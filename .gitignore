@@ -1,0 +1,7 @@
+/build/
+/.cache/
+/data/
+/config.json
+*.db
+*.db-shm
+*.db-wal
