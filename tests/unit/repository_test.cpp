@@ -103,6 +103,38 @@ void first_run_initialises_metadata_and_schema()
     CHECK(!va::open_repository(*context));
 }
 
+// A locked or damaged database is reported with SQLite's own reason; only a
+// database without VeriArchive's tables is an unsupported schema.
+void schema_check_reports_the_sqlite_reason()
+{
+    TemporaryDirectory temporary("schema-reason");
+    const va::RepositoryLayout layout{temporary.path()};
+    std::filesystem::create_directories(layout.root);
+    const auto database_name = layout.database().u8string();
+    const auto run = [&](sqlite3* database, const char* sql) {
+        CHECK(sqlite3_exec(database, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+    };
+
+    std::ofstream(layout.database(), std::ios::binary) << std::string(4096, 'x');
+    const auto damaged = va::validate_schema(layout);
+    CHECK(!damaged && damaged.error().message == "cannot prepare SQL: file is not a database");
+    std::filesystem::remove(layout.database());
+
+    sqlite3* database = nullptr;
+    CHECK(sqlite3_open(reinterpret_cast<const char*>(database_name.c_str()), &database) == SQLITE_OK);
+    run(database, "CREATE TABLE other(x)");
+    const auto foreign = va::validate_schema(layout);
+    CHECK(!foreign && foreign.error().message == "unsupported repository schema");
+
+    // Another connection holds the database while this one checks it.
+    run(database, "CREATE TABLE schema_version(version INTEGER); INSERT INTO schema_version VALUES (1)");
+    run(database, "BEGIN EXCLUSIVE");
+    const auto locked = va::validate_schema(layout);
+    CHECK(!locked && locked.error().message == "cannot prepare SQL: database is locked");
+    run(database, "ROLLBACK");
+    sqlite3_close(database);
+}
+
 void pinned_unavailable_repository_does_not_fall_back()
 {
     TemporaryDirectory temporary("pinned-missing");
@@ -263,6 +295,7 @@ void repository_tests()
 {
     first_run_uses_executable_directory();
     first_run_initialises_metadata_and_schema();
+    schema_check_reports_the_sqlite_reason();
     pinned_unavailable_repository_does_not_fall_back();
     explicit_repository_must_already_be_initialised();
     explicit_init_creates_and_pins_repository();

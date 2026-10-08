@@ -322,8 +322,21 @@ std::expected<void, IoError> validate_schema(const RepositoryLayout& layout)
     }
 
     auto version = database->prepare("SELECT version FROM schema_version");
-    if (!version || sqlite3_step(version->get()) != SQLITE_ROW ||
-        sqlite3_column_int(version->get(), 0) != 1) {
+    // A locked, damaged or unreadable database is not an unsupported schema:
+    // report SQLite's own reason ("database is locked", "file is not a
+    // database"). Plain SQLITE_ERROR is what a missing schema_version table
+    // gives, which means some other program's database.
+    if (!version && (version.error().native_code & 0xff) != SQLITE_ERROR) {
+        return std::unexpected(version.error());
+    }
+    if (!version) {
+        return std::unexpected(repository_error("unsupported repository schema"));
+    }
+    const auto row = version->step();
+    if (!row) {
+        return std::unexpected(row.error());
+    }
+    if (!*row || sqlite3_column_int(version->get(), 0) != 1) {
         return std::unexpected(repository_error("unsupported repository schema"));
     }
 
