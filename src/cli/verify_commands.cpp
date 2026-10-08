@@ -7,6 +7,7 @@
 #include "common/uuid.h"
 #include "core/engine/verify_engine.h"
 #include "platform/file_system.h"
+#include "platform/interrupt.h"
 #include "platform/media_enumerator.h"
 
 #include <iostream>
@@ -53,6 +54,10 @@ void print_outcome(const VerifyOutcome& outcome)
     for (const auto& item : outcome.items) {
         std::cout << "  " << item.status << "  " << item.path.p
                   << (item.detail.empty() ? "" : "  (" + item.detail + ")") << '\n';
+    }
+    if (outcome.result == "INCOMPLETE") {
+        std::cout << "  resume with: veriarchive-cli verify --full " << outcome.archive_uuid
+                  << " --resume " << outcome.run_id << std::endl;
     }
     if (!outcome.resumed_from.empty()) {
         std::cout << "  resumed from run: " << outcome.resumed_from << std::endl;
@@ -136,6 +141,7 @@ int verify_command(const Arguments& arguments)
         session->context.repository_uuid, host_info()};
 
     CancelToken cancel;
+    platform::cancel_on_interrupt(cancel);
     CliProgress progress(arguments.json);
     const auto outcome = verify_full(services, request, cancel, progress);
     progress.finish();

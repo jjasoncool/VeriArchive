@@ -6,6 +6,7 @@
 #include "common/utf8.h"
 #include "core/engine/register_engine.h"
 #include "platform/file_system.h"
+#include "platform/interrupt.h"
 #include "platform/media_enumerator.h"
 
 #include <iostream>
@@ -115,6 +116,7 @@ int register_command(const Arguments& arguments)
         session->context.repo, host_info()};
 
     CancelToken cancel;
+    platform::cancel_on_interrupt(cancel);
     CliProgress progress(arguments.json);
     const auto outcome = register_archive(services, request, cancel, progress);
     progress.finish();

@@ -89,6 +89,7 @@ if(WIN32)
     target_sources(veriarchive_platform PRIVATE
         src/platform/windows/file_writer_win.cpp
         src/platform/windows/fs_access_win.cpp
+        src/platform/windows/interrupt_win.cpp
         src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
         src/platform/windows/win_util.cpp
@@ -98,6 +99,7 @@ elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
         src/platform/linux/file_writer_linux.cpp
         src/platform/linux/fs_access_linux.cpp
+        src/platform/linux/interrupt_linux.cpp
         src/platform/linux/media_enumerator_linux.cpp
         src/platform/linux/mountinfo.cpp
         src/platform/linux/platform_services_linux.cpp
