@@ -1,0 +1,51 @@
+# CI per HANDOFF R-120 on GitLab (decision 0012): Windows (MSYS2 UCRT64),
+# Ubuntu 24.04 and Fedora. Every job configures, builds and runs the tests.
+
+stages:
+  - build
+
+.linux_build: &linux_build
+  stage: build
+  script:
+    - cmake --preset linux-release
+    - cmake --build --preset linux-release
+    - ctest --preset linux-release
+    # R-122: forbidden constructs in src/core and src/common.
+    - "! grep -rnE 'current_path\\(\\)|\\.string\\(\\)|<windows\\.h>|<libudev\\.h>' src/core src/common"
+
+ubuntu-24.04:
+  <<: *linux_build
+  image: ubuntu:24.04
+  before_script:
+    - apt-get update
+    - >
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+      build-essential cmake ninja-build pkg-config ca-certificates git
+      libsqlite3-dev libssl-dev libglib2.0-dev libgtk-4-dev
+
+fedora:
+  <<: *linux_build
+  image: fedora:41
+  before_script:
+    - >
+      dnf install -y gcc-c++ cmake ninja-build pkgconf-pkg-config git
+      sqlite-devel openssl-devel glib2-devel gtk4-devel
+
+windows-ucrt64:
+  stage: build
+  tags:
+    - saas-windows-medium-amd64
+  variables:
+    MSYSTEM: UCRT64
+    CHERE_INVOKING: "1"
+  before_script:
+    - choco install msys2 -y --no-progress --params "/NoUpdate /InstallDir:C:\msys64"
+    - >
+      C:\msys64\usr\bin\bash.exe -lc "pacman -Sy --noconfirm --needed
+      mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+      mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-sqlite3 mingw-w64-ucrt-x86_64-openssl
+      mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-ntldd"
+  script:
+    - C:\msys64\usr\bin\bash.exe -lc "cmake --preset windows-ucrt64-release && cmake --build --preset windows-ucrt64-release && ctest --preset windows-ucrt64-release"
+    # R-121: the CLI must not depend on the MSYS2 POSIX runtime.
+    - C:\msys64\usr\bin\bash.exe -lc "! ntldd -R build/windows-ucrt64-release/veriarchive-cli.exe | grep -i msys-2.0.dll"

@@ -682,7 +682,7 @@ veriarchive_common  veriarchive_core  veriarchive_platform  veriarchive_cli  ver
 presets: linux-debug  linux-release  windows-ucrt64-debug  windows-ucrt64-release
 ```
 
-- R-120 CI on every push: `windows-latest` (msys2/setup-msys2, UCRT64), `ubuntu-24.04`, and a Fedora container. Runs unit + integration tests (golden manifests, repository-resolution matrix, fault injection via `FaultInjectingByteSource`). Linux CI additionally runs the loop-device + `dm-flakey` unreadable-sector test when a privileged runner is available.
+- R-120 (CI runs on GitLab: `docs/decisions/0012-gitlab-ci.md`) CI on every push: `windows-latest` (msys2/setup-msys2, UCRT64), `ubuntu-24.04`, and a Fedora container. Runs unit + integration tests (golden manifests, repository-resolution matrix, fault injection via `FaultInjectingByteSource`). Linux CI additionally runs the loop-device + `dm-flakey` unreadable-sector test when a privileged runner is available.
 - R-121 Windows release check: `ntldd -R veriarchive-cli.exe` lists no `msys-2.0.dll`; the package includes GTK4/gtkmm DLLs, compiled `share/glib-2.0/schemas`, an icon theme, and LGPL notices.
 - R-122 CI greps fail the build on `current_path()`, `path::string()`, `<windows.h>`, `<libudev.h>` under `src/core` and `src/common` (except the R-04 exemption).
 
