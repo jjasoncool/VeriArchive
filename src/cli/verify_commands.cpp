@@ -57,7 +57,8 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
     }
     for (const auto& item : outcome.items) {
         std::cout << "  " << text(item.status) << "  " << item.path.p
-                  << (item.detail.empty() ? "" : "  (" + text(item.detail) + ")") << '\n';
+                  << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail)))
+                  << '\n';
     }
     if (outcome.result == "INCOMPLETE") {
         std::cout << "  "

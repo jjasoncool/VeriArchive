@@ -304,7 +304,8 @@ int relocate(const Arguments& arguments, Opened& opened)
                   << '\n';
         for (const auto& item : outcome->items) {
             std::cout << "  " << text(item.status) << "  " << item.path.p
-                      << (item.detail.empty() ? "" : "  (" + text(item.detail) + ")") << '\n';
+                      << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail)))
+                      << '\n';
         }
     }
     return outcome->result == "PASSED" ? exit_code::passed : exit_code::passed_with_warnings;
