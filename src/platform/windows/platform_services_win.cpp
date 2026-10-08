@@ -1,4 +1,5 @@
 #include "platform/platform_services.h"
+#include "common/utf8.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <fstream>
@@ -115,6 +116,21 @@ bool process_is_elevated()
                           elevation.TokenIsElevated;
     CloseHandle(token);
     return elevated;
+}
+
+std::string os_name()
+{
+    return "windows";
+}
+
+std::string host_name()
+{
+    wchar_t name[256]{};
+    DWORD length = 256;
+    if (!GetComputerNameExW(ComputerNameDnsHostname, name, &length)) {
+        return {};
+    }
+    return utf16_to_utf8(std::u16string(name, name + length));
 }
 
 } // namespace va::platform

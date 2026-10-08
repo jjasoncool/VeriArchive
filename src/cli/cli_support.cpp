@@ -4,6 +4,7 @@
 #include "platform/file_writer.h"
 #include "platform/platform_services.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
@@ -124,6 +125,67 @@ int report_failure(const Arguments& arguments, const Failure& failure)
         std::cerr << "error: " << failure.message << '\n';
     }
     return failure.code;
+}
+
+} // namespace va::cli
+
+namespace va::cli {
+
+std::optional<Failure> check_options(const Arguments& arguments,
+    std::initializer_list<std::string_view> flags, std::initializer_list<std::string_view> values)
+{
+    for (const auto& flag : arguments.flags) {
+        if (std::find(flags.begin(), flags.end(), flag) == flags.end()) {
+            return Failure{exit_code::usage, "unknown option " + flag};
+        }
+    }
+    for (const auto& [option, value] : arguments.values) {
+        if (std::find(values.begin(), values.end(), option) == values.end()) {
+            return Failure{exit_code::usage, "option " + option + " is not used by this command"};
+        }
+    }
+    return std::nullopt;
+}
+
+std::filesystem::path user_path(const std::string& word)
+{
+    std::error_code error;
+    auto path = std::filesystem::absolute(path_from_utf8(word), error);
+    return error ? path_from_utf8(word) : path.lexically_normal();
+}
+
+HostInfo host_info()
+{
+    return {platform::os_name(), platform::host_name(), VERIARCHIVE_VERSION};
+}
+
+void CliProgress::on_progress(const Progress& progress)
+{
+    if (quiet_) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (shown_ && now - last_ < std::chrono::milliseconds(200)) {
+        return;
+    }
+    last_ = now;
+    shown_ = true;
+    if (progress.items_total == 0) {
+        std::cerr << "\rscanning: " << progress.items_done << " entries" << std::string(20, ' ');
+    } else {
+        std::cerr << "\rhashing: " << progress.items_done << '/' << progress.items_total << " files, "
+                  << progress.bytes_done / (1024 * 1024) << " MiB" << std::string(10, ' ');
+    }
+    std::cerr.flush();
+}
+
+void CliProgress::finish()
+{
+    if (shown_ && !quiet_) {
+        std::cerr << '\r' << std::string(70, ' ') << '\r';
+        std::cerr.flush();
+    }
+    shown_ = false;
 }
 
 } // namespace va::cli

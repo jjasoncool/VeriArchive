@@ -103,4 +103,18 @@ bool process_is_elevated()
     return geteuid() == 0;
 }
 
+std::string os_name()
+{
+    return "linux";
+}
+
+std::string host_name()
+{
+    char name[256]{};
+    if (gethostname(name, sizeof(name) - 1) != 0) {
+        return {};
+    }
+    return name;
+}
+
 } // namespace va::platform

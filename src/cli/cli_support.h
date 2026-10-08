@@ -3,7 +3,11 @@
 // (HANDOFF §B16), repository opening, and text/JSON output.
 #include "app/app_context.h"
 #include "core/interfaces.h"
+#include "core/engine/candidates.h"
 #include "core/repository/repository.h"
+
+#include <chrono>
+#include <initializer_list>
 
 #include <map>
 #include <memory>
@@ -58,6 +62,31 @@ struct Session {
 
 // Resolves and opens (or initialises) the repository per HANDOFF §B7.4.
 std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise);
+
+// A usage failure when the command received an option it does not accept.
+std::optional<Failure> check_options(const Arguments& arguments,
+    std::initializer_list<std::string_view> flags, std::initializer_list<std::string_view> values);
+
+// A path typed by the user; relative paths are taken relative to the shell's
+// working directory, as users expect.
+std::filesystem::path user_path(const std::string& word);
+
+// Operating system, host name and version for manifests and history.
+HostInfo host_info();
+
+// Progress on stderr, at most five updates a second; silent in --json mode.
+class CliProgress final : public IProgressSink {
+public:
+    explicit CliProgress(bool quiet) : quiet_(quiet) {}
+    ~CliProgress() override { finish(); }
+    void on_progress(const Progress& progress) override;
+    void finish();
+
+private:
+    bool quiet_;
+    bool shown_ = false;
+    std::chrono::steady_clock::time_point last_{};
+};
 
 // Output helpers: text goes to stdout line by line; JSON is printed once.
 void print_json(const nlohmann::json& document);

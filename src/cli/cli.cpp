@@ -15,7 +15,9 @@ void print_usage()
         "Usage: veriarchive-cli [--config P] [--repository P] [--json] <command>\n"
         "\n"
         "  repo init | info\n"
-        "  media list\n";
+        "  media list\n"
+        "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
+        "           [--force-new-archive] [--copy-of UUID]\n";
 }
 
 } // namespace
@@ -39,6 +41,9 @@ int run(std::vector<std::string> raw_arguments)
     }
     if (command == "media") {
         return media_command(*arguments);
+    }
+    if (command == "register") {
+        return register_command(*arguments);
     }
 
     print_usage();
