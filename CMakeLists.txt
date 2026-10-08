@@ -27,24 +27,44 @@ target_include_directories(veriarchive_common PUBLIC src)
 target_compile_features(veriarchive_common PUBLIC cxx_std_23)
 target_link_libraries(veriarchive_common PUBLIC nlohmann_json::nlohmann_json)
 
+add_library(veriarchive_platform)
+add_library(VeriArchive::platform ALIAS veriarchive_platform)
+target_include_directories(veriarchive_platform PUBLIC src)
+target_compile_features(veriarchive_platform PUBLIC cxx_std_23)
+target_link_libraries(veriarchive_platform PUBLIC VeriArchive::common)
+
+if(WIN32)
+    target_sources(veriarchive_platform PRIVATE
+        src/platform/windows/platform_services_win.cpp
+    )
+    target_link_libraries(veriarchive_platform PRIVATE mpr)
+elseif(UNIX AND NOT APPLE)
+    target_sources(veriarchive_platform PRIVATE
+        src/platform/linux/platform_services_linux.cpp
+    )
+else()
+    message(FATAL_ERROR "VeriArchive currently supports Windows and Linux only")
+endif()
+
 if(BUILD_TESTING)
     add_executable(veriarchive_tests
         tests/unit/test_main.cpp
         tests/unit/archive_path_test.cpp
-        tests/unit/canonical_json_test.cpp)
+        tests/unit/canonical_json_test.cpp
+        tests/unit/config_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
-    target_link_libraries(veriarchive_tests PRIVATE VeriArchive::common)
+    target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)
     add_test(NAME veriarchive_m1 COMMAND veriarchive_tests)
 endif()
 
 if(MSVC)
-    foreach(target veriarchive_common veriarchive_tests)
+    foreach(target veriarchive_common veriarchive_platform veriarchive_tests)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE /W4 /permissive-)
         endif()
     endforeach()
 else()
-    foreach(target veriarchive_common veriarchive_tests)
+    foreach(target veriarchive_common veriarchive_platform veriarchive_tests)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
         endif()
