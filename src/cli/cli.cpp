@@ -1,5 +1,6 @@
 #include "common/utf8.h"
 #include "core/repository/repository.h"
+#include "platform/file_writer.h"
 #include "platform/platform_services.h"
 #include <cstdlib>
 #include <iostream>
@@ -91,7 +92,9 @@ int run(std::vector<std::string> arguments) {
         return repository_error;
     }
 
-    auto result = options.initialise ? initialise_repository(*context) : open_repository(*context);
+    const auto writer = platform::make_file_writer();
+    auto result = options.initialise ? initialise_repository(*context, *writer)
+                                     : open_repository(*context);
     if (!result) {
         std::cerr << result.error().message << '\n';
         return repository_error;

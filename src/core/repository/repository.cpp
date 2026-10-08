@@ -2,6 +2,7 @@
 
 #include "common/canonical_json.h"
 #include "core/repository/sqlite_raii.h"
+#include "core/write_file.h"
 #include "schema_sql.h"
 
 #include <array>
@@ -84,20 +85,17 @@ std::optional<std::string> read_repository_uuid(const std::filesystem::path& roo
     return uuid;
 }
 
-std::expected<void, IoError> write_repository_metadata(AppContext& context)
+std::expected<void, IoError> write_repository_metadata(AppContext& context, IFileWriter& writer)
 {
     context.repository_uuid = generate_repository_uuid();
-    std::ofstream output(context.repo.root / "repository.json", std::ios::binary);
-    if (!output) {
-        return std::unexpected(repository_error("cannot write repository.json"));
-    }
-
-    output << "{\"format\":\"veriarchive-repo\",\"version\":1"
-           << ",\"repository_uuid\":" << canonical_json::quote(context.repository_uuid)
-           << ",\"created\":" << canonical_json::quote(current_timestamp()) << "}\n";
-
-    if (!output) {
-        return std::unexpected(repository_error("cannot write repository.json"));
+    const auto contents = "{\"format\":\"veriarchive-repo\",\"version\":1"
+                          ",\"repository_uuid\":" +
+                          canonical_json::quote(context.repository_uuid) +
+                          ",\"created\":" + canonical_json::quote(current_timestamp()) + "}\n";
+    if (auto written = write_file_atomically(writer, context.repo.root / "repository.json", contents);
+        !written) {
+        return std::unexpected(repository_error("cannot write repository.json: " +
+                                                written.error().message));
     }
     return {};
 }
@@ -156,7 +154,18 @@ std::expected<void, IoError> initialise_database(const RepositoryLayout& layout)
     if (!exists) {
         return std::unexpected(exists.error());
     }
-    return *exists ? std::expected<void, IoError>{} : database->execute(schema_sql);
+    if (*exists) {
+        return {};
+    }
+    // One transaction: a crash leaves either no schema or the complete schema.
+    if (auto begun = database->execute("BEGIN IMMEDIATE;"); !begun) {
+        return begun;
+    }
+    if (auto created = database->execute(schema_sql); !created) {
+        (void)database->execute("ROLLBACK;");
+        return created;
+    }
+    return database->execute("COMMIT;");
 }
 
 std::expected<bool, IoError> table_exists(
@@ -253,7 +262,7 @@ std::expected<AppContext, IoError> resolve_repository(
     return context;
 }
 
-std::expected<void, IoError> initialise_repository(AppContext& context)
+std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer)
 {
     if (std::filesystem::exists(context.repo.root / "repository.json")) {
         return open_repository(context);
@@ -261,20 +270,23 @@ std::expected<void, IoError> initialise_repository(AppContext& context)
     if (auto result = create_repository_directories(context.repo); !result) {
         return result;
     }
-
-    if (const auto existing_uuid = read_repository_uuid(context.repo.root)) {
-        context.repository_uuid = *existing_uuid;
-    } else if (auto result = write_repository_metadata(context); !result) {
+    if (auto result = initialise_database(context.repo); !result) {
         return result;
     }
-
-    if (auto result = initialise_database(context.repo); !result) {
+    if (auto result = write_repository_metadata(context, writer); !result) {
         return result;
     }
 
     context.config.last_repository_uuid = context.repository_uuid;
-    if (context.config.repository && !write_config(context.config_file, context.config)) {
-        return std::unexpected(repository_error("cannot pin repository in config"));
+    if (context.config.repository) {
+        std::error_code error;
+        std::filesystem::create_directories(context.config_file.parent_path(), error);
+        if (auto pinned = write_file_atomically(
+                writer, context.config_file, config_to_json(context.config));
+            !pinned) {
+            return std::unexpected(
+                repository_error("cannot pin repository in config: " + pinned.error().message));
+        }
     }
     return {};
 }

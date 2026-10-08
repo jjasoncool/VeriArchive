@@ -33,7 +33,8 @@ target_link_libraries(veriarchive_common PUBLIC nlohmann_json::nlohmann_json)
 
 add_library(veriarchive_core
     src/core/repository/repository.cpp
-    src/core/repository/sqlite_raii.cpp)
+    src/core/repository/sqlite_raii.cpp
+    src/core/write_file.cpp)
 add_library(VeriArchive::core ALIAS veriarchive_core)
 target_include_directories(veriarchive_core PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_features(veriarchive_core PUBLIC cxx_std_23)
@@ -47,12 +48,16 @@ target_link_libraries(veriarchive_platform PUBLIC VeriArchive::core)
 
 if(WIN32)
     target_sources(veriarchive_platform PRIVATE
+        src/platform/windows/file_writer_win.cpp
         src/platform/windows/platform_services_win.cpp
+        src/platform/windows/win_util.cpp
     )
     target_link_libraries(veriarchive_platform PRIVATE mpr)
 elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
+        src/platform/linux/file_writer_linux.cpp
         src/platform/linux/platform_services_linux.cpp
+        src/platform/linux/posix_util.cpp
     )
 else()
     message(FATAL_ERROR "VeriArchive currently supports Windows and Linux only")
@@ -76,6 +81,7 @@ if(BUILD_TESTING)
         tests/unit/archive_path_test.cpp
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
+        tests/unit/file_writer_test.cpp
         tests/unit/repository_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)

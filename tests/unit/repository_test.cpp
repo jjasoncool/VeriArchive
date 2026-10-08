@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "core/repository/repository.h"
+#include "platform/file_writer.h"
 
 #include <chrono>
 #include <fstream>
@@ -75,7 +76,7 @@ void first_run_initialises_metadata_and_schema()
         return;
     }
 
-    const auto result = va::initialise_repository(*context);
+    const auto result = va::initialise_repository(*context, *va::platform::make_file_writer());
 
     CHECK(result.has_value());
     CHECK(std::filesystem::exists(context->repo.root / "repository.json"));
@@ -106,7 +107,7 @@ void pinned_unavailable_repository_does_not_fall_back()
     if (!context) {
         return;
     }
-    const auto initialized = va::initialise_repository(*context);
+    const auto initialized = va::initialise_repository(*context, *va::platform::make_file_writer());
     CHECK(initialized.has_value());
     if (!initialized) { return; }
 

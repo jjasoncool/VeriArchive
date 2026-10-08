@@ -53,6 +53,29 @@ public:
         const std::filesystem::path& file) = 0;
 };
 
+// A file being written. Bytes go to a temporary file next to the destination and
+// become visible only when commit() has flushed them to stable storage and
+// atomically replaced the destination (R-61). Destroying an uncommitted file
+// deletes the temporary file, so a crash never leaves a half-written destination.
+class IOutputFile {
+public:
+    virtual ~IOutputFile() = default;
+
+    virtual std::expected<void, IoError> write(std::span<const std::byte> data) = 0;
+    virtual std::expected<void, IoError> commit() = 0;
+};
+
+// Durable writes (decision 0011). Only the repository and manifests are written;
+// archive media is never written (R-03).
+class IFileWriter {
+public:
+    virtual ~IFileWriter() = default;
+
+    virtual std::expected<std::unique_ptr<IOutputFile>, IoError> create(
+        const std::filesystem::path& destination) = 0;
+    virtual std::expected<void, IoError> remove(const std::filesystem::path& file) = 0;
+};
+
 class IMediaEnumerator {
 public:
     virtual ~IMediaEnumerator() = default;

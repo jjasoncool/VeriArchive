@@ -63,7 +63,7 @@ std::expected<std::optional<Config>, IoError> read_config(const std::filesystem:
     }
 }
 
-bool write_config(const std::filesystem::path& path, const Config& config)
+std::string config_to_json(const Config& config)
 {
     auto document = config.document;
     if (config.repository) {
@@ -82,18 +82,7 @@ bool write_config(const std::filesystem::path& path, const Config& config)
         keys.push_back({{"key_id", key.key_id}, {"pubkey_hex", key.pubkey_hex}, {"note", key.note}});
     }
     document["trusted_keys"] = std::move(keys);
-
-    std::error_code error;
-    if (!path.parent_path().empty()) {
-        std::filesystem::create_directories(path.parent_path(), error);
-    }
-    if (error) {
-        return false;
-    }
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    output << document.dump(2) << '\n';
-    output.close();
-    return !output.fail();
+    return document.dump(2) + '\n';
 }
 
 } // namespace va

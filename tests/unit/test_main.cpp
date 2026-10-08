@@ -6,5 +6,6 @@ int main()
     canonical_json_tests();
     repository_tests();
     config_tests();
+    file_writer_tests();
     return test_failures == 0 ? 0 : 1;
 }

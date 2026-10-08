@@ -512,6 +512,8 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 
 ## B9. Core interfaces (the platform boundary)
 
+> Amended by `docs/decisions/0011-durable-writes-through-ifilewriter.md`: adds `IOutputFile` / `IFileWriter` for durable atomic writes.
+
 ```cpp
 namespace va {
 

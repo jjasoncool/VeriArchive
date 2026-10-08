@@ -1,6 +1,7 @@
 #pragma once
 #include "app/app_context.h"
 #include "common/error.h"
+#include "core/interfaces.h"
 #include <expected>
 #include <functional>
 #include <optional>
@@ -25,7 +26,10 @@ struct RepositoryProbes {
 std::expected<AppContext, IoError> resolve_repository(
     const RepositoryOptions& options,
     const RepositoryProbes& probes);
-std::expected<void, IoError> initialise_repository(AppContext& context);
+// Crash-safe order: directories, then the database schema in one transaction,
+// then repository.json (its presence marks a complete repository), then the
+// config pin. Re-running after a crash at any step completes the repository.
+std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer);
 std::expected<void, IoError> open_repository(AppContext& context);
 std::expected<void, IoError> validate_schema(const RepositoryLayout& layout);
 

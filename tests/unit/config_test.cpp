@@ -1,6 +1,8 @@
 #include "test_support.h"
 #include "common/config.h"
 #include "common/utf8.h"
+#include "core/write_file.h"
+#include "platform/file_writer.h"
 #include "platform/platform_services.h"
 
 #include <chrono>
@@ -12,6 +14,10 @@ void config_tests()
         ("va-config-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(root);
     const auto path = root / "config.json";
+    const auto writer = va::platform::make_file_writer();
+    const auto save = [&](const va::Config& config) {
+        return va::write_file_atomically(*writer, path, va::config_to_json(config)).has_value();
+    };
 
     const auto missing = va::read_config(path);
     CHECK(missing && !*missing);
@@ -25,7 +31,7 @@ void config_tests()
     original.document["io"]["rotational_override"]["disk-serial"] = true;
     original.document["extension"] = { {"keep", "unchanged"} };
 
-    CHECK(va::write_config(path, original));
+    CHECK(save(original));
     for (int iteration = 0; iteration < 3; ++iteration) {
         auto loaded = va::read_config(path);
         CHECK(loaded && loaded->has_value());
@@ -40,7 +46,7 @@ void config_tests()
         CHECK(config.trusted_keys.size() == 1);
         CHECK(config.document["io"] == original.document["io"]);
         CHECK(config.document["extension"] == original.document["extension"]);
-        CHECK(va::write_config(path, config));
+        CHECK(save(config));
     }
 
     std::ofstream(path) << "{not valid JSON";

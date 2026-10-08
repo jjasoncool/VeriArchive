@@ -33,6 +33,8 @@ struct Config {
 
 // Missing file is distinct from malformed or inaccessible configuration.
 std::expected<std::optional<Config>, IoError> read_config(const std::filesystem::path& path);
-bool write_config(const std::filesystem::path& path, const Config& config);
+// Serialises known fields over the preserved document. The caller writes the
+// result durably (core/write_file.h); common never touches the disk for writes.
+std::string config_to_json(const Config& config);
 
 } // namespace va
