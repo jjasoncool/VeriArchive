@@ -112,6 +112,8 @@ public:
     std::expected<void, IoError> insert_file_rows(
         const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
     std::expected<void, IoError> delete_file_rows(const Uuid& archive_uuid, std::uint32_t revision);
+    // Empties the rebuildable index tables (archive_revisions, files) for rebuild-index.
+    std::expected<void, IoError> clear_index();
 
     std::expected<VerifyRunRecord, IoError> append_verify_run(
         VerifyRunRecord run, const std::string& repository_uuid);

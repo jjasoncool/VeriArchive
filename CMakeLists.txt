@@ -54,6 +54,7 @@ add_library(veriarchive_core
     src/core/engine/candidates.cpp
     src/core/engine/comparison.cpp
     src/core/engine/item_rules.cpp
+    src/core/engine/rebuild_index.cpp
     src/core/engine/recorded_manifest.cpp
     src/core/engine/register_engine.cpp
     src/core/engine/sha256sums.cpp
@@ -147,6 +148,7 @@ if(BUILD_TESTING)
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
         tests/unit/verify_engine_test.cpp
+        tests/unit/rebuild_index_test.cpp
         tests/unit/register_engine_test.cpp
         tests/unit/repository_test.cpp
         tests/unit/scanner_test.cpp

@@ -393,6 +393,11 @@ std::expected<void, IoError> ArchiveStore::delete_file_rows(const Uuid& archive_
     return statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision)).run();
 }
 
+std::expected<void, IoError> ArchiveStore::clear_index()
+{
+    return database_.execute("DELETE FROM files; DELETE FROM archive_revisions;");
+}
+
 std::expected<VerifyRunRecord, IoError> ArchiveStore::append_verify_run(
     VerifyRunRecord run, const std::string& repository_uuid)
 {

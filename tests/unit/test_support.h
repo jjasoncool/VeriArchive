@@ -30,3 +30,4 @@ void register_engine_tests();
 void verify_engine_tests();
 void archive_status_tests();
 void sha256sums_tests();
+void rebuild_index_tests();

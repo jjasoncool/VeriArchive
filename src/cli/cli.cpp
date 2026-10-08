@@ -14,7 +14,7 @@ void print_usage()
     std::cout <<
         "Usage: veriarchive-cli [--config P] [--repository P] [--json] <command>\n"
         "\n"
-        "  repo init | info\n"
+        "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
         "           [--force-new-archive] [--copy-of UUID]\n"
