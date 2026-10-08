@@ -36,6 +36,7 @@ std::expected<std::optional<Config>, IoError> read_config(const std::filesystem:
         }
         config.last_repository_uuid = document.value("last_repository_uuid", std::string{});
         config.allow_network_repository = document.value("allow_network_repository", false);
+        config.language = document.value("language", std::string{});
         if (document.contains("policy")) {
             const auto& policy = document.at("policy");
             if (!policy.is_object()) {
@@ -73,6 +74,11 @@ std::string config_to_json(const Config& config)
     }
     document["last_repository_uuid"] = config.last_repository_uuid;
     document["allow_network_repository"] = config.allow_network_repository;
+    if (config.language.empty()) {
+        document.erase("language");
+    } else {
+        document["language"] = config.language;
+    }
     auto& policy = document["policy"];
     policy["full_verify_max_age_days"] = config.policy.full_verify_max_age_days;
     policy["any_verify_max_age_days"] = config.policy.any_verify_max_age_days;

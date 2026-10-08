@@ -2,6 +2,7 @@
 #include "common/utf8.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <cstdlib>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
@@ -131,6 +132,47 @@ std::string host_name()
         return {};
     }
     return utf16_to_utf8(std::u16string(name, name + length));
+}
+
+std::string ui_language()
+{
+    // The display language, not the regional format: an English Windows set to
+    // Taiwan's date format keeps an English interface.
+    ULONG count = 0;
+    ULONG size = 0;
+    if (!GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, nullptr, &size) || size == 0) {
+        return {};
+    }
+    std::wstring names(size, L'\0');
+    if (!GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, names.data(), &size) || count == 0) {
+        return {};
+    }
+    const auto first = std::wstring(names.c_str()); // the list is NUL-separated
+    return utf16_to_utf8(std::u16string(first.begin(), first.end()));
+}
+
+namespace {
+
+UINT original_output_code_page = 0;
+UINT original_input_code_page = 0;
+
+} // namespace
+
+void prepare_console()
+{
+    // The console's code page belongs to the console window, not the process:
+    // restore it at exit so the shell the user returns to is unchanged.
+    original_output_code_page = GetConsoleOutputCP();
+    original_input_code_page = GetConsoleCP();
+    if (original_output_code_page == 0) {
+        return; // no console (output redirected from a GUI process, a service, ...)
+    }
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    std::atexit([] {
+        SetConsoleOutputCP(original_output_code_page);
+        SetConsoleCP(original_input_code_page);
+    });
 }
 
 } // namespace va::platform

@@ -2,6 +2,7 @@
 
 #include "common/utf8.h"
 #include "core/repository/repository.h"
+#include "core/write_file.h"
 #include "platform/file_writer.h"
 #include "platform/platform_services.h"
 
@@ -62,6 +63,68 @@ std::expected<Session, std::string> open_session(const SessionOptions& session_o
 HostInfo host_info(std::string app_version)
 {
     return {platform::os_name(), platform::host_name(), std::move(app_version)};
+}
+
+namespace {
+
+std::optional<std::filesystem::path> config_path(std::optional<std::filesystem::path> explicit_config)
+{
+    const auto executable = platform::executable_path();
+    const auto config_directory = platform::user_config_dir();
+    if (!executable || !config_directory) {
+        return std::nullopt;
+    }
+    RepositoryOptions options;
+    options.explicit_config = std::move(explicit_config);
+    options.executable_dir = executable->parent_path();
+    options.user_config_dir = *config_directory;
+    auto path = config_file_path(options);
+    if (path.is_relative()) {
+        path = options.executable_dir / path;
+    }
+    return path;
+}
+
+} // namespace
+
+Language interface_language(std::optional<std::string> explicit_code,
+    std::optional<std::filesystem::path> explicit_config)
+{
+    if (!explicit_code) {
+        if (const char* environment = std::getenv("VERIARCHIVE_LANG")) {
+            explicit_code = environment;
+        }
+    }
+    std::optional<std::string> configured;
+    if (const auto path = config_path(std::move(explicit_config))) {
+        if (const auto config = read_config(*path); config && *config) {
+            configured = (*config)->language;
+        }
+    }
+    return resolve_language(std::move(explicit_code), std::move(configured), platform::ui_language());
+}
+
+std::expected<void, std::string> save_language(Language language,
+    std::optional<std::filesystem::path> explicit_config)
+{
+    const auto path = config_path(std::move(explicit_config));
+    if (!path) {
+        return std::unexpected(std::string("cannot locate the config file"));
+    }
+    Config config;
+    if (const auto existing = read_config(*path); existing && *existing) {
+        config = **existing;
+    } else if (!existing) {
+        return std::unexpected(existing.error().message);
+    }
+    config.language = std::string(language_code(language));
+    std::error_code error;
+    std::filesystem::create_directories(path->parent_path(), error);
+    const auto writer = platform::make_file_writer();
+    if (auto written = write_file_atomically(*writer, *path, config_to_json(config)); !written) {
+        return std::unexpected(written.error().message);
+    }
+    return {};
 }
 
 } // namespace va::app

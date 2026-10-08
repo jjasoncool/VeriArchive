@@ -23,6 +23,10 @@ struct RepositoryProbes {
     std::function<bool(const std::filesystem::path&)> network_filesystem;
 };
 
+// The config file used (R-82): --config, else <executable_dir>/config.json when
+// it exists (portable install), else the user config directory's config.json.
+std::filesystem::path config_file_path(const RepositoryOptions& options);
+
 std::expected<AppContext, IoError> resolve_repository(
     const RepositoryOptions& options,
     const RepositoryProbes& probes);

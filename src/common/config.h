@@ -29,6 +29,7 @@ struct Config {
     std::vector<TrustedKey> trusted_keys;
     Policy policy;
     bool allow_network_repository = false;
+    std::string language; // "" = follow the system, "en" or "zh-TW" (decision 0017)
 };
 
 // Missing file is distinct from malformed or inaccessible configuration.

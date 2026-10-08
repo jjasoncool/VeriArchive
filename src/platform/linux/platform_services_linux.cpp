@@ -117,4 +117,16 @@ std::string host_name()
     return name;
 }
 
+std::string ui_language()
+{
+    for (const char* variable : {"LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"}) { // gettext's order
+        if (const char* value = std::getenv(variable); value && *value) {
+            return value;
+        }
+    }
+    return {};
+}
+
+void prepare_console() {}
+
 } // namespace va::platform

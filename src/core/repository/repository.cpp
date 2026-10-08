@@ -21,7 +21,9 @@ IoError repository_error(std::string message)
     return {IoErrorKind::Other, repository_error_code, std::move(message)};
 }
 
-std::filesystem::path select_config_path(const RepositoryOptions& options)
+} // namespace
+
+std::filesystem::path config_file_path(const RepositoryOptions& options)
 {
     if (options.explicit_config) {
         return *options.explicit_config;
@@ -34,6 +36,8 @@ std::filesystem::path select_config_path(const RepositoryOptions& options)
 
     return options.user_config_dir / "config.json";
 }
+
+namespace {
 
 std::optional<std::string> read_repository_uuid(const std::filesystem::path& root)
 {
@@ -168,7 +172,7 @@ std::expected<AppContext, IoError> resolve_repository(
     AppContext context;
     context.executable_dir = options.executable_dir;
     context.user_config_dir = options.user_config_dir;
-    context.config_file = select_config_path(options);
+    context.config_file = config_file_path(options);
 
     if (context.config_file.is_relative()) {
         context.config_file = options.executable_dir / context.config_file;
