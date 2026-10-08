@@ -14,10 +14,12 @@ pushed to GitLab.
 | M3 | Scanner (exclusions, mount points, collisions, unreadable entries, links), uncached threaded hash pipeline (BLAKE3 + SHA-256), `.vam` writer/reader with golden test, registration, FULL verification with every §A6 item status, `export-sha256sums` |
 | M4 | Ctrl-C cancellation, resumable verification and registration with checkpoints, hash-chained history and `repo verify-history`, `repo rebuild-index`, export/import with rollback protection, `archive relocate`, optional media copy |
 | M5 | GTK4 GUI with Archive List, Register, Verify, History and Settings views, progress, cancel and resume |
+| Language | CLI and GUI in English and Traditional Chinese with a language setting; `--json` stays English (decision 0017) |
 
-Automated tests: unit tests for every module (fake file system and media enumerator per R-93),
-a CLI end-to-end test (CJK and emoji names, damage detection, export/import) and a windowless GUI
-smoke test.
+Automated tests: unit tests for every module (fake file system and media enumerator per R-93)
+and the translation catalog, a CLI end-to-end test (CJK and emoji names, damage detection,
+export/import, interface language), a windowless GUI smoke test, and a check that the Windows
+package runs without MSYS2 in both languages.
 
 Measured locally (Release build, Windows 11, WD SN850X NVMe, uncached reads, four 512 MiB
 files): FULL verify at about 4.5 GB/s with eight readers and about 1.47 GB/s with one reader

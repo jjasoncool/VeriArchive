@@ -82,3 +82,9 @@ the repository: losing it loses the verification history.
 `veriarchive-gui` offers the same operations in five views: Archive List, Register Archive,
 Verify Archive, Verification History and Settings. Long operations show progress and can be
 cancelled and resumed. The GUI runs unprivileged.
+
+## Interface language
+
+The CLI and the GUI speak English and Traditional Chinese (decision 0017): `--lang en|zh-TW`,
+then `VERIARCHIVE_LANG`, then `"language"` in the config file (the GUI's Settings view sets it),
+then the system's display language. `--json` output and exit codes are always English.

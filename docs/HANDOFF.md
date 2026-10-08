@@ -410,6 +410,8 @@ struct AppContext {                 // built once in the composition root, passe
 - R-82 JSON. Lookup order for the config file itself: (1) `--config <path>`; (2) `<executable_dir>/config.json` (portable install); (3) user config dir — Windows `%APPDATA%\VeriArchive\config.json`, Linux `${XDG_CONFIG_HOME:-~/.config}/veriarchive/config.json`. First found wins; files are not merged.
 - Keys: `repository` (path), `trusted_keys`, `policy` (`full_verify_max_age_days`, `any_verify_max_age_days`, `strict_metadata`), `io` (`rotational_override` by serial), `allow_network_repository` (bool).
 
+> Amended by `docs/decisions/0017-interface-language.md`: adds `language` (`"en"`, `"zh-TW"`; absent = follow the system).
+
 ### B7.4 RepositoryRoot resolution (authoritative, R-83)
 
 ```text
@@ -725,6 +727,8 @@ VeriArchive/
 
 ## B16. CLI
 
+> Amended by `docs/decisions/0017-interface-language.md`: global option `--lang en|zh-TW` (also `VERIARCHIVE_LANG`); text output in English or Traditional Chinese, `--json` always English.
+
 ```text
 veriarchive-cli repo init [--repository P] | info | rebuild-index | verify-history
 veriarchive-cli media list [--json]
@@ -743,6 +747,7 @@ Exit codes: `0` PASSED · `2` PASSED_WITH_WARNINGS · `3` FAILED · `4` INCOMPLE
 ## B17. GUI (M5)
 
 > Amended by `docs/decisions/0016-gtk4-c-api-for-the-gui.md`: the GUI uses the GTK4 C API (no gtkmm).
+> Amended by `docs/decisions/0017-interface-language.md`: Settings has a language drop-down (English, 繁體中文).
 
 Views: Register Archive, Verify Archive, Archive List, Verification History, Settings.
 Archive List columns: label, short uuid, volume label, model, capacity, last FULL (result/date), last verify (mode/result/date), OVERDUE, revision.
