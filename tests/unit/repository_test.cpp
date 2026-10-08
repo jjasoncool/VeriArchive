@@ -127,6 +127,7 @@ void explicit_repository_must_already_be_initialised()
 {
     TemporaryDirectory temporary("explicit");
     auto options = make_options(temporary.path());
+    options.initialise = false;
     options.explicit_repository = temporary.path() / "missing";
 
     CHECK(!va::resolve_repository(options, always_writable_local).has_value());
@@ -138,6 +139,27 @@ void explicit_repository_must_already_be_initialised()
     CHECK(context.has_value());
     if (!context) { return; }
     CHECK(context->repo_selected_by == "explicit");
+}
+
+// §B16 `repo init --repository P` creates the repository at P and pins it.
+void explicit_init_creates_and_pins_repository()
+{
+    TemporaryDirectory temporary("explicit-init");
+    auto options = make_options(temporary.path());
+    options.explicit_repository = temporary.path() / "new-repository";
+
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context.has_value());
+    if (!context) {
+        return;
+    }
+    CHECK(va::initialise_repository(*context, *va::platform::make_file_writer()));
+    CHECK(std::filesystem::exists(temporary.path() / "new-repository" / "repository.json"));
+
+    options.explicit_repository.reset();
+    options.initialise = false;
+    const auto pinned = va::resolve_repository(options, always_writable_local);
+    CHECK(pinned && pinned->repo_selected_by == "pinned");
 }
 
 void malformed_repository_uuid_is_rejected()
@@ -183,6 +205,28 @@ void changed_repository_uuid_is_reported_and_recorded()
     CHECK(saved && *saved && (*saved)->last_repository_uuid == actual_uuid);
 }
 
+// R-84: relative locations resolve against the executable directory, never the
+// process working directory. The test moves the working directory elsewhere.
+void relative_paths_ignore_working_directory()
+{
+    TemporaryDirectory temporary("cwd");
+    auto options = make_options(temporary.path());
+    write_repository_metadata(options.executable_dir / "repo");
+    std::filesystem::create_directories(temporary.path() / "elsewhere");
+    write_repository_metadata(temporary.path() / "elsewhere" / "repo");
+
+    const auto original_directory = std::filesystem::current_path();
+    std::filesystem::current_path(temporary.path() / "elsewhere");
+    options.explicit_repository = std::filesystem::path("repo");
+    const auto context = va::resolve_repository(options, always_writable_local);
+    std::filesystem::current_path(original_directory);
+
+    CHECK(context.has_value());
+    if (context) {
+        CHECK(context->repo.root == (options.executable_dir / "repo").lexically_normal());
+    }
+}
+
 void network_repository_is_rejected_by_default()
 {
     TemporaryDirectory temporary("network");
@@ -221,8 +265,10 @@ void repository_tests()
     first_run_initialises_metadata_and_schema();
     pinned_unavailable_repository_does_not_fall_back();
     explicit_repository_must_already_be_initialised();
+    explicit_init_creates_and_pins_repository();
     malformed_repository_uuid_is_rejected();
     changed_repository_uuid_is_reported_and_recorded();
+    relative_paths_ignore_working_directory();
     network_repository_is_rejected_by_default();
     unwritable_executable_directory_falls_back_to_home();
 }

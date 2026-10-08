@@ -223,9 +223,19 @@ std::expected<AppContext, IoError> resolve_repository(
         context.repo.root = options.executable_dir / context.repo.root;
     }
     context.repo.root = context.repo.root.lexically_normal();
-    if (!first_run && !read_repository_uuid(context.repo.root)) {
+    // `repo init --repository P` may create a repository at P (§B16); every
+    // other use of an explicit or pinned location requires an existing one.
+    const bool explicit_init = options.initialise && context.repo_selected_by == "explicit";
+    const bool exists = read_repository_uuid(context.repo.root).has_value();
+    if (!first_run && !explicit_init && !exists) {
         return std::unexpected(repository_error(
             "configured repository is unavailable or is not a VeriArchive repository"));
+    }
+    if (explicit_init && !exists && std::filesystem::exists(context.repo.root / "repository.json")) {
+        return std::unexpected(repository_error("not a VeriArchive repository: invalid repository.json"));
+    }
+    if (explicit_init && !exists && !probes.writable(context.repo.root)) {
+        return std::unexpected(repository_error("cannot create a repository at the given path"));
     }
 
     if (probes.network_filesystem(context.repo.root) &&
@@ -235,7 +245,8 @@ std::expected<AppContext, IoError> resolve_repository(
             "set allow_network_repository or move the repository"));
     }
 
-    if (first_run) {
+    // Pin the new repository, unless an explicit init would replace an existing pin.
+    if (first_run || (explicit_init && !context.config.repository)) {
         context.config.repository = context.repo.root;
         if (!options.explicit_config && probes.writable(options.executable_dir)) {
             context.config_file = options.executable_dir / "config.json";
