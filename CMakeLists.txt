@@ -166,6 +166,11 @@ if(BUILD_TESTING)
         target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp)
     endif()
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
+    add_test(NAME veriarchive_cli_e2e
+        COMMAND ${CMAKE_COMMAND}
+            -DCLI=$<TARGET_FILE:veriarchive_cli>
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/cli_e2e.cmake)
 endif()
 
 if(MSVC)
