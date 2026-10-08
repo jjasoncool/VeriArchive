@@ -21,7 +21,8 @@ void print_usage()
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "  archive list | show <uuid> | retire <uuid>\n"
         "  history <uuid>\n"
-        "  export-sha256sums <uuid> --out FILE\n";
+        "  export-sha256sums <uuid> --out FILE\n"
+        "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n";
 }
 
 } // namespace
@@ -60,6 +61,12 @@ int run(std::vector<std::string> raw_arguments)
     }
     if (command == "export-sha256sums") {
         return export_sha256sums_command(*arguments);
+    }
+    if (command == "export") {
+        return export_command(*arguments);
+    }
+    if (command == "import") {
+        return import_command(*arguments);
     }
 
     print_usage();

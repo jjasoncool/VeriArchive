@@ -58,6 +58,7 @@ add_library(veriarchive_core
     src/core/engine/recorded_manifest.cpp
     src/core/engine/register_engine.cpp
     src/core/engine/sha256sums.cpp
+    src/core/engine/transfer.cpp
     src/core/engine/verify_engine.cpp
     src/core/hash/hash_pipeline.cpp
     src/core/hash/hashers.cpp
@@ -152,7 +153,8 @@ if(BUILD_TESTING)
         tests/unit/register_engine_test.cpp
         tests/unit/repository_test.cpp
         tests/unit/scanner_test.cpp
-        tests/unit/sha256sums_test.cpp)
+        tests/unit/sha256sums_test.cpp
+        tests/unit/transfer_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)
     target_compile_definitions(veriarchive_tests PRIVATE
