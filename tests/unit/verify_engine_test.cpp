@@ -89,6 +89,33 @@ void content_changes_fail()
     CHECK(outcome.coverage_bytes == 20000); // only bytes that were read and matched
 }
 
+// Items come in canonical order (R-43), not in the order they were found: a
+// missing file is found while merging, a modified one only after re-hashing.
+void items_are_in_canonical_order()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("a.txt", "a");
+    fixture.archive.add_file("m/b.txt", "b");
+    fixture.archive.add_file("z.txt", "z");
+    CHECK(fixture.register_root(fixture.archive.root()).has_value());
+    fixture.archive.node("a.txt").content = "A";                // Modified, found by re-hashing
+    fixture.archive.node("m/b.txt").mtime_ns += 5'000'000'000;  // MetadataMismatch, found by re-hashing
+    fixture.archive.remove("z.txt");                            // Missing, found while merging
+    fixture.archive.add_file("n.txt", "n");                     // New, found while merging
+
+    const auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome.has_value());
+    if (!outcome) {
+        return;
+    }
+    std::vector<std::string> order;
+    for (const auto& item : outcome->items) {
+        order.push_back(item.path.p + " " + item.status);
+    }
+    CHECK((order == std::vector<std::string>{
+        "a.txt Modified", "m/b.txt MetadataMismatch", "n.txt New", "z.txt Missing"}));
+}
+
 void unreadable_files_fail_with_their_reason()
 {
     Registered fixture;
@@ -308,6 +335,7 @@ void verify_engine_tests()
 {
     unchanged_archive_passes();
     content_changes_fail();
+    items_are_in_canonical_order();
     unreadable_files_fail_with_their_reason();
     metadata_changes_warn();
     known_unreadable_entries_warn();

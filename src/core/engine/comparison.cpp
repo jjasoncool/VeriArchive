@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <tuple>
 
 namespace va {
 namespace {
@@ -310,6 +311,16 @@ ComparisonResult compare_with_manifest(
         result.incomplete = true;
     }
     std::sort(result.current_entries.begin(), result.current_entries.end(), canonical_less);
+    // Report items in canonical order (R-43). They were added in two passes
+    // (the merge above, then the hash callback in whatever order the readers
+    // finished), so without this the same media could list them differently
+    // on every run. There is one item per (path, raw, stream); a file's stream
+    // is "", which sorts before any stream name, just like canonical_less.
+    std::sort(result.items.begin(), result.items.end(),
+        [](const VerifyItemRecord& left, const VerifyItemRecord& right) {
+            return std::tie(left.path.p, left.path.raw, left.stream) <
+                   std::tie(right.path.p, right.path.raw, right.stream);
+        });
     return result;
 }
 
