@@ -39,6 +39,7 @@ add_library(veriarchive_common
     src/common/hex.cpp
     src/common/unicode.cpp
     src/common/config.cpp
+    src/common/time.cpp
     src/common/utf8.cpp
     src/common/uuid.cpp)
 add_library(VeriArchive::common ALIAS veriarchive_common)
@@ -49,6 +50,8 @@ target_link_libraries(veriarchive_common
     PRIVATE PkgConfig::GLIB)
 
 add_library(veriarchive_core
+    src/core/engine/candidates.cpp
+    src/core/engine/register_engine.cpp
     src/core/hash/hash_pipeline.cpp
     src/core/hash/hashers.cpp
     src/core/identity/filesystem_id.cpp
@@ -129,6 +132,7 @@ if(BUILD_TESTING)
         tests/unit/manifest_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
+        tests/unit/register_engine_test.cpp
         tests/unit/repository_test.cpp
         tests/unit/scanner_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)

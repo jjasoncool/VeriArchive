@@ -18,6 +18,29 @@ public:
     void on_progress(const va::Progress&) override {}
 };
 
+// Reports one fixed volume for every path.
+class FakeMediaEnumerator final : public va::IMediaEnumerator {
+public:
+    va::VolumeInfo volume;
+    std::optional<va::IoError> error;
+
+    std::expected<std::vector<va::VolumeInfo>, va::IoError> volumes() override
+    {
+        if (error) {
+            return std::unexpected(*error);
+        }
+        return std::vector<va::VolumeInfo>{volume};
+    }
+
+    std::expected<va::VolumeInfo, va::IoError> volume_for_path(const std::filesystem::path&) override
+    {
+        if (error) {
+            return std::unexpected(*error);
+        }
+        return volume;
+    }
+};
+
 class FakeFileSystem final : public va::IFileSystemAccess {
 public:
     struct Node {

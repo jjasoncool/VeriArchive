@@ -107,6 +107,7 @@ void stopping_and_cancelling()
     CHECK(!status && delivered == 0);
 
     CHECK(va::default_reader_count(true) == 1);
+    CHECK(va::default_reader_count(std::nullopt) == 1);
     CHECK(va::default_reader_count(false) >= 1 && va::default_reader_count(false) <= 8);
 }
 

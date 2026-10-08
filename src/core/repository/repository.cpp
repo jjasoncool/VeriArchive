@@ -1,14 +1,13 @@
 #include "core/repository/repository.h"
 
 #include "common/canonical_json.h"
+#include "common/time.h"
 #include "common/uuid.h"
 #include "core/repository/sqlite_raii.h"
 #include "core/write_file.h"
 #include "schema_sql.h"
 
 #include <array>
-#include <chrono>
-#include <format>
 #include <fstream>
 #include <sqlite3.h>
 
@@ -34,13 +33,6 @@ std::filesystem::path select_config_path(const RepositoryOptions& options)
     }
 
     return options.user_config_dir / "config.json";
-}
-
-std::string current_timestamp()
-{
-    const auto now = std::chrono::floor<std::chrono::seconds>(
-        std::chrono::system_clock::now());
-    return std::format("{:%FT%TZ}", now);
 }
 
 std::optional<std::string> read_repository_uuid(const std::filesystem::path& root)

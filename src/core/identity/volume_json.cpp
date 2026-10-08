@@ -63,4 +63,9 @@ VolumeInfo volume_from_json(const nlohmann::json& json)
     return volume;
 }
 
+std::string volume_to_json_text(const VolumeInfo& volume)
+{
+    return volume_to_json(volume).dump();
+}
+
 } // namespace va

@@ -10,5 +10,6 @@ namespace va {
 
 nlohmann::json volume_to_json(const VolumeInfo& volume);
 VolumeInfo volume_from_json(const nlohmann::json& json);
+std::string volume_to_json_text(const VolumeInfo& volume);
 
 } // namespace va

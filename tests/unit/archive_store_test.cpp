@@ -1,42 +1,10 @@
 #include "test_support.h"
 
-#include "core/repository/archive_store.h"
-#include "core/repository/repository.h"
-#include "platform/file_writer.h"
-
-#include <chrono>
-#include <sqlite3.h>
+#include "test_repository.h"
 
 namespace {
 
-struct TestRepository {
-    va::AppContext context;
-
-    TestRepository()
-    {
-        const auto root = std::filesystem::temp_directory_path() /
-            ("va-store-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        context.repo.root = root / "repository";
-        context.config_file = root / "config.json";
-        const auto initialised = va::initialise_repository(context, *va::platform::make_file_writer());
-        CHECK(initialised.has_value());
-    }
-
-    ~TestRepository()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(context.repo.root.parent_path(), error);
-    }
-
-    void execute(const char* sql) const
-    {
-        sqlite3* database = nullptr;
-        const auto name = context.repo.database().u8string();
-        sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &database);
-        CHECK(sqlite3_exec(database, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
-        sqlite3_close(database);
-    }
-};
+using test::TestRepository;
 
 va::VerifyRunRecord run(std::string id, std::string result)
 {

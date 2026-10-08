@@ -33,8 +33,9 @@ struct HashPipelineOptions {
     bool uncached = true;               // R-100
 };
 
-// Reader count for a device: one for HDDs (avoids seek amplification),
-// min(8, cores) for SSDs and unknown non-rotational media (R-110, R-111).
+// Reader count for a device: one for HDDs and for devices of unknown type
+// (avoids seek amplification; USB bridges often hide the type), min(8, cores)
+// for SSDs (R-110, R-111).
 std::size_t default_reader_count(std::optional<bool> rotational);
 
 // Hashes every job. `on_result` runs on the calling thread once per finished

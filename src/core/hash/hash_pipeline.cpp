@@ -259,7 +259,7 @@ private:
 
 std::size_t default_reader_count(std::optional<bool> rotational)
 {
-    if (rotational.value_or(false)) {
+    if (rotational.value_or(true)) {
         return 1;
     }
     const auto cores = std::max(1u, std::thread::hardware_concurrency());
