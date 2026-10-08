@@ -15,7 +15,9 @@ struct RebuildReport {
     std::size_t archives = 0;
     std::size_t revisions = 0;
     std::size_t entries = 0;
-    std::vector<std::string> skipped;  // manifests that failed validation, with the reason
+    // Manifests that failed validation, with the reason: "cannot read manifest
+    // <uuid>/r0001.vam: <cause>" or "cannot list the manifests of archive <uuid>: <cause>".
+    std::vector<std::string> skipped;
 };
 
 std::expected<RebuildReport, IoError> rebuild_index(

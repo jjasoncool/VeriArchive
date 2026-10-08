@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 
 namespace va {
 namespace {
@@ -46,9 +47,13 @@ std::expected<RebuildReport, IoError> rebuild_index(
         if (directory.type != EntryType::Directory || !is_canonical_uuid(archive_uuid)) {
             continue;
         }
+        // Each skipped line starts with its own words and ends with the cause
+        // after ": ", so the interface language catalog (decision 0017) can
+        // recognise the sentence and translate the cause on its own.
         const auto files = repository_files.list(layout.manifests() / directory.native_name);
         if (!files) {
-            report.skipped.push_back(archive_uuid + ": " + files.error().message);
+            report.skipped.push_back(
+                "cannot list the manifests of archive " + archive_uuid + ": " + files.error().message);
             continue;
         }
         for (const auto& file : *files) {
@@ -58,13 +63,14 @@ std::expected<RebuildReport, IoError> rebuild_index(
                 continue;
             }
             const auto path = layout.manifests() / directory.native_name / file.native_name;
+            const auto cannot_read = "cannot read manifest " + archive_uuid + "/" + name + ": ";
             auto reader = ManifestReader::open(repository_files, path);
             if (!reader) {
-                report.skipped.push_back(archive_uuid + "/" + name + ": " + reader.error().message);
+                report.skipped.push_back(cannot_read + reader.error().message);
                 continue;
             }
             if (reader->header().archive_uuid != archive_uuid || reader->header().revision != *revision) {
-                report.skipped.push_back(archive_uuid + "/" + name + ": header does not match its file name");
+                report.skipped.push_back(cannot_read + "header does not match its file name");
                 continue;
             }
             FoundRevision item;
@@ -72,12 +78,23 @@ std::expected<RebuildReport, IoError> rebuild_index(
             item.record = {archive_uuid, *revision, "manifests/" + archive_uuid + "/" + name,
                 reader->header_line(), reader->header_blake3(), reader->header().body_blake3, "",
                 reader->header().created};
+            // A manifest whose entries cannot all be read is skipped, never
+            // indexed with only the entries before the bad line.
+            std::optional<std::string> entry_error;
             for (;;) {
                 auto next = reader->next();
-                if (!next || !*next) {
+                if (!next) {
+                    entry_error = next.error().message;
+                    break;
+                }
+                if (!*next) {
                     break;
                 }
                 item.entries.push_back(std::move(**next));
+            }
+            if (entry_error) {
+                report.skipped.push_back(cannot_read + *entry_error);
+                continue;
             }
             found[archive_uuid].push_back(std::move(item));
         }
