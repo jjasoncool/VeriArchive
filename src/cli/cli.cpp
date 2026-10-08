@@ -100,6 +100,15 @@ int run(std::vector<std::string> arguments) {
         return repository_error;
     }
 
+    if (auto recorded = record_repository_uuid(*context, *writer); !recorded) {
+        std::cerr << recorded.error().message << '\n';
+        return repository_error;
+    }
+    if (!context->previous_repository_uuid.empty()) {
+        std::cerr << "warning: repository_uuid changed from " << context->previous_repository_uuid
+                  << " to " << context->repository_uuid << "; recorded the new uuid\n";
+    }
+
     if (platform::process_is_elevated()) {
         std::cerr << "warning: VeriArchive is running elevated; "
                      "repository and home resolution may differ\n";

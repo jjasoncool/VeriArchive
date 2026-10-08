@@ -1,6 +1,8 @@
 #include "test_support.h"
 
 #include "core/repository/repository.h"
+#include "common/uuid.h"
+#include "core/write_file.h"
 #include "platform/file_writer.h"
 
 #include <chrono>
@@ -50,7 +52,7 @@ void write_repository_metadata(const std::filesystem::path& root)
     std::filesystem::create_directories(root);
     std::ofstream output(root / "repository.json");
     output << "{\"format\":\"veriarchive-repo\",\"version\":1,"
-              "\"repository_uuid\":\"test-repository\",\"created\":\"now\"}\n";
+              "\"repository_uuid\":\"3f2b8c1e-0d4a-4c6e-9b7a-1e2d3c4b5a69\",\"created\":\"now\"}\n";
 }
 
 void first_run_uses_executable_directory()
@@ -80,6 +82,9 @@ void first_run_initialises_metadata_and_schema()
 
     CHECK(result.has_value());
     CHECK(std::filesystem::exists(context->repo.root / "repository.json"));
+    CHECK(va::is_canonical_uuid(context->repository_uuid));
+    CHECK(!va::is_canonical_uuid("3F2B8C1E-0D4A-4C6E-9B7A-1E2D3C4B5A69"));
+    CHECK(!va::is_canonical_uuid("3f2b8c1e0d4a4c6e9b7a1e2d3c4b5a69"));
     CHECK(va::validate_schema(context->repo).has_value());
 
     const auto config_time = std::filesystem::last_write_time(context->config_file);
@@ -135,6 +140,49 @@ void explicit_repository_must_already_be_initialised()
     CHECK(context->repo_selected_by == "explicit");
 }
 
+void malformed_repository_uuid_is_rejected()
+{
+    TemporaryDirectory temporary("bad-uuid");
+    const auto root = temporary.path() / "repository";
+    std::filesystem::create_directories(root);
+    std::ofstream(root / "repository.json")
+        << "{\"format\":\"veriarchive-repo\",\"version\":1,"
+           "\"repository_uuid\":\"NOT-A-UUID\",\"created\":\"now\"}\n";
+    auto options = make_options(temporary.path());
+    options.explicit_repository = root;
+
+    CHECK(!va::resolve_repository(options, always_writable_local).has_value());
+}
+
+// R-83 step 5: a repository whose uuid differs from the recorded one is opened
+// with a warning, and the new uuid is recorded.
+void changed_repository_uuid_is_reported_and_recorded()
+{
+    TemporaryDirectory temporary("uuid-changed");
+    auto options = make_options(temporary.path());
+    const auto writer = va::platform::make_file_writer();
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *writer));
+    if (!context) {
+        return;
+    }
+    const auto actual_uuid = context->repository_uuid;
+    const std::string recorded_uuid = "00000000-0000-4000-8000-000000000000";
+    context->config.last_repository_uuid = recorded_uuid;
+    CHECK(va::write_file_atomically(*writer, context->config_file, va::config_to_json(context->config)));
+
+    options.initialise = false;
+    auto reopened = va::resolve_repository(options, always_writable_local);
+    CHECK(reopened && va::open_repository(*reopened));
+    if (!reopened) {
+        return;
+    }
+    CHECK(va::record_repository_uuid(*reopened, *writer));
+    CHECK(reopened->previous_repository_uuid == recorded_uuid);
+    const auto saved = va::read_config(reopened->config_file);
+    CHECK(saved && *saved && (*saved)->last_repository_uuid == actual_uuid);
+}
+
 void network_repository_is_rejected_by_default()
 {
     TemporaryDirectory temporary("network");
@@ -173,6 +221,8 @@ void repository_tests()
     first_run_initialises_metadata_and_schema();
     pinned_unavailable_repository_does_not_fall_back();
     explicit_repository_must_already_be_initialised();
+    malformed_repository_uuid_is_rejected();
+    changed_repository_uuid_is_reported_and_recorded();
     network_repository_is_rejected_by_default();
     unwritable_executable_directory_falls_back_to_home();
 }

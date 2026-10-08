@@ -25,7 +25,8 @@ add_library(veriarchive_common
     src/common/canonical_json.cpp
     src/common/hex.cpp
     src/common/config.cpp
-    src/common/utf8.cpp)
+    src/common/utf8.cpp
+    src/common/uuid.cpp)
 add_library(VeriArchive::common ALIAS veriarchive_common)
 target_include_directories(veriarchive_common PUBLIC src)
 target_compile_features(veriarchive_common PUBLIC cxx_std_23)

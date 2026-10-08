@@ -14,6 +14,9 @@ struct AppContext {
     RepositoryLayout repo;
     std::string repo_selected_by;
     std::string repository_uuid;
+    // Non-empty when the opened repository's uuid differs from the uuid recorded
+    // in the config (R-83 step 5); the user interface shows a warning.
+    std::string previous_repository_uuid;
 };
 
 } // namespace va

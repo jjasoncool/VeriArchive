@@ -1,6 +1,7 @@
 #include "core/repository/repository.h"
 
 #include "common/canonical_json.h"
+#include "common/uuid.h"
 #include "core/repository/sqlite_raii.h"
 #include "core/write_file.h"
 #include "schema_sql.h"
@@ -9,7 +10,6 @@
 #include <chrono>
 #include <format>
 #include <fstream>
-#include <random>
 #include <sqlite3.h>
 
 namespace va {
@@ -34,24 +34,6 @@ std::filesystem::path select_config_path(const RepositoryOptions& options)
     }
 
     return options.user_config_dir / "config.json";
-}
-
-std::string generate_repository_uuid()
-{
-    std::array<unsigned char, 16> bytes{};
-    std::random_device random;
-    for (auto& byte : bytes) {
-        byte = static_cast<unsigned char>(random());
-    }
-
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-    return std::format(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-"
-        "{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]);
 }
 
 std::string current_timestamp()
@@ -79,7 +61,7 @@ std::optional<std::string> read_repository_uuid(const std::filesystem::path& roo
         return std::nullopt;
     }
     const auto uuid = document["repository_uuid"].get<std::string>();
-    if (uuid.empty()) {
+    if (!is_canonical_uuid(uuid)) {
         return std::nullopt;
     }
     return uuid;
@@ -87,7 +69,7 @@ std::optional<std::string> read_repository_uuid(const std::filesystem::path& roo
 
 std::expected<void, IoError> write_repository_metadata(AppContext& context, IFileWriter& writer)
 {
-    context.repository_uuid = generate_repository_uuid();
+    context.repository_uuid = generate_uuid();
     const auto contents = "{\"format\":\"veriarchive-repo\",\"version\":1"
                           ",\"repository_uuid\":" +
                           canonical_json::quote(context.repository_uuid) +
@@ -301,6 +283,27 @@ std::expected<void, IoError> open_repository(AppContext& context)
         return result;
     }
     context.repository_uuid = *uuid;
+    return {};
+}
+
+std::expected<void, IoError> record_repository_uuid(AppContext& context, IFileWriter& writer)
+{
+    if (context.config.last_repository_uuid == context.repository_uuid) {
+        return {};
+    }
+    if (!context.config.last_repository_uuid.empty()) {
+        context.previous_repository_uuid = context.config.last_repository_uuid;
+    }
+    if (!std::filesystem::exists(context.config_file)) {
+        return {};
+    }
+    context.config.last_repository_uuid = context.repository_uuid;
+    if (auto written = write_file_atomically(
+            writer, context.config_file, config_to_json(context.config));
+        !written) {
+        return std::unexpected(repository_error(
+            "cannot record repository_uuid in config: " + written.error().message));
+    }
     return {};
 }
 
