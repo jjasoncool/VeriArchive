@@ -8,5 +8,7 @@ int repo_command(const Arguments& arguments);
 int media_command(const Arguments& arguments);
 int register_command(const Arguments& arguments);
 int verify_command(const Arguments& arguments);
+int archive_command(const Arguments& arguments);
+int history_command(const Arguments& arguments);
 
 } // namespace va::cli

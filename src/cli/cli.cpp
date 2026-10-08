@@ -18,7 +18,9 @@ void print_usage()
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
         "           [--force-new-archive] [--copy-of UUID]\n"
-        "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n";
+        "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
+        "  archive list | show <uuid> | retire <uuid>\n"
+        "  history <uuid>\n";
 }
 
 } // namespace
@@ -48,6 +50,12 @@ int run(std::vector<std::string> raw_arguments)
     }
     if (command == "verify") {
         return verify_command(*arguments);
+    }
+    if (command == "archive") {
+        return archive_command(*arguments);
+    }
+    if (command == "history") {
+        return history_command(*arguments);
     }
 
     print_usage();

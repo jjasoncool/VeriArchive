@@ -50,6 +50,7 @@ target_link_libraries(veriarchive_common
     PRIVATE PkgConfig::GLIB)
 
 add_library(veriarchive_core
+    src/core/engine/archive_status.cpp
     src/core/engine/candidates.cpp
     src/core/engine/item_rules.cpp
     src/core/engine/register_engine.cpp
@@ -104,6 +105,7 @@ else()
 endif()
 
 add_executable(veriarchive_cli
+    src/cli/archive_commands.cpp
     src/cli/cli.cpp
     src/cli/cli_support.cpp
     src/cli/media_commands.cpp
@@ -126,6 +128,7 @@ if(BUILD_TESTING)
     add_executable(veriarchive_tests
         tests/unit/test_main.cpp
         tests/unit/archive_path_test.cpp
+        tests/unit/archive_status_test.cpp
         tests/unit/archive_store_test.cpp
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp

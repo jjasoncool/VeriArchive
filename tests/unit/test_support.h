@@ -28,3 +28,4 @@ void hash_pipeline_tests();
 void archive_store_tests();
 void register_engine_tests();
 void verify_engine_tests();
+void archive_status_tests();
