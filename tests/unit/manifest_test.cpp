@@ -1,5 +1,6 @@
 #include "test_support.h"
 
+#include "common/json_error.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
@@ -181,10 +182,41 @@ void out_of_order_entries_are_rejected()
     std::filesystem::remove_all(root, error);
 }
 
+// A malformed line is explained with the JSON library's own sentence, without
+// its "[json.exception.<kind>.<id>] " tag, which means nothing to people.
+void malformed_manifests_say_why()
+{
+    const auto root = temporary_directory("va-manifest-malformed-");
+    const auto files = va::platform::make_file_system_access();
+    const auto failure = [&](const std::string& bytes) {
+        const auto path = root / "r0001.vam";
+        std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+        const auto reader = va::ManifestReader::open(*files, path);
+        return reader ? std::string{} : reader.error().message;
+    };
+    CHECK(failure("{\"format\":\"vam\",\"version\":2}\n") ==
+          "invalid manifest header: not a version 1 .vam manifest");
+    CHECK(failure("{\"version\":1}\n") == "invalid manifest header: key 'format' not found");
+    CHECK(failure("{\"format\":1}\n") == "invalid manifest header: type must be string, but is number");
+    CHECK(failure("[]\n") == "invalid manifest header: cannot use at() with array");
+    CHECK(failure("{\n").starts_with("invalid manifest header: parse error at line 1, column 2: "));
+
+    try {
+        va::entry_from_json(nlohmann::json{{"t", "x"}, {"p", "a"}});
+        CHECK(false);
+    } catch (const nlohmann::json::exception& error) {
+        CHECK(va::json_error_text(error) == "unknown entry type x");
+    }
+
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 } // namespace
 
 void manifest_tests()
 {
     golden_manifest_bytes();
     out_of_order_entries_are_rejected();
+    malformed_manifests_say_why();
 }

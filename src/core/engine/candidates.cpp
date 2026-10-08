@@ -1,6 +1,7 @@
 #include "core/engine/candidates.h"
 
 #include "common/archive_path.h"
+#include "common/json_error.h"
 #include "common/unicode.h"
 
 namespace va {
@@ -11,7 +12,7 @@ std::expected<ManifestHeader, IoError> recorded_header(const RevisionRecord& rev
         return header_from_json(nlohmann::json::parse(revision.header_json));
     } catch (const std::exception& error) {
         return std::unexpected(IoError{IoErrorKind::Other, 0,
-            "invalid recorded manifest header for " + revision.archive_uuid + ": " + error.what()});
+            "invalid recorded manifest header for " + revision.archive_uuid + ": " + json_error_text(error)});
     }
 }
 

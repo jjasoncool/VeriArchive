@@ -1,4 +1,5 @@
 #include "common/config.h"
+#include "common/json_error.h"
 #include "common/utf8.h"
 
 #include <fstream>
@@ -59,8 +60,7 @@ std::expected<std::optional<Config>, IoError> read_config(const std::filesystem:
         }
         return config;
     } catch (const nlohmann::json::exception& error) {
-        return std::unexpected(IoError{IoErrorKind::Other, 0,
-            std::string("Invalid config: ") + error.what()});
+        return std::unexpected(IoError{IoErrorKind::Other, 0, "Invalid config: " + json_error_text(error)});
     }
 }
 

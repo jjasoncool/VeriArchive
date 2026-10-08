@@ -1,5 +1,6 @@
 #include "test_support.h"
 #include "common/config.h"
+#include "common/json_error.h"
 #include "common/utf8.h"
 #include "core/write_file.h"
 #include "platform/file_writer.h"
@@ -7,6 +8,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <stdexcept>
 
 void config_tests()
 {
@@ -49,10 +51,20 @@ void config_tests()
         CHECK(save(config));
     }
 
+    // Messages carry the JSON library's sentence without its
+    // "[json.exception.<kind>.<id>] " tag, which means nothing to people.
     std::ofstream(path) << "{not valid JSON";
-    CHECK(!va::read_config(path));
+    const auto invalid = va::read_config(path);
+    CHECK(!invalid && invalid.error().message.starts_with("Invalid config: parse error at line 1, column "));
     std::ofstream(path) << "{\"repository\":42}";
-    CHECK(!va::read_config(path));
+    const auto wrong_type = va::read_config(path);
+    CHECK(!wrong_type && wrong_type.error().message == "Invalid config: type must be string, but is number");
+    std::ofstream(path) << "{\"trusted_keys\":[{}]}";
+    const auto missing_key = va::read_config(path);
+    CHECK(!missing_key && missing_key.error().message == "Invalid config: key 'key_id' not found");
+    CHECK(va::json_error_text(std::runtime_error("[json.exception.x.1] y")) == "y");
+    CHECK(va::json_error_text(std::runtime_error("plain text")) == "plain text");
+    CHECK(va::json_error_text(std::runtime_error("[json.exception.no end")) == "[json.exception.no end");
 
     // R-105
     for (const char* text : {"{}", "{\"policy\":{}}"}) {

@@ -1,5 +1,6 @@
 #include "core/manifest/manifest_reader.h"
 
+#include "common/json_error.h"
 #include "core/hash/hashers.h"
 
 #include <algorithm>
@@ -71,7 +72,7 @@ std::expected<ManifestReader, ManifestFailure> ManifestReader::open(
     try {
         reader.header_ = header_from_json(nlohmann::json::parse(reader.header_line_));
     } catch (const std::exception& error) {
-        return std::unexpected(malformed(std::string("invalid manifest header: ") + error.what()));
+        return std::unexpected(malformed("invalid manifest header: " + json_error_text(error)));
     }
     reader.header_blake3_ = blake3_hex(reader.header_line_);
 
@@ -125,7 +126,7 @@ std::expected<std::optional<Entry>, ManifestFailure> ManifestReader::next()
             }
             entry = entry_from_json(json);
         } catch (const std::exception& error) {
-            return std::unexpected(malformed(std::string("invalid manifest entry: ") + error.what()));
+            return std::unexpected(malformed("invalid manifest entry: " + json_error_text(error)));
         }
         if (previous_ && !canonical_less(*previous_, entry)) {
             return std::unexpected(malformed("manifest entries out of canonical order"));
