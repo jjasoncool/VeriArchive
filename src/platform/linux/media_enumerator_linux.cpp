@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <compare>
+#include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -294,6 +295,26 @@ VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
     return volume;
 }
 
+// Filesystems without a block device (ZFS datasets, overlayfs, tmpfs): the
+// kernel's filesystem id (statvfs f_fsid) is the only identifier. No devices
+// are reported, so matching is at best MATCH_WEAK.
+VolumeInfo describe_virtual_mount(const linux_mounts::Mount& mount)
+{
+    VolumeInfo volume;
+    volume.mount_point = mount.mount_point;
+    volume.filesystem_type = normalise_filesystem_type(mount.filesystem_type);
+    volume.read_only = has_option(mount.options, "ro");
+    struct statvfs information {};
+    if (::statvfs(mount.mount_point.c_str(), &information) == 0) {
+        volume.capacity_bytes = static_cast<std::uint64_t>(information.f_blocks) * information.f_frsize;
+        char text[32];
+        std::snprintf(text, sizeof(text), "fsid-%016llx",
+            static_cast<unsigned long long>(information.f_fsid));
+        volume.filesystem_uuid = text;
+    }
+    return volume;
+}
+
 // Block-device-backed mounts only. btrfs reports an anonymous major 0 in
 // mountinfo, so the device number comes from the source node instead.
 std::optional<DeviceNumber> block_device_of(const linux_mounts::Mount& mount)
@@ -342,8 +363,7 @@ public:
         }
         const auto number = block_device_of(*mount);
         if (!number) {
-            return std::unexpected(IoError{IoErrorKind::NotSupported, 0,
-                "the path is not on a block-device filesystem (" + mount->filesystem_type + ")"});
+            return describe_virtual_mount(*mount);
         }
         return describe_mount(*mount, *number);
     }
