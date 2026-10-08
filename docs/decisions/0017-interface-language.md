@@ -44,6 +44,7 @@ English is the source language: the code keeps writing English. `va::app::Text` 
 | run, resume, checkpoint | 執行、繼續、檢查點 |
 | history, history chain | 歷程、歷程鏈 |
 | volume, disk, carrier, media | 磁碟區、磁碟、載體、媒體 |
+| link (symlink or junction), symlink | 連結、符號連結 |
 | identity | 身分 |
 | relocate, retire | 搬移、停用 |
 | export, import | 匯出、匯入 |

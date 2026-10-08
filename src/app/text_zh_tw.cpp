@@ -6,7 +6,8 @@
 // An entry may add a match mode (text.h): Match::Cause for a wrapper whose last
 // value is an engine message ("context: {}"), Match::FormatOnly for a template
 // used only through Text::format. Without one, values are carried over as they
-// are.
+// are. Library and system messages (SQLite, JSON, strerror) have entries too:
+// they arrive as the cause inside engine messages.
 #include "app/text.h"
 
 #include <span>
@@ -99,8 +100,8 @@ constexpr CatalogEntry entries[] = {
         "請備份儲存庫根目錄：遺失它會失去所有驗證歷程。"},
     {"explicit", "明確指定"},
     {"pinned", "固定於設定檔"},
-    {"first-run:exe-dir", "首次執行：程式所在資料夾"},
-    {"first-run:home", "首次執行：個人資料夾"},
+    {"first-run:exe-dir", "第一次使用（程式所在資料夾）"},
+    {"first-run:home", "第一次使用（個人資料夾）"},
     {"History intact: {} verification runs, hash chain verified.",
         "歷程完整：共 {} 次驗證執行，雜湊鏈已驗證。"},
     {"V1 detects edited or deleted rows; signed checkpoints arrive in V1.1.",
@@ -113,7 +114,6 @@ constexpr CatalogEntry entries[] = {
     {"Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
         "已從清單檔重建索引：{} 個封存、{} 個版次、{} 個項目。"},
     {"skipped: {}", "已略過：{}"},
-    {"{}: header does not match its file name", "{}：標頭與其檔名不符"},
     {"usage: repo init | info | rebuild-index | verify-history",
         "用法：repo init | info | rebuild-index | verify-history"},
     // src/cli/media_commands.cpp
@@ -126,7 +126,7 @@ constexpr CatalogEntry entries[] = {
     {"Registered {} ({}) revision {}", "已註冊 {}（{}）版次 {}"},
     {"root: {}", "根目錄：{}"},
     {"files: {}  directories: {}  links: {}  hashed bytes: {}",
-        "檔案：{}  資料夾：{}  符號連結：{}  已計算雜湊位元組：{}"},
+        "檔案：{}  資料夾：{}  連結：{}  已計算雜湊位元組：{}"},
     {"manifest: {}", "清單檔：{}", Match::Cause},
     {"unreadable at registration ({}; recorded without hashes, never reported as verified):",
         "註冊時無法讀取（{} 個；已記錄但不含雜湊，絕不會回報為已驗證）："},
@@ -181,7 +181,7 @@ constexpr CatalogEntry entries[] = {
     {"device: {}  wwn {}", "裝置：{}  wwn {}"},
     {"device: {}  serial {}", "裝置：{}  序號 {}"},
     {"content: {} files, {} empty directories, {} links, {} bytes",
-        "內容：{} 個檔案、{} 個空資料夾、{} 個符號連結、{} 位元組"},
+        "內容：{} 個檔案、{} 個空資料夾、{} 個連結、{} 位元組"},
     {"copy of: {}", "副本來源：{}"},
     {"revisions:", "版次："},
     {"Retired {} ({}). It is no longer expected to be verified, "
@@ -292,9 +292,12 @@ constexpr CatalogEntry entries[] = {
     {"VeriArchive is running elevated; repository and home resolution may differ",
         "VeriArchive 正以系統管理員權限執行；儲存庫與個人資料夾的判定結果可能不同"},
     {"cannot locate the config file", "找不到設定檔的位置"},
+    {"Finish or cancel the running operation before changing the language.",
+        "請先完成或取消正在執行的作業，再切換語言。"},
     // src/gui/register_view.cpp
     {"{} files, {} empty directories, {} links, {} hashed",
-        "{} 個檔案、{} 個空資料夾、{} 個符號連結，已計算雜湊 {}", Match::FormatOnly},
+        "{} 個檔案、{} 個空資料夾、{} 個連結，已計算雜湊 {}",
+        Match::FormatOnly},
     {"Manifest: {}", "清單檔：{}"},
     {"Unreadable at registration (recorded without hashes, never reported as verified):",
         "註冊時無法讀取（已記錄但不含雜湊，絕不會回報為已驗證）："},
@@ -417,7 +420,8 @@ constexpr CatalogEntry entries[] = {
     {"cannot scan the root: {}", "無法掃描根目錄：{}", Match::Cause},
     {"cannot write the manifest: {}", "無法寫入清單檔：{}", Match::Cause},
     {"cannot record the archive: {}", "無法記錄封存：{}", Match::Cause},
-    {"the manifest copy on the media could not be written: {}", "無法寫入清單檔的媒體副本：{}", Match::Cause},
+    {"the manifest copy on the media could not be written: {}", "無法寫入清單檔的媒體副本：{}",
+        Match::Cause},
     {"{} entries carry portability warnings", "{} 個項目帶有可攜性警告"},
     // src/core/engine/verify_engine.cpp
     {"cannot list volumes: {}", "無法列出磁碟區：{}", Match::Cause},
@@ -427,7 +431,7 @@ constexpr CatalogEntry entries[] = {
     {"media copy {} differs from the repository copy", "媒體副本 {} 與儲存庫中的副本不同"},
     {"the media holds revision {}, newer than the repository's {}: "
         "the repository may have been rolled back",
-        "媒體上有版次 {}，比儲存庫的版次 {} 新：儲存庫可能已被倒退"},
+        "媒體上有版次 {}，比儲存庫的版次 {} 新：儲存庫可能已被回復到較舊的狀態"},
     {"no registered archive {}", "找不到已註冊的封存 {}"},
     {"UNKNOWN: this is not a registered archive; use `register` to create one",
         "未知：這不是已註冊的封存；請使用 `register` 建立封存"},
@@ -449,15 +453,20 @@ constexpr CatalogEntry entries[] = {
         "媒體身分：沒有可比對的硬體序號（弱相符）"},
     {"scan: {}", "掃描：{}", Match::Cause},
     {"verification finished as PASSED but could not be recorded: {}",
-        "驗證結果為通過，但無法記錄：{}", Match::Cause},
+        "驗證結果為通過，但無法記錄：{}",
+        Match::Cause},
     {"verification finished as PASSED_WITH_WARNINGS but could not be recorded: {}",
-        "驗證結果為通過（有警告），但無法記錄：{}", Match::Cause},
+        "驗證結果為通過（有警告），但無法記錄：{}",
+        Match::Cause},
     {"verification finished as FAILED but could not be recorded: {}",
-        "驗證結果為失敗，但無法記錄：{}", Match::Cause},
+        "驗證結果為失敗，但無法記錄：{}",
+        Match::Cause},
     {"verification finished as INCOMPLETE but could not be recorded: {}",
-        "驗證結果為未完成，但無法記錄：{}", Match::Cause},
+        "驗證結果為未完成，但無法記錄：{}",
+        Match::Cause},
     // src/core/engine/candidates.cpp
-    {"invalid recorded manifest header for {}: {}", "封存 {} 記錄的清單檔標頭無效：{}", Match::Cause},
+    {"invalid recorded manifest header for {}: {}", "封存 {} 記錄的清單檔標頭無效：{}",
+        Match::Cause},
     {"the root is not on the reported volume", "根目錄不在回報的磁碟區上"},
     // src/core/engine/comparison.cpp
     {"Unreadable(permission)", "無法讀取（權限不足）"},
@@ -479,11 +488,11 @@ constexpr CatalogEntry entries[] = {
     {"name cannot exist on linux", "此名稱無法存在於 Linux"},
     {"inside a directory unreadable at registration", "位於註冊時無法讀取的資料夾內"},
     {"f -> d", "檔案 → 資料夾"},
-    {"f -> l", "檔案 → 符號連結"},
+    {"f -> l", "檔案 → 連結"},
     {"d -> f", "資料夾 → 檔案"},
-    {"d -> l", "資料夾 → 符號連結"},
-    {"l -> f", "符號連結 → 檔案"},
-    {"l -> d", "符號連結 → 資料夾"},
+    {"d -> l", "資料夾 → 連結"},
+    {"l -> f", "連結 → 檔案"},
+    {"l -> d", "連結 → 資料夾"},
     {"known-since-registration", "註冊時即無法讀取"},
     {"readable now, unreadable at registration", "現在可讀取，註冊時無法讀取"},
     {"size differs", "大小不同"},
@@ -491,7 +500,8 @@ constexpr CatalogEntry entries[] = {
     // src/core/engine/relocate_engine.cpp
     {"a retired archive takes no new revisions (decision 0003)",
         "已停用的封存不再接受新的版次（決策紀錄 0003）"},
-    {"cannot identify the volume of the new root: {}", "無法識別新根目錄所在的磁碟區：{}", Match::Cause},
+    {"cannot identify the volume of the new root: {}", "無法識別新根目錄所在的磁碟區：{}",
+        Match::Cause},
     {"the new root overlaps archive {} on the same volume (decision 0001)",
         "新根目錄與同一磁碟區上的封存 {} 重疊（決策紀錄 0001）"},
     {"ManifestHashMismatch: {}", "清單檔雜湊不符：{}", Match::Cause},
@@ -515,13 +525,16 @@ constexpr CatalogEntry entries[] = {
     {"the manifest differs from the repository record", "清單檔與儲存庫的紀錄不符"},
     {"revision {} is older than the known revision {}", "版次 {} 比已知的版次 {} 舊"},
     // src/core/engine/rebuild_index.cpp
-    {"{}/{}: header does not match its file name", "{}/{}：標頭與其檔名不符"},
+    {"cannot list the manifests of archive {}: {}", "無法列出封存 {} 的清單檔：{}", Match::Cause},
+    {"cannot read manifest {}/{}: {}", "無法讀取清單檔 {}/{}：{}", Match::Cause},
+    {"header does not match its file name", "標頭與其檔名不符"},
     // src/common/config.cpp
     {"Cannot read config", "無法讀取設定檔"},
     {"Config must be an object", "設定檔必須是 JSON 物件"},
     {"Repository path is empty", "儲存庫路徑是空的"},
-    {"Policy must be an object", "policy 必須是 JSON 物件"},
-    {"Trusted keys must be an array", "受信任的金鑰必須是 JSON 陣列"},
+    // Config keys stay as written in the file (decision 0017).
+    {"Policy must be an object", "設定檔中的 policy 必須是 JSON 物件"},
+    {"Trusted keys must be an array", "設定檔中的 trusted_keys 必須是 JSON 陣列"},
     {"Invalid config: {}", "設定檔無效：{}", Match::Cause},
     // src/common/archive_path.cpp
     {"ArchivePath must be relative", "ArchivePath 必須是相對路徑"},
@@ -548,7 +561,8 @@ constexpr CatalogEntry entries[] = {
         "或將儲存庫移到其他位置"},
     {"cannot pin repository in config: {}", "無法在設定檔中固定儲存庫：{}", Match::Cause},
     {"Invalid repository.json", "repository.json 無效"},
-    {"cannot record repository_uuid in config: {}", "無法在設定檔中記錄 repository_uuid：{}", Match::Cause},
+    {"cannot record repository_uuid in config: {}", "無法在設定檔中記錄 repository_uuid：{}",
+        Match::Cause},
     {"unsupported repository schema", "不支援的儲存庫結構描述"},
     {"unsupported or incomplete repository schema", "不支援或不完整的儲存庫結構描述"},
     // src/core/repository/sqlite_raii.cpp
@@ -557,6 +571,28 @@ constexpr CatalogEntry entries[] = {
     {"cannot execute SQL: {}", "無法執行 SQL：{}", Match::Cause},
     {"cannot prepare SQL: {}", "無法準備 SQL 陳述式：{}", Match::Cause},
     {"cannot run SQL: {}", "無法執行 SQL 陳述式：{}", Match::Cause},
+    // SQLite's own messages (sqlite3_errmsg), the cause in the messages above.
+    // Exact texts of the linked SQLite (3.53).
+    {"database is locked", "資料庫已被鎖定"},
+    {"database table is locked", "資料表已被鎖定"},
+    {"attempt to write a readonly database", "無法寫入唯讀的資料庫"},
+    {"disk I/O error", "磁碟 I/O 錯誤"},
+    {"database disk image is malformed", "資料庫檔案已損毀"},
+    {"database or disk is full", "資料庫或磁碟已滿"},
+    {"unable to open database file", "無法開啟資料庫檔案"},
+    {"file is not a database", "檔案不是資料庫"},
+    {"constraint failed", "違反限制條件"},
+    {"SQL logic error", "SQL 邏輯錯誤"},
+    {"out of memory", "記憶體不足"},
+    {"interrupted", "已中斷"},
+    {"database schema has changed", "資料庫結構描述已變更"},
+    {"cannot start a transaction within a transaction", "無法在交易中再開始交易"},
+    {"cannot commit - no transaction is active", "無法提交：沒有進行中的交易"},
+    // These start with literal text, so they are tried before "{} failed: {}"
+    // and the column names after ": " stay as they are.
+    {"UNIQUE constraint failed: {}", "違反唯一性限制：{}"},
+    {"NOT NULL constraint failed: {}", "違反非空值限制：{}"},
+    {"no such table: {}", "找不到資料表：{}"},
     // src/core/manifest/manifest.cpp
     {"not a version 1 .vam manifest", "不是格式版本 1 的 .vam 清單檔"},
     {"unknown entry type {}", "未知的項目類型 {}"},
@@ -568,6 +604,17 @@ constexpr CatalogEntry entries[] = {
         "清單檔主體與其標頭不符（清單檔雜湊不符）"},
     {"invalid manifest entry: {}", "清單檔項目無效：{}", Match::Cause},
     {"manifest entries out of canonical order", "清單檔項目未依標準順序排列"},
+    // nlohmann::json's sentences (common/json_error.h removes the library's tag),
+    // the cause in the config and manifest messages above. Type names (string,
+    // number, object, array) and key names are JSON terms and stay as they are.
+    {"key '{}' not found", "找不到欄位「{}」"},
+    {"type must be {}, but is {}", "類型必須是 {}，實際是 {}"},
+    {"cannot use at() with {}", "需要 JSON 物件，實際是 {}"},
+    {"cannot use value() with {}", "需要 JSON 物件，實際是 {}"},
+    {"parse error at line {}, column {}: {}", "JSON 語法錯誤（第 {} 行，第 {} 欄）：{}", Match::Cause},
+    {"attempting to parse an empty input; check that your input string or stream contains the "
+        "expected JSON",
+        "內容是空的，沒有 JSON 資料"},
     // src/core/manifest/manifest_writer.cpp
     {"manifest entries out of canonical order at {}", "清單檔項目在 {} 處未依標準順序排列"},
     {"manifest body changed while writing", "清單檔主體在寫入期間發生變更"},
@@ -577,18 +624,11 @@ constexpr CatalogEntry entries[] = {
     {"filesystem-type-differs", "檔案系統類型不同"},
     {"model-differs", "型號不同"},
     {"device-replaced", "裝置已更換"},
-    {"retired", "已停用"},
+    // Shown as "identity: retired": the archive is retired, not the identity.
+    {"retired", "封存已停用"},
     {"identity-file-copied", "身分檔案是從其他媒體複製而來"},
-    // src/core/scan/scanner.cpp
-    {"scan cancelled", "掃描已取消"},
-    // src/core/hash/hash_pipeline.cpp
-    {"cancelled", "已取消"},
-    {"hashing stopped", "雜湊計算已停止"},
     // src/core/hash/hashers.cpp
     {"cannot initialise SHA-256", "無法初始化 SHA-256"},
-    // src/core/interfaces.h
-    {"change tracking is not available in V1", "V1 不提供變更追蹤"},
-    {"raw device access requires the V1.1 helper", "原始裝置存取需要 V1.1 輔助程式"},
     // src/platform/windows/win_util.cpp
     {"{} failed (Win32 error {})", "{} 失敗（Win32 錯誤 {}）"},
     // src/platform/windows/platform_services_win.cpp
@@ -602,6 +642,42 @@ constexpr CatalogEntry entries[] = {
     {"cannot create temporary file", "無法建立暫存檔案"},
     // src/platform/linux/posix_util.cpp
     {"{} failed: {}", "{} 失敗：{}", Match::Cause},
+    // strerror() texts, the cause after "<call> failed: ". The CLI never calls
+    // setlocale, so glibc gives these English texts (where GTK has set a locale,
+    // glibc may already give its own translation, which is shown as it is).
+    // Windows' own messages come in the system language; std::filesystem errors
+    // on Windows may give the same English texts ("Filename too long" is UCRT's).
+    {"Operation not permitted", "不允許此操作"},
+    {"No such file or directory", "找不到檔案或資料夾"},
+    {"Input/output error", "輸入/輸出錯誤"},
+    {"Permission denied", "權限不足"},
+    {"Device or resource busy", "裝置或資源忙碌中"},
+    {"File exists", "檔案已存在"},
+    {"No such device", "找不到裝置"},
+    {"No such device or address", "找不到裝置或位址"},
+    {"Not a directory", "不是資料夾"},
+    {"Is a directory", "這是資料夾"},
+    {"Directory not empty", "資料夾不是空的"},
+    {"Invalid argument", "無效的引數"},
+    {"Too many open files", "開啟的檔案過多"},
+    {"No space left on device", "裝置上沒有剩餘空間"},
+    {"Read-only file system", "檔案系統是唯讀的"},
+    {"Disk quota exceeded", "超過磁碟配額"},
+    {"No medium found", "找不到媒體"},
+    {"Connection timed out", "連線逾時"},
+    {"Stale file handle", "檔案控制代碼已失效"},
+    {"Transport endpoint is not connected", "傳輸端點未連線"},
+    {"Cannot send after transport endpoint shutdown", "傳輸端點已關閉"},
+    {"Too many levels of symbolic links", "符號連結層數過多"},
+    {"File name too long", "檔名過長"},
+    {"Filename too long", "檔名過長"},
+    {"Operation not supported", "不支援此操作"},
+    {"Operation canceled", "操作已取消"},
+    {"Function not implemented", "功能未實作"},
+    // On Linux file systems EBADMSG is a checksum failure and EUCLEAN a
+    // corrupted file system; the literal wording would not say so.
+    {"Bad message", "資料損毀（校驗碼錯誤）"},
+    {"Structure needs cleaning", "檔案系統結構損毀，需要修復"},
     // src/platform/linux/platform_services_linux.cpp
     {"readlink failed", "readlink 失敗"},
     {"HOME is unavailable", "無法取得 HOME"},

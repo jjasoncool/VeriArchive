@@ -200,10 +200,10 @@ void translation_tests()
     CHECK(chinese("scan: ReadFile failed (Win32 error 23)") ==
           "掃描：ReadFile 失敗（Win32 錯誤 23）");
     CHECK(chinese("manifest: open failed: No such file or directory") ==
-          "清單檔：open 失敗：No such file or directory");
+          "清單檔：open 失敗：找不到檔案或資料夾");
     CHECK(chinese("scan: opendir failed: Permission denied") ==
-          "掃描：opendir 失敗：Permission denied");
-    CHECK(chinese("open failed: Permission denied") == "open 失敗：Permission denied");
+          "掃描：opendir 失敗：權限不足");
+    CHECK(chinese("open failed: Permission denied") == "open 失敗：權限不足");
     // Engine warnings whose cause is an engine message or code.
     CHECK(chinese("manifest: the manifest differs from the repository record") ==
           "清單檔：清單檔與儲存庫的紀錄不符");
@@ -228,6 +228,72 @@ void translation_tests()
     CHECK(chinese.format("{} archives", 3) == "3 個封存");
     CHECK(chinese("3 archives") == "3 archives");
     CHECK(chinese("cannot open the archive") == "cannot open the archive");
+
+    // Library and system causes (findings 8, 22, 23).
+    CHECK(chinese("cannot run SQL: database is locked") == "無法執行 SQL 陳述式：資料庫已被鎖定");
+    CHECK(chinese("cannot execute SQL: database is locked") == "無法執行 SQL：資料庫已被鎖定");
+    CHECK(chinese("cannot open repository database: unable to open database file") ==
+          "無法開啟儲存庫資料庫：無法開啟資料庫檔案");
+    CHECK(chinese("cannot record the archive: cannot run SQL: database is locked") ==
+          "無法記錄封存：無法執行 SQL 陳述式：資料庫已被鎖定");
+    CHECK(chinese("cannot run SQL: UNIQUE constraint failed: t.a, t.b") ==
+          "無法執行 SQL 陳述式：違反唯一性限制：t.a, t.b");
+    CHECK(chinese("UNIQUE constraint failed: t.a") == "違反唯一性限制：t.a");
+    CHECK(chinese("cannot prepare SQL: no such table: archives") ==
+          "無法準備 SQL 陳述式：找不到資料表：archives");
+    CHECK(chinese("cannot prepare SQL: file is not a database") == "無法準備 SQL 陳述式：檔案不是資料庫");
+    CHECK(chinese("pread failed: Input/output error") == "pread 失敗：輸入/輸出錯誤");
+    CHECK(chinese("cannot scan the root: open directory failed: Permission denied") ==
+          "無法掃描根目錄：open directory 失敗：權限不足");
+    CHECK(chinese("cannot identify the volume of the root: canonical failed: No such file or directory") ==
+          "無法識別根目錄所在的磁碟區：canonical 失敗：找不到檔案或資料夾");
+    CHECK(chinese("scan: readdir failed: Input/output error") == "掃描：readdir 失敗：輸入/輸出錯誤");
+    CHECK(chinese("Permission denied") == "權限不足");
+    // JSON library sentences inside config and manifest messages.
+    CHECK(chinese("Invalid config: key 'key_id' not found") == "設定檔無效：找不到欄位「key_id」");
+    CHECK(chinese("Invalid config: type must be string, but is number") ==
+          "設定檔無效：類型必須是 string，實際是 number");
+    CHECK(chinese("invalid manifest header: not a version 1 .vam manifest") ==
+          "清單檔標頭無效：不是格式版本 1 的 .vam 清單檔");
+    CHECK(chinese("invalid manifest header: cannot use at() with array") ==
+          "清單檔標頭無效：需要 JSON 物件，實際是 array");
+    CHECK(chinese("invalid manifest entry: unknown entry type x") == "清單檔項目無效：未知的項目類型 x");
+    CHECK(chinese("Invalid config: parse error at line 1, column 1: attempting to parse an empty input; "
+                  "check that your input string or stream contains the expected JSON") ==
+          "設定檔無效：JSON 語法錯誤（第 1 行，第 1 欄）：內容是空的，沒有 JSON 資料");
+    CHECK(chinese("invalid manifest header: parse error at line 1, column 2: syntax error while parsing "
+                  "object key - unexpected end of input; expected string literal") ==
+          "清單檔標頭無效：JSON 語法錯誤（第 1 行，第 2 欄）：syntax error while parsing "
+          "object key - unexpected end of input; expected string literal");
+    // Rebuild-index skipped lines.
+    const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
+    CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==
+          "無法讀取清單檔 " + uuid + "/r0001.vam：清單檔是空的");
+    CHECK(chinese("cannot read manifest " + uuid + "/r0002.vam: header does not match its file name") ==
+          "無法讀取清單檔 " + uuid + "/r0002.vam：標頭與其檔名不符");
+    CHECK(chinese("cannot read manifest " + uuid + "/r0003.vam: invalid manifest header: key 'format' not found") ==
+          "無法讀取清單檔 " + uuid + "/r0003.vam：清單檔標頭無效：找不到欄位「format」");
+    CHECK(chinese("cannot list the manifests of archive " + uuid + ": FindFirstFileExW failed (Win32 error 5)") ==
+          "無法列出封存 " + uuid + " 的清單檔：FindFirstFileExW 失敗（Win32 錯誤 5）");
+    CHECK(chinese.format("skipped: {}", chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest")) ==
+          "已略過：無法讀取清單檔 " + uuid + "/r0001.vam：清單檔是空的");
+    // Wording fixes (findings 27, 29, 30, 31, 32).
+    CHECK(chinese("warning: identity: retired") == "警告：媒體身分：封存已停用");
+    CHECK(chinese("RETIRED") == "已停用");
+    CHECK(chinese("l -> f") == "連結 → 檔案");
+    CHECK(chinese.format("files: {}  directories: {}  links: {}  hashed bytes: {}", 2, 1, 0, 12) ==
+          "檔案：2  資料夾：1  連結：0  已計算雜湊位元組：12");
+    CHECK(chinese("warning: the media holds revision 2, newer than the repository's 1: "
+                  "the repository may have been rolled back") ==
+          "警告：媒體上有版次 2，比儲存庫的版次 1 新：儲存庫可能已被回復到較舊的狀態");
+    CHECK(chinese.format("repo_selected_by: {}", chinese("first-run:exe-dir")) ==
+          "儲存庫選定方式：第一次使用（程式所在資料夾）");
+    CHECK(chinese("error: Trusted keys must be an array") == "錯誤：設定檔中的 trusted_keys 必須是 JSON 陣列");
+    CHECK(chinese("Finish or cancel the running operation before changing the language.") ==
+          "請先完成或取消正在執行的作業，再切換語言。");
+    // English stays byte-identical.
+    CHECK(english("cannot run SQL: database is locked") == "cannot run SQL: database is locked");
+    CHECK(english("first-run:home") == "first-run:home");
 
     // Asides take the language's brackets.
     CHECK(english.parenthesized("size differs") == "(size differs)");
