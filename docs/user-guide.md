@@ -27,7 +27,7 @@ The interface is available in English and Traditional Chinese. The first setting
 4. the Windows display language
 5. English
 
-In the GUI, the Settings view has a language drop-down (English / 繁體中文). The choice is saved in the config file and the window is rebuilt in the new language at once. It cannot be changed while a registration or verification runs.
+In the GUI, the Settings view has a language drop-down (English / 繁體中文). The choice is saved in the config file and the window is rebuilt in the new language at once; typed folders, chosen options, the window size and the reports shown are kept, and the reports are shown in the new language. It cannot be changed while a registration or verification runs.
 
 `--json` output, exit codes and the codes inside JSON (`PASSED`, `Modified`, ...) are **always English**, so scripts behave the same in every language.
 
@@ -181,3 +181,5 @@ veriarchive-cli import D:\export\r0001.vam                # import into another 
 - Exit codes: 0 passed, 2 passed with warnings, 3 failed, 4 incomplete, 10 usage, 11 repository, 12 needs your decision.
 - V1 detects accidental corruption and unintended change; tamper evidence (signed manifests) begins in V1.1.
 - VeriArchive needs no administrator rights and should not be run elevated.
+- In PowerShell, run `[Console]::OutputEncoding = [Text.UTF8Encoding]::new()` before capturing, redirecting (`>`) or piping CLI output; otherwise Chinese text is garbled. Output shown directly in the window is not affected.
+- If the GUI closes unexpectedly, the reason is written to `veriarchive-gui.log` in the user config folder (`%APPDATA%\VeriArchive` on Windows, `~/.config/veriarchive` on Linux). Include it when reporting a problem.
