@@ -1,6 +1,7 @@
 #pragma once
 // Filesystem identifiers normalised so the same volume reads the same on
 // Windows and Linux (HANDOFF §B1.3, decision 0006).
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -22,5 +23,11 @@ struct FilesystemId {
 //  - exfat, vfat: 32-bit serial as 8 lowercase hex without the dash, in both fields.
 //  - everything else (ext4, xfs, btrfs, ...): the lowercase UUID, no short form.
 FilesystemId normalise_filesystem_id(std::string_view filesystem_type, std::string_view raw);
+
+// Windows' storage driver reports an NVMe namespace's EUI-64/NGUID in the serial
+// field, formatted like "E823_8FA6_BF53_0001_001B_448B_47F1_5232.". Linux shows the
+// same identifier as the WWN "eui.e8238fa6bf530001001b448b47f15232". Returns that
+// WWN form, or nullopt when `serial` is not in this format.
+std::optional<std::string> nvme_wwn_from_windows_serial(std::string_view serial);
 
 } // namespace va

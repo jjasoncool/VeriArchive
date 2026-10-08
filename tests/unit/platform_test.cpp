@@ -1,9 +1,9 @@
 #include "test_support.h"
 
 #include "platform/linux/mountinfo.h"
+#include "platform/media_enumerator.h"
 #include "platform/platform_services.h"
 
-#include <chrono>
 
 namespace {
 
@@ -65,10 +65,29 @@ void network_detection_fails_closed()
     CHECK(va::platform::network_filesystem(unidentifiable));
 }
 
+// M2: the volume holding the temporary directory can be identified without
+// elevation. Devices may legitimately be missing (virtual disks), so only the
+// filesystem identity is required.
+void media_enumeration_identifies_local_volume()
+{
+    const auto enumerator = va::platform::make_media_enumerator();
+    const auto volume = enumerator->volume_for_path(std::filesystem::temp_directory_path());
+    CHECK(volume.has_value());
+    if (volume) {
+        CHECK(!volume->mount_point.empty());
+        CHECK(!volume->filesystem_type.empty());
+        CHECK(!volume->filesystem_uuid.empty() || !volume->filesystem_uuid_short.empty());
+        CHECK(volume->capacity_bytes > 0);
+    }
+    const auto all = enumerator->volumes();
+    CHECK(all && !all->empty());
+}
+
 } // namespace
 
 void platform_tests()
 {
+    media_enumeration_identifies_local_volume();
     mountinfo_is_parsed();
     network_types_are_recognised();
     network_detection_fails_closed();

@@ -183,6 +183,9 @@ void filesystem_identifiers()
     CHECK(id.uuid.empty() && id.uuid_short == "5678ef90");
     id = va::normalise_filesystem_id("exfat", "ABCD-1234");
     CHECK(id.uuid == "abcd1234" && id.uuid_short == "abcd1234");
+    CHECK(va::nvme_wwn_from_windows_serial("E823_8FA6_BF53_0001_001B_448B_47F1_5232.") ==
+          std::optional<std::string>("eui.e8238fa6bf530001001b448b47f15232"));
+    CHECK(!va::nvme_wwn_from_windows_serial("AN0RZH3N"));
     id = va::normalise_filesystem_id("ext4", "3F2B8C1E-0D4A-4C6E-9B7A-1E2D3C4B5A69");
     CHECK(id.uuid == "3f2b8c1e-0d4a-4c6e-9b7a-1e2d3c4b5a69" && id.uuid_short.empty());
 }

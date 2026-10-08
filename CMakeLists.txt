@@ -40,6 +40,7 @@ target_link_libraries(veriarchive_common
 add_library(veriarchive_core
     src/core/identity/filesystem_id.cpp
     src/core/identity/matcher.cpp
+    src/core/identity/volume_json.cpp
     src/core/repository/repository.cpp
     src/core/repository/sqlite_raii.cpp
     src/core/write_file.cpp)
@@ -57,6 +58,7 @@ target_link_libraries(veriarchive_platform PUBLIC VeriArchive::core)
 if(WIN32)
     target_sources(veriarchive_platform PRIVATE
         src/platform/windows/file_writer_win.cpp
+        src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
         src/platform/windows/win_util.cpp
     )
@@ -64,6 +66,7 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
         src/platform/linux/file_writer_linux.cpp
+        src/platform/linux/media_enumerator_linux.cpp
         src/platform/linux/mountinfo.cpp
         src/platform/linux/platform_services_linux.cpp
         src/platform/linux/posix_util.cpp
@@ -75,6 +78,7 @@ endif()
 add_executable(veriarchive_cli
     src/cli/cli.cpp
     src/cli/cli_support.cpp
+    src/cli/media_commands.cpp
     src/cli/repo_commands.cpp)
 set_target_properties(veriarchive_cli PROPERTIES OUTPUT_NAME veriarchive-cli)
 if(WIN32)

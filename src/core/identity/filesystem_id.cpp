@@ -65,4 +65,28 @@ FilesystemId normalise_filesystem_id(std::string_view filesystem_type, std::stri
     return {lowercase(raw), ""};
 }
 
+std::optional<std::string> nvme_wwn_from_windows_serial(std::string_view serial)
+{
+    if (!serial.ends_with('.') || serial.find('_') == std::string_view::npos) {
+        return std::nullopt;
+    }
+    std::string hex;
+    for (const char character : serial) {
+        if (character == '_' || character == '.') {
+            continue;
+        }
+        const bool digit = (character >= '0' && character <= '9') ||
+                           (character >= 'a' && character <= 'f') ||
+                           (character >= 'A' && character <= 'F');
+        if (!digit) {
+            return std::nullopt;
+        }
+        hex += character;
+    }
+    if (hex.size() != 16 && hex.size() != 32) {
+        return std::nullopt;
+    }
+    return "eui." + lowercase(hex);
+}
+
 } // namespace va

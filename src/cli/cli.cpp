@@ -14,7 +14,8 @@ void print_usage()
     std::cout <<
         "Usage: veriarchive-cli [--config P] [--repository P] [--json] <command>\n"
         "\n"
-        "  repo init | info\n";
+        "  repo init | info\n"
+        "  media list\n";
 }
 
 } // namespace
@@ -35,6 +36,9 @@ int run(std::vector<std::string> raw_arguments)
     const auto& command = arguments->words.front();
     if (command == "repo") {
         return repo_command(*arguments);
+    }
+    if (command == "media") {
+        return media_command(*arguments);
     }
 
     print_usage();
