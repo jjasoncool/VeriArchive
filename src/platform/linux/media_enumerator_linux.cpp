@@ -315,6 +315,15 @@ VolumeInfo describe_virtual_mount(const linux_mounts::Mount& mount)
     return volume;
 }
 
+bool pseudo_filesystem(const std::string& type)
+{
+    static const std::set<std::string> pseudo{"proc", "sysfs", "devtmpfs", "devpts", "cgroup",
+        "cgroup2", "mqueue", "securityfs", "debugfs", "tracefs", "pstore", "bpf", "autofs",
+        "hugetlbfs", "configfs", "fusectl", "binfmt_misc", "efivarfs", "nsfs", "rpc_pipefs",
+        "selinuxfs", "ramfs", "squashfs"};
+    return pseudo.contains(type);
+}
+
 // Block-device-backed mounts only. btrfs reports an anonymous major 0 in
 // mountinfo, so the device number comes from the source node instead.
 std::optional<DeviceNumber> block_device_of(const linux_mounts::Mount& mount)
@@ -335,14 +344,29 @@ public:
         }
         std::vector<VolumeInfo> result;
         std::set<DeviceNumber> seen;
+        // A volume mounted several times (bind mounts, subvolumes) is listed once:
+        // first at a mount of its filesystem root, otherwise at any of its mounts
+        // (containers often see disks only through bind mounts).
+        for (const bool root_only : {true, false}) {
+            for (const auto& mount : mounts) {
+                const auto number = block_device_of(mount);
+                if (!number || (root_only && mount.root != "/") || !seen.insert(*number).second) {
+                    continue;
+                }
+                result.push_back(describe_mount(mount, *number));
+            }
+        }
+        // Filesystems without a block device (ZFS, overlayfs, tmpfs), once per
+        // filesystem id; kernel pseudo filesystems cannot hold archives.
+        std::set<std::string> seen_ids;
         for (const auto& mount : mounts) {
-            const auto number = block_device_of(mount);
-            // A volume mounted several times (bind mounts, subvolumes) is listed
-            // once, at the mount of its filesystem root when there is one.
-            if (!number || mount.root != "/" || !seen.insert(*number).second) {
+            if (block_device_of(mount) || mount.root != "/" || pseudo_filesystem(mount.filesystem_type)) {
                 continue;
             }
-            result.push_back(describe_mount(mount, *number));
+            auto volume = describe_virtual_mount(mount);
+            if (!volume.filesystem_uuid.empty() && seen_ids.insert(volume.filesystem_uuid).second) {
+                result.push_back(std::move(volume));
+            }
         }
         return result;
     }
