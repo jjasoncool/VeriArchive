@@ -23,6 +23,7 @@ configure_file(src/core/repository/schema_sql.h.in generated/schema_sql.h @ONLY)
 add_library(veriarchive_common
     src/common/archive_path.cpp
     src/common/canonical_json.cpp
+    src/common/hex.cpp
     src/common/config.cpp
     src/common/utf8.cpp)
 add_library(VeriArchive::common ALIAS veriarchive_common)
