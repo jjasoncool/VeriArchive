@@ -4,6 +4,7 @@
 #   lib/gdk-pixbuf-2.0/...       image loaders GTK uses for icons
 #   share/glib-2.0/schemas       compiled GTK settings schemas
 #   share/icons                  Adwaita and hicolor icon themes
+#   share/locale/zh_TW           GTK's own Traditional Chinese texts
 #   share/licenses               licenses of every bundled third-party package
 #
 # Set by the including CMakeLists.txt through install(CODE):
@@ -72,7 +73,16 @@ endif()
 file(INSTALL "${mingw}/share/icons/Adwaita" "${mingw}/share/icons/hicolor"
     DESTINATION "${prefix}/share/icons")
 
-# 5. Licenses (LGPL notices, R-121): one folder per MSYS2 package that owns a
+# 5. Traditional Chinese texts of GTK's own widgets and dialogs (decision 0017);
+# GTK finds them under share/locale next to bin.
+foreach(domain gtk40 glib20 gdk-pixbuf)
+    set(catalog "${mingw}/share/locale/zh_TW/LC_MESSAGES/${domain}.mo")
+    if(EXISTS "${catalog}")
+        file(INSTALL "${catalog}" DESTINATION "${prefix}/share/locale/zh_TW/LC_MESSAGES")
+    endif()
+endforeach()
+
+# 6. Licenses (LGPL notices, R-121): one folder per MSYS2 package that owns a
 # bundled file, plus a list of which file came from which package.
 get_filename_component(msys_root "${mingw}/.." ABSOLUTE)
 find_program(pacman pacman PATHS "${msys_root}/usr/bin" NO_DEFAULT_PATH)

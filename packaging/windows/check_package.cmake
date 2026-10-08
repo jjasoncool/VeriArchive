@@ -44,7 +44,9 @@ foreach(required
         "share/licenses/THIRD-PARTY.txt"
         "share/licenses/gtk4"
         "share/licenses/glib2"
-        "share/doc/VeriArchive/NOTICE.txt")
+        "share/locale/zh_TW/LC_MESSAGES/gtk40.mo"
+        "share/doc/VeriArchive/NOTICE.txt"
+        "share/doc/VeriArchive/user-guide.zh-TW.md")
     if(NOT EXISTS "${PREFIX}/${required}")
         message(FATAL_ERROR "missing from the package: ${required}")
     endif()
@@ -58,12 +60,23 @@ execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" VERIARCHIVE_LA
 if(NOT cli EQUAL 0 OR NOT usage MATCHES "Usage: veriarchive-cli")
     message(FATAL_ERROR "the packaged CLI does not start without MSYS2 (exit ${cli})")
 endif()
+# No command after the option: the usage, in Chinese, with the usage exit code.
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" "${PREFIX}/bin/veriarchive-cli.exe" --lang zh-TW
+    ENCODING UTF-8
+    RESULT_VARIABLE cli OUTPUT_VARIABLE chinese_usage)
+if(NOT cli EQUAL 10 OR NOT chinese_usage MATCHES "用法：veriarchive-cli")
+    message(FATAL_ERROR "the packaged CLI does not show Traditional Chinese (exit ${cli})\n${chinese_usage}")
+endif()
 if(EXISTS "${PREFIX}/bin/veriarchive-gui.exe")
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" VERIARCHIVE_GUI_SMOKE_TEST=1
-            "VERIARCHIVE_REPOSITORY=${PREFIX}/no-repository" "${PREFIX}/bin/veriarchive-gui.exe"
-        RESULT_VARIABLE gui ERROR_VARIABLE gui_errors)
-    if(NOT gui EQUAL 0 OR gui_errors MATCHES "CRITICAL|WARNING")
-        message(FATAL_ERROR "the packaged GUI does not start without MSYS2 (exit ${gui})\n${gui_errors}")
-    endif()
+    # Both interface languages; in Chinese GTK also loads its own zh_TW texts.
+    foreach(language en zh-TW)
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" VERIARCHIVE_GUI_SMOKE_TEST=1
+                "VERIARCHIVE_LANG=${language}" "VERIARCHIVE_REPOSITORY=${PREFIX}/no-repository"
+                "${PREFIX}/bin/veriarchive-gui.exe"
+            RESULT_VARIABLE gui ERROR_VARIABLE gui_errors)
+        if(NOT gui EQUAL 0 OR gui_errors MATCHES "CRITICAL|WARNING")
+            message(FATAL_ERROR "the packaged GUI (${language}) does not start without MSYS2 (exit ${gui})\n${gui_errors}")
+        endif()
+    endforeach()
 endif()
 message(STATUS "Windows package is self-contained: ${PREFIX}")
