@@ -53,6 +53,7 @@ add_library(veriarchive_core
     src/core/engine/archive_status.cpp
     src/core/engine/candidates.cpp
     src/core/engine/item_rules.cpp
+    src/core/engine/recorded_manifest.cpp
     src/core/engine/register_engine.cpp
     src/core/engine/verify_engine.cpp
     src/core/hash/hash_pipeline.cpp

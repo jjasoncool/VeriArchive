@@ -6,7 +6,7 @@
 #include "core/engine/item_rules.h"
 #include "core/hash/hash_pipeline.h"
 #include "core/identity/volume_json.h"
-#include "core/manifest/manifest_reader.h"
+#include "core/engine/recorded_manifest.h"
 #include "core/scan/scanner.h"
 
 #include <algorithm>
@@ -295,43 +295,15 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     std::vector<Entry> recorded;
     ManifestHeader header;
     if (outcome.failure_classes.empty()) {
-        const auto revision = store.revision(outcome.archive_uuid, outcome.revision);
-        const auto all_revisions = store.revisions(outcome.archive_uuid);
-        if (!revision || !*revision || !all_revisions) {
-            outcome.failure_classes.push_back("RepositoryError");
+        auto manifest = load_recorded_manifest(
+            store, services.repository_files, services.layout, outcome.archive_uuid, outcome.revision);
+        if (!manifest) {
+            outcome.failure_classes.push_back(manifest.error().failure_class);
+            outcome.warnings.push_back("manifest: " + manifest.error().message);
         } else {
-            const auto path = services.layout.root / path_from_utf8((*revision)->manifest_relpath);
-            auto reader = ManifestReader::open(services.repository_files, path);
-            if (!reader) {
-                outcome.failure_classes.push_back(
-                    reader.error().kind == ManifestFailure::Kind::BodyMismatch ? "ManifestHashMismatch"
-                                                                               : "RepositoryError");
-                outcome.warnings.push_back("manifest: " + reader.error().message);
-            } else if (reader->header_blake3() != (*revision)->header_blake3 ||
-                       reader->header().body_blake3 != (*revision)->body_blake3 ||
-                       reader->header().archive_uuid != outcome.archive_uuid ||
-                       reader->header().revision != outcome.revision) {
-                outcome.failure_classes.push_back("ManifestHashMismatch");
-            } else {
-                const auto highest = std::max_element(all_revisions->begin(), all_revisions->end(),
-                    [](const RevisionRecord& a, const RevisionRecord& b) { return a.revision < b.revision; });
-                if (highest != all_revisions->end() && reader->header().revision < highest->revision) {
-                    outcome.failure_classes.push_back("ManifestRevisionRollback"); // R-15
-                }
-                header = reader->header();
-                outcome.registered_bytes = header.counts.bytes;
-                for (;;) {
-                    auto next = reader->next();
-                    if (!next) {
-                        outcome.failure_classes.push_back("RepositoryError");
-                        break;
-                    }
-                    if (!*next) {
-                        break;
-                    }
-                    recorded.push_back(std::move(**next));
-                }
-            }
+            header = std::move(manifest->header);
+            recorded = std::move(manifest->entries);
+            outcome.registered_bytes = header.counts.bytes;
         }
     }
 
