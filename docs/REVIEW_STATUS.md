@@ -19,6 +19,11 @@ Automated tests: unit tests for every module (fake file system and media enumera
 a CLI end-to-end test (CJK and emoji names, damage detection, export/import) and a windowless GUI
 smoke test.
 
+Measured locally (Release build, Windows 11, WD SN850X NVMe, uncached reads, four 512 MiB
+files): FULL verify at about 4.5 GB/s with eight readers and about 1.47 GB/s with one reader
+(the HDD setting, limited by SHA-256). Hashing therefore stays well above HDD speeds; the HDD
+acceptance against `dd` still has to be measured on a real HDD.
+
 ## Still required before acceptance
 
 - **Linux compilation and tests.** The Linux platform files have not been compiled yet (no Linux
