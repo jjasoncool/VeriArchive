@@ -1,0 +1,2 @@
+#pragma once
+namespace va { inline constexpr char schema_sql[] = R"veriarchive_sql(@VERIARCHIVE_SCHEMA_SQL@)veriarchive_sql"; }

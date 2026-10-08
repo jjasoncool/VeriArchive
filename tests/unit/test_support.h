@@ -14,4 +14,5 @@ inline int test_failures = 0;
 
 void archive_path_tests();
 void canonical_json_tests();
+void repository_tests();
 void config_tests();
