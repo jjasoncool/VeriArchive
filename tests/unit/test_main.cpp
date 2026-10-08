@@ -19,5 +19,6 @@ int main()
     register_engine_tests();
     verify_engine_tests();
     archive_status_tests();
+    sha256sums_tests();
     return test_failures == 0 ? 0 : 1;
 }

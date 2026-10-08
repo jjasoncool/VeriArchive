@@ -20,7 +20,8 @@ void print_usage()
         "           [--force-new-archive] [--copy-of UUID]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "  archive list | show <uuid> | retire <uuid>\n"
-        "  history <uuid>\n";
+        "  history <uuid>\n"
+        "  export-sha256sums <uuid> --out FILE\n";
 }
 
 } // namespace
@@ -56,6 +57,9 @@ int run(std::vector<std::string> raw_arguments)
     }
     if (command == "history") {
         return history_command(*arguments);
+    }
+    if (command == "export-sha256sums") {
+        return export_sha256sums_command(*arguments);
     }
 
     print_usage();
