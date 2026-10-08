@@ -23,5 +23,6 @@ int main()
     rebuild_index_tests();
     transfer_tests();
     relocate_tests();
+    text_tests();
     return test_failures == 0 ? 0 : 1;
 }

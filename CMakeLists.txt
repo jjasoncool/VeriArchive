@@ -113,7 +113,10 @@ else()
 endif()
 
 # Composition-root helpers shared by the CLI and the GUI (R-05).
-add_library(veriarchive_app src/app/session.cpp)
+add_library(veriarchive_app
+    src/app/session.cpp
+    src/app/text.cpp
+    src/app/text_zh_tw.cpp)
 add_library(VeriArchive::app ALIAS veriarchive_app)
 target_compile_features(veriarchive_app PUBLIC cxx_std_23)
 target_link_libraries(veriarchive_app PUBLIC VeriArchive::platform)
@@ -222,9 +225,10 @@ if(BUILD_TESTING)
         tests/unit/repository_test.cpp
         tests/unit/scanner_test.cpp
         tests/unit/sha256sums_test.cpp
+        tests/unit/text_test.cpp
         tests/unit/transfer_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
-    target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)
+    target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform VeriArchive::app)
     target_compile_definitions(veriarchive_tests PRIVATE
         VERIARCHIVE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
     if(NOT (UNIX AND NOT APPLE))
