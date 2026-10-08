@@ -662,6 +662,8 @@ C++23 features used: `std::expected`, `std::format`, `std::span`, `std::ranges`.
 
 ### Dependencies (identical on both platforms)
 
+> Amended by `docs/decisions/0013-glib-for-unicode-comparison.md`: GLib (≥ 2.72) is required for Unicode comparison keys.
+
 | Purpose | Library | How |
 |---|---|---|
 | BLAKE3 | official C implementation (SIMD dispatch) | `third_party/blake3` submodule or FetchContent, static |

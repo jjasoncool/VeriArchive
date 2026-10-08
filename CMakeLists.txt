@@ -17,6 +17,8 @@ if(NOT nlohmann_json_FOUND)
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 find_package(SQLite3 3.40 REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0>=2.72)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/core/repository/schema.sql" VERIARCHIVE_SCHEMA_SQL)
 configure_file(src/core/repository/schema_sql.h.in generated/schema_sql.h @ONLY)
 
@@ -24,13 +26,16 @@ add_library(veriarchive_common
     src/common/archive_path.cpp
     src/common/canonical_json.cpp
     src/common/hex.cpp
+    src/common/unicode.cpp
     src/common/config.cpp
     src/common/utf8.cpp
     src/common/uuid.cpp)
 add_library(VeriArchive::common ALIAS veriarchive_common)
 target_include_directories(veriarchive_common PUBLIC src)
 target_compile_features(veriarchive_common PUBLIC cxx_std_23)
-target_link_libraries(veriarchive_common PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(veriarchive_common
+    PUBLIC nlohmann_json::nlohmann_json
+    PRIVATE PkgConfig::GLIB)
 
 add_library(veriarchive_core
     src/core/repository/repository.cpp
@@ -88,6 +93,7 @@ if(BUILD_TESTING)
         tests/unit/config_test.cpp
         tests/unit/file_writer_test.cpp
         tests/unit/platform_test.cpp
+        tests/unit/unicode_test.cpp
         tests/unit/repository_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)
