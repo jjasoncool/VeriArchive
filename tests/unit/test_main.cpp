@@ -10,5 +10,6 @@ int main()
     platform_tests();
     unicode_tests();
     identity_tests();
+    hash_tests();
     return test_failures == 0 ? 0 : 1;
 }

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(VeriArchive VERSION 0.1.0 LANGUAGES CXX)
+project(VeriArchive VERSION 0.1.0 LANGUAGES C CXX)
 
 include(CTest)
 option(VERIARCHIVE_ALLOW_NONBASELINE_TOOLCHAIN "Allow local, non-release toolchain checks" OFF)
@@ -17,6 +17,17 @@ if(NOT nlohmann_json_FOUND)
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 find_package(SQLite3 3.40 REQUIRED)
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+find_package(BLAKE3 1.5 CONFIG QUIET)
+if(NOT BLAKE3_FOUND)
+    # Official BLAKE3 C implementation with SIMD dispatch (§B15), pinned by hash.
+    include(FetchContent)
+    FetchContent_Declare(blake3
+        URL https://github.com/BLAKE3-team/BLAKE3/archive/refs/tags/1.8.2.tar.gz
+        URL_HASH SHA256=6b51aefe515969785da02e87befafc7fdc7a065cd3458cf1141f29267749e81f
+        SOURCE_SUBDIR c)
+    FetchContent_MakeAvailable(blake3)
+endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0>=2.72)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/core/repository/schema.sql" VERIARCHIVE_SCHEMA_SQL)
@@ -38,6 +49,7 @@ target_link_libraries(veriarchive_common
     PRIVATE PkgConfig::GLIB)
 
 add_library(veriarchive_core
+    src/core/hash/hashers.cpp
     src/core/identity/filesystem_id.cpp
     src/core/identity/matcher.cpp
     src/core/identity/volume_json.cpp
@@ -47,7 +59,9 @@ add_library(veriarchive_core
 add_library(VeriArchive::core ALIAS veriarchive_core)
 target_include_directories(veriarchive_core PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_features(veriarchive_core PUBLIC cxx_std_23)
-target_link_libraries(veriarchive_core PUBLIC VeriArchive::common SQLite::SQLite3)
+target_link_libraries(veriarchive_core
+    PUBLIC VeriArchive::common SQLite::SQLite3
+    PRIVATE BLAKE3::blake3 OpenSSL::Crypto)
 
 add_library(veriarchive_platform)
 add_library(VeriArchive::platform ALIAS veriarchive_platform)
@@ -98,6 +112,7 @@ if(BUILD_TESTING)
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
         tests/unit/file_writer_test.cpp
+        tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp

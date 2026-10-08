@@ -20,3 +20,4 @@ void file_writer_tests();
 void platform_tests();
 void unicode_tests();
 void identity_tests();
+void hash_tests();
