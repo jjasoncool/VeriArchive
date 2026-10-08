@@ -2,9 +2,15 @@
 #include "common/utf8.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
+#include <mutex>
 #include <stdexcept>
+#include <streambuf>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace va::platform {
@@ -153,26 +159,128 @@ std::string ui_language()
 
 namespace {
 
-UINT original_output_code_page = 0;
-UINT original_input_code_page = 0;
+// Shows UTF-8 text in a console window. The console's code page is left alone:
+// it belongs to the window, not to this process, and a changed code page would
+// stay behind after Ctrl+C or a crash and garble later programs in the user's
+// shell. WriteConsoleW takes UTF-16, which the console shows correctly whatever
+// its code page, so each write is converted from UTF-8 first.
+//
+// The buffer writes at once and holds back only the first bytes of a character
+// whose remaining bytes have not arrived yet (one character may be split across
+// two writes). Output keeps its order with the other stream, and nothing is left
+// to flush at exit.
+class ConsoleBuffer final : public std::streambuf {
+public:
+    explicit ConsoleBuffer(HANDLE console) : console_(console) {}
+
+protected:
+    // Called by the stream for every piece of text (`std::cout << "..."`).
+    std::streamsize xsputn(const char* data, std::streamsize count) override
+    {
+        // The standard streams may be written from several threads (the C library's
+        // buffers are locked too), and `pending_` must not be changed by two at once.
+        const std::lock_guard lock(mutex_);
+        pending_.append(data, static_cast<std::size_t>(count));
+        const auto complete = complete_length(pending_);
+        const bool written = write(std::string_view(pending_).substr(0, complete));
+        pending_.erase(0, complete);
+        return written ? count : 0; // 0 sets the stream's badbit, as a failed fwrite would
+    }
+
+    // Called for a single character; this buffer has no put area, so that is
+    // every `std::cout << 'x'`.
+    int_type overflow(int_type character) override
+    {
+        if (traits_type::eq_int_type(character, traits_type::eof())) {
+            return traits_type::not_eof(character); // a flush request: nothing is buffered
+        }
+        const char byte = traits_type::to_char_type(character);
+        return xsputn(&byte, 1) == 1 ? character : traits_type::eof();
+    }
+
+private:
+    // The length of `bytes` without an unfinished UTF-8 character at its end.
+    // Malformed bytes count as finished: they are shown as U+FFFD, never held.
+    static std::size_t complete_length(std::string_view bytes)
+    {
+        const std::size_t size = bytes.size();
+        for (std::size_t back = 1; back <= std::min<std::size_t>(3, size); ++back) {
+            const auto byte = static_cast<unsigned char>(bytes[size - back]);
+            if ((byte & 0xC0) == 0x80) {
+                continue; // a continuation byte: look further back for the first byte
+            }
+            // `byte` starts the last character; the first byte tells its length.
+            std::size_t length = 1; // ASCII, or a byte that never starts a character
+            if (byte >= 0xC0 && byte < 0xE0) {
+                length = 2;
+            } else if (byte >= 0xE0 && byte < 0xF0) {
+                length = 3;
+            } else if (byte >= 0xF0 && byte < 0xF8) {
+                length = 4;
+            }
+            return length > back ? size - back : size;
+        }
+        return size;
+    }
+
+    bool write(std::string_view utf8) const
+    {
+        const auto units = utf8_to_utf16(utf8); // malformed bytes become U+FFFD
+        std::size_t done = 0;
+        while (done < units.size()) {
+            // Moderate pieces: older consoles refuse very large writes. A piece
+            // never ends between the two halves of a surrogate pair.
+            std::size_t piece = std::min<std::size_t>(units.size() - done, 8192);
+            if (done + piece < units.size() && units[done + piece - 1] >= 0xD800 &&
+                units[done + piece - 1] <= 0xDBFF) {
+                --piece;
+            }
+            DWORD written = 0;
+            if (!WriteConsoleW(console_, units.data() + done, static_cast<DWORD>(piece), &written,
+                    nullptr) ||
+                written == 0) {
+                return false;
+            }
+            done += written;
+        }
+        return true;
+    }
+
+    HANDLE console_;
+    std::mutex mutex_;
+    std::string pending_; // the start of an unfinished character, at most 3 bytes between writes
+};
+
+// True when the handle is a console window, not a pipe or a file.
+bool is_console(HANDLE handle)
+{
+    DWORD mode = 0;
+    return handle != nullptr && handle != INVALID_HANDLE_VALUE &&
+           GetConsoleMode(handle, &mode) != 0;
+}
 
 } // namespace
 
 void prepare_console()
 {
-    // The console's code page belongs to the console window, not the process:
-    // restore it at exit so the shell the user returns to is unchanged.
-    original_output_code_page = GetConsoleOutputCP();
-    original_input_code_page = GetConsoleCP();
-    if (original_output_code_page == 0) {
-        return; // no console (output redirected from a GUI process, a service, ...)
-    }
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-    std::atexit([] {
-        SetConsoleOutputCP(original_output_code_page);
-        SetConsoleCP(original_input_code_page);
-    });
+    // Once per process. The buffers are never deleted on purpose: the standard
+    // streams are flushed at exit after static objects are destroyed, so they
+    // must outlive everything.
+    static const bool prepared = [] {
+        const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (is_console(output)) {
+            std::cout.rdbuf(new ConsoleBuffer(output));
+        }
+        // A redirected stream keeps its own buffer and gets the UTF-8 bytes unchanged.
+        const HANDLE errors = GetStdHandle(STD_ERROR_HANDLE);
+        if (is_console(errors)) {
+            auto* buffer = new ConsoleBuffer(errors);
+            std::cerr.rdbuf(buffer);
+            std::clog.rdbuf(buffer);
+        }
+        return true;
+    }();
+    (void)prepared;
 }
 
 } // namespace va::platform
