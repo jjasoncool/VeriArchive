@@ -171,6 +171,15 @@ std::expected<void, IoError> ArchiveStore::set_setting(const std::string& key, c
     return statement->bind(1, key).bind(2, value).run();
 }
 
+std::expected<void, IoError> ArchiveStore::remove_setting(const std::string& key)
+{
+    auto statement = database_.prepare("DELETE FROM settings WHERE key = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    return statement->bind(1, key).run();
+}
+
 std::expected<std::string, IoError> ArchiveStore::next_label()
 {
     const auto current = setting("next_label_seq");

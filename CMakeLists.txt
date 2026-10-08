@@ -52,6 +52,7 @@ target_link_libraries(veriarchive_common
 add_library(veriarchive_core
     src/core/engine/archive_status.cpp
     src/core/engine/candidates.cpp
+    src/core/engine/comparison.cpp
     src/core/engine/item_rules.cpp
     src/core/engine/recorded_manifest.cpp
     src/core/engine/register_engine.cpp

@@ -36,6 +36,7 @@ struct VerifyServices {
 // A finished (or interrupted) run, already recorded in the history chain.
 struct VerifyOutcome {
     std::string run_id;
+    std::string resumed_from;                   // R-104: the INCOMPLETE run this one continues
     Uuid archive_uuid;
     std::string label;
     std::uint32_t revision = 0;

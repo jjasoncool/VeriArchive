@@ -3,14 +3,11 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
-#include "core/engine/item_rules.h"
-#include "core/hash/hash_pipeline.h"
-#include "core/identity/volume_json.h"
+#include "core/engine/comparison.h"
 #include "core/engine/recorded_manifest.h"
-#include "core/scan/scanner.h"
+#include "core/identity/volume_json.h"
 
 #include <algorithm>
-#include <set>
 
 namespace va {
 namespace {
@@ -19,9 +16,6 @@ std::unexpected<VerifyStop> stop(VerifyStop::Kind kind, std::string message, Mat
 {
     return std::unexpected(VerifyStop{kind, std::move(message), std::move(identity)});
 }
-
-// How an item status affects the run result (§A6).
-enum class Severity { None, Warning, Failure };
 
 struct Located {
     std::filesystem::path root;
@@ -79,107 +73,6 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
         "archive " + candidate.archive_uuid + " is not on any attached volume");
 }
 
-// Ancestor directories of an ArchivePath string: "a/b/c" -> "a", "a/b".
-template <typename Visitor>
-void for_each_ancestor(const std::string& path, Visitor visit)
-{
-    for (auto slash = path.find('/'); slash != std::string::npos; slash = path.find('/', slash + 1)) {
-        visit(path.substr(0, slash));
-    }
-}
-
-template <typename Container>
-std::optional<std::string> ancestor_in(const std::string& path, const Container& paths)
-{
-    std::optional<std::string> found;
-    for_each_ancestor(path, [&](const std::string& ancestor) {
-        if (!found && paths.contains(ancestor)) {
-            found = ancestor;
-        }
-    });
-    return found;
-}
-
-std::string unreadable_status(const std::string& reason)
-{
-    return "Unreadable(" + reason + ")";
-}
-
-class Comparison {
-public:
-    Comparison(VerifyOutcome& outcome, bool strict_metadata, std::string filesystem_type,
-        bool same_os)
-        : outcome_(outcome), strict_metadata_(strict_metadata),
-          filesystem_type_(std::move(filesystem_type)), same_os_(same_os)
-    {
-    }
-
-    bool content_failure = false;
-    bool warning = false;
-
-    void add(const Entry& entry, const std::string& status, const std::string& detail, Severity severity)
-    {
-        ++outcome_.counts[status];
-        if (severity == Severity::Failure) {
-            content_failure = true;
-        } else if (severity == Severity::Warning) {
-            warning = true;
-        }
-        if (status != "Verified") {
-            outcome_.items.push_back({outcome_.run_id, entry.path, entry.stream, status, detail});
-        }
-    }
-
-    // Metadata differences are warnings unless --strict-metadata (R-51).
-    void verified_or_metadata(const Entry& recorded, const Entry& current)
-    {
-        std::string detail;
-        if (recorded.mtime_ns && current.mtime_ns &&
-            !mtime_matches(filesystem_type_, *recorded.mtime_ns, *current.mtime_ns)) {
-            detail = "mtime";
-        }
-        if (strict_metadata_) {
-            if (recorded.mode && current.mode && *recorded.mode != *current.mode) {
-                detail += detail.empty() ? "mode" : ",mode";
-            }
-            if (recorded.attrs && current.attrs && *recorded.attrs != *current.attrs) {
-                detail += detail.empty() ? "attrs" : ",attrs";
-            }
-        }
-        if (detail.empty()) {
-            add(recorded, "Verified", "", Severity::None);
-        } else {
-            add(recorded, "MetadataMismatch", detail,
-                strict_metadata_ ? Severity::Failure : Severity::Warning);
-        }
-    }
-
-    // Decision 0008: on the registering OS a link target must match exactly;
-    // across OSes an absolute target may be translated by the driver.
-    void compare_link(const Entry& recorded, const Entry& current)
-    {
-        if (recorded.b3 == current.b3 && recorded.sha256 == current.sha256) {
-            verified_or_metadata(recorded, current);
-            return;
-        }
-        const auto absolute = [](const Entry& entry) {
-            return std::find(entry.warn.begin(), entry.warn.end(), "link-absolute") != entry.warn.end();
-        };
-        if (!same_os_ && (absolute(recorded) || absolute(current))) {
-            add(recorded, "MetadataMismatch", "link-target-translated",
-                strict_metadata_ ? Severity::Failure : Severity::Warning);
-            return;
-        }
-        add(recorded, "Modified", "link target differs", Severity::Failure);
-    }
-
-private:
-    VerifyOutcome& outcome_;
-    bool strict_metadata_;
-    std::string filesystem_type_;
-    bool same_os_;
-};
-
 std::optional<Uuid> read_identity_claim(IFileSystemAccess& files, const std::filesystem::path& root)
 {
     auto source = files.open(root / ".veriarchive" / "identity.json", ReadOptions{false, true});
@@ -199,6 +92,34 @@ std::optional<Uuid> read_identity_claim(IFileSystemAccess& files, const std::fil
     return json["archive_uuid"].get<std::string>();
 }
 
+// A run in progress is described in settings ("run:<id>") so an interrupted
+// run can be resumed even when the process was killed before recording it.
+std::string run_setting(const std::string& run_id)
+{
+    return "run:" + run_id;
+}
+
+struct ResumePoint {
+    Uuid archive_uuid;
+    std::uint32_t revision = 0;
+};
+
+std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, const std::string& run_id)
+{
+    const auto setting = store.setting(run_setting(run_id));
+    if (!setting) {
+        return stop(VerifyStop::Kind::Repository, setting.error().message);
+    }
+    if (setting->empty()) {
+        return stop(VerifyStop::Kind::NotFound, "run " + run_id + " is not an interrupted run");
+    }
+    const auto json = nlohmann::json::parse(*setting, nullptr, false);
+    if (!json.is_object() || !json.contains("archive_uuid") || !json.contains("revision")) {
+        return stop(VerifyStop::Kind::Repository, "run " + run_id + " has an invalid resume record");
+    }
+    return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>()};
+}
+
 } // namespace
 
 std::expected<VerifyOutcome, VerifyStop> verify_full(
@@ -208,17 +129,27 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     IProgressSink& progress)
 {
     auto& store = services.store;
+    std::optional<ResumePoint> resume;
+    if (request.resume_run) {
+        auto point = find_resume_point(store, *request.resume_run);
+        if (!point) {
+            return std::unexpected(point.error());
+        }
+        resume = *point;
+    }
+
     auto candidates = load_candidates(store);
     if (!candidates) {
         return stop(VerifyStop::Kind::Repository, candidates.error().message);
     }
-    // Naming an archive is the operator's selection (§B10 AMBIGUOUS).
-    if (request.archive_uuid) {
+    // Naming an archive (or resuming its run) is the operator's selection (§B10 AMBIGUOUS).
+    const auto selected = resume ? std::optional(resume->archive_uuid) : request.archive_uuid;
+    if (selected) {
         std::erase_if(*candidates, [&](const ArchiveCandidate& candidate) {
-            return candidate.archive_uuid != *request.archive_uuid;
+            return candidate.archive_uuid != *selected;
         });
         if (candidates->empty()) {
-            return stop(VerifyStop::Kind::NotFound, "no registered archive " + *request.archive_uuid);
+            return stop(VerifyStop::Kind::NotFound, "no registered archive " + *selected);
         }
     }
 
@@ -268,18 +199,40 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     if (!archive || !*archive) {
         return stop(VerifyStop::Kind::Repository, "the matched archive is missing from the database");
     }
+    // R-104: resume only while the identity matches and the revision is unchanged.
+    if (resume && (identity.result == MatchResult::Mismatch || (*archive)->current_revision != resume->revision)) {
+        return stop(VerifyStop::Kind::Decision,
+            "run " + *request.resume_run + " cannot be resumed: the media identity or the archive "
+            "revision changed since it started; run a new verification");
+    }
 
     VerifyOutcome outcome;
     outcome.run_id = generate_uuid();
+    outcome.resumed_from = request.resume_run.value_or("");
     outcome.archive_uuid = (*archive)->archive_uuid;
     outcome.label = (*archive)->label;
     outcome.revision = (*archive)->current_revision;
     outcome.root = located->root;
     outcome.identity = identity;
     const auto started = current_timestamp();
-    bool incomplete = false;
-    bool content_failure = false; // an item status that fails the run
-    bool item_warning = false;    // an item status that caps the run at warnings
+
+    // Make this run resumable from now on, carrying over a resumed run's checkpoints.
+    std::set<std::string> content_verified;
+    (void)store.set_setting(run_setting(outcome.run_id),
+        nlohmann::json{{"archive_uuid", outcome.archive_uuid}, {"revision", outcome.revision},
+            {"started", started}}.dump());
+    if (resume) {
+        if (auto previous = store.progress(*request.resume_run)) {
+            content_verified = std::move(*previous);
+        }
+        const std::vector<std::string> keys(content_verified.begin(), content_verified.end());
+        if (store.begin()) {
+            (void)store.add_progress(outcome.run_id, keys);
+            (void)store.clear_progress(*request.resume_run);
+            (void)store.remove_setting(run_setting(*request.resume_run));
+            (void)store.commit();
+        }
+    }
 
     for (const auto& detail : identity.details) {
         outcome.warnings.push_back("identity: " + detail);
@@ -292,202 +245,71 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
 
     // The manifest bytes must be the ones the repository recorded (R-14).
-    std::vector<Entry> recorded;
-    ManifestHeader header;
+    std::optional<RecordedManifest> manifest;
     if (outcome.failure_classes.empty()) {
-        auto manifest = load_recorded_manifest(
+        auto loaded = load_recorded_manifest(
             store, services.repository_files, services.layout, outcome.archive_uuid, outcome.revision);
-        if (!manifest) {
-            outcome.failure_classes.push_back(manifest.error().failure_class);
-            outcome.warnings.push_back("manifest: " + manifest.error().message);
+        if (!loaded) {
+            outcome.failure_classes.push_back(loaded.error().failure_class);
+            outcome.warnings.push_back("manifest: " + loaded.error().message);
         } else {
-            header = std::move(manifest->header);
-            recorded = std::move(manifest->entries);
-            outcome.registered_bytes = header.counts.bytes;
+            manifest = std::move(*loaded);
+            outcome.registered_bytes = manifest->header.counts.bytes;
         }
     }
 
-    if (outcome.failure_classes.empty()) {
-        ScanOptions scan_options;
-        scan_options.exclusions = header.exclusions;
-        auto scanned = scan_tree(services.archive_files, located->root, scan_options, cancel, progress);
-        if (!scanned) {
-            const auto kind = scanned.error().kind;
-            if (kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved) {
-                incomplete = true;
-            } else {
-                outcome.failure_classes.push_back("FilesystemAccessError");
-                outcome.warnings.push_back("scan: " + scanned.error().message);
-            }
-        } else {
-            Comparison comparison(outcome, request.strict_metadata, located->volume.filesystem_type,
-                header.os == services.host.os);
-
-            // Directory facts needed to explain missing and new entries.
-            std::set<std::string> known_unreadable_dirs;  // unreadable at registration
-            std::set<std::string> recorded_dirs;          // every directory implied by the manifest
-            for (const auto& entry : recorded) {
-                if (entry.type == 'd' && !entry.unreadable.empty()) {
-                    known_unreadable_dirs.insert(entry.path.p);
-                }
-                for_each_ancestor(entry.path.p, [&](const std::string& dir) { recorded_dirs.insert(dir); });
-            }
-            std::map<std::string, std::string> unreadable_dirs_now;
-            std::set<std::string> current_dirs;
-            for (const auto& scanned_entry : scanned->entries) {
-                const auto& entry = scanned_entry.entry;
-                if (entry.type == 'd' && !entry.unreadable.empty()) {
-                    unreadable_dirs_now[entry.path.p] = entry.unreadable;
-                }
-                for_each_ancestor(entry.path.p, [&](const std::string& dir) { current_dirs.insert(dir); });
-            }
-            std::set<std::string> mount_points_now;
-            for (const auto& mount_point : scanned->skipped_mount_points) {
-                mount_points_now.insert(mount_point.p);
-            }
-
-            const auto missing = [&](const Entry& entry) {
-                if (entry.type == 'd' && current_dirs.contains(entry.path.p)) {
-                    comparison.add(entry, "Verified", "", Severity::None); // now holds new entries
-                } else if (ancestor_in(entry.path.p, mount_points_now)) {
-                    comparison.add(entry, "SkippedMountPoint", "a mount point now covers this path",
-                        Severity::Failure);
-                } else if (const auto dir = ancestor_in(entry.path.p, unreadable_dirs_now)) {
-                    comparison.add(entry, unreadable_status(unreadable_dirs_now.at(*dir)),
-                        "directory " + *dir + " cannot be listed", Severity::Failure);
-                } else if ((services.host.os == "windows" && !representable_on_windows(entry.path.p)) ||
-                           (!entry.path.enc.empty() && !archive_path_to_native(entry.path))) {
-                    comparison.add(entry, "Unrepresentable", "name cannot exist on " + services.host.os,
-                        Severity::Warning); // R-44
-                } else {
-                    comparison.add(entry, "Missing", "", Severity::Failure);
-                }
-            };
-            const auto added = [&](const Entry& entry) {
-                if (entry.type == 'd' && recorded_dirs.contains(entry.path.p)) {
-                    return; // existed implicitly; its recorded contents are reported individually
-                }
-                if (ancestor_in(entry.path.p, known_unreadable_dirs)) {
-                    comparison.add(entry, "Unbaselined", "inside a directory unreadable at registration",
-                        Severity::Warning);
-                } else {
-                    comparison.add(entry, "New", "", Severity::Failure);
-                }
-            };
-
-            // Merge the two sorted lists (R-43 order) and collect files to hash.
-            std::vector<std::pair<const Entry*, const ScannedEntry*>> to_hash;
-            std::size_t m = 0;
-            std::size_t s = 0;
-            const auto& current = scanned->entries;
-            while (m < recorded.size() || s < current.size()) {
-                if (s == current.size() || (m < recorded.size() && canonical_less(recorded[m], current[s].entry))) {
-                    missing(recorded[m++]);
-                    continue;
-                }
-                if (m == recorded.size() || canonical_less(current[s].entry, recorded[m])) {
-                    added(current[s++].entry);
-                    continue;
-                }
-                const auto& was = recorded[m++];
-                const auto& now = current[s++];
-                const auto& is = now.entry;
-                if (was.type != is.type) {
-                    comparison.add(was, "TypeChanged", std::string(1, was.type) + " -> " + is.type,
-                        Severity::Failure); // R-50
-                    continue;
-                }
-                const bool known = !was.unreadable.empty();
-                if (!is.unreadable.empty()) {
-                    comparison.add(was, unreadable_status(is.unreadable),
-                        known ? "known-since-registration" : "",
-                        known ? Severity::Warning : Severity::Failure); // decision 0010
-                    continue;
-                }
-                if (known && was.type != 'f') {
-                    comparison.add(was, "Unbaselined", "readable now, unreadable at registration",
-                        Severity::Warning);
-                    continue;
-                }
-                if (was.type == 'd') {
-                    comparison.add(was, "Verified", "", Severity::None);
-                } else if (was.type == 'l') {
-                    comparison.compare_link(was, is);
-                } else {
-                    to_hash.emplace_back(&was, &now);
+    ComparisonResult comparison;
+    if (manifest) {
+        ComparisonInput input;
+        input.root = located->root;
+        input.filesystem_type = located->volume.filesystem_type;
+        input.rotational = request.rotational;
+        if (!input.rotational) {
+            for (const auto& device : located->volume.devices) {
+                if (device.rotational) {
+                    input.rotational = input.rotational.value_or(false) || *device.rotational;
                 }
             }
-
-            // Re-read and re-hash every recorded file (R-100, R-101).
-            std::vector<HashJob> jobs;
-            jobs.reserve(to_hash.size());
-            for (std::size_t index = 0; index < to_hash.size(); ++index) {
-                jobs.push_back({index, to_hash[index].second->native});
+        }
+        input.host_os = services.host.os;
+        input.header = &manifest->header;
+        input.recorded = &manifest->entries;
+        input.strict_metadata = request.strict_metadata;
+        input.content_verified = std::move(content_verified);
+        input.checkpoint = [&](const std::vector<std::string>& keys) {
+            if (store.begin()) {
+                (void)store.add_progress(outcome.run_id, keys);
+                (void)store.commit();
             }
-            HashPipelineOptions hash_options;
-            std::optional<bool> rotational = request.rotational;
-            if (!rotational) {
-                for (const auto& device : located->volume.devices) {
-                    if (device.rotational) {
-                        rotational = rotational.value_or(false) || *device.rotational;
-                    }
-                }
-            }
-            hash_options.readers = default_reader_count(rotational);
-            const auto hashed = hash_files(services.archive_files, jobs, hash_options, cancel, progress,
-                [&](HashResult&& result) {
-                    const auto& was = *to_hash[result.id].first;
-                    const auto& is = to_hash[result.id].second->entry;
-                    const bool known = !was.unreadable.empty(); // decision 0010
-                    if (result.error) {
-                        if (result.error->kind == IoErrorKind::DeviceRemoved) {
-                            incomplete = true;
-                            return false;
-                        }
-                        comparison.add(was, unreadable_status(unreadable_reason(*result.error)),
-                            known ? "known-since-registration" : result.error->message,
-                            known ? Severity::Warning : Severity::Failure);
-                        return true;
-                    }
-                    if (known) {
-                        comparison.add(was, "Unbaselined", "readable now, unreadable at registration",
-                            Severity::Warning);
-                        return true;
-                    }
-                    if (result.b3 != was.b3 || result.sha256 != was.sha256 || !was.size ||
-                        result.size != *was.size) {
-                        comparison.add(was, "Modified",
-                            was.size && result.size != *was.size ? "size differs" : "content differs",
-                            Severity::Failure);
-                    } else {
-                        outcome.coverage_bytes += result.size; // read and matched
-                        comparison.verified_or_metadata(was, is);
-                    }
-                    return true;
-                });
-            if (!hashed) {
-                incomplete = true;
-            }
-            content_failure = comparison.content_failure;
-            item_warning = comparison.warning;
+        };
+        comparison = compare_with_manifest(services.archive_files, input, cancel, progress);
+        if (!comparison.scan_error.empty()) {
+            outcome.failure_classes.push_back("FilesystemAccessError");
+            outcome.warnings.push_back("scan: " + comparison.scan_error);
+        }
+        outcome.counts = comparison.counts;
+        outcome.items = comparison.items;
+        outcome.coverage_bytes = comparison.coverage_bytes;
+        for (auto& item : outcome.items) {
+            item.run_id = outcome.run_id;
         }
     }
 
     // Run result (§A6): INCOMPLETE makes no claim; run-level failures fail.
-    if (incomplete) {
+    if (comparison.incomplete) {
         outcome.result = "INCOMPLETE";
-    } else if (!outcome.failure_classes.empty() || content_failure) {
+    } else if (!outcome.failure_classes.empty() || comparison.content_failure) {
         outcome.result = "FAILED";
-    } else if (item_warning || !outcome.warnings.empty()) {
+    } else if (comparison.warning || !outcome.warnings.empty()) {
         outcome.result = "PASSED_WITH_WARNINGS";
     } else {
         outcome.result = "PASSED";
     }
 
     // Record evidence, the chained run row and its items in one transaction.
-    nlohmann::json counts = nlohmann::json::object();
-    for (const auto& [status, count] : outcome.counts) {
-        counts[status] = count;
+    nlohmann::json counts{{"items", outcome.counts}};
+    if (!outcome.resumed_from.empty()) {
+        counts["resumed_from"] = outcome.resumed_from;
     }
     VerifyRunRecord run;
     run.run_id = outcome.run_id;
@@ -517,6 +339,15 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         }
         if (auto items = store.insert_verify_items(outcome.items); !items) {
             return items;
+        }
+        // A finished run needs no checkpoints; an INCOMPLETE one keeps them for --resume.
+        if (outcome.result != "INCOMPLETE") {
+            if (auto cleared = store.clear_progress(outcome.run_id); !cleared) {
+                return cleared;
+            }
+            if (auto removed = store.remove_setting(run_setting(outcome.run_id)); !removed) {
+                return removed;
+            }
         }
         return store.commit();
     }();

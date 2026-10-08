@@ -228,6 +228,65 @@ void link_targets_across_systems()
     CHECK(outcome && status_of(*outcome, "absolute") == "Modified"); // same OS: exact
 }
 
+// M4 / R-104: an interrupted run resumes without re-reading what it verified.
+void interrupted_run_resumes_without_rehashing()
+{
+    EngineFixture fixture;
+    for (int index = 1; index <= 9; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, static_cast<char>('0' + index)));
+    }
+    const auto registered = fixture.register_root(fixture.archive.root());
+    CHECK(registered.has_value());
+
+    fixture.archive.node("f5").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.verify(fixture.archive.root());
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+    if (!interrupted) {
+        return;
+    }
+
+    fixture.archive.node("f5").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    request.resume_run = interrupted->run_id;
+    const auto resumed = fixture.verify(request);
+    CHECK(resumed && resumed->result == "PASSED");
+    CHECK(resumed && resumed->resumed_from == interrupted->run_id);
+    CHECK(resumed && resumed->counts.at("Verified") == 9);
+    CHECK(resumed && resumed->coverage_bytes == 9000);
+    // Only what the interrupted run had not verified is read again.
+    CHECK(interrupted->coverage_bytes >= 4000);
+    CHECK(fixture.archive.bytes_read == 9000 - interrupted->coverage_bytes);
+
+    // A finished run cannot be resumed again.
+    const auto again = fixture.verify(request);
+    CHECK(!again && again.error().kind == va::VerifyStop::Kind::NotFound);
+}
+
+void resume_refused_after_new_revision()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("a", "a");
+    fixture.archive.add_file("b", "b");
+    CHECK(fixture.register_root(fixture.archive.root()).has_value());
+    fixture.archive.node("b").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.verify(fixture.archive.root());
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+    fixture.archive.node("b").open_error.reset();
+
+    va::RegisterRequest rebaseline;
+    rebaseline.root = fixture.archive.root();
+    rebaseline.new_revision = true;
+    CHECK(fixture.register_root(rebaseline).has_value());
+
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    request.resume_run = interrupted ? interrupted->run_id : "";
+    const auto resumed = fixture.verify(request);
+    CHECK(!resumed && resumed.error().kind == va::VerifyStop::Kind::Decision);
+}
+
 void item_rules()
 {
     CHECK(va::mtime_matches("ntfs", 1'000'000'000, 1'900'000'000));
@@ -257,5 +316,7 @@ void verify_engine_tests()
     verify_by_archive_uuid();
     unrepresentable_names_warn();
     link_targets_across_systems();
+    interrupted_run_resumes_without_rehashing();
+    resume_refused_after_new_revision();
     item_rules();
 }

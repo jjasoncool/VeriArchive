@@ -129,6 +129,7 @@ public:
 
     std::expected<std::string, IoError> setting(const std::string& key);
     std::expected<void, IoError> set_setting(const std::string& key, const std::string& value);
+    std::expected<void, IoError> remove_setting(const std::string& key);
 
 private:
     explicit ArchiveStore(repository_detail::SqliteDatabase database);

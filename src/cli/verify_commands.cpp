@@ -54,6 +54,9 @@ void print_outcome(const VerifyOutcome& outcome)
         std::cout << "  " << item.status << "  " << item.path.p
                   << (item.detail.empty() ? "" : "  (" + item.detail + ")") << '\n';
     }
+    if (!outcome.resumed_from.empty()) {
+        std::cout << "  resumed from run: " << outcome.resumed_from << std::endl;
+    }
     std::cout << "  run: " << outcome.run_id << "\n  " << guarantee << '\n';
 }
 
@@ -65,6 +68,7 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
     }
     return {
         {"run_id", outcome.run_id},
+        {"resumed_from", outcome.resumed_from},
         {"archive_uuid", outcome.archive_uuid},
         {"label", outcome.label},
         {"revision", outcome.revision},
