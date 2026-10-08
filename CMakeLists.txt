@@ -49,6 +49,7 @@ target_link_libraries(veriarchive_common
     PRIVATE PkgConfig::GLIB)
 
 add_library(veriarchive_core
+    src/core/hash/hash_pipeline.cpp
     src/core/hash/hashers.cpp
     src/core/identity/filesystem_id.cpp
     src/core/identity/matcher.cpp
@@ -120,6 +121,7 @@ if(BUILD_TESTING)
         tests/unit/config_test.cpp
         tests/unit/file_writer_test.cpp
         tests/unit/fs_access_test.cpp
+        tests/unit/hash_pipeline_test.cpp
         tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
         tests/unit/manifest_test.cpp
