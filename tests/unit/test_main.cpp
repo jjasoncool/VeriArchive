@@ -9,5 +9,6 @@ int main()
     file_writer_tests();
     platform_tests();
     unicode_tests();
+    identity_tests();
     return test_failures == 0 ? 0 : 1;
 }

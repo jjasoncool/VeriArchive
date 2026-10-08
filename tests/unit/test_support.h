@@ -19,3 +19,4 @@ void config_tests();
 void file_writer_tests();
 void platform_tests();
 void unicode_tests();
+void identity_tests();

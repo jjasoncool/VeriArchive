@@ -38,6 +38,8 @@ target_link_libraries(veriarchive_common
     PRIVATE PkgConfig::GLIB)
 
 add_library(veriarchive_core
+    src/core/identity/filesystem_id.cpp
+    src/core/identity/matcher.cpp
     src/core/repository/repository.cpp
     src/core/repository/sqlite_raii.cpp
     src/core/write_file.cpp)
@@ -92,6 +94,7 @@ if(BUILD_TESTING)
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
         tests/unit/file_writer_test.cpp
+        tests/unit/identity_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
         tests/unit/repository_test.cpp)
