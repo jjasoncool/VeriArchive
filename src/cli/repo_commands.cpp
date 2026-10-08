@@ -22,11 +22,13 @@ int info(const Arguments& arguments, const Session& session)
             {"config_file", path_to_utf8(context.config_file)},
         });
     } else {
-        std::cout << "RepositoryRoot: " << path_to_utf8(context.repo.root)
-                  << "\nrepository_uuid: " << context.repository_uuid
-                  << "\nrepo_selected_by: " << context.repo_selected_by
-                  << "\nconfig_file: " << path_to_utf8(context.config_file)
-                  << "\nBack up RepositoryRoot: losing it loses all verification history.\n";
+        const auto& text = arguments.text;
+        std::cout << text.format("RepositoryRoot: {}", path_to_utf8(context.repo.root)) << '\n'
+                  << text.format("repository_uuid: {}", context.repository_uuid) << '\n'
+                  << text.format("repo_selected_by: {}", text(context.repo_selected_by)) << '\n'
+                  << text.format("config_file: {}", path_to_utf8(context.config_file)) << '\n'
+                  << text("Back up RepositoryRoot: losing it loses all verification history.")
+                  << '\n';
     }
     return exit_code::passed;
 }
@@ -47,10 +49,17 @@ int verify_history(const Arguments& arguments, const Session& session)
         print_json({{"runs", check->runs}, {"intact", intact},
             {"first_broken_run", check->first_broken_run.value_or("")}, {"problem", check->problem}});
     } else if (intact) {
-        std::cout << "History intact: " << check->runs << " verification runs, hash chain verified.\n"
-                  << "V1 detects edited or deleted rows; signed checkpoints arrive in V1.1.\n";
+        const auto& text = arguments.text;
+        std::cout << text.format("History intact: {} verification runs, hash chain verified.",
+                         check->runs)
+                  << '\n'
+                  << text("V1 detects edited or deleted rows; signed checkpoints arrive in V1.1.")
+                  << '\n';
     } else {
-        std::cout << "History BROKEN at run " << *check->first_broken_run << ": " << check->problem << '\n';
+        const auto& text = arguments.text;
+        std::cout << text.format("History BROKEN at run {}: {}", *check->first_broken_run,
+                         text(check->problem))
+                  << '\n';
     }
     return intact ? exit_code::passed : exit_code::failed;
 }
@@ -71,10 +80,13 @@ int rebuild(const Arguments& arguments, const Session& session)
         print_json({{"archives", report->archives}, {"revisions", report->revisions},
             {"entries", report->entries}, {"skipped", report->skipped}});
     } else {
-        std::cout << "Rebuilt the index from manifests: " << report->archives << " archives, "
-                  << report->revisions << " revisions, " << report->entries << " entries.\n";
+        const auto& text = arguments.text;
+        std::cout << text.format(
+                         "Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
+                         report->archives, report->revisions, report->entries)
+                  << '\n';
         for (const auto& skipped : report->skipped) {
-            std::cout << "  skipped: " << skipped << '\n';
+            std::cout << "  " << text.format("skipped: {}", text(skipped)) << '\n';
         }
     }
     return report->skipped.empty() ? exit_code::passed : exit_code::passed_with_warnings;

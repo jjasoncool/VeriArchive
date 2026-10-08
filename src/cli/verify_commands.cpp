@@ -15,6 +15,7 @@
 namespace va::cli {
 namespace {
 
+// R-02. Translated in text output; --json keeps the English sentence.
 constexpr const char* guarantee =
     "V1 detects accidental corruption and unintended change; tamper evidence "
     "(signed manifests) begins in V1.1.";
@@ -33,36 +34,41 @@ int result_code(const std::string& result)
     return exit_code::failed;
 }
 
-void print_outcome(const VerifyOutcome& outcome)
+void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
 {
-    std::cout << "FULL VERIFY " << outcome.result << "  " << outcome.label << " ("
-              << outcome.archive_uuid << ") revision " << outcome.revision
-              << "\n  root: " << path_to_utf8(outcome.root)
-              << "\n  identity: " << to_string(outcome.identity.result)
-              << "\n  coverage: " << outcome.coverage_bytes << " of " << outcome.registered_bytes
-              << " registered bytes read and matched\n  items:";
+    // R-21: the mode stays on the result line in every language.
+    std::cout << text.format("FULL VERIFY {}  {} ({}) revision {}", text(outcome.result), outcome.label,
+                     outcome.archive_uuid, outcome.revision)
+              << "\n  " << text.format("root: {}", path_to_utf8(outcome.root))
+              << "\n  " << text.format("identity: {}", text(to_string(outcome.identity.result)))
+              << "\n  "
+              << text.format("coverage: {} of {} registered bytes read and matched", outcome.coverage_bytes,
+                     outcome.registered_bytes)
+              << "\n  " << text("items:");
     for (const auto& [status, count] : outcome.counts) {
-        std::cout << "  " << status << " " << count;
+        std::cout << "  " << text(status) << " " << count;
     }
     std::cout << '\n';
     for (const auto& failure : outcome.failure_classes) {
-        std::cout << "  failure: " << failure << '\n';
+        std::cout << "  " << text.format("failure: {}", text(failure)) << '\n';
     }
     for (const auto& warning : outcome.warnings) {
-        std::cout << "  warning: " << warning << '\n';
+        std::cout << "  " << text.format("warning: {}", text(warning)) << '\n';
     }
     for (const auto& item : outcome.items) {
-        std::cout << "  " << item.status << "  " << item.path.p
-                  << (item.detail.empty() ? "" : "  (" + item.detail + ")") << '\n';
+        std::cout << "  " << text(item.status) << "  " << item.path.p
+                  << (item.detail.empty() ? "" : "  (" + text(item.detail) + ")") << '\n';
     }
     if (outcome.result == "INCOMPLETE") {
-        std::cout << "  resume with: veriarchive-cli verify --full " << outcome.archive_uuid
-                  << " --resume " << outcome.run_id << std::endl;
+        std::cout << "  "
+                  << text.format("resume with: veriarchive-cli verify --full {} --resume {}",
+                         outcome.archive_uuid, outcome.run_id)
+                  << std::endl;
     }
     if (!outcome.resumed_from.empty()) {
-        std::cout << "  resumed from run: " << outcome.resumed_from << std::endl;
+        std::cout << "  " << text.format("resumed from run: {}", outcome.resumed_from) << std::endl;
     }
-    std::cout << "  run: " << outcome.run_id << "\n  " << guarantee << '\n';
+    std::cout << "  " << text.format("run: {}", outcome.run_id) << "\n  " << text(guarantee) << '\n';
 }
 
 nlohmann::json outcome_json(const VerifyOutcome& outcome)
@@ -142,7 +148,7 @@ int verify_command(const Arguments& arguments)
 
     CancelToken cancel;
     platform::cancel_on_interrupt(cancel);
-    CliProgress progress(arguments.json);
+    CliProgress progress(arguments);
     const auto outcome = verify_full(services, request, cancel, progress);
     progress.finish();
     if (!outcome) {
@@ -153,7 +159,7 @@ int verify_command(const Arguments& arguments)
     if (arguments.json) {
         print_json(outcome_json(*outcome));
     } else {
-        print_outcome(*outcome);
+        print_outcome(arguments.text, *outcome);
     }
     return result_code(outcome->result);
 }

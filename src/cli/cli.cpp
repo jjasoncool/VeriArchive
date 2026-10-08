@@ -2,17 +2,19 @@
 // and dispatches to the command group named by the first word.
 #include "cli/cli.h"
 
+#include "app/session.h"
 #include "cli/commands.h"
+#include "platform/platform_services.h"
 
 #include <iostream>
 
 namespace va::cli {
 namespace {
 
-void print_usage()
+void print_usage(const app::Text& text)
 {
-    std::cout <<
-        "Usage: veriarchive-cli [--config P] [--repository P] [--json] <command>\n"
+    std::cout << text(
+        "Usage: veriarchive-cli [--config P] [--repository P] [--lang en|zh-TW] [--json] <command>\n"
         "\n"
         "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
@@ -23,21 +25,24 @@ void print_usage()
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
-        "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n";
+        "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n");
 }
 
 } // namespace
 
 int run(std::vector<std::string> raw_arguments)
 {
+    platform::prepare_console();
     std::string error;
-    const auto arguments = parse_arguments(raw_arguments, error);
+    auto arguments = parse_arguments(raw_arguments, error);
     if (!arguments) {
-        std::cerr << "error: " << error << '\n';
+        const app::Text text(app::interface_language(std::nullopt, std::nullopt));
+        std::cerr << text.format("error: {}", text(error)) << '\n';
         return exit_code::usage;
     }
+    arguments->text = app::Text(app::interface_language(arguments->language, arguments->config));
     if (arguments->words.empty()) {
-        print_usage();
+        print_usage(arguments->text);
         return raw_arguments.empty() ? exit_code::passed : exit_code::usage;
     }
 
@@ -70,7 +75,7 @@ int run(std::vector<std::string> raw_arguments)
         return import_command(*arguments);
     }
 
-    print_usage();
+    print_usage(arguments->text);
     return exit_code::usage;
 }
 

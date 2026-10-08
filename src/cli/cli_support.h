@@ -2,6 +2,7 @@
 // Shared pieces of the command-line interface: argument parsing, exit codes
 // (HANDOFF §B16), repository opening, and text/JSON output.
 #include "app/app_context.h"
+#include "app/text.h"
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
 #include "core/repository/repository.h"
@@ -35,6 +36,8 @@ struct Arguments {
     bool json = false;
     std::optional<std::filesystem::path> config;
     std::optional<std::filesystem::path> repository;
+    std::optional<std::string> language;          // --lang en | zh-TW
+    app::Text text;                               // messages in the chosen language (decision 0017)
     std::vector<std::string> words;               // e.g. {"repo", "info"} or {"verify", "<uuid>"}
     std::map<std::string, std::string> values;    // e.g. {"--label", "ARCH-0001"}
     std::set<std::string> flags;                  // e.g. {"--full"}
@@ -43,11 +46,12 @@ struct Arguments {
     std::optional<std::string> value(const std::string& option) const;
 };
 
-// Splits the command line. Known value options (--config, --label, --out, ...)
+// Splits the command line. Known value options (--config, --lang, --label, ...)
 // take the next word as their value; any other "--name" is a flag.
 std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, std::string& error);
 
-// A command's failure: the exit code to return and a message for the user.
+// A command's failure: the exit code to return and a message for the user,
+// written in English; report_failure() translates it for text output.
 struct Failure {
     int code;
     std::string message;
@@ -77,20 +81,22 @@ HostInfo host_info();
 // Progress on stderr, at most five updates a second; silent in --json mode.
 class CliProgress final : public IProgressSink {
 public:
-    explicit CliProgress(bool quiet) : quiet_(quiet) {}
+    explicit CliProgress(const Arguments& arguments) : quiet_(arguments.json), text_(arguments.text) {}
     ~CliProgress() override { finish(); }
     void on_progress(const Progress& progress) override;
     void finish();
 
 private:
     bool quiet_;
+    app::Text text_;
     bool shown_ = false;
     std::chrono::steady_clock::time_point last_{};
 };
 
-// Output helpers: text goes to stdout line by line; JSON is printed once.
+// Output helpers: text goes to stdout line by line; JSON is printed once and
+// stays in English. Warnings and failures are translated for text output.
 void print_json(const nlohmann::json& document);
-void print_warning(const std::string& message);
+void print_warning(const app::Text& text, const std::string& message);
 int report_failure(const Arguments& arguments, const Failure& failure);
 
 } // namespace va::cli

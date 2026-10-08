@@ -24,19 +24,22 @@ std::string format_bytes(std::uint64_t bytes)
     return std::format("{:.1f} {}", value, units[unit]);
 }
 
-void print_volume(const VolumeInfo& volume)
+void print_volume(const app::Text& text, const VolumeInfo& volume)
 {
     std::cout << path_to_utf8(volume.mount_point) << "  " << volume.filesystem_type << "  \""
               << volume.volume_label << "\"  " << format_bytes(volume.capacity_bytes)
-              << (volume.read_only ? "  read-only" : "") << '\n'
-              << "  filesystem_uuid: "
-              << (volume.filesystem_uuid.empty() ? "-" : volume.filesystem_uuid)
-              << "  short: " << (volume.filesystem_uuid_short.empty() ? "-" : volume.filesystem_uuid_short)
+              << (volume.read_only ? "  " + text("read-only") : std::string{}) << '\n'
+              << "  "
+              << text.format("filesystem_uuid: {}  short: {}",
+                     volume.filesystem_uuid.empty() ? "-" : volume.filesystem_uuid,
+                     volume.filesystem_uuid_short.empty() ? "-" : volume.filesystem_uuid_short)
               << '\n';
     for (const auto& device : volume.devices) {
-        std::cout << "  device: " << (device.model.empty() ? "?" : device.model)
-                  << "  serial: " << (device.serial.empty() ? "(none)" : device.serial)
-                  << "  bus: " << (device.bus.empty() ? "?" : device.bus)
+        std::cout << "  "
+                  << text.format("device: {}  serial: {}  bus: {}",
+                         device.model.empty() ? "?" : device.model,
+                         device.serial.empty() ? text("(none)") : device.serial,
+                         device.bus.empty() ? "?" : device.bus)
                   << "  " << format_bytes(device.capacity_bytes)
                   << (device.rotational ? (*device.rotational ? "  hdd" : "  ssd") : "") << '\n';
     }
@@ -63,7 +66,7 @@ int media_command(const Arguments& arguments)
         print_json({{"volumes", std::move(list)}});
     } else {
         for (const auto& volume : *volumes) {
-            print_volume(volume);
+            print_volume(arguments.text, volume);
         }
     }
     return exit_code::passed;

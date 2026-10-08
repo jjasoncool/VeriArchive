@@ -13,7 +13,7 @@ namespace va::cli {
 namespace {
 
 const std::set<std::string> value_options{
-    "--config", "--repository", "--label", "--io", "--resume", "--out", "--copy-of", "--seed",
+    "--config", "--repository", "--lang", "--label", "--io", "--resume", "--out", "--copy-of", "--seed",
 };
 
 } // namespace
@@ -58,6 +58,12 @@ std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, st
             arguments.config = path_from_utf8(value);
         } else if (token == "--repository") {
             arguments.repository = path_from_utf8(value);
+        } else if (token == "--lang") {
+            if (!app::parse_language(value)) {
+                error = "--lang takes en or zh-TW";
+                return std::nullopt;
+            }
+            arguments.language = value;
         } else {
             arguments.values[token] = value;
         }
@@ -72,7 +78,7 @@ std::expected<Session, Failure> open_session(const Arguments& arguments, bool in
         return std::unexpected(Failure{exit_code::repository, session.error()});
     }
     for (const auto& warning : session->warnings) {
-        print_warning(warning);
+        print_warning(arguments.text, warning);
     }
     return Session{std::move(session->context), std::move(session->writer)};
 }
@@ -82,9 +88,9 @@ void print_json(const nlohmann::json& document)
     std::cout << document.dump(2) << '\n';
 }
 
-void print_warning(const std::string& message)
+void print_warning(const app::Text& text, const std::string& message)
 {
-    std::cerr << "warning: " << message << '\n';
+    std::cerr << text.format("warning: {}", text(message)) << '\n';
 }
 
 int report_failure(const Arguments& arguments, const Failure& failure)
@@ -92,7 +98,7 @@ int report_failure(const Arguments& arguments, const Failure& failure)
     if (arguments.json) {
         print_json({{"error", failure.message}, {"exit_code", failure.code}});
     } else {
-        std::cerr << "error: " << failure.message << '\n';
+        std::cerr << arguments.text.format("error: {}", arguments.text(failure.message)) << '\n';
     }
     return failure.code;
 }
@@ -141,10 +147,13 @@ void CliProgress::on_progress(const Progress& progress)
     last_ = now;
     shown_ = true;
     if (progress.items_total == 0) {
-        std::cerr << "\rscanning: " << progress.items_done << " entries" << std::string(20, ' ');
+        std::cerr << '\r' << text_.format("scanning: {} entries", progress.items_done)
+                  << std::string(20, ' ');
     } else {
-        std::cerr << "\rhashing: " << progress.items_done << '/' << progress.items_total << " files, "
-                  << progress.bytes_done / (1024 * 1024) << " MiB" << std::string(10, ' ');
+        std::cerr << '\r'
+                  << text_.format("hashing: {}/{} files, {} MiB", progress.items_done,
+                         progress.items_total, progress.bytes_done / (1024 * 1024))
+                  << std::string(10, ' ');
     }
     std::cerr.flush();
 }

@@ -16,12 +16,39 @@
 namespace va::cli {
 namespace {
 
-std::string run_summary(const std::optional<VerifyRunRecord>& run, bool with_mode)
+// "Last FULL verify: PASSED on <date>" or, with the mode, "Last verify: FULL
+// PASSED on <date>", plus OVERDUE; one translated line, so the mode stays in it
+// in every language (R-21).
+std::string last_verify_line(const app::Text& text, const std::optional<VerifyRunRecord>& run, bool with_mode,
+    bool overdue)
 {
+    std::string line;
     if (!run) {
-        return "never";
+        line = with_mode ? text("Last verify: never") : text("Last FULL verify: never");
+    } else if (with_mode) {
+        line = text.format("Last verify: {} {} on {}", text(run->mode), text(run->result), run->finished);
+    } else {
+        line = text.format("Last FULL verify: {} on {}", text(run->result), run->finished);
     }
-    return (with_mode ? run->mode + " " : "") + run->result + " on " + run->finished;
+    return overdue ? line + "  " + text("OVERDUE") : line;
+}
+
+// "ManifestHashMismatch,MediaIdentityMismatch" with each failure class translated.
+std::string failure_classes_text(const app::Text& text, std::string_view classes)
+{
+    std::string result;
+    for (std::size_t start = 0; start <= classes.size();) {
+        auto end = classes.find(',', start);
+        if (end == std::string_view::npos) {
+            end = classes.size();
+        }
+        if (start > 0) {
+            result += ',';
+        }
+        result += text(classes.substr(start, end - start));
+        start = end + 1;
+    }
+    return result;
 }
 
 nlohmann::json run_json(const std::optional<VerifyRunRecord>& run)
@@ -114,22 +141,21 @@ int list(const Arguments& arguments, const Opened& opened)
         print_json({{"archives", std::move(list)}});
         return exit_code::passed;
     }
+    const auto& text = arguments.text;
     if (opened.statuses.empty()) {
-        std::cout << "No archives registered.\n";
+        std::cout << text("No archives registered.") << '\n';
     }
     for (const auto& status : opened.statuses) {
         std::cout << display_label(status) << "  " << status.archive.archive_uuid.substr(0, 8)
                   << "  r" << status.archive.current_revision
-                  << (status.archive.status == "REGISTERED" ? "" : "  " + status.archive.status);
+                  << (status.archive.status == "REGISTERED" ? "" : "  " + text(status.archive.status));
         if (status.header) {
             const auto& identity = status.header->identity;
             std::cout << "  \"" << identity.volume_label << "\"  "
                       << (identity.devices.empty() ? "" : identity.devices.front().model);
         }
-        std::cout << "\n    Last FULL verify: " << run_summary(status.last_full, false)
-                  << (status.full_overdue ? "  OVERDUE" : "")
-                  << "\n    Last verify: " << run_summary(status.last_any, true)
-                  << (status.any_overdue ? "  OVERDUE" : "") << '\n';
+        std::cout << "\n    " << last_verify_line(text, status.last_full, false, status.full_overdue)
+                  << "\n    " << last_verify_line(text, status.last_any, true, status.any_overdue) << '\n';
     }
     return exit_code::passed;
 }
@@ -161,31 +187,37 @@ int show(const Arguments& arguments, Opened& opened)
         print_json(json);
         return exit_code::passed;
     }
-    std::cout << display_label(*status) << "  " << status->archive.archive_uuid
-              << "\n  status: " << status->archive.status << "  revision: " << status->archive.current_revision
-              << "\n  registered: " << status->archive.created << "\n  root_subpath: "
-              << (status->archive.root_subpath.empty() ? "(volume root)" : status->archive.root_subpath)
+    const auto& text = arguments.text;
+    std::cout << display_label(*status) << "  " << status->archive.archive_uuid << "\n  "
+              << text.format("status: {}  revision: {}", text(status->archive.status),
+                     status->archive.current_revision)
+              << "\n  " << text.format("registered: {}", status->archive.created) << "\n  "
+              << text.format("root_subpath: {}",
+                     status->archive.root_subpath.empty() ? text("(volume root)") : status->archive.root_subpath)
               << '\n';
     if (status->header) {
         const auto& header = *status->header;
-        std::cout << "  filesystem: " << header.identity.filesystem_type << " "
-                  << header.identity.filesystem_uuid << "  label \"" << header.identity.volume_label << "\"\n";
+        std::cout << "  "
+                  << text.format("filesystem: {} {}  label \"{}\"", header.identity.filesystem_type,
+                         header.identity.filesystem_uuid, header.identity.volume_label)
+                  << '\n';
         for (const auto& device : header.identity.devices) {
-            std::cout << "  device: " << device.model
-                      << (device.serial.empty() ? "  wwn " + device.wwn : "  serial " + device.serial)
+            std::cout << "  "
+                      << (device.serial.empty() ? text.format("device: {}  wwn {}", device.model, device.wwn)
+                                                : text.format("device: {}  serial {}", device.model, device.serial))
                       << std::endl;
         }
-        std::cout << "  content: " << header.counts.files << " files, " << header.counts.dirs
-                  << " empty directories, " << header.counts.links << " links, " << header.counts.bytes
-                  << " bytes\n";
+        std::cout << "  "
+                  << text.format("content: {} files, {} empty directories, {} links, {} bytes", header.counts.files,
+                         header.counts.dirs, header.counts.links, header.counts.bytes)
+                  << '\n';
         if (header.copy_of) {
-            std::cout << "  copy of: " << *header.copy_of << '\n';
+            std::cout << "  " << text.format("copy of: {}", *header.copy_of) << '\n';
         }
     }
-    std::cout << "  Last FULL verify: " << run_summary(status->last_full, false)
-              << (status->full_overdue ? "  OVERDUE" : "")
-              << "\n  Last verify: " << run_summary(status->last_any, true)
-              << (status->any_overdue ? "  OVERDUE" : "") << "\n  revisions:\n";
+    std::cout << "  " << last_verify_line(text, status->last_full, false, status->full_overdue) << "\n  "
+              << last_verify_line(text, status->last_any, true, status->any_overdue) << "\n  "
+              << text("revisions:") << '\n';
     for (const auto& revision : *revisions) {
         std::cout << "    r" << revision.revision << "  " << revision.created << "  "
                   << revision.manifest_relpath << '\n';
@@ -207,9 +239,10 @@ int retire(const Arguments& arguments, Opened& opened)
     if (arguments.json) {
         print_json({{"archive_uuid", archive.archive_uuid}, {"status", archive.status}});
     } else {
-        std::cout << "Retired " << display_label(*status) << " (" << archive.archive_uuid
-                  << "). It is no longer expected to be verified, is still recognised when "
-                     "attached, and keeps its history.\n";
+        std::cout << arguments.text.format("Retired {} ({}). It is no longer expected to be verified, is still "
+                                           "recognised when attached, and keeps its history.",
+                         display_label(*status), archive.archive_uuid)
+                  << '\n';
     }
     return exit_code::passed;
 }
@@ -238,15 +271,16 @@ int relocate(const Arguments& arguments, Opened& opened)
         opened.store, opened.session.context.repo, opened.session.context.repository_uuid, host_info()};
     CancelToken cancel;
     platform::cancel_on_interrupt(cancel);
-    CliProgress progress(arguments.json);
+    CliProgress progress(arguments);
     const auto outcome = relocate_archive(services, request, cancel, progress);
     progress.finish();
 
+    const auto& text = arguments.text;
     if (!outcome) {
         if (outcome.error().kind == RelocateFailure::Kind::Differs && !arguments.json) {
-            std::cout << "RELOCATION REFUSED: " << outcome.error().message << '\n';
+            std::cout << text.format("RELOCATION REFUSED: {}", text(outcome.error().message)) << '\n';
             for (const auto& item : outcome.error().items) {
-                std::cout << "  " << item.status << "  " << item.path.p << '\n';
+                std::cout << "  " << text(item.status) << "  " << item.path.p << '\n';
             }
             return exit_code::failed;
         }
@@ -262,13 +296,15 @@ int relocate(const Arguments& arguments, Opened& opened)
             {"result", outcome->result}, {"run_id", outcome->run_id},
             {"manifest", path_to_utf8(outcome->manifest)}, {"counts", outcome->counts}});
     } else {
-        std::cout << "Relocated " << outcome->label << " (" << outcome->archive_uuid << ") to "
-                  << path_to_utf8(request.root) << " as revision " << outcome->revision
-                  << "\n  FULL VERIFY " << outcome->result << " of the new carrier (run " << outcome->run_id
-                  << ")\n";
+        std::cout << text.format("Relocated {} ({}) to {} as revision {}", outcome->label, outcome->archive_uuid,
+                         path_to_utf8(request.root), outcome->revision)
+                  << "\n  "
+                  << text.format("FULL VERIFY {} of the new carrier (run {})", text(outcome->result),
+                         outcome->run_id)
+                  << '\n';
         for (const auto& item : outcome->items) {
-            std::cout << "  " << item.status << "  " << item.path.p
-                      << (item.detail.empty() ? "" : "  (" + item.detail + ")") << '\n';
+            std::cout << "  " << text(item.status) << "  " << item.path.p
+                      << (item.detail.empty() ? "" : "  (" + text(item.detail) + ")") << '\n';
         }
     }
     return outcome->result == "PASSED" ? exit_code::passed : exit_code::passed_with_warnings;
@@ -333,15 +369,17 @@ int history_command(const Arguments& arguments)
         print_json({{"archive_uuid", status->archive.archive_uuid}, {"runs", std::move(list)}});
         return exit_code::passed;
     }
+    const auto& text = arguments.text;
     std::cout << display_label(*status) << "  " << status->archive.archive_uuid << '\n';
     if (runs->empty()) {
-        std::cout << "  never verified\n";
+        std::cout << "  " << text("never verified") << '\n';
     }
     for (const auto& run : *runs) {
-        std::cout << "  " << run.finished << "  " << run.mode << " VERIFY " << run.result << "  r"
-                  << run.revision << "  " << (run.coverage_bytes ? *run.coverage_bytes : 0) << " bytes"
-                  << (run.failure_classes.empty() ? "" : "  " + run.failure_classes) << "  " << run.run_id
-                  << '\n';
+        std::cout << "  "
+                  << text.format("{}  {} VERIFY {}  r{}  {} bytes", run.finished, text(run.mode), text(run.result),
+                         run.revision, run.coverage_bytes.value_or(0))
+                  << (run.failure_classes.empty() ? "" : "  " + failure_classes_text(text, run.failure_classes))
+                  << "  " << run.run_id << '\n';
     }
     return exit_code::passed;
 }

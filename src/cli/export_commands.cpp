@@ -53,11 +53,13 @@ int export_sha256sums_command(const Arguments& arguments)
         print_json({{"archive_uuid", (*archive)->archive_uuid}, {"out", path_to_utf8(destination)},
             {"skipped", sums.skipped}});
     } else {
-        std::cout << "Wrote " << path_to_utf8(destination) << " for " << (*archive)->label
-                  << " revision " << (*archive)->current_revision
-                  << ". Check it from the archive root with: sha256sum -c <file>\n";
+        const auto& text = arguments.text;
+        std::cout << text.format("Wrote {} for {} revision {}. Check it from the archive root with: "
+                                 "sha256sum -c <file>",
+                         path_to_utf8(destination), (*archive)->label, (*archive)->current_revision)
+                  << '\n';
         for (const auto& skipped : sums.skipped) {
-            std::cout << "  skipped: " << skipped << '\n';
+            std::cout << "  " << text.format("skipped: {}", text(skipped)) << '\n';
         }
     }
     return exit_code::passed;
@@ -90,8 +92,9 @@ int export_command(const Arguments& arguments)
         print_json({{"manifest", path_to_utf8(exported->manifest)},
             {"identity", path_to_utf8(exported->identity)}});
     } else {
-        std::cout << "Exported " << path_to_utf8(exported->manifest) << "\n     and "
-                  << path_to_utf8(exported->identity) << '\n';
+        std::cout << arguments.text.format("Exported {}\n     and {}", path_to_utf8(exported->manifest),
+                         path_to_utf8(exported->identity))
+                  << '\n';
     }
     return exit_code::passed;
 }
@@ -124,11 +127,14 @@ int import_command(const Arguments& arguments)
             {"revision", imported->revision}, {"already_present", imported->already_present},
             {"new_archive", imported->new_archive}});
     } else if (imported->already_present) {
-        std::cout << "Already present: " << imported->label << " (" << imported->archive_uuid
-                  << ") revision " << imported->revision << ", identical bytes.\n";
+        std::cout << arguments.text.format("Already present: {} ({}) revision {}, identical bytes.",
+                         imported->label, imported->archive_uuid, imported->revision)
+                  << '\n';
     } else {
-        std::cout << "Imported " << imported->label << " (" << imported->archive_uuid << ") revision "
-                  << imported->revision << (imported->new_archive ? " as a new archive" : "") << ".\n";
+        std::cout << arguments.text.format(imported->new_archive ? "Imported {} ({}) revision {} as a new archive."
+                                                                  : "Imported {} ({}) revision {}.",
+                         imported->label, imported->archive_uuid, imported->revision)
+                  << '\n';
     }
     return exit_code::passed;
 }

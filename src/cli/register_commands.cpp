@@ -26,32 +26,38 @@ int failure_code(RegisterFailure::Kind kind)
     }
 }
 
-void print_outcome(const RegisterOutcome& outcome, const std::filesystem::path& root)
+void print_outcome(const app::Text& text, const RegisterOutcome& outcome, const std::filesystem::path& root)
 {
-    std::cout << "Registered " << outcome.label << " (" << outcome.archive_uuid << ") revision "
-              << outcome.revision << "\n  root: " << path_to_utf8(root)
-              << "\n  files: " << outcome.counts.files << "  directories: " << outcome.counts.dirs
-              << "  links: " << outcome.counts.links << "  hashed bytes: " << outcome.counts.bytes
-              << "\n  manifest: " << path_to_utf8(outcome.manifest) << '\n';
+    std::cout << text.format("Registered {} ({}) revision {}", outcome.label, outcome.archive_uuid,
+                     outcome.revision)
+              << "\n  " << text.format("root: {}", path_to_utf8(root))
+              << "\n  " << text.format("files: {}  directories: {}  links: {}  hashed bytes: {}",
+                     outcome.counts.files, outcome.counts.dirs, outcome.counts.links, outcome.counts.bytes)
+              << "\n  " << text.format("manifest: {}", path_to_utf8(outcome.manifest)) << '\n';
     if (!outcome.unreadable.empty()) {
-        std::cout << "  unreadable at registration (" << outcome.unreadable.size()
-                  << "; recorded without hashes, never reported as verified):\n";
+        std::cout << "  "
+                  << text.format("unreadable at registration ({}; recorded without hashes, never reported "
+                                 "as verified):",
+                         outcome.unreadable.size())
+                  << '\n';
         for (const auto& entry : outcome.unreadable) {
-            std::cout << "    " << entry.unreadable << "  " << entry.path.p << '\n';
+            std::cout << "    " << text(entry.unreadable) << "  " << entry.path.p << '\n';
         }
     }
     for (const auto& mount_point : outcome.skipped_mount_points) {
-        std::cout << "  skipped mount point: " << mount_point.p << '\n';
+        std::cout << "  " << text.format("skipped mount point: {}", mount_point.p) << '\n';
     }
     for (const auto& warning : outcome.warnings) {
-        std::cout << "  warning: " << warning << '\n';
+        std::cout << "  " << text.format("warning: {}", text(warning)) << '\n';
     }
     // D5: without a media copy, the repository holds the only copy of the baseline.
     if (outcome.media_copy.empty()) {
-        std::cout << "  note: the baseline exists only in the repository; back up RepositoryRoot "
-                     "(or register with --write-media-copy to keep a copy on the media).\n";
+        std::cout << "  "
+                  << text("note: the baseline exists only in the repository; back up RepositoryRoot "
+                          "(or register with --write-media-copy to keep a copy on the media).")
+                  << '\n';
     } else {
-        std::cout << "  media copy: " << path_to_utf8(outcome.media_copy) << '\n';
+        std::cout << "  " << text.format("media copy: {}", path_to_utf8(outcome.media_copy)) << '\n';
     }
 }
 
@@ -132,7 +138,7 @@ int register_command(const Arguments& arguments)
 
     CancelToken cancel;
     platform::cancel_on_interrupt(cancel);
-    CliProgress progress(arguments.json);
+    CliProgress progress(arguments);
     const auto outcome = register_archive(services, request, cancel, progress);
     progress.finish();
     if (!outcome) {
@@ -142,7 +148,7 @@ int register_command(const Arguments& arguments)
     if (arguments.json) {
         print_json(outcome_json(*outcome));
     } else {
-        print_outcome(*outcome, request.root);
+        print_outcome(arguments.text, *outcome, request.root);
     }
     return outcome->unreadable.empty() ? exit_code::passed : exit_code::passed_with_warnings;
 }

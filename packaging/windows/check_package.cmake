@@ -52,7 +52,8 @@ endforeach()
 
 # Run the packaged programs with only Windows on PATH.
 set(clean_path "PATH=$ENV{SystemRoot}/System32;$ENV{SystemRoot}")
-execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" "${PREFIX}/bin/veriarchive-cli.exe"
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" VERIARCHIVE_LANG=en
+        "${PREFIX}/bin/veriarchive-cli.exe"
     RESULT_VARIABLE cli OUTPUT_VARIABLE usage)
 if(NOT cli EQUAL 0 OR NOT usage MATCHES "Usage: veriarchive-cli")
     message(FATAL_ERROR "the packaged CLI does not start without MSYS2 (exit ${cli})")
