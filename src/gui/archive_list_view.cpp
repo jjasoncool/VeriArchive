@@ -60,7 +60,9 @@ void refresh_archive_list(GuiState& state)
         gtk_label_set_text(GTK_LABEL(view.status), text(statuses.error().message).c_str());
         return;
     }
-    const auto count = text.format(statuses->size() == 1 ? "{} archive" : "{} archives", statuses->size());
+    // Two calls: the compiler checks each literal template against its value.
+    const auto count = statuses->size() == 1 ? text.format("{} archive", statuses->size())
+                                             : text.format("{} archives", statuses->size());
     gtk_label_set_text(GTK_LABEL(view.status), count.c_str());
 
     const char* headers[] = {"Label", "UUID", "Volume", "Model", "Capacity", "Last FULL verify",

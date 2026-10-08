@@ -9,8 +9,10 @@
 // Messages that come from the engines (core) are plain English sentences with
 // values already inserted, e.g. "cannot scan the root: access denied". Text
 // still translates them: a catalog template "cannot scan the root: {}" matches
-// the sentence and the value is carried over into the translation. A value
-// after a final ": " is the cause, itself a message, and is translated too.
+// the sentence and the value is carried over into the translation. Values are
+// data (paths, labels, uuids, numbers) and are never translated. The one
+// exception is a template marked Match::Cause: a wrapper whose last value is
+// itself an engine message (the cause), which is translated too.
 //
 // A translation may refer to values by position ("{1}...{0}") when Chinese
 // word order differs from English.
@@ -35,8 +37,17 @@ std::string_view language_name(Language language);  // "English" or "繁體中�
 
 // Resolution order: explicit choice (--lang, VERIARCHIVE_LANG), the config
 // file's "language", the operating system's interface language, English.
+// The system value may be a ':'-separated priority list, as in Linux's
+// LANGUAGE ("fr:zh_TW:en"): its first recognised entry wins.
 Language resolve_language(std::optional<std::string> explicit_code,
     std::optional<std::string> configured_code, std::string_view system_code);
+
+// Fills `translated` with the values. When the translation does not fit the
+// values (std::format_error), the English template is used instead: the
+// compiler has already checked it, so a bad catalog entry shows English text
+// rather than ending the program. Used by Text::format.
+std::string format_translation(std::string_view translated, std::string_view english_template,
+    std::format_args values);
 
 class Text {
 public:
@@ -50,12 +61,20 @@ public:
 
     // Translates a "{}" template, then fills in the values:
     //   text.format("Registered {} revision {}", label, revision)
+    // The template must be a string literal: like std::format, the compiler
+    // checks that it fits the values. To choose between two messages, call
+    // format twice instead of passing `condition ? "a {}" : "b {}"`.
     template <typename... Args>
-    std::string format(std::string_view english_template, const Args&... values) const
+    std::string format(std::format_string<const Args&...> english_template,
+        const Args&... values) const
     {
-        const auto translated = translate_template(english_template);
-        return std::vformat(translated, std::make_format_args(values...));
+        const auto english = english_template.get();
+        return format_translation(translate_template(english), english,
+            std::make_format_args(values...));
     }
+
+    // An aside in the language's brackets: "(x)" in English, "（x）" in Chinese.
+    std::string parenthesized(std::string_view inner) const;
 
 private:
     std::string translate(std::string_view english, int depth) const;
@@ -63,10 +82,18 @@ private:
     Language language_;
 };
 
+// How a catalog template takes part in translating engine sentences.
+enum class Match {
+    Values,      // the values (paths, labels, uuids, numbers) are carried over unchanged
+    Cause,       // a wrapper "context: {}": the last value is an engine message, translated too
+    FormatOnly,  // used only through Text::format, never matched against sentences
+};
+
 // One English -> Chinese pair of a catalog.
 struct CatalogEntry {
     std::string_view english;
     std::string_view translation;
+    Match match = Match::Values;
 };
 
 // The Traditional Chinese catalog (text_zh_tw.cpp).

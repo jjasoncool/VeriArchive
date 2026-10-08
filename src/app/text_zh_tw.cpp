@@ -2,6 +2,11 @@
 // text written in the code with its translation; "{}" marks a value and must
 // appear the same number of times on both sides ("{0}", "{1}" when the Chinese
 // word order differs). Terms follow the table in decision 0017.
+//
+// An entry may add a match mode (text.h): Match::Cause for a wrapper whose last
+// value is an engine message ("context: {}"), Match::FormatOnly for a template
+// used only through Text::format. Without one, values are carried over as they
+// are.
 #include "app/text.h"
 
 #include <span>
@@ -77,8 +82,8 @@ constexpr CatalogEntry entries[] = {
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n"},
     // src/cli/cli_support.cpp
-    {"error: {}", "錯誤：{}"},
-    {"warning: {}", "警告：{}"},
+    {"error: {}", "錯誤：{}", Match::Cause},
+    {"warning: {}", "警告：{}", Match::Cause},
     {"option {} needs a value", "選項 {} 需要一個值"},
     {"--lang takes en or zh-TW", "--lang 只接受 en 或 zh-TW"},
     {"unknown option {}", "未知的選項 {}"},
@@ -122,7 +127,7 @@ constexpr CatalogEntry entries[] = {
     {"root: {}", "根目錄：{}"},
     {"files: {}  directories: {}  links: {}  hashed bytes: {}",
         "檔案：{}  資料夾：{}  符號連結：{}  已計算雜湊位元組：{}"},
-    {"manifest: {}", "清單檔：{}"},
+    {"manifest: {}", "清單檔：{}", Match::Cause},
     {"unreadable at registration ({}; recorded without hashes, never reported as verified):",
         "註冊時無法讀取（{} 個；已記錄但不含雜湊，絕不會回報為已驗證）："},
     {"skipped mount point: {}", "已略過掛載點：{}"},
@@ -140,7 +145,7 @@ constexpr CatalogEntry entries[] = {
     {"not a directory: {}", "不是資料夾：{}"},
     // src/cli/verify_commands.cpp
     {"FULL VERIFY {}  {} ({}) revision {}", "完整驗證 {}  {}（{}）版次 {}"},
-    {"identity: {}", "媒體身分：{}"},
+    {"identity: {}", "媒體身分：{}", Match::Cause},
     {"coverage: {} of {} registered bytes read and matched",
         "涵蓋範圍：已註冊的 {1} 位元組中，有 {0} 位元組已讀取且相符"},
     {"items:", "項目："},
@@ -186,7 +191,7 @@ constexpr CatalogEntry entries[] = {
     {"Relocated {} ({}) to {} as revision {}", "已將 {}（{}）搬移至 {}，成為版次 {}"},
     {"FULL VERIFY {} of the new carrier (run {})", "新載體的完整驗證：{}（執行 {}）"},
     {"never verified", "從未驗證"},
-    {"{}  {} VERIFY {}  r{}  {} bytes", "{}  {} {}  r{}  {} 位元組"},
+    {"{}  {} VERIFY {}  r{}  {} bytes", "{}  {} {}  r{}  {} 位元組", Match::FormatOnly},
     {"several archives start with {}", "有多個封存以 {} 開頭"},
     {"no archive {}", "找不到封存 {}"},
     {"usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
@@ -227,8 +232,8 @@ constexpr CatalogEntry entries[] = {
     // src/gui/archive_list_view.cpp
     {"never", "從未"},
     {"No repository is open; see Settings.", "目前沒有開啟的儲存庫；請參閱「設定」。"},
-    {"{} archive", "{} 個封存"},
-    {"{} archives", "{} 個封存"},
+    {"{} archive", "{} 個封存", Match::FormatOnly},
+    {"{} archives", "{} 個封存", Match::FormatOnly},
     {"Label", "標籤"},
     {"UUID", "UUID"},
     {"Volume", "磁碟區"},
@@ -289,7 +294,7 @@ constexpr CatalogEntry entries[] = {
     {"cannot locate the config file", "找不到設定檔的位置"},
     // src/gui/register_view.cpp
     {"{} files, {} empty directories, {} links, {} hashed",
-        "{} 個檔案、{} 個空資料夾、{} 個符號連結，已計算雜湊 {}"},
+        "{} 個檔案、{} 個空資料夾、{} 個符號連結，已計算雜湊 {}", Match::FormatOnly},
     {"Manifest: {}", "清單檔：{}"},
     {"Unreadable at registration (recorded without hashes, never reported as verified):",
         "註冊時無法讀取（已記錄但不含雜湊，絕不會回報為已驗證）："},
@@ -323,7 +328,7 @@ constexpr CatalogEntry entries[] = {
     {"Cancel", "取消"},
     // src/gui/verify_view.cpp
     {"FULL VERIFY {}", "完整驗證 {}"},
-    {"{} ({}) revision {}", "{}（{}）版次 {}"},
+    {"{} ({}) revision {}", "{}（{}）版次 {}", Match::FormatOnly},
     {"Root: {}", "根目錄：{}"},
     {"Identity: {}", "媒體身分：{}"},
     {"Coverage: {} of {} registered bytes read and matched",
@@ -393,14 +398,14 @@ constexpr CatalogEntry entries[] = {
         "--new-revision：此根目錄沒有已註冊的封存"},
     {"labels have the form ARCH-NNNN", "標籤的格式為 ARCH-NNNN"},
     {"--copy-of needs an archive uuid", "--copy-of 需要一個封存 uuid"},
-    {"cannot identify the volume of the root: {}", "無法識別根目錄所在的磁碟區：{}"},
+    {"cannot identify the volume of the root: {}", "無法識別根目錄所在的磁碟區：{}", Match::Cause},
     {"there is no interrupted registration of this root to resume", "此根目錄沒有可繼續的中斷註冊"},
     {"the archive of the interrupted registration is missing", "找不到中斷的註冊所屬的封存"},
     {"an interrupted registration of this root exists (archive {}); finish it with --resume",
         "此根目錄有一個中斷的註冊（封存 {}）；請以 --resume 完成它"},
     {"the archive to re-baseline is missing from the database",
         "資料庫中找不到要重新建立基準的封存"},
-    {"cannot write the media copy: {}", "無法寫入媒體副本：{}"},
+    {"cannot write the media copy: {}", "無法寫入媒體副本：{}", Match::Cause},
     {"registration was interrupted while scanning; "
         "continue with `register <root_path> --resume`",
         "註冊在掃描時中斷；請以 `register <root_path> --resume` 繼續"},
@@ -409,13 +414,13 @@ constexpr CatalogEntry entries[] = {
         "裝置在註冊期間中斷連線；請以 `register <root_path> --resume` 繼續"},
     {"registration was cancelled; continue with `register <root_path> --resume`",
         "註冊已取消；請以 `register <root_path> --resume` 繼續"},
-    {"cannot scan the root: {}", "無法掃描根目錄：{}"},
-    {"cannot write the manifest: {}", "無法寫入清單檔：{}"},
-    {"cannot record the archive: {}", "無法記錄封存：{}"},
-    {"the manifest copy on the media could not be written: {}", "無法寫入清單檔的媒體副本：{}"},
+    {"cannot scan the root: {}", "無法掃描根目錄：{}", Match::Cause},
+    {"cannot write the manifest: {}", "無法寫入清單檔：{}", Match::Cause},
+    {"cannot record the archive: {}", "無法記錄封存：{}", Match::Cause},
+    {"the manifest copy on the media could not be written: {}", "無法寫入清單檔的媒體副本：{}", Match::Cause},
     {"{} entries carry portability warnings", "{} 個項目帶有可攜性警告"},
     // src/core/engine/verify_engine.cpp
-    {"cannot list volumes: {}", "無法列出磁碟區：{}"},
+    {"cannot list volumes: {}", "無法列出磁碟區：{}", Match::Cause},
     {"archive {} is not on any attached volume", "封存 {} 不在任何已連接的磁碟區上"},
     {"run {} is not an interrupted run", "執行 {} 不是中斷的執行"},
     {"run {} has an invalid resume record", "執行 {} 的繼續紀錄無效"},
@@ -442,17 +447,17 @@ constexpr CatalogEntry entries[] = {
         "執行 {} 無法繼續：自開始以來媒體身分或封存版次已改變；請執行新的驗證"},
     {"identity: no hardware serial to compare (MATCH_WEAK)",
         "媒體身分：沒有可比對的硬體序號（弱相符）"},
-    {"scan: {}", "掃描：{}"},
+    {"scan: {}", "掃描：{}", Match::Cause},
     {"verification finished as PASSED but could not be recorded: {}",
-        "驗證結果為通過，但無法記錄：{}"},
+        "驗證結果為通過，但無法記錄：{}", Match::Cause},
     {"verification finished as PASSED_WITH_WARNINGS but could not be recorded: {}",
-        "驗證結果為通過（有警告），但無法記錄：{}"},
+        "驗證結果為通過（有警告），但無法記錄：{}", Match::Cause},
     {"verification finished as FAILED but could not be recorded: {}",
-        "驗證結果為失敗，但無法記錄：{}"},
+        "驗證結果為失敗，但無法記錄：{}", Match::Cause},
     {"verification finished as INCOMPLETE but could not be recorded: {}",
-        "驗證結果為未完成，但無法記錄：{}"},
+        "驗證結果為未完成，但無法記錄：{}", Match::Cause},
     // src/core/engine/candidates.cpp
-    {"invalid recorded manifest header for {}: {}", "封存 {} 記錄的清單檔標頭無效：{}"},
+    {"invalid recorded manifest header for {}: {}", "封存 {} 記錄的清單檔標頭無效：{}", Match::Cause},
     {"the root is not on the reported volume", "根目錄不在回報的磁碟區上"},
     // src/core/engine/comparison.cpp
     {"Unreadable(permission)", "無法讀取（權限不足）"},
@@ -486,19 +491,19 @@ constexpr CatalogEntry entries[] = {
     // src/core/engine/relocate_engine.cpp
     {"a retired archive takes no new revisions (decision 0003)",
         "已停用的封存不再接受新的版次（決策紀錄 0003）"},
-    {"cannot identify the volume of the new root: {}", "無法識別新根目錄所在的磁碟區：{}"},
+    {"cannot identify the volume of the new root: {}", "無法識別新根目錄所在的磁碟區：{}", Match::Cause},
     {"the new root overlaps archive {} on the same volume (decision 0001)",
         "新根目錄與同一磁碟區上的封存 {} 重疊（決策紀錄 0001）"},
-    {"ManifestHashMismatch: {}", "清單檔雜湊不符：{}"},
-    {"ManifestRevisionRollback: {}", "清單檔版次倒退：{}"},
-    {"RepositoryError: {}", "儲存庫錯誤：{}"},
+    {"ManifestHashMismatch: {}", "清單檔雜湊不符：{}", Match::Cause},
+    {"ManifestRevisionRollback: {}", "清單檔版次倒退：{}", Match::Cause},
+    {"RepositoryError: {}", "儲存庫錯誤：{}", Match::Cause},
     {"relocation was interrupted; nothing was changed", "搬移已中斷；未做任何變更"},
-    {"cannot scan the new root: {}", "無法掃描新根目錄：{}"},
+    {"cannot scan the new root: {}", "無法掃描新根目錄：{}", Match::Cause},
     {"the new carrier does not hold the recorded content; "
         "nothing was changed (use `register --new-revision` to re-baseline changed content)",
         "新載體上的內容與記錄不符；未做任何變更（若內容已變更，"
         "請使用 `register --new-revision` 重新建立基準）"},
-    {"cannot record the relocation: {}", "無法記錄搬移：{}"},
+    {"cannot record the relocation: {}", "無法記錄搬移：{}", Match::Cause},
     // src/core/engine/transfer.cpp
     {"cannot compare with the stored manifest", "無法與已儲存的清單檔比較"},
     {"revision {} is already known with different bytes", "版次 {} 已存在，但位元組內容不同"},
@@ -517,7 +522,7 @@ constexpr CatalogEntry entries[] = {
     {"Repository path is empty", "儲存庫路徑是空的"},
     {"Policy must be an object", "policy 必須是 JSON 物件"},
     {"Trusted keys must be an array", "受信任的金鑰必須是 JSON 陣列"},
-    {"Invalid config: {}", "設定檔無效：{}"},
+    {"Invalid config: {}", "設定檔無效：{}", Match::Cause},
     // src/common/archive_path.cpp
     {"ArchivePath must be relative", "ArchivePath 必須是相對路徑"},
     {"ArchivePath cannot contain ..", "ArchivePath 不可包含 .."},
@@ -525,8 +530,8 @@ constexpr CatalogEntry entries[] = {
     {"invalid raw ArchivePath", "無效的原始 ArchivePath"},
     {"invalid ArchivePath", "無效的 ArchivePath"},
     // src/core/repository/repository.cpp
-    {"cannot write repository.json: {}", "無法寫入 repository.json：{}"},
-    {"cannot create repository directory: {}", "無法建立儲存庫資料夾：{}"},
+    {"cannot write repository.json: {}", "無法寫入 repository.json：{}", Match::Cause},
+    {"cannot create repository directory: {}", "無法建立儲存庫資料夾：{}", Match::Cause},
     {"cannot inspect repository schema", "無法檢查儲存庫的結構描述"},
     {"cannot inspect repository tables", "無法檢查儲存庫的資料表"},
     {"Explicit config does not exist", "指定的設定檔不存在"},
@@ -541,27 +546,27 @@ constexpr CatalogEntry entries[] = {
         "set allow_network_repository or move the repository",
         "在網路檔案系統上使用 SQLite 並不安全（鎖定、WAL）；請設定 allow_network_repository，"
         "或將儲存庫移到其他位置"},
-    {"cannot pin repository in config: {}", "無法在設定檔中固定儲存庫：{}"},
+    {"cannot pin repository in config: {}", "無法在設定檔中固定儲存庫：{}", Match::Cause},
     {"Invalid repository.json", "repository.json 無效"},
-    {"cannot record repository_uuid in config: {}", "無法在設定檔中記錄 repository_uuid：{}"},
+    {"cannot record repository_uuid in config: {}", "無法在設定檔中記錄 repository_uuid：{}", Match::Cause},
     {"unsupported repository schema", "不支援的儲存庫結構描述"},
     {"unsupported or incomplete repository schema", "不支援或不完整的儲存庫結構描述"},
     // src/core/repository/sqlite_raii.cpp
     {"unknown SQLite error", "未知的 SQLite 錯誤"},
-    {"cannot open repository database: {}", "無法開啟儲存庫資料庫：{}"},
-    {"cannot execute SQL: {}", "無法執行 SQL：{}"},
-    {"cannot prepare SQL: {}", "無法準備 SQL 陳述式：{}"},
-    {"cannot run SQL: {}", "無法執行 SQL 陳述式：{}"},
+    {"cannot open repository database: {}", "無法開啟儲存庫資料庫：{}", Match::Cause},
+    {"cannot execute SQL: {}", "無法執行 SQL：{}", Match::Cause},
+    {"cannot prepare SQL: {}", "無法準備 SQL 陳述式：{}", Match::Cause},
+    {"cannot run SQL: {}", "無法執行 SQL 陳述式：{}", Match::Cause},
     // src/core/manifest/manifest.cpp
     {"not a version 1 .vam manifest", "不是格式版本 1 的 .vam 清單檔"},
     {"unknown entry type {}", "未知的項目類型 {}"},
     // src/core/manifest/manifest_reader.cpp
     {"manifest does not end with a newline", "清單檔未以換行字元結尾"},
     {"empty manifest", "清單檔是空的"},
-    {"invalid manifest header: {}", "清單檔標頭無效：{}"},
+    {"invalid manifest header: {}", "清單檔標頭無效：{}", Match::Cause},
     {"manifest body does not match its header (ManifestHashMismatch)",
         "清單檔主體與其標頭不符（清單檔雜湊不符）"},
-    {"invalid manifest entry: {}", "清單檔項目無效：{}"},
+    {"invalid manifest entry: {}", "清單檔項目無效：{}", Match::Cause},
     {"manifest entries out of canonical order", "清單檔項目未依標準順序排列"},
     // src/core/manifest/manifest_writer.cpp
     {"manifest entries out of canonical order at {}", "清單檔項目在 {} 處未依標準順序排列"},
@@ -596,7 +601,7 @@ constexpr CatalogEntry entries[] = {
     // src/platform/windows/file_writer_win.cpp
     {"cannot create temporary file", "無法建立暫存檔案"},
     // src/platform/linux/posix_util.cpp
-    {"{} failed: {}", "{} 失敗：{}"},
+    {"{} failed: {}", "{} 失敗：{}", Match::Cause},
     // src/platform/linux/platform_services_linux.cpp
     {"readlink failed", "readlink 失敗"},
     {"HOME is unavailable", "無法取得 HOME"},

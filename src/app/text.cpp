@@ -22,29 +22,42 @@ std::string lowercase(std::string_view text)
 }
 
 // A catalog prepared for lookups: exact messages in a hash map, and templates
-// (messages with "{}") split into their literal parts, longest template first
-// so the most specific one wins.
+// (messages with "{}") split into their literal parts. Templates that start
+// with literal text are tried before templates that start with a value, so
+// "RepositoryError: {}" wraps "CreateFileW failed (Win32 error 2)" instead of
+// "{} failed (Win32 error {})" taking "RepositoryError: CreateFileW" as its
+// first value. Within each group the longest template goes first, so the most
+// specific one wins.
 struct PreparedCatalog {
     struct Pattern {
         std::vector<std::string> literals;  // the text around the "{}": one more than the values
         std::string translation;
         std::size_t length;
-        bool ends_with_cause;  // "context: {}": the last value is itself a message
+        bool translates_cause;   // Match::Cause: the last value is itself a message
+        bool may_match_a_cause;  // may match inside a cause (see Text::translate)
     };
     std::unordered_map<std::string, std::string> exact;
     std::vector<Pattern> patterns;
 };
 
+// True when the template starts with literal text rather than with a value.
+bool anchored(const PreparedCatalog::Pattern& pattern)
+{
+    return !pattern.literals.front().empty();
+}
+
 PreparedCatalog prepare(std::span<const CatalogEntry> entries)
 {
     PreparedCatalog catalog;
     for (const auto& entry : entries) {
+        // Every entry is found by exact lookup; Text::format needs nothing more.
         catalog.exact.emplace(std::string(entry.english), std::string(entry.translation));
-        if (entry.english.find("{}") == std::string_view::npos) {
+        const bool is_template = entry.english.find("{}") != std::string_view::npos;
+        if (!is_template || entry.match == Match::FormatOnly) {
             continue;
         }
         PreparedCatalog::Pattern pattern{{}, std::string(entry.translation), entry.english.size(),
-            entry.english.ends_with(": {}")};
+            entry.match == Match::Cause, false};
         std::size_t start = 0;
         for (auto found = entry.english.find("{}"); found != std::string_view::npos;
              found = entry.english.find("{}", start)) {
@@ -52,10 +65,21 @@ PreparedCatalog prepare(std::span<const CatalogEntry> entries)
             start = found + 2;
         }
         pattern.literals.emplace_back(entry.english.substr(start));
+        // Platform errors start with the name of the call that failed
+        // ("CreateFileW failed (Win32 error 5)", "open failed: Permission denied").
+        // They are the usual cause, so they may match one although they start
+        // with a value.
+        pattern.may_match_a_cause = anchored(pattern) || entry.english.starts_with("{} failed");
         catalog.patterns.push_back(std::move(pattern));
     }
+    // A stable sort keeps catalog order between templates that compare equal.
     std::stable_sort(catalog.patterns.begin(), catalog.patterns.end(),
-        [](const auto& left, const auto& right) { return left.length > right.length; });
+        [](const auto& left, const auto& right) {
+            if (anchored(left) != anchored(right)) {
+                return anchored(left);
+            }
+            return left.length > right.length;
+        });
     return catalog;
 }
 
@@ -160,7 +184,32 @@ Language resolve_language(std::optional<std::string> explicit_code,
             }
         }
     }
-    return parse_language(system_code).value_or(Language::English);
+    // The system value may be a ':'-separated priority list (Linux LANGUAGE,
+    // "fr:zh_TW:en"): the first entry with a catalog wins. None means English,
+    // like gettext's implicit "C" at the end of the list.
+    std::string_view list = system_code;
+    while (!list.empty()) {
+        const auto colon = list.find(':');
+        if (const auto language = parse_language(list.substr(0, colon))) {
+            return *language;
+        }
+        if (colon == std::string_view::npos) {
+            break;
+        }
+        list.remove_prefix(colon + 1);
+    }
+    return Language::English;
+}
+
+std::string format_translation(std::string_view translated, std::string_view english_template,
+    std::format_args values)
+{
+    try {
+        return std::vformat(translated, values);
+    } catch (const std::format_error&) {
+        // The English template was checked at compile time, so this cannot throw.
+        return std::vformat(english_template, values);
+    }
 }
 
 std::string Text::operator()(std::string_view english) const
@@ -168,9 +217,13 @@ std::string Text::operator()(std::string_view english) const
     return translate(english, 0);
 }
 
-// Engine errors wrap their cause: "cannot read the manifest: access denied".
-// When a template ends in ": {}", the cause is translated as well; other values
-// (paths, labels, numbers) are carried over unchanged.
+// Engine errors wrap their cause: "cannot scan the root: FindFirstFileExW failed
+// (Win32 error 5)". A template marked Match::Cause translates its last value as
+// a message of its own; all other values (paths, labels, uuids, numbers) are
+// carried over unchanged. Inside a cause (depth > 0) only exact messages,
+// templates that start with literal text, and platform errors may match: any
+// other template that starts with a value matches every text with the same
+// ending, which is too loose for a piece of another message.
 std::string Text::translate(std::string_view english, int depth) const
 {
     const auto& catalog = catalog_for(language_);
@@ -181,11 +234,14 @@ std::string Text::translate(std::string_view english, int depth) const
         return found->second;
     }
     for (const auto& pattern : catalog.patterns) {
+        if (depth > 0 && !pattern.may_match_a_cause) {
+            continue;
+        }
         auto values = match_template(pattern.literals, english);
         if (!values) {
             continue;
         }
-        if (pattern.ends_with_cause && depth < 4) {
+        if (pattern.translates_cause && depth < 4) {
             values->back() = translate(values->back(), depth + 1);
         }
         return fill(pattern.translation, *values);
@@ -198,6 +254,15 @@ std::string Text::translate_template(std::string_view english_template) const
     const auto& catalog = catalog_for(language_);
     const auto found = catalog.exact.find(std::string(english_template));
     return found == catalog.exact.end() ? std::string(english_template) : found->second;
+}
+
+std::string Text::parenthesized(std::string_view inner) const
+{
+    // Chinese text uses full-width brackets, as the catalog does throughout.
+    if (language_ == Language::TraditionalChinese) {
+        return "（" + std::string(inner) + "）";
+    }
+    return "(" + std::string(inner) + ")";
 }
 
 } // namespace va::app

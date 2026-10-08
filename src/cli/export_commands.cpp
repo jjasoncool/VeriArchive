@@ -130,9 +130,13 @@ int import_command(const Arguments& arguments)
         std::cout << arguments.text.format("Already present: {} ({}) revision {}, identical bytes.",
                          imported->label, imported->archive_uuid, imported->revision)
                   << '\n';
+    } else if (imported->new_archive) {
+        // Two calls, not one with `?:`: format checks each literal template at compile time.
+        std::cout << arguments.text.format("Imported {} ({}) revision {} as a new archive.",
+                         imported->label, imported->archive_uuid, imported->revision)
+                  << '\n';
     } else {
-        std::cout << arguments.text.format(imported->new_archive ? "Imported {} ({}) revision {} as a new archive."
-                                                                  : "Imported {} ({}) revision {}.",
+        std::cout << arguments.text.format("Imported {} ({}) revision {}.",
                          imported->label, imported->archive_uuid, imported->revision)
                   << '\n';
     }
