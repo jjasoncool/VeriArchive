@@ -16,3 +16,4 @@ When the verifying OS equals the revision's `created_by.os`, canonical targets m
 
 - R-66 golden fixtures use relative links only; absolute links get their own cross-OS test.
 - Under `--strict-metadata` a translated absolute target fails like any other metadata difference.
+- The manifest stores only the hash of a link target, so registration marks an absolute target with `warn:["link-absolute"]`; at verify time that flag tells whether the recorded side was absolute.

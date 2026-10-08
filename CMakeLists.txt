@@ -72,6 +72,7 @@ target_link_libraries(veriarchive_platform PUBLIC VeriArchive::core)
 if(WIN32)
     target_sources(veriarchive_platform PRIVATE
         src/platform/windows/file_writer_win.cpp
+        src/platform/windows/fs_access_win.cpp
         src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
         src/platform/windows/win_util.cpp
@@ -80,6 +81,7 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
         src/platform/linux/file_writer_linux.cpp
+        src/platform/linux/fs_access_linux.cpp
         src/platform/linux/media_enumerator_linux.cpp
         src/platform/linux/mountinfo.cpp
         src/platform/linux/platform_services_linux.cpp
@@ -112,6 +114,7 @@ if(BUILD_TESTING)
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
         tests/unit/file_writer_test.cpp
+        tests/unit/fs_access_test.cpp
         tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
         tests/unit/platform_test.cpp

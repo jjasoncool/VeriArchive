@@ -26,7 +26,9 @@ public:
     virtual std::size_t alignment() const = 0;
 };
 
-enum class EntryType { File, Directory, Link, Stream };
+// Special: FIFO, socket or device node (Linux). Never opened; recorded as an
+// unreadable entry (decision 0014).
+enum class EntryType { File, Directory, Link, Stream, Special };
 
 struct DirEntry {
     std::filesystem::path native_name;
