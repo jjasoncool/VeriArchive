@@ -257,6 +257,8 @@ if(BUILD_TESTING)
             -DCLI=$<TARGET_FILE:veriarchive_cli>
             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/cli_e2e.cmake)
+    # The test chooses the language through its config file and --lang.
+    set_tests_properties(veriarchive_cli_e2e PROPERTIES ENVIRONMENT_MODIFICATION "VERIARCHIVE_LANG=unset:")
 endif()
 
 if(MSVC)

@@ -27,6 +27,7 @@ function(run_cli expected_codes)
         message(FATAL_ERROR "veriarchive-cli ${ARGN}\nexit ${code}, expected one of ${expected_codes}\n${output}\n${errors}")
     endif()
     set(last_output "${output}" PARENT_SCOPE)
+    set(last_errors "${errors}" PARENT_SCOPE)
 endfunction()
 
 # A tree with CJK and emoji names, an empty directory and a nested file.
@@ -63,6 +64,20 @@ if(NOT last_output MATCHES "FULL VERIFY")
     message(FATAL_ERROR "--lang en does not override the configured language:\n${last_output}")
 endif()
 run_cli("10" --lang fr archive list)
+# Command-line errors follow --lang and the config file too.
+run_cli("10" --lang en archive list --label)
+if(NOT last_errors STREQUAL "error: option --label needs a value\n")
+    message(FATAL_ERROR "a parse error ignores --lang en:\n${last_errors}")
+endif()
+run_cli("10" archive list --label)
+if(NOT last_errors MATCHES "選項 --label 需要一個值")
+    message(FATAL_ERROR "a parse error ignores the configured language:\n${last_errors}")
+endif()
+# A path the user typed is shown as typed, even when it looks like a status word.
+run_cli("10" register Missing)
+if(NOT last_errors MATCHES "不是資料夾：Missing")
+    message(FATAL_ERROR "a typed path was translated:\n${last_errors}")
+endif()
 # Pinning the repository kept the language in the config file.
 file(READ "${WORK}/config.json" config)
 string(JSON language GET "${config}" language)

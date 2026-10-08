@@ -67,17 +67,30 @@ HostInfo host_info(std::string app_version)
 
 namespace {
 
+// The config file that open_session() would read, resolved the same way:
+// a relative path is taken from the executable's folder, never from the current
+// directory.
 std::optional<std::filesystem::path> config_path(std::optional<std::filesystem::path> explicit_config)
 {
+    if (explicit_config && !explicit_config->is_relative()) {
+        return explicit_config; // needs neither the executable nor the user config directory
+    }
     const auto executable = platform::executable_path();
-    const auto config_directory = platform::user_config_dir();
-    if (!executable || !config_directory) {
+    if (!executable) {
         return std::nullopt;
     }
     RepositoryOptions options;
     options.explicit_config = std::move(explicit_config);
     options.executable_dir = executable->parent_path();
-    options.user_config_dir = *config_directory;
+    if (!options.explicit_config) {
+        // Only the default location needs the user config directory, so an
+        // explicit --config still works when APPDATA / HOME are unset.
+        const auto config_directory = platform::user_config_dir();
+        if (!config_directory) {
+            return std::nullopt;
+        }
+        options.user_config_dir = *config_directory;
+    }
     auto path = config_file_path(options);
     if (path.is_relative()) {
         path = options.executable_dir / path;

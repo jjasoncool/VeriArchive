@@ -47,8 +47,11 @@ struct Arguments {
 };
 
 // Splits the command line. Known value options (--config, --lang, --label, ...)
-// take the next word as their value; any other "--name" is a flag.
-std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, std::string& error);
+// take the next word as their value; any other "--name" is a flag. On a usage
+// error `error` is set (the first one only). The result still carries the
+// --lang and --config that were read, so the error itself is shown in the
+// chosen language (decision 0017).
+Arguments parse_arguments(const std::vector<std::string>& raw, std::string& error);
 
 // A command's failure: the exit code to return and a message for the user,
 // written in English; report_failure() translates it for text output.

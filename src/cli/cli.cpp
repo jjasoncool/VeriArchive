@@ -35,47 +35,48 @@ int run(std::vector<std::string> raw_arguments)
     platform::prepare_console();
     std::string error;
     auto arguments = parse_arguments(raw_arguments, error);
-    if (!arguments) {
-        const app::Text text(app::interface_language(std::nullopt, std::nullopt));
-        std::cerr << text.format("error: {}", text(error)) << '\n';
+    // Chosen before a usage error is reported, so that error also follows --lang
+    // and the --config file's language (decision 0017).
+    arguments.text = app::Text(app::interface_language(arguments.language, arguments.config));
+    if (!error.empty()) {
+        std::cerr << arguments.text.format("error: {}", arguments.text(error)) << '\n';
         return exit_code::usage;
     }
-    arguments->text = app::Text(app::interface_language(arguments->language, arguments->config));
-    if (arguments->words.empty()) {
-        print_usage(arguments->text);
+    if (arguments.words.empty()) {
+        print_usage(arguments.text);
         return raw_arguments.empty() ? exit_code::passed : exit_code::usage;
     }
 
-    const auto& command = arguments->words.front();
+    const auto& command = arguments.words.front();
     if (command == "repo") {
-        return repo_command(*arguments);
+        return repo_command(arguments);
     }
     if (command == "media") {
-        return media_command(*arguments);
+        return media_command(arguments);
     }
     if (command == "register") {
-        return register_command(*arguments);
+        return register_command(arguments);
     }
     if (command == "verify") {
-        return verify_command(*arguments);
+        return verify_command(arguments);
     }
     if (command == "archive") {
-        return archive_command(*arguments);
+        return archive_command(arguments);
     }
     if (command == "history") {
-        return history_command(*arguments);
+        return history_command(arguments);
     }
     if (command == "export-sha256sums") {
-        return export_sha256sums_command(*arguments);
+        return export_sha256sums_command(arguments);
     }
     if (command == "export") {
-        return export_command(*arguments);
+        return export_command(arguments);
     }
     if (command == "import") {
-        return import_command(*arguments);
+        return import_command(arguments);
     }
 
-    print_usage(arguments->text);
+    print_usage(arguments.text);
     return exit_code::usage;
 }
 

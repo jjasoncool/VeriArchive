@@ -27,8 +27,11 @@ std::optional<std::string> Arguments::value(const std::string& option) const
     return found->second;
 }
 
-std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, std::string& error)
+Arguments parse_arguments(const std::vector<std::string>& raw, std::string& error)
 {
+    // A usage error does not throw the options away: run() still needs --lang and
+    // --config to show the error. (Searching `raw` for "--lang" instead would go
+    // wrong in `--label --lang`, where "--lang" is the label.)
     Arguments arguments;
     for (std::size_t index = 0; index < raw.size(); ++index) {
         const auto& token = raw[index];
@@ -50,8 +53,10 @@ std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, st
                 arguments.flags.insert(token);
                 continue;
             }
-            error = "option " + token + " needs a value";
-            return std::nullopt;
+            if (error.empty()) {
+                error = "option " + token + " needs a value";
+            }
+            break; // the last word: every option before it has been read
         }
         const auto& value = raw[++index];
         if (token == "--config") {
@@ -60,8 +65,10 @@ std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, st
             arguments.repository = path_from_utf8(value);
         } else if (token == "--lang") {
             if (!app::parse_language(value)) {
-                error = "--lang takes en or zh-TW";
-                return std::nullopt;
+                if (error.empty()) {
+                    error = "--lang takes en or zh-TW";
+                }
+                continue; // keep reading, so a later --config still chooses the language
             }
             arguments.language = value;
         } else {
