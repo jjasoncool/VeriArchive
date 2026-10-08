@@ -22,5 +22,6 @@ int main()
     sha256sums_tests();
     rebuild_index_tests();
     transfer_tests();
+    relocate_tests();
     return test_failures == 0 ? 0 : 1;
 }

@@ -1,10 +1,15 @@
-// `archive list | show <uuid> | retire <uuid>` and `history <uuid>`.
+// `archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>`
+// and `history <uuid>`.
 // Archives are always shown with their last FULL verify and last verify of any
 // mode, with dates and OVERDUE flags, never a bare "integrity status" (R-21).
 #include "cli/commands.h"
 
 #include "common/utf8.h"
 #include "core/engine/archive_status.h"
+#include "core/engine/relocate_engine.h"
+#include "platform/file_system.h"
+#include "platform/interrupt.h"
+#include "platform/media_enumerator.h"
 
 #include <iostream>
 
@@ -211,16 +216,77 @@ int retire(const Arguments& arguments, Opened& opened)
 
 } // namespace
 
+// Decision 0004: accept a copy (or a new enclosure) as the archive's carrier
+// after a FULL verify of every entry; VeriArchive itself copies nothing.
+int relocate(const Arguments& arguments, Opened& opened)
+{
+    const auto status = find_status(opened.statuses, arguments.words[2]);
+    if (!status) {
+        return report_failure(arguments, status.error());
+    }
+    RelocateRequest request{status->archive.archive_uuid, user_path(arguments.words[3]), std::nullopt};
+    if (const auto io = arguments.value("--io")) {
+        if (*io != "hdd" && *io != "ssd") {
+            return report_failure(arguments, {exit_code::usage, "--io takes hdd or ssd"});
+        }
+        request.rotational = *io == "hdd";
+    }
+    const auto archive_files = platform::make_file_system_access();
+    const auto repository_files = platform::make_file_system_access();
+    const auto media = platform::make_media_enumerator();
+    RelocateServices services{*archive_files, *repository_files, *opened.session.writer, *media,
+        opened.store, opened.session.context.repo, opened.session.context.repository_uuid, host_info()};
+    CancelToken cancel;
+    platform::cancel_on_interrupt(cancel);
+    CliProgress progress(arguments.json);
+    const auto outcome = relocate_archive(services, request, cancel, progress);
+    progress.finish();
+
+    if (!outcome) {
+        if (outcome.error().kind == RelocateFailure::Kind::Differs && !arguments.json) {
+            std::cout << "RELOCATION REFUSED: " << outcome.error().message << '\n';
+            for (const auto& item : outcome.error().items) {
+                std::cout << "  " << item.status << "  " << item.path.p << '\n';
+            }
+            return exit_code::failed;
+        }
+        const auto kind = outcome.error().kind;
+        const int code = kind == RelocateFailure::Kind::Incomplete ? exit_code::incomplete
+                         : kind == RelocateFailure::Kind::Differs  ? exit_code::failed
+                         : kind == RelocateFailure::Kind::Refused  ? exit_code::identity_decision
+                                                                   : exit_code::repository;
+        return report_failure(arguments, {code, outcome.error().message});
+    }
+    if (arguments.json) {
+        print_json({{"archive_uuid", outcome->archive_uuid}, {"revision", outcome->revision},
+            {"result", outcome->result}, {"run_id", outcome->run_id},
+            {"manifest", path_to_utf8(outcome->manifest)}, {"counts", outcome->counts}});
+    } else {
+        std::cout << "Relocated " << outcome->label << " (" << outcome->archive_uuid << ") to "
+                  << path_to_utf8(request.root) << " as revision " << outcome->revision
+                  << "\n  FULL VERIFY " << outcome->result << " of the new carrier (run " << outcome->run_id
+                  << ")\n";
+        for (const auto& item : outcome->items) {
+            std::cout << "  " << item.status << "  " << item.path.p
+                      << (item.detail.empty() ? "" : "  (" + item.detail + ")") << '\n';
+        }
+    }
+    return outcome->result == "PASSED" ? exit_code::passed : exit_code::passed_with_warnings;
+}
+
 int archive_command(const Arguments& arguments)
 {
-    if (const auto problem = check_options(arguments, {}, {})) {
+    const bool relocate_command = arguments.words.size() == 4 && arguments.words[1] == "relocate";
+    if (const auto problem = check_options(arguments, {}, relocate_command ? std::initializer_list<std::string_view>{"--io"}
+                                                                           : std::initializer_list<std::string_view>{})) {
         return report_failure(arguments, *problem);
     }
     const bool list_command = arguments.words.size() == 2 && arguments.words[1] == "list";
     const bool uuid_command = arguments.words.size() == 3 &&
                               (arguments.words[1] == "show" || arguments.words[1] == "retire");
-    if (!list_command && !uuid_command) {
-        return report_failure(arguments, {exit_code::usage, "usage: archive list | show <uuid> | retire <uuid>"});
+    if (!list_command && !uuid_command && !relocate_command) {
+        return report_failure(arguments, {exit_code::usage,
+            "usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--io hdd|ssd]"});
     }
     auto opened = open_statuses(arguments);
     if (!opened) {
@@ -228,6 +294,9 @@ int archive_command(const Arguments& arguments)
     }
     if (list_command) {
         return list(arguments, *opened);
+    }
+    if (relocate_command) {
+        return relocate(arguments, *opened);
     }
     return arguments.words[1] == "show" ? show(arguments, *opened) : retire(arguments, *opened);
 }

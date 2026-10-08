@@ -32,3 +32,4 @@ void archive_status_tests();
 void sha256sums_tests();
 void rebuild_index_tests();
 void transfer_tests();
+void relocate_tests();

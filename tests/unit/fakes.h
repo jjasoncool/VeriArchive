@@ -18,10 +18,12 @@ public:
     void on_progress(const va::Progress&) override {}
 };
 
-// Reports one fixed volume for every path.
+// Reports `volume` for every path, except paths below the mount point of one of
+// `extra_volumes` (the deepest match wins), like real nested mounts.
 class FakeMediaEnumerator final : public va::IMediaEnumerator {
 public:
     va::VolumeInfo volume;
+    std::vector<va::VolumeInfo> extra_volumes;
     std::optional<va::IoError> error;
 
     std::expected<std::vector<va::VolumeInfo>, va::IoError> volumes() override
@@ -29,15 +31,25 @@ public:
         if (error) {
             return std::unexpected(*error);
         }
-        return std::vector<va::VolumeInfo>{volume};
+        std::vector<va::VolumeInfo> all{volume};
+        all.insert(all.end(), extra_volumes.begin(), extra_volumes.end());
+        return all;
     }
 
-    std::expected<va::VolumeInfo, va::IoError> volume_for_path(const std::filesystem::path&) override
+    std::expected<va::VolumeInfo, va::IoError> volume_for_path(const std::filesystem::path& path) override
     {
         if (error) {
             return std::unexpected(*error);
         }
-        return volume;
+        const va::VolumeInfo* best = &volume;
+        for (const auto& extra : extra_volumes) {
+            const auto relative = path.lexically_normal().lexically_relative(extra.mount_point.lexically_normal());
+            const bool inside = !relative.empty() && !relative.native().starts_with(std::filesystem::path("..").native());
+            if (inside && extra.mount_point.native().size() >= best->mount_point.native().size()) {
+                best = &extra;
+            }
+        }
+        return *best;
     }
 };
 
