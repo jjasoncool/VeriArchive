@@ -4,3 +4,14 @@ CompileFlags:
     - "-fmodules-ts"
     - "-fmodule-mapper=*"
     - "-fdeps-format=*"
+---
+# Linux-only sources (CMake builds them only on Linux) include POSIX and Linux
+# headers. On the Windows development host clangd parses them with MinGW
+# headers and reports errors that do not exist; hide those. mountinfo.cpp is
+# portable C++ and is also built on Windows for the unit tests, so it keeps its
+# diagnostics. On a Linux host this block can be removed.
+If:
+  PathMatch: src/platform/linux/.*
+  PathExclude: src/platform/linux/mountinfo\..*
+Diagnostics:
+  Suppress: "*"
