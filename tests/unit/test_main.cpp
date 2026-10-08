@@ -12,5 +12,6 @@ int main()
     identity_tests();
     hash_tests();
     fs_access_tests();
+    scanner_tests();
     return test_failures == 0 ? 0 : 1;
 }

@@ -53,8 +53,10 @@ add_library(veriarchive_core
     src/core/identity/filesystem_id.cpp
     src/core/identity/matcher.cpp
     src/core/identity/volume_json.cpp
+    src/core/manifest/entry.cpp
     src/core/repository/repository.cpp
     src/core/repository/sqlite_raii.cpp
+    src/core/scan/scanner.cpp
     src/core/write_file.cpp)
 add_library(VeriArchive::core ALIAS veriarchive_core)
 target_include_directories(veriarchive_core PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -119,7 +121,8 @@ if(BUILD_TESTING)
         tests/unit/identity_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
-        tests/unit/repository_test.cpp)
+        tests/unit/repository_test.cpp
+        tests/unit/scanner_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)
     if(NOT (UNIX AND NOT APPLE))
