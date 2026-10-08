@@ -10,6 +10,8 @@
 #include "core/scan/scanner.h"
 
 #include <algorithm>
+#include <chrono>
+#include <map>
 #include <regex>
 
 namespace va {
@@ -45,8 +47,62 @@ std::optional<bool> rotational_of(const VolumeInfo& volume, std::optional<bool> 
     return any_known ? std::optional<bool>(false) : std::nullopt;
 }
 
-// Decision 0001 and R-97: decides whether this root may be registered, and
-// which existing archive receives a new revision.
+// An unfinished registration (R-104) is described in settings under
+// "registration:<archive_uuid>"; its hashed entries are cached in the files
+// table under the revision being created.
+std::string pending_key(const Uuid& archive_uuid)
+{
+    return "registration:" + archive_uuid;
+}
+
+struct Plan {
+    Uuid archive_uuid;
+    std::uint32_t revision = 1;
+    std::string label;
+    std::optional<Uuid> copy_of;
+    Timestamp created;
+    bool new_archive = true;
+};
+
+nlohmann::json plan_json(const Plan& plan, const std::filesystem::path& root)
+{
+    nlohmann::json json{{"archive_uuid", plan.archive_uuid}, {"revision", plan.revision},
+        {"label", plan.label}, {"created", plan.created}, {"new_archive", plan.new_archive},
+        {"root", path_to_utf8(root)}};
+    if (plan.copy_of) {
+        json["copy_of"] = *plan.copy_of;
+    }
+    return json;
+}
+
+// The unfinished registration of `root`, if there is one.
+std::expected<std::optional<Plan>, IoError> find_pending(ArchiveStore& store, const std::filesystem::path& root)
+{
+    const auto pending = store.settings_with_prefix("registration:");
+    if (!pending) {
+        return std::unexpected(pending.error());
+    }
+    const auto wanted = unicode_fold(path_to_utf8(root.lexically_normal()));
+    for (const auto& [key, value] : *pending) {
+        const auto json = nlohmann::json::parse(value, nullptr, false);
+        if (!json.is_object() || !json.contains("root") ||
+            unicode_fold(path_to_utf8(path_from_utf8(json["root"].get<std::string>()).lexically_normal())) != wanted) {
+            continue;
+        }
+        Plan plan;
+        plan.archive_uuid = json.value("archive_uuid", std::string{});
+        plan.revision = json.value("revision", 1u);
+        plan.label = json.value("label", std::string{});
+        plan.created = json.value("created", std::string{});
+        plan.new_archive = json.value("new_archive", true);
+        if (json.contains("copy_of")) {
+            plan.copy_of = json["copy_of"].get<std::string>();
+        }
+        return std::optional<Plan>(plan);
+    }
+    return std::optional<Plan>{};
+}
+
 std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_archives(
     const std::vector<ArchiveCandidate>& candidates, const MediaEvidence& evidence,
     const std::string& root_subpath, const RegisterRequest& request)
@@ -114,6 +170,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     IProgressSink& progress)
 {
     using Kind = RegisterFailure::Kind;
+    auto& store = services.store;
     if (request.label && !std::regex_match(*request.label, std::regex("ARCH-[0-9]{4,}"))) {
         return fail(Kind::Refused, "labels have the form ARCH-NNNN");
     }
@@ -131,33 +188,144 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     }
     const MediaEvidence evidence{current_timestamp(), *volume, std::nullopt};
 
-    const auto candidates = load_candidates(services.store);
-    if (!candidates) {
-        return fail(Kind::Repository, candidates.error().message);
+    const auto pending = find_pending(store, request.root);
+    if (!pending) {
+        return fail(Kind::Repository, pending.error().message);
     }
-    const auto checked = check_existing_archives(*candidates, evidence, *root_subpath, request);
-    if (!checked) {
-        return std::unexpected(checked.error());
-    }
-    const std::optional<ArchiveCandidate>& target = *checked; // archive receiving a new revision
 
-    // Scan, then hash every readable file.
+    // Decide which archive and revision this registration creates.
+    Plan plan;
+    std::optional<ArchiveRecord> existing; // archive receiving a new revision
+    std::map<std::string, Entry> cached;   // R-104: hashes from the interrupted attempt
+    if (request.resume) {
+        if (!*pending) {
+            return fail(Kind::Refused, "there is no interrupted registration of this root to resume");
+        }
+        plan = **pending;
+        if (!plan.new_archive) {
+            const auto found = store.find_archive(plan.archive_uuid);
+            if (!found || !*found) {
+                return fail(Kind::Repository, "the archive of the interrupted registration is missing");
+            }
+            existing = **found;
+        }
+        const auto rows = store.file_rows(plan.archive_uuid, plan.revision);
+        if (!rows) {
+            return fail(Kind::Repository, rows.error().message);
+        }
+        for (const auto& row : *rows) {
+            cached.emplace(entry_key(row), row);
+        }
+    } else {
+        if (*pending) {
+            return fail(Kind::Refused, "an interrupted registration of this root exists (archive " +
+                                           (*pending)->archive_uuid + "); finish it with --resume");
+        }
+        const auto candidates = load_candidates(store);
+        if (!candidates) {
+            return fail(Kind::Repository, candidates.error().message);
+        }
+        const auto checked = check_existing_archives(*candidates, evidence, *root_subpath, request);
+        if (!checked) {
+            return std::unexpected(checked.error());
+        }
+        const std::optional<ArchiveCandidate>& target = *checked;
+        plan.created = current_timestamp();
+        plan.copy_of = request.copy_of;
+        if (target) {
+            const auto found = store.find_archive(target->archive_uuid);
+            if (!found || !*found) {
+                return fail(Kind::Repository, "the archive to re-baseline is missing from the database");
+            }
+            existing = **found;
+            plan.new_archive = false;
+            plan.archive_uuid = existing->archive_uuid;
+            plan.revision = existing->current_revision + 1;
+            plan.label = existing->label;
+            if (!plan.copy_of) {
+                const auto previous = store.revision(existing->archive_uuid, existing->current_revision);
+                if (previous && *previous) {
+                    if (const auto header = recorded_header(**previous)) {
+                        plan.copy_of = header->copy_of;
+                    }
+                }
+            }
+        } else {
+            plan.archive_uuid = generate_uuid();
+            if (request.label) {
+                plan.label = *request.label;
+            } else {
+                auto label = store.next_label();
+                if (!label) {
+                    return fail(Kind::Repository, label.error().message);
+                }
+                plan.label = *label;
+            }
+        }
+        // Recorded before any work, so an interruption leaves a resumable registration.
+        const auto recorded = [&]() -> std::expected<void, IoError> {
+            if (auto begun = store.begin(); !begun) {
+                return begun;
+            }
+            if (plan.new_archive) {
+                ArchiveRecord archive{plan.archive_uuid, plan.label, plan.created, 0,
+                    "REGISTRATION_INCOMPLETE", *root_subpath, ""};
+                if (auto inserted = store.insert_archive(archive); !inserted) {
+                    return inserted;
+                }
+            }
+            if (auto saved = store.set_setting(pending_key(plan.archive_uuid), plan_json(plan, request.root).dump());
+                !saved) {
+                return saved;
+            }
+            return store.commit();
+        }();
+        if (!recorded) {
+            store.rollback();
+            return fail(Kind::Repository, recorded.error().message);
+        }
+    }
+
+    // Scan, then hash every readable file not already hashed before an interruption.
+    const auto interrupted = [&](const std::string& why) {
+        return fail(Kind::Incomplete, why + "; continue with `register <root_path> --resume`");
+    };
     ScanOptions scan_options;
     auto scanned = scan_tree(services.archive_files, request.root, scan_options, cancel, progress);
     if (!scanned) {
         const auto kind = scanned.error().kind;
-        return fail(kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved ? Kind::Incomplete
-                                                                                         : Kind::Media,
-            "cannot scan the root: " + scanned.error().message);
+        if (kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved) {
+            return interrupted("registration was interrupted while scanning");
+        }
+        return fail(Kind::Media, "cannot scan the root: " + scanned.error().message);
     }
 
     std::vector<HashJob> jobs;
     for (std::size_t index = 0; index < scanned->entries.size(); ++index) {
-        const auto& entry = scanned->entries[index].entry;
-        if (entry.type == 'f' && entry.unreadable.empty()) {
-            jobs.push_back({index, scanned->entries[index].native});
+        auto& entry = scanned->entries[index].entry;
+        if (entry.type != 'f' || !entry.unreadable.empty()) {
+            continue;
         }
+        const auto hit = cached.find(entry_key(entry));
+        if (hit != cached.end() && !hit->second.b3.empty() && hit->second.size == entry.size &&
+            hit->second.mtime_ns == entry.mtime_ns) {
+            entry.b3 = hit->second.b3; // unchanged since the interrupted attempt hashed it
+            entry.sha256 = hit->second.sha256;
+            continue;
+        }
+        jobs.push_back({index, scanned->entries[index].native});
     }
+
+    std::vector<Entry> checkpoint;
+    auto last_checkpoint = std::chrono::steady_clock::now();
+    const auto flush_checkpoint = [&] {
+        if (!checkpoint.empty() && store.begin()) {
+            (void)store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint);
+            (void)store.commit();
+        }
+        checkpoint.clear();
+        last_checkpoint = std::chrono::steady_clock::now();
+    };
     HashPipelineOptions hash_options;
     hash_options.readers = default_reader_count(rotational_of(*volume, request.rotational));
     bool device_removed = false;
@@ -175,55 +343,33 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             entry.b3 = std::move(result.b3);
             entry.sha256 = std::move(result.sha256);
             entry.size = result.size;
+            checkpoint.push_back(entry); // R-104: every 1000 files or 60 seconds
+            if (checkpoint.size() >= 1000 ||
+                std::chrono::steady_clock::now() - last_checkpoint > std::chrono::seconds(60)) {
+                flush_checkpoint();
+            }
             return true;
         });
+    flush_checkpoint();
     if (!hashed || device_removed) {
-        return fail(Kind::Incomplete,
-            device_removed ? "the device disappeared during registration" : "registration was cancelled");
+        return interrupted(device_removed ? "the device disappeared during registration"
+                                          : "registration was cancelled");
     }
 
     // Manifest first: it is the truth. The database index follows.
     RegisterOutcome outcome;
-    outcome.archive_uuid = target ? target->archive_uuid : generate_uuid();
-    std::optional<ArchiveRecord> existing;
-    if (target) {
-        auto found = services.store.find_archive(target->archive_uuid);
-        if (!found || !*found) {
-            return fail(Kind::Repository, "the archive to re-baseline is missing from the database");
-        }
-        existing = **found;
-    }
-    outcome.revision = existing ? existing->current_revision + 1 : 1;
-
-    std::optional<Uuid> copy_of = request.copy_of;
-    if (existing) {
-        outcome.label = existing->label;
-        if (!copy_of) {
-            const auto previous = services.store.revision(existing->archive_uuid, existing->current_revision);
-            if (previous && *previous) {
-                if (const auto header = recorded_header(**previous)) {
-                    copy_of = header->copy_of;
-                }
-            }
-        }
-    } else if (request.label) {
-        outcome.label = *request.label;
-    } else {
-        auto label = services.store.next_label();
-        if (!label) {
-            return fail(Kind::Repository, label.error().message);
-        }
-        outcome.label = *label;
-    }
+    outcome.archive_uuid = plan.archive_uuid;
+    outcome.label = plan.label;
+    outcome.revision = plan.revision;
 
     ManifestHeader header;
-    header.archive_uuid = outcome.archive_uuid;
-    header.label = outcome.label;
-    header.revision = outcome.revision;
-    if (existing) {
-        header.supersedes = existing->current_revision;
+    header.archive_uuid = plan.archive_uuid;
+    header.label = plan.label;
+    header.revision = plan.revision;
+    if (plan.revision > 1) {
+        header.supersedes = plan.revision - 1;
     }
-    header.copy_of = copy_of;
+    header.copy_of = plan.copy_of;
     header.created = current_timestamp();
     header.app_version = services.host.app_version;
     header.os = services.host.os;
@@ -234,7 +380,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     header.exclusions_version = default_exclusions_version;
     header.exclusions = scan_options.exclusions;
 
-    outcome.manifest = manifest_path(services.layout.manifests(), outcome.archive_uuid, outcome.revision);
+    outcome.manifest = manifest_path(services.layout.manifests(), plan.archive_uuid, plan.revision);
     std::error_code directory_error;
     std::filesystem::create_directories(outcome.manifest.parent_path(), directory_error);
     ManifestWriter manifest(services.writer, services.repository_files, outcome.manifest);
@@ -256,7 +402,6 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     outcome.counts = written->header.counts;
     outcome.skipped_mount_points = scanned->skipped_mount_points;
 
-    auto& store = services.store;
     const auto record = [&]() -> std::expected<void, IoError> {
         if (auto begun = store.begin(); !begun) {
             return begun;
@@ -264,34 +409,35 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         ArchiveRecord archive;
         if (existing) {
             archive = *existing;
-            archive.current_revision = outcome.revision;
-            archive.status = "REGISTERED";
-            archive.root_subpath = *root_subpath;
-            if (auto updated = store.update_archive(archive); !updated) {
-                return updated;
-            }
         } else {
-            archive = {outcome.archive_uuid, outcome.label, header.created, outcome.revision,
-                "REGISTERED", *root_subpath, ""};
-            if (auto inserted = store.insert_archive(archive); !inserted) {
-                return inserted;
-            }
+            archive = {plan.archive_uuid, plan.label, plan.created, 0, "", "", ""};
+        }
+        archive.current_revision = plan.revision;
+        archive.status = "REGISTERED";
+        archive.root_subpath = *root_subpath;
+        if (auto updated = store.update_archive(archive); !updated) {
+            return updated;
         }
         const auto relative = outcome.manifest.lexically_relative(services.layout.root);
-        RevisionRecord revision{outcome.archive_uuid, outcome.revision, path_to_utf8(relative),
-            written->header_line, written->header_blake3, written->header.body_blake3, "",
-            header.created};
+        RevisionRecord revision{plan.archive_uuid, plan.revision, path_to_utf8(relative),
+            written->header_line, written->header_blake3, written->header.body_blake3, "", header.created};
         std::replace(revision.manifest_relpath.begin(), revision.manifest_relpath.end(), '\\', '/');
         if (auto inserted = store.insert_revision(revision); !inserted) {
             return inserted;
         }
-        if (auto indexed = store.insert_file_rows(outcome.archive_uuid, outcome.revision, entries); !indexed) {
+        if (auto cleared = store.delete_file_rows(plan.archive_uuid, plan.revision); !cleared) {
+            return cleared;
+        }
+        if (auto indexed = store.insert_file_rows(plan.archive_uuid, plan.revision, entries); !indexed) {
             return indexed;
         }
-        EvidenceRecord evidence_record{outcome.archive_uuid, "", evidence.seen_at,
-            volume_to_json_text(*volume), existing ? "MATCH" : "UNKNOWN", "registered"};
+        EvidenceRecord evidence_record{plan.archive_uuid, "", evidence.seen_at,
+            volume_to_json_text(*volume), plan.new_archive ? "UNKNOWN" : "MATCH", "registered"};
         if (auto inserted = store.insert_evidence(evidence_record); !inserted) {
             return inserted;
+        }
+        if (auto removed = store.remove_setting(pending_key(plan.archive_uuid)); !removed) {
+            return removed;
         }
         return store.commit();
     }();

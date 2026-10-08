@@ -133,6 +133,44 @@ void retired_archive_takes_no_revision()
     CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused);
 }
 
+// R-104: an interrupted registration resumes without re-hashing finished files.
+void interrupted_registration_resumes()
+{
+    Fixture fixture;
+    for (int index = 1; index <= 6; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, static_cast<char>('a' + index)));
+    }
+    fixture.archive.node("f4").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.run(at("/vol"));
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->size() == 1 && archives->front().status == "REGISTRATION_INCOMPLETE");
+    const auto cached = archives && !archives->empty()
+                            ? fixture.store.file_rows(archives->front().archive_uuid, 1)
+                            : std::expected<std::vector<va::Entry>, va::IoError>{};
+    CHECK(cached && cached->size() >= 3); // f1..f3 were checkpointed
+
+    // A plain register of the same root is refused while the interrupted one exists.
+    fixture.archive.node("f4").open_error.reset();
+    const auto again = fixture.run(at("/vol"));
+    CHECK(!again && again.error().kind == va::RegisterFailure::Kind::Refused);
+
+    fixture.archive.bytes_read = 0;
+    auto request = at("/vol");
+    request.resume = true;
+    const auto resumed = fixture.run(request);
+    CHECK(resumed && resumed->revision == 1 && resumed->counts.files == 6);
+    // Only files without a checkpointed hash are read again.
+    CHECK(cached && fixture.archive.bytes_read == 6000 - 1000 * cached->size());
+    const auto archive = fixture.store.find_archive(resumed ? resumed->archive_uuid : "");
+    CHECK(archive && *archive && (*archive)->status == "REGISTERED");
+
+    // Verification of the resumed registration passes.
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+}
+
 void unidentifiable_volume_fails()
 {
     Fixture fixture;
@@ -150,5 +188,6 @@ void register_engine_tests()
     overlapping_roots_are_refused();
     unreadable_files_are_recorded();
     retired_archive_takes_no_revision();
+    interrupted_registration_resumes();
     unidentifiable_volume_fails();
 }

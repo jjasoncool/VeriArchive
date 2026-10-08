@@ -180,6 +180,27 @@ std::expected<void, IoError> ArchiveStore::remove_setting(const std::string& key
     return statement->bind(1, key).run();
 }
 
+std::expected<std::vector<std::pair<std::string, std::string>>, IoError> ArchiveStore::settings_with_prefix(
+    const std::string& prefix)
+{
+    auto statement = database_.prepare("SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, static_cast<std::int64_t>(prefix.size())).bind(2, prefix);
+    std::vector<std::pair<std::string, std::string>> result;
+    for (;;) {
+        const auto row = statement->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            return result;
+        }
+        result.emplace_back(statement->text(0), statement->text(1));
+    }
+}
+
 std::expected<std::string, IoError> ArchiveStore::next_label()
 {
     const auto current = setting("next_label_seq");
@@ -351,8 +372,57 @@ std::expected<void, IoError> ArchiveStore::insert_evidence(const EvidenceRecord&
 std::expected<void, IoError> ArchiveStore::insert_file_rows(
     const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
 {
+    return write_file_rows("INSERT", archive_uuid, revision, entries);
+}
+
+std::expected<void, IoError> ArchiveStore::upsert_file_rows(
+    const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
+{
+    return write_file_rows("INSERT OR REPLACE", archive_uuid, revision, entries);
+}
+
+std::expected<std::vector<Entry>, IoError> ArchiveStore::file_rows(
+    const Uuid& archive_uuid, std::uint32_t revision)
+{
     auto statement = database_.prepare(
-        "INSERT INTO files(archive_uuid, revision, path, raw_hex, stream, type, size, mtime_ns, "
+        "SELECT path, raw_hex, stream, type, size, mtime_ns, b3, sha256 FROM files "
+        "WHERE archive_uuid = ? AND revision = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision));
+    std::vector<Entry> entries;
+    for (;;) {
+        const auto row = statement->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            return entries;
+        }
+        Entry entry;
+        entry.path.p = statement->text(0);
+        entry.path.raw = statement->text(1);
+        entry.stream = statement->text(2);
+        const auto type = statement->text(3);
+        entry.type = type.empty() ? 'f' : type[0];
+        if (!statement->is_null(4)) {
+            entry.size = static_cast<std::uint64_t>(statement->integer(4));
+        }
+        if (!statement->is_null(5)) {
+            entry.mtime_ns = statement->integer(5);
+        }
+        entry.b3 = statement->text(6);
+        entry.sha256 = statement->text(7);
+        entries.push_back(std::move(entry));
+    }
+}
+
+std::expected<void, IoError> ArchiveStore::write_file_rows(const char* verb,
+    const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
+{
+    auto statement = database_.prepare(std::string(verb) +
+        " INTO files(archive_uuid, revision, path, raw_hex, stream, type, size, mtime_ns, "
         "b3, sha256, flags) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     if (!statement) {
         return std::unexpected(statement.error());

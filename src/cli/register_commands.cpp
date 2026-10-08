@@ -76,17 +76,23 @@ nlohmann::json outcome_json(const RegisterOutcome& outcome)
 int register_command(const Arguments& arguments)
 {
     if (const auto problem = check_options(arguments,
-            {"--new-revision", "--force-new-archive"}, {"--label", "--io", "--copy-of"})) {
+            {"--new-revision", "--force-new-archive", "--resume"}, {"--label", "--io", "--copy-of", "--resume"})) {
         return report_failure(arguments, *problem);
     }
-    if (arguments.words.size() != 2) {
+    // `register --resume <root>` reads the root as the option's value.
+    auto words = arguments.words;
+    if (const auto value = arguments.value("--resume"); value && words.size() == 1) {
+        words.push_back(*value);
+    }
+    if (words.size() != 2) {
         return report_failure(arguments, {exit_code::usage,
             "usage: register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-            "[--force-new-archive] [--copy-of UUID]"});
+            "[--force-new-archive] [--copy-of UUID] [--resume]"});
     }
 
     RegisterRequest request;
-    request.root = user_path(arguments.words[1]);
+    request.root = user_path(words[1]);
+    request.resume = arguments.has("--resume") || arguments.value("--resume").has_value();
     request.label = arguments.value("--label");
     request.copy_of = arguments.value("--copy-of");
     request.new_revision = arguments.has("--new-revision");
@@ -98,7 +104,7 @@ int register_command(const Arguments& arguments)
         request.rotational = *io == "hdd";
     }
     if (!std::filesystem::is_directory(request.root)) {
-        return report_failure(arguments, {exit_code::usage, "not a directory: " + arguments.words[1]});
+        return report_failure(arguments, {exit_code::usage, "not a directory: " + words[1]});
     }
 
     auto session = open_session(arguments, false);

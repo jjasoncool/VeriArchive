@@ -112,6 +112,10 @@ public:
     std::expected<void, IoError> insert_file_rows(
         const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
     std::expected<void, IoError> delete_file_rows(const Uuid& archive_uuid, std::uint32_t revision);
+    // Registration checkpoints (R-104): hashed entries of an unfinished revision.
+    std::expected<void, IoError> upsert_file_rows(
+        const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
+    std::expected<std::vector<Entry>, IoError> file_rows(const Uuid& archive_uuid, std::uint32_t revision);
     // Empties the rebuildable index tables (archive_revisions, files) for rebuild-index.
     std::expected<void, IoError> clear_index();
 
@@ -132,9 +136,13 @@ public:
     std::expected<std::string, IoError> setting(const std::string& key);
     std::expected<void, IoError> set_setting(const std::string& key, const std::string& value);
     std::expected<void, IoError> remove_setting(const std::string& key);
+    std::expected<std::vector<std::pair<std::string, std::string>>, IoError> settings_with_prefix(
+        const std::string& prefix);
 
 private:
     explicit ArchiveStore(repository_detail::SqliteDatabase database);
+    std::expected<void, IoError> write_file_rows(const char* verb, const Uuid& archive_uuid,
+        std::uint32_t revision, const std::vector<Entry>& entries);
     repository_detail::SqliteDatabase database_;
 };
 

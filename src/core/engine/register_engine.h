@@ -19,6 +19,7 @@ struct RegisterRequest {
     bool force_new_archive = false;         // R-97: register again as a separate archive
     std::optional<Uuid> copy_of;            // decision 0005
     std::optional<bool> rotational;         // --io hdd|ssd overrides detection (R-111)
+    bool resume = false;                    // R-104: continue an interrupted registration
 };
 
 struct RegisterServices {

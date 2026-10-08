@@ -44,6 +44,11 @@ std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, st
             continue;
         }
         if (index + 1 >= raw.size()) {
+            // `register ... --resume` is a flag; `verify ... --resume RUN_ID` takes a value (§B16).
+            if (token == "--resume") {
+                arguments.flags.insert(token);
+                continue;
+            }
             error = "option " + token + " needs a value";
             return std::nullopt;
         }
