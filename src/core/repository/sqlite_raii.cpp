@@ -103,3 +103,70 @@ std::expected<SqliteStatement, IoError> SqliteDatabase::prepare(std::string_view
 }
 
 } // namespace va::repository_detail
+namespace va::repository_detail {
+
+SqliteStatement& SqliteStatement::bind(int index, std::string_view text)
+{
+    sqlite3_bind_text(statement_, index, text.data(), static_cast<int>(text.size()), SQLITE_TRANSIENT);
+    return *this;
+}
+
+SqliteStatement& SqliteStatement::bind(int index, std::int64_t value)
+{
+    sqlite3_bind_int64(statement_, index, value);
+    return *this;
+}
+
+SqliteStatement& SqliteStatement::bind_null(int index)
+{
+    sqlite3_bind_null(statement_, index);
+    return *this;
+}
+
+std::expected<bool, IoError> SqliteStatement::step()
+{
+    const int result = sqlite3_step(statement_);
+    if (result == SQLITE_ROW) {
+        return true;
+    }
+    if (result == SQLITE_DONE) {
+        return false;
+    }
+    return std::unexpected(sqlite_error(sqlite3_db_handle(statement_), "cannot run SQL"));
+}
+
+std::expected<void, IoError> SqliteStatement::run()
+{
+    const auto stepped = step();
+    if (!stepped) {
+        return std::unexpected(stepped.error());
+    }
+    reset();
+    return {};
+}
+
+void SqliteStatement::reset()
+{
+    sqlite3_reset(statement_);
+    sqlite3_clear_bindings(statement_);
+}
+
+std::string SqliteStatement::text(int column) const
+{
+    const auto* value = sqlite3_column_text(statement_, column);
+    const int length = sqlite3_column_bytes(statement_, column);
+    return value ? std::string(reinterpret_cast<const char*>(value), static_cast<std::size_t>(length))
+                 : std::string{};
+}
+
+std::int64_t SqliteStatement::integer(int column) const
+{
+    return sqlite3_column_int64(statement_, column);
+}
+
+bool SqliteStatement::is_null(int column) const
+{
+    return sqlite3_column_type(statement_, column) == SQLITE_NULL;
+}
+
+} // namespace va::repository_detail

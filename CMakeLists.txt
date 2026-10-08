@@ -58,6 +58,7 @@ add_library(veriarchive_core
     src/core/manifest/manifest.cpp
     src/core/manifest/manifest_reader.cpp
     src/core/manifest/manifest_writer.cpp
+    src/core/repository/archive_store.cpp
     src/core/repository/repository.cpp
     src/core/repository/sqlite_raii.cpp
     src/core/scan/scanner.cpp
@@ -117,6 +118,7 @@ if(BUILD_TESTING)
     add_executable(veriarchive_tests
         tests/unit/test_main.cpp
         tests/unit/archive_path_test.cpp
+        tests/unit/archive_store_test.cpp
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
         tests/unit/file_writer_test.cpp

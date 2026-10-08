@@ -15,5 +15,6 @@ int main()
     scanner_tests();
     manifest_tests();
     hash_pipeline_tests();
+    archive_store_tests();
     return test_failures == 0 ? 0 : 1;
 }

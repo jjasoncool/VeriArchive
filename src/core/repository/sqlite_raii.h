@@ -2,8 +2,10 @@
 
 #include "common/error.h"
 
+#include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <string>
 #include <string_view>
 
 struct sqlite3;
@@ -22,6 +24,19 @@ public:
     SqliteStatement& operator=(SqliteStatement&& other) noexcept;
 
     sqlite3_stmt* get() const noexcept;
+
+    // Parameters are numbered from 1, columns from 0 (SQLite's convention).
+    SqliteStatement& bind(int index, std::string_view text);
+    SqliteStatement& bind(int index, std::int64_t value);
+    SqliteStatement& bind_null(int index);
+    // true when a result row is available, false when the statement is done.
+    std::expected<bool, IoError> step();
+    std::expected<void, IoError> run(); // step() expecting no rows
+    void reset();
+
+    std::string text(int column) const;
+    std::int64_t integer(int column) const;
+    bool is_null(int column) const;
 
 private:
     sqlite3_stmt* statement_;

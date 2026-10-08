@@ -25,3 +25,4 @@ void fs_access_tests();
 void scanner_tests();
 void manifest_tests();
 void hash_pipeline_tests();
+void archive_store_tests();
