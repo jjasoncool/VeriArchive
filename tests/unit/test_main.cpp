@@ -17,5 +17,6 @@ int main()
     hash_pipeline_tests();
     archive_store_tests();
     register_engine_tests();
+    verify_engine_tests();
     return test_failures == 0 ? 0 : 1;
 }

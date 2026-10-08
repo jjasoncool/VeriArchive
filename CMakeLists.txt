@@ -51,7 +51,9 @@ target_link_libraries(veriarchive_common
 
 add_library(veriarchive_core
     src/core/engine/candidates.cpp
+    src/core/engine/item_rules.cpp
     src/core/engine/register_engine.cpp
+    src/core/engine/verify_engine.cpp
     src/core/hash/hash_pipeline.cpp
     src/core/hash/hashers.cpp
     src/core/identity/filesystem_id.cpp
@@ -134,6 +136,7 @@ if(BUILD_TESTING)
         tests/unit/manifest_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
+        tests/unit/verify_engine_test.cpp
         tests/unit/register_engine_test.cpp
         tests/unit/repository_test.cpp
         tests/unit/scanner_test.cpp)

@@ -1,48 +1,17 @@
 #include "test_support.h"
 
-#include "fakes.h"
-#include "test_repository.h"
+#include "engine_fixture.h"
 
-#include "core/engine/register_engine.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 
 namespace {
 
-va::VolumeInfo fake_volume(const std::filesystem::path& mount_point)
-{
-    va::VolumeInfo volume;
-    volume.mount_point = mount_point;
-    volume.filesystem_type = "ntfs";
-    volume.filesystem_uuid = "1111222233334444";
-    volume.filesystem_uuid_short = "33334444";
-    volume.volume_label = "ARCHIVE";
-    volume.capacity_bytes = 1000000;
-    va::PhysicalDeviceInfo device;
-    device.model = "Test Disk";
-    device.serial = "SERIAL-1";
-    device.rotational = true;
-    volume.devices.push_back(device);
-    return volume;
-}
-
-// Everything a registration needs, wired to fakes for the archive side and a
-// real temporary repository.
-struct Fixture {
-    test::TestRepository repository;
-    test::FakeFileSystem archive{"/vol"};
-    test::FakeMediaEnumerator media;
-    va::ArchiveStore store = repository.store();
-    va::CancelToken cancel;
-    test::NullProgress progress;
-
-    Fixture() { media.volume = fake_volume(archive.root()); }
-
+// Registration-only view of the shared engine fixture.
+struct Fixture : test::EngineFixture {
     std::expected<va::RegisterOutcome, va::RegisterFailure> run(va::RegisterRequest request)
     {
-        va::RegisterServices services{archive, *repository.files, *repository.writer, media, store,
-            repository.context.repo, {"windows", "test-host", "0.1.0"}};
-        return va::register_archive(services, request, cancel, progress);
+        return register_root(request);
     }
 };
 
