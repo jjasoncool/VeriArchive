@@ -11,7 +11,13 @@ int main(int argc, char* argv[])
     state.host = va::app::host_info(VERIARCHIVE_VERSION);
     static bool smoke_test = std::getenv("VERIARCHIVE_GUI_SMOKE_TEST") != nullptr;
 
-    state.application = gtk_application_new("io.veriarchive.Gui", G_APPLICATION_DEFAULT_FLAGS);
+    // Windows has no D-Bus session bus. Without an address GLib would try to
+    // start one (a background gdbus.exe) or warn that it cannot; an unusable
+    // address makes it skip D-Bus quietly. Linux desktops keep their bus.
+    if (VERIARCHIVE_WITHOUT_SESSION_BUS && !g_getenv("DBUS_SESSION_BUS_ADDRESS")) {
+        g_setenv("DBUS_SESSION_BUS_ADDRESS", "disabled:", TRUE);
+    }
+    state.application = gtk_application_new("io.veriarchive.Gui", G_APPLICATION_NON_UNIQUE);
     g_signal_connect(state.application, "activate",
         G_CALLBACK(+[](GtkApplication*, gpointer data) {
             va::gui::activate(*static_cast<va::gui::GuiState*>(data), smoke_test);
