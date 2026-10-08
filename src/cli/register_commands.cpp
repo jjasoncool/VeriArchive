@@ -118,7 +118,9 @@ int register_command(const Arguments& arguments)
         }
         request.rotational = *io == "hdd";
     }
-    if (!std::filesystem::is_directory(request.root)) {
+    // The error_code overload: a root that cannot be checked is reported, not thrown.
+    std::error_code root_error;
+    if (!std::filesystem::is_directory(request.root, root_error)) {
         return report_failure(arguments, {exit_code::usage, "not a directory: " + words[1]});
     }
 

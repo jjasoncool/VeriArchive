@@ -21,6 +21,15 @@ IoError repository_error(std::string message)
     return {IoErrorKind::Other, repository_error_code, std::move(message)};
 }
 
+// std::filesystem::exists without exceptions: the throwing overload would end
+// the program on, for example, access denied. A path that cannot be checked
+// counts as missing; the later read or write then reports the real error.
+bool path_exists(const std::filesystem::path& path)
+{
+    std::error_code error;
+    return std::filesystem::exists(path, error) && !error;
+}
+
 } // namespace
 
 std::filesystem::path config_file_path(const RepositoryOptions& options)
@@ -30,7 +39,7 @@ std::filesystem::path config_file_path(const RepositoryOptions& options)
     }
 
     const auto portable_config = options.executable_dir / "config.json";
-    if (std::filesystem::exists(portable_config)) {
+    if (path_exists(portable_config)) {
         return portable_config;
     }
 
@@ -227,7 +236,7 @@ std::expected<AppContext, IoError> resolve_repository(
         return std::unexpected(repository_error(
             "configured repository is unavailable or is not a VeriArchive repository"));
     }
-    if (explicit_init && !exists && std::filesystem::exists(context.repo.root / "repository.json")) {
+    if (explicit_init && !exists && path_exists(context.repo.root / "repository.json")) {
         return std::unexpected(repository_error("not a VeriArchive repository: invalid repository.json"));
     }
     if (explicit_init && !exists && !probes.writable(context.repo.root)) {
@@ -253,7 +262,7 @@ std::expected<AppContext, IoError> resolve_repository(
 
 std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer)
 {
-    if (std::filesystem::exists(context.repo.root / "repository.json")) {
+    if (path_exists(context.repo.root / "repository.json")) {
         return open_repository(context);
     }
     if (auto result = create_repository_directories(context.repo); !result) {
@@ -301,7 +310,7 @@ std::expected<void, IoError> record_repository_uuid(AppContext& context, IFileWr
     if (!context.config.last_repository_uuid.empty()) {
         context.previous_repository_uuid = context.config.last_repository_uuid;
     }
-    if (!std::filesystem::exists(context.config_file)) {
+    if (!path_exists(context.config_file)) {
         return {};
     }
     context.config.last_repository_uuid = context.repository_uuid;
