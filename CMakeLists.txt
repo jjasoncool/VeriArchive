@@ -57,6 +57,7 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
         src/platform/linux/file_writer_linux.cpp
+        src/platform/linux/mountinfo.cpp
         src/platform/linux/platform_services_linux.cpp
         src/platform/linux/posix_util.cpp
     )
@@ -83,10 +84,15 @@ if(BUILD_TESTING)
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
         tests/unit/file_writer_test.cpp
+        tests/unit/platform_test.cpp
         tests/unit/repository_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)
-    add_test(NAME veriarchive_m1 COMMAND veriarchive_tests)
+    if(NOT (UNIX AND NOT APPLE))
+        # Pure C++ parser; tested on every OS although only Linux uses it.
+        target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp)
+    endif()
+    add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
 endif()
 
 if(MSVC)

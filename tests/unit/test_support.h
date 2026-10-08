@@ -17,3 +17,4 @@ void canonical_json_tests();
 void repository_tests();
 void config_tests();
 void file_writer_tests();
+void platform_tests();

@@ -7,5 +7,6 @@ int main()
     repository_tests();
     config_tests();
     file_writer_tests();
+    platform_tests();
     return test_failures == 0 ? 0 : 1;
 }

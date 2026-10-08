@@ -1,4 +1,5 @@
 #include "platform/platform_services.h"
+#include "platform/linux/mountinfo.h"
 #include <cstdlib>
 #include <fstream>
 #include <stdexcept>
@@ -63,18 +64,38 @@ bool writable_directory(const std::filesystem::path& directory)
     return writable;
 }
 
+// Fails closed: a filesystem that cannot be identified is treated as remote, so
+// SQLite is never silently placed on a network share.
 bool network_filesystem(const std::filesystem::path& path)
 {
     struct statfs information {};
     if (statfs(path.c_str(), &information) != 0) {
-        return false;
+        return true;
     }
 
-    constexpr decltype(information.f_type) nfs_magic = 0x6969;
-    constexpr decltype(information.f_type) cifs_magic = 0xFF534D42;
-    constexpr decltype(information.f_type) smb_magic = 0x517B;
-    return information.f_type == nfs_magic || information.f_type == cifs_magic ||
-           information.f_type == smb_magic;
+    using magic = decltype(information.f_type);
+    constexpr magic remote_magics[] = {
+        static_cast<magic>(0x6969),     // NFS
+        static_cast<magic>(0xFF534D42), // CIFS
+        static_cast<magic>(0xFE534D42), // SMB2/3
+        static_cast<magic>(0x517B),     // SMB
+        static_cast<magic>(0x5346414F), // AFS
+        static_cast<magic>(0x73757245), // Coda
+        static_cast<magic>(0x564C),     // NCP
+        static_cast<magic>(0x01021997), // 9P
+        static_cast<magic>(0x00C36400), // Ceph
+    };
+    for (const auto remote : remote_magics) {
+        if (information.f_type == remote) {
+            return true;
+        }
+    }
+
+    std::error_code error;
+    const auto canonical = std::filesystem::canonical(path, error);
+    const auto mount =
+        linux_mounts::mount_containing(linux_mounts::read_mountinfo(), error ? path : canonical);
+    return !mount || linux_mounts::is_network_filesystem_type(mount->filesystem_type);
 }
 
 bool process_is_elevated()

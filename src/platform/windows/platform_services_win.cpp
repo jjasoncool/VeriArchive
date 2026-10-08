@@ -76,17 +76,29 @@ bool writable_directory(const std::filesystem::path& directory)
     return false;
 }
 
+// Fails closed: a volume that cannot be identified is treated as remote, so
+// SQLite is never silently placed on a network share.
 bool network_filesystem(const std::filesystem::path& path)
 {
-    const auto root = path.root_path();
-    if (GetDriveTypeW(root.c_str()) == DRIVE_REMOTE) {
+    // The volume that actually holds the path (it may be a volume mounted into
+    // a folder, not the drive letter at the start of the path).
+    std::vector<wchar_t> volume(32768);
+    if (!GetVolumePathNameW(path.c_str(), volume.data(), static_cast<DWORD>(volume.size()))) {
+        return true;
+    }
+    const std::wstring volume_path(volume.data());
+    const UINT type = GetDriveTypeW(volume_path.c_str());
+    if (type == DRIVE_REMOTE || type == DRIVE_UNKNOWN || type == DRIVE_NO_ROOT_DIR) {
         return true;
     }
 
-    wchar_t remote_name[MAX_PATH]{};
-    DWORD length = MAX_PATH;
-    const auto drive = root.native().substr(0, 2);
-    return WNetGetConnectionW(drive.c_str(), remote_name, &length) == NO_ERROR;
+    if (volume_path.size() >= 2 && volume_path[1] == L':') {
+        wchar_t remote_name[MAX_PATH]{};
+        DWORD length = MAX_PATH;
+        const auto drive = volume_path.substr(0, 2);
+        return WNetGetConnectionW(drive.c_str(), remote_name, &length) == NO_ERROR;
+    }
+    return false;
 }
 
 bool process_is_elevated()
