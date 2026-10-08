@@ -112,6 +112,12 @@ else()
     message(FATAL_ERROR "VeriArchive currently supports Windows and Linux only")
 endif()
 
+# Composition-root helpers shared by the CLI and the GUI (R-05).
+add_library(veriarchive_app src/app/session.cpp)
+add_library(VeriArchive::app ALIAS veriarchive_app)
+target_compile_features(veriarchive_app PUBLIC cxx_std_23)
+target_link_libraries(veriarchive_app PUBLIC VeriArchive::platform)
+
 add_executable(veriarchive_cli
     src/cli/archive_commands.cpp
     src/cli/cli.cpp
@@ -131,7 +137,7 @@ if(UNIX AND NOT APPLE)
 endif()
 target_compile_features(veriarchive_cli PRIVATE cxx_std_23)
 target_compile_definitions(veriarchive_cli PRIVATE VERIARCHIVE_VERSION="${PROJECT_VERSION}")
-target_link_libraries(veriarchive_cli PRIVATE VeriArchive::platform)
+target_link_libraries(veriarchive_cli PRIVATE VeriArchive::app)
 
 if(BUILD_TESTING)
     add_executable(veriarchive_tests
@@ -174,13 +180,13 @@ if(BUILD_TESTING)
 endif()
 
 if(MSVC)
-    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_cli veriarchive_tests)
+    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_app veriarchive_cli veriarchive_gui veriarchive_tests)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE /W4 /permissive-)
         endif()
     endforeach()
 else()
-    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_cli veriarchive_tests)
+    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_app veriarchive_cli veriarchive_gui veriarchive_tests)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
         endif()

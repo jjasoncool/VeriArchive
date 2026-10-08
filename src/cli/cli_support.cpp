@@ -1,5 +1,6 @@
 #include "cli/cli_support.h"
 
+#include "app/session.h"
 #include "common/utf8.h"
 #include "platform/file_writer.h"
 #include "platform/platform_services.h"
@@ -66,50 +67,14 @@ std::optional<Arguments> parse_arguments(const std::vector<std::string>& raw, st
 
 std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise)
 {
-    const auto executable = platform::executable_path();
-    const auto config_directory = platform::user_config_dir();
-    const auto home = platform::user_home();
-    if (!executable || !config_directory || !home) {
-        const auto& error = !executable ? executable.error()
-                            : !config_directory ? config_directory.error()
-                                                : home.error();
-        return std::unexpected(Failure{exit_code::repository, error.message});
+    auto session = app::open_session({initialise, arguments.repository, arguments.config});
+    if (!session) {
+        return std::unexpected(Failure{exit_code::repository, session.error()});
     }
-
-    RepositoryOptions options;
-    options.initialise = initialise;
-    options.executable_dir = executable->parent_path();
-    options.user_config_dir = *config_directory;
-    options.user_home = *home;
-    options.explicit_repository = arguments.repository;
-    options.explicit_config = arguments.config;
-    if (const char* environment_repository = std::getenv("VERIARCHIVE_REPOSITORY")) {
-        options.environment_repository = path_from_utf8(environment_repository);
+    for (const auto& warning : session->warnings) {
+        print_warning(warning);
     }
-
-    const RepositoryProbes probes{platform::writable_directory, platform::network_filesystem};
-    auto context = resolve_repository(options, probes);
-    if (!context) {
-        return std::unexpected(Failure{exit_code::repository, context.error().message});
-    }
-
-    Session session{std::move(*context), platform::make_file_writer()};
-    auto opened = initialise ? initialise_repository(session.context, *session.writer)
-                             : open_repository(session.context);
-    if (!opened) {
-        return std::unexpected(Failure{exit_code::repository, opened.error().message});
-    }
-    if (auto recorded = record_repository_uuid(session.context, *session.writer); !recorded) {
-        return std::unexpected(Failure{exit_code::repository, recorded.error().message});
-    }
-    if (!session.context.previous_repository_uuid.empty()) {
-        print_warning("repository_uuid changed from " + session.context.previous_repository_uuid +
-                      " to " + session.context.repository_uuid + "; recorded the new uuid");
-    }
-    if (platform::process_is_elevated()) {
-        print_warning("VeriArchive is running elevated; repository and home resolution may differ");
-    }
-    return session;
+    return Session{std::move(session->context), std::move(session->writer)};
 }
 
 void print_json(const nlohmann::json& document)
@@ -161,7 +126,7 @@ std::filesystem::path user_path(const std::string& word)
 
 HostInfo host_info()
 {
-    return {platform::os_name(), platform::host_name(), VERIARCHIVE_VERSION};
+    return app::host_info(VERIARCHIVE_VERSION);
 }
 
 void CliProgress::on_progress(const Progress& progress)
