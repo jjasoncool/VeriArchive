@@ -119,12 +119,25 @@ std::string host_name()
 
 std::string ui_language()
 {
-    for (const char* variable : {"LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"}) { // gettext's order
+    // gettext's rules: the locale is LC_ALL, then LC_MESSAGES, then LANG, and "C"
+    // when none is set (an empty variable counts as unset). LANGUAGE, a
+    // ':'-separated priority list such as "fr:zh_TW:en", overrides the locale,
+    // except when the locale is C or POSIX: `LC_ALL=C command` is the usual way to
+    // ask for untranslated (English) text, whatever LANGUAGE says.
+    std::string locale = "C";
+    for (const char* variable : {"LC_ALL", "LC_MESSAGES", "LANG"}) {
         if (const char* value = std::getenv(variable); value && *value) {
-            return value;
+            locale = value;
+            break;
         }
     }
-    return {};
+    if (locale == "C" || locale == "POSIX") {
+        return locale;
+    }
+    if (const char* language = std::getenv("LANGUAGE"); language && *language) {
+        return language; // may be a list; app::resolve_language takes its first known entry
+    }
+    return locale;
 }
 
 void prepare_console() {}
