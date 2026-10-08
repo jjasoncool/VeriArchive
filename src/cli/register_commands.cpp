@@ -46,6 +46,13 @@ void print_outcome(const RegisterOutcome& outcome, const std::filesystem::path& 
     for (const auto& warning : outcome.warnings) {
         std::cout << "  warning: " << warning << '\n';
     }
+    // D5: without a media copy, the repository holds the only copy of the baseline.
+    if (outcome.media_copy.empty()) {
+        std::cout << "  note: the baseline exists only in the repository; back up RepositoryRoot "
+                     "(or register with --write-media-copy to keep a copy on the media).\n";
+    } else {
+        std::cout << "  media copy: " << path_to_utf8(outcome.media_copy) << '\n';
+    }
 }
 
 nlohmann::json outcome_json(const RegisterOutcome& outcome)
@@ -68,6 +75,7 @@ nlohmann::json outcome_json(const RegisterOutcome& outcome)
         {"skipped_mount_points", std::move(mount_points)},
         {"warnings", outcome.warnings},
         {"manifest", path_to_utf8(outcome.manifest)},
+        {"media_copy", path_to_utf8(outcome.media_copy)},
     };
 }
 
@@ -76,7 +84,7 @@ nlohmann::json outcome_json(const RegisterOutcome& outcome)
 int register_command(const Arguments& arguments)
 {
     if (const auto problem = check_options(arguments,
-            {"--new-revision", "--force-new-archive", "--resume"}, {"--label", "--io", "--copy-of", "--resume"})) {
+            {"--new-revision", "--force-new-archive", "--resume", "--write-media-copy"}, {"--label", "--io", "--copy-of", "--resume"})) {
         return report_failure(arguments, *problem);
     }
     // `register --resume <root>` reads the root as the option's value.
@@ -87,12 +95,13 @@ int register_command(const Arguments& arguments)
     if (words.size() != 2) {
         return report_failure(arguments, {exit_code::usage,
             "usage: register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-            "[--force-new-archive] [--copy-of UUID] [--resume]"});
+            "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]"});
     }
 
     RegisterRequest request;
     request.root = user_path(words[1]);
     request.resume = arguments.has("--resume") || arguments.value("--resume").has_value();
+    request.write_media_copy = arguments.has("--write-media-copy");
     request.label = arguments.value("--label");
     request.copy_of = arguments.value("--copy-of");
     request.new_revision = arguments.has("--new-revision");
@@ -118,8 +127,8 @@ int register_command(const Arguments& arguments)
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();
     const auto media = platform::make_media_enumerator();
-    RegisterServices services{*archive_files, *repository_files, *session->writer, *media, *store,
-        session->context.repo, host_info()};
+    RegisterServices services{*archive_files, *repository_files, *session->writer, *session->writer, *media,
+        *store, session->context.repo, host_info()};
 
     CancelToken cancel;
     platform::cancel_on_interrupt(cancel);

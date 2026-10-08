@@ -12,4 +12,8 @@ std::expected<void, IoError> write_file_atomically(
     const std::filesystem::path& destination,
     std::string_view contents);
 
+// Reads a small file completely (manifest copies, identity files).
+std::expected<std::string, IoError> read_whole_file(
+    IFileSystemAccess& files, const std::filesystem::path& path);
+
 } // namespace va

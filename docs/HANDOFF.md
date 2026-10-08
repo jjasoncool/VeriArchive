@@ -514,6 +514,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 
 > Amended by `docs/decisions/0011-durable-writes-through-ifilewriter.md`: adds `IOutputFile` / `IFileWriter` for durable atomic writes.
 > Amended by `docs/decisions/0014-special-files.md`: `EntryType::Special` for FIFOs, sockets and device nodes.
+> `IFileWriter` also creates directories (`create_directories`), used for the optional media copy (R-89).
 
 ```cpp
 namespace va {

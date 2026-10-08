@@ -107,6 +107,20 @@ public:
     }
 
     Node& node(const std::string& relative) { return nodes_.at(key(path_of(relative))); }
+    bool contains(const std::string& relative) const { return nodes_.contains(key(path_of(relative))); }
+
+    // Writes by absolute path, as a writer on the archive media would.
+    void put(const std::filesystem::path& absolute, std::string content)
+    {
+        auto relative = absolute.lexically_normal().lexically_relative(root_.lexically_normal());
+        auto& written = add_file(va::path_to_utf8(relative), std::move(content));
+        written.mtime_ns = 1;
+    }
+    std::string content_at(const std::filesystem::path& absolute) const
+    {
+        const auto found = nodes_.find(key(absolute));
+        return found == nodes_.end() ? std::string{} : found->second.content;
+    }
     void remove(const std::string& relative)
     {
         const auto prefix = key(path_of(relative));
@@ -228,6 +242,46 @@ private:
 
     std::filesystem::path root_;
     std::map<std::string, Node> nodes_;
+};
+
+// Writes into a FakeFileSystem: stands in for writes to archive media (R-89).
+class FakeMediaWriter final : public va::IFileWriter {
+public:
+    explicit FakeMediaWriter(FakeFileSystem& files) : files_(files) {}
+
+    std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
+        const std::filesystem::path& destination) override
+    {
+        return std::make_unique<Output>(files_, destination);
+    }
+    std::expected<void, va::IoError> remove(const std::filesystem::path&) override { return {}; }
+    std::expected<void, va::IoError> create_directories(const std::filesystem::path&) override { return {}; }
+
+private:
+    class Output final : public va::IOutputFile {
+    public:
+        Output(FakeFileSystem& files, std::filesystem::path destination)
+            : files_(files), destination_(std::move(destination))
+        {
+        }
+        std::expected<void, va::IoError> write(std::span<const std::byte> data) override
+        {
+            content_.append(reinterpret_cast<const char*>(data.data()), data.size());
+            return {};
+        }
+        std::expected<void, va::IoError> commit() override
+        {
+            files_.put(destination_, content_);
+            return {};
+        }
+
+    private:
+        FakeFileSystem& files_;
+        std::filesystem::path destination_;
+        std::string content_;
+    };
+
+    FakeFileSystem& files_;
 };
 
 } // namespace test

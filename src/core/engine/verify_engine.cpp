@@ -6,6 +6,9 @@
 #include "core/engine/comparison.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/identity/volume_json.h"
+#include "core/manifest/manifest_reader.h"
+#include "core/manifest/manifest_writer.h"
+#include "core/write_file.h"
 
 #include <algorithm>
 
@@ -118,6 +121,46 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
         return stop(VerifyStop::Kind::Repository, "run " + run_id + " has an invalid resume record");
     }
     return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>()};
+}
+
+// R-89: a manifest copy on the media is compared with the repository copy. A
+// different copy of the same revision is a warning; a valid copy of a *newer*
+// revision means the repository may have been rolled back, which fails the run.
+void check_media_copies(VerifyServices& services, const std::filesystem::path& root, VerifyOutcome& outcome)
+{
+    const auto directory = root / ".veriarchive";
+    const auto listing = services.archive_files.list(directory);
+    if (!listing) {
+        return;
+    }
+    for (const auto& file : *listing) {
+        const auto name = path_to_utf8(file.native_name);
+        if (name.size() < 9 || name.front() != 'r' || !name.ends_with(".vam")) {
+            continue;
+        }
+        std::uint32_t revision = 0;
+        try {
+            revision = static_cast<std::uint32_t>(std::stoul(name.substr(1, name.size() - 5)));
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (revision == outcome.revision) {
+            const auto on_media = read_whole_file(services.archive_files, directory / file.native_name);
+            const auto in_repository = read_whole_file(services.repository_files,
+                manifest_path(services.layout.manifests(), outcome.archive_uuid, revision));
+            if (on_media && in_repository && *on_media != *in_repository) {
+                outcome.warnings.push_back("media copy " + name + " differs from the repository copy");
+            }
+        } else if (revision > outcome.revision) {
+            const auto reader = ManifestReader::open(services.archive_files, directory / file.native_name);
+            if (reader && reader->header().archive_uuid == outcome.archive_uuid) {
+                outcome.failure_classes.push_back("ManifestRevisionRollback");
+                outcome.warnings.push_back("the media holds revision " + std::to_string(revision) +
+                                           ", newer than the repository's " + std::to_string(outcome.revision) +
+                                           ": the repository may have been rolled back");
+            }
+        }
+    }
 }
 
 } // namespace
@@ -255,6 +298,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         } else {
             manifest = std::move(*loaded);
             outcome.registered_bytes = manifest->header.counts.bytes;
+            check_media_copies(services, located->root, outcome);
         }
     }
 

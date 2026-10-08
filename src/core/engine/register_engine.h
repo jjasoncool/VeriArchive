@@ -20,12 +20,14 @@ struct RegisterRequest {
     std::optional<Uuid> copy_of;            // decision 0005
     std::optional<bool> rotational;         // --io hdd|ssd overrides detection (R-111)
     bool resume = false;                    // R-104: continue an interrupted registration
+    bool write_media_copy = false;          // R-89: also write .veriarchive/ on the media (off by default)
 };
 
 struct RegisterServices {
     IFileSystemAccess& archive_files;       // reads the archive media
     IFileSystemAccess& repository_files;    // reads back repository files
-    IFileWriter& writer;                    // writes repository files only (R-03)
+    IFileWriter& writer;                    // writes repository files
+    IFileWriter& media_writer;              // writes the archive media, only with write_media_copy (R-03)
     IMediaEnumerator& media;
     ArchiveStore& store;
     RepositoryLayout layout;
@@ -41,6 +43,7 @@ struct RegisterOutcome {
     std::vector<ArchivePath> skipped_mount_points;
     std::vector<std::string> warnings;
     std::filesystem::path manifest;
+    std::filesystem::path media_copy;       // set when the media copy was written (R-89)
 };
 
 struct RegisterFailure {

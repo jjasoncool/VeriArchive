@@ -5,7 +5,9 @@
 #include "common/unicode.h"
 #include "common/uuid.h"
 #include "core/hash/hash_pipeline.h"
+#include "core/engine/transfer.h"
 #include "core/identity/volume_json.h"
+#include "core/write_file.h"
 #include "core/manifest/manifest_writer.h"
 #include "core/scan/scanner.h"
 
@@ -286,6 +288,21 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
     }
 
+    // R-89: identity.json goes on the media before the scan, so the scan excludes
+    // it (.veriarchive/) and it is never reported as New.
+    const auto media_directory = request.root / ".veriarchive";
+    if (request.write_media_copy) {
+        const auto identity = identity_file_json(plan.archive_uuid, plan.label, plan.revision,
+            *root_subpath, plan.created);
+        const auto created_directory = services.media_writer.create_directories(media_directory);
+        const auto written_identity = created_directory
+            ? write_file_atomically(services.media_writer, media_directory / "identity.json", identity)
+            : created_directory;
+        if (!written_identity) {
+            return fail(Kind::Media, "cannot write the media copy: " + written_identity.error().message);
+        }
+    }
+
     // Scan, then hash every readable file not already hashed before an interruption.
     const auto interrupted = [&](const std::string& why) {
         return fail(Kind::Incomplete, why + "; continue with `register <root_path> --resume`");
@@ -444,6 +461,16 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     if (!record) {
         store.rollback();
         return fail(Kind::Repository, "cannot record the archive: " + record.error().message);
+    }
+
+    if (request.write_media_copy) {
+        const auto copy = media_directory / outcome.manifest.filename();
+        if (auto copied = copy_file(services.repository_files, services.media_writer, outcome.manifest, copy)) {
+            outcome.media_copy = copy;
+        } else {
+            outcome.warnings.push_back("the manifest copy on the media could not be written: " +
+                                       copied.error().message);
+        }
     }
 
     std::size_t portability = 0;

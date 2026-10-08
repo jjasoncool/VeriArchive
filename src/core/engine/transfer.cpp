@@ -12,33 +12,25 @@
 namespace va {
 namespace {
 
-std::expected<std::string, IoError> read_all(IFileSystemAccess& files, const std::filesystem::path& path)
-{
-    auto source = files.open(path, ReadOptions{false, true});
-    if (!source) {
-        return std::unexpected(source.error());
-    }
-    std::string bytes;
-    std::vector<std::byte> buffer(1 << 20);
-    for (std::uint64_t offset = 0;;) {
-        const auto count = (*source)->read(offset, buffer);
-        if (!count) {
-            return std::unexpected(count.error());
-        }
-        if (*count == 0) {
-            return bytes;
-        }
-        bytes.append(reinterpret_cast<const char*>(buffer.data()), *count);
-        offset += *count;
-    }
-}
-
 std::unexpected<ImportFailure> fail(std::string failure_class, std::string message)
 {
     return std::unexpected(ImportFailure{std::move(failure_class), std::move(message)});
 }
 
 } // namespace
+
+std::string identity_file_json(const Uuid& archive_uuid, const std::string& label,
+    std::uint32_t revision, const std::string& root_subpath, const std::string& created)
+{
+    return canonical_json::ObjectWriter{}
+               .add_string("archive_uuid", archive_uuid)
+               .add_string("label", label)
+               .add_unsigned("revision", revision)
+               .add_string("root_subpath", root_subpath)
+               .add_string("created", created)
+               .str() +
+           '\n';
+}
 
 std::expected<void, IoError> copy_file(IFileSystemAccess& files, IFileWriter& writer,
     const std::filesystem::path& source, const std::filesystem::path& destination)
@@ -91,16 +83,10 @@ std::expected<ExportResult, std::string> export_archive(ArchiveStore& store,
         return std::unexpected(copied.error().message);
     }
 
-    // identity.json: the archive's identity as VeriArchive manages it (§B1.2).
-    const auto identity = canonical_json::ObjectWriter{}
-                              .add_string("archive_uuid", archive_uuid)
-                              .add_string("label", (*archive)->label)
-                              .add_unsigned("revision", revision)
-                              .add_string("root_subpath", manifest->header.root_subpath)
-                              .add_string("created", (*archive)->created)
-                              .str();
     result.identity = out_directory / "identity.json";
-    if (auto written = write_file_atomically(writer, result.identity, identity + "\n"); !written) {
+    const auto identity = identity_file_json(archive_uuid, (*archive)->label, revision,
+        manifest->header.root_subpath, (*archive)->created);
+    if (auto written = write_file_atomically(writer, result.identity, identity); !written) {
         return std::unexpected(written.error().message);
     }
     return result;
@@ -129,8 +115,8 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     const auto same = std::find_if(known->begin(), known->end(),
         [&](const RevisionRecord& record) { return record.revision == header.revision; });
     if (same != known->end()) {
-        const auto incoming = read_all(files, manifest);
-        const auto stored = read_all(files, destination);
+        const auto incoming = read_whole_file(files, manifest);
+        const auto stored = read_whole_file(files, destination);
         if (!incoming || !stored) {
             return fail("RepositoryError", "cannot compare with the stored manifest");
         }

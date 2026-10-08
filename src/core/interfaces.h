@@ -76,6 +76,7 @@ public:
     virtual std::expected<std::unique_ptr<IOutputFile>, IoError> create(
         const std::filesystem::path& destination) = 0;
     virtual std::expected<void, IoError> remove(const std::filesystem::path& file) = 0;
+    virtual std::expected<void, IoError> create_directories(const std::filesystem::path& directory) = 0;
 };
 
 class IMediaEnumerator {

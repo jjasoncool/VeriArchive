@@ -34,13 +34,14 @@ struct EngineFixture {
     va::CancelToken cancel;
     NullProgress progress;
     va::HostInfo host{"windows", "test-host", "0.1.0"};
+    FakeMediaWriter media_writer{archive};
 
     EngineFixture() { media.volume = fake_volume(archive.root()); }
 
     std::expected<va::RegisterOutcome, va::RegisterFailure> register_root(va::RegisterRequest request)
     {
-        va::RegisterServices services{archive, *repository.files, *repository.writer, media, store,
-            repository.context.repo, host};
+        va::RegisterServices services{archive, *repository.files, *repository.writer, media_writer, media,
+            store, repository.context.repo, host};
         return va::register_archive(services, request, cancel, progress);
     }
 

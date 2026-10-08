@@ -18,4 +18,26 @@ std::expected<void, IoError> write_file_atomically(
     return (*file)->commit();
 }
 
+std::expected<std::string, IoError> read_whole_file(
+    IFileSystemAccess& files, const std::filesystem::path& path)
+{
+    auto source = files.open(path, ReadOptions{false, true});
+    if (!source) {
+        return std::unexpected(source.error());
+    }
+    std::string bytes;
+    std::vector<std::byte> buffer(1 << 20);
+    for (std::uint64_t offset = 0;;) {
+        const auto count = (*source)->read(offset, buffer);
+        if (!count) {
+            return std::unexpected(count.error());
+        }
+        if (*count == 0) {
+            return bytes;
+        }
+        bytes.append(reinterpret_cast<const char*>(buffer.data()), *count);
+        offset += *count;
+    }
+}
+
 } // namespace va

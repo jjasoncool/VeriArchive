@@ -5,6 +5,8 @@
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 
+#include <algorithm>
+
 namespace {
 
 // Registration-only view of the shared engine fixture.
@@ -171,6 +173,63 @@ void interrupted_registration_resumes()
     CHECK(verified && verified->result == "PASSED");
 }
 
+// R-89: the optional media copy, and what verification makes of it.
+void media_copy_is_written_and_checked()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a");
+    auto request = at("/vol");
+    request.write_media_copy = true;
+    const auto registered = fixture.run(request);
+    CHECK(registered && !registered->media_copy.empty());
+    if (!registered) {
+        return;
+    }
+    CHECK(fixture.archive.contains(".veriarchive/identity.json"));
+    CHECK(fixture.archive.contains(".veriarchive/r0001.vam"));
+    CHECK(registered->counts.files == 1); // .veriarchive/ is excluded (R-54)
+
+    auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+
+    // A differing copy of the same revision is a warning.
+    auto& copy = fixture.archive.node(".veriarchive/r0001.vam");
+    const auto original = copy.content;
+    copy.content += "x";
+    verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED_WITH_WARNINGS");
+    copy.content = original;
+
+    // A newer valid revision on the media means the repository was rolled back.
+    auto rebaseline = at("/vol");
+    rebaseline.new_revision = true;
+    rebaseline.write_media_copy = true;
+    CHECK(fixture.run(rebaseline).has_value());
+    auto archive = fixture.store.find_archive(registered->archive_uuid);
+    if (archive && *archive) {
+        (*archive)->current_revision = 1;
+        CHECK(fixture.store.update_archive(**archive));
+    }
+    fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2");
+    verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "FAILED");
+    CHECK(verified && std::find(verified->failure_classes.begin(), verified->failure_classes.end(),
+                          "ManifestRevisionRollback") != verified->failure_classes.end());
+}
+
+// §B10 last row: an identity file naming another archive was copied.
+void copied_identity_file_fails()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a");
+    CHECK(fixture.run(at("/vol")).has_value());
+    fixture.archive.add_file(".veriarchive/identity.json",
+        "{\"archive_uuid\":\"00000000-0000-4000-8000-000000000000\"}");
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "FAILED");
+    CHECK(verified && verified->identity.result == va::MatchResult::Mismatch);
+}
+
 void unidentifiable_volume_fails()
 {
     Fixture fixture;
@@ -189,5 +248,7 @@ void register_engine_tests()
     unreadable_files_are_recorded();
     retired_archive_takes_no_revision();
     interrupted_registration_resumes();
+    media_copy_is_written_and_checked();
+    copied_identity_file_fails();
     unidentifiable_volume_fails();
 }

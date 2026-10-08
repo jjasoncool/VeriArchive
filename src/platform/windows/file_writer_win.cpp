@@ -93,6 +93,16 @@ public:
         }
         return {};
     }
+
+    std::expected<void, IoError> create_directories(const std::filesystem::path& directory) override
+    {
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error) {
+            return std::unexpected(error_from_win32(static_cast<DWORD>(error.value()), "create_directories"));
+        }
+        return {};
+    }
 };
 
 } // namespace

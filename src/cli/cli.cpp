@@ -17,9 +17,10 @@ void print_usage()
         "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
-        "           [--force-new-archive] [--copy-of UUID]\n"
+        "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
-        "  archive list | show <uuid> | retire <uuid>\n"
+        "         [--resume RUN_ID]\n"
+        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n";

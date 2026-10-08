@@ -37,6 +37,10 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     IFileSystemAccess& files, IFileWriter& writer, const RepositoryLayout& layout,
     const std::filesystem::path& manifest, bool force_rollback);
 
+// identity.json (§B1.2 ArchiveIdentity), written by export and by the media copy (R-89).
+std::string identity_file_json(const Uuid& archive_uuid, const std::string& label,
+    std::uint32_t revision, const std::string& root_subpath, const std::string& created);
+
 // Streams `source` into `destination` through IFileWriter (atomic, durable).
 std::expected<void, IoError> copy_file(IFileSystemAccess& files, IFileWriter& writer,
     const std::filesystem::path& source, const std::filesystem::path& destination);
