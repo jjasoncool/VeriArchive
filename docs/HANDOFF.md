@@ -292,7 +292,7 @@ line 2..N   body   — one canonical JSON object per line: entries (sorted per R
 
 - R-64 Keys are emitted in the fixed order given in §B4.3 / §B4.4 (not alphabetical); no whitespace; integers as plain decimal; strings escape only `"`, `\`, and U+0000–U+001F (always as `\uXXXX`, including newline and tab); all other characters as raw UTF-8; hashes lowercase hex; booleans `true`/`false`; absent optional fields are omitted, never `null`.
 - R-65 The writer is a small in-house emitter. Parsing MAY use nlohmann/json.
-- R-66 Golden test: the same fixture tree registered on Windows and on Linux MUST produce byte-identical `.vam` files after a test helper blanks `created`, `created_by`, `identity`, `root_hint`. Golden fixtures use relative links only (decision 0008).
+- R-66 Golden test: the same fixture tree registered on Windows and on Linux MUST produce byte-identical `.vam` files after a test helper blanks `created`, `created_by`, `identity`, `root_hint`. Golden fixtures use relative links only (decision 0008); the cross-OS comparison also blanks `mode` and `attrs` (decision 0015).
 
 ### B4.3 Header (line 1; shown wrapped, real header is one line)
 
@@ -321,7 +321,7 @@ Field rules:
 - `hash.chunk_size`: `0` = no chunk lines (V1). V1.1 uses 67108864 (64 MiB, see D2); fixed per archive at registration.
 - `merkle_root` omitted when `chunk_size` is 0. A verifier that sees `chunk_size:0` skips chunk and Merkle checks.
 - `identity` is the `VolumeInfo`/`PhysicalDeviceInfo` snapshot minus runtime fields (`mount_point`, `device_ref`, `read_only`, `rotational`). It describes the carrier this revision was read from (decision 0004).
-- `copy_of` (optional, omitted when absent): `archive_uuid` of another archive holding the same content; display only (decision 0005).
+- `copy_of` (optional, omitted when absent, directly after `supersedes`): `archive_uuid` of another archive holding the same content; display only (decisions 0005, 0015).
 
 ### B4.4 Body lines
 

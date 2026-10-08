@@ -1,0 +1,138 @@
+#include "core/manifest/manifest_reader.h"
+
+#include "core/hash/hashers.h"
+
+#include <algorithm>
+
+namespace va {
+namespace {
+
+ManifestFailure io_failure(const IoError& error)
+{
+    return {ManifestFailure::Kind::Io, error.message};
+}
+
+ManifestFailure malformed(std::string message)
+{
+    return {ManifestFailure::Kind::Malformed, std::move(message)};
+}
+
+} // namespace
+
+std::expected<bool, ManifestFailure> ManifestReader::read_line(std::string& line)
+{
+    line.clear();
+    for (;;) {
+        if (buffer_start_ == buffer_end_) {
+            const auto count = source_->read(offset_, buffer_);
+            if (!count) {
+                return std::unexpected(io_failure(count.error()));
+            }
+            if (*count == 0) {
+                if (!line.empty()) {
+                    return std::unexpected(malformed("manifest does not end with a newline"));
+                }
+                return false;
+            }
+            offset_ += *count;
+            buffer_start_ = 0;
+            buffer_end_ = *count;
+        }
+        const auto* begin = reinterpret_cast<const char*>(buffer_.data()) + buffer_start_;
+        const auto* end = reinterpret_cast<const char*>(buffer_.data()) + buffer_end_;
+        const auto* newline = std::find(begin, end, '\n');
+        line.append(begin, newline);
+        buffer_start_ += static_cast<std::size_t>(newline - begin);
+        if (newline != end) {
+            ++buffer_start_;
+            return true;
+        }
+    }
+}
+
+std::expected<ManifestReader, ManifestFailure> ManifestReader::open(
+    IFileSystemAccess& files, const std::filesystem::path& path)
+{
+    ManifestReader reader;
+    reader.buffer_.resize(1 << 20);
+    auto source = files.open(path, ReadOptions{false, true});
+    if (!source) {
+        return std::unexpected(io_failure(source.error()));
+    }
+    reader.source_ = std::move(*source);
+
+    auto has_header = reader.read_line(reader.header_line_);
+    if (!has_header) {
+        return std::unexpected(has_header.error());
+    }
+    if (!*has_header) {
+        return std::unexpected(malformed("empty manifest"));
+    }
+    try {
+        reader.header_ = header_from_json(nlohmann::json::parse(reader.header_line_));
+    } catch (const std::exception& error) {
+        return std::unexpected(malformed(std::string("invalid manifest header: ") + error.what()));
+    }
+    reader.header_blake3_ = blake3_hex(reader.header_line_);
+
+    // R-62: hash everything after line 1 before trusting any entry.
+    const std::uint64_t body_start = reader.header_line_.size() + 1;
+    Blake3Hasher body_hash;
+    std::uint64_t length = 0;
+    std::uint64_t lines = 0;
+    for (std::uint64_t offset = body_start;;) {
+        const auto count = reader.source_->read(offset, reader.buffer_);
+        if (!count) {
+            return std::unexpected(io_failure(count.error()));
+        }
+        if (*count == 0) {
+            break;
+        }
+        const auto piece = std::span(reader.buffer_.data(), *count);
+        body_hash.update(piece);
+        lines += static_cast<std::uint64_t>(
+            std::count(piece.begin(), piece.end(), std::byte{'\n'}));
+        length += *count;
+        offset += *count;
+    }
+    if (length != reader.header_.body_length || lines != reader.header_.body_lines ||
+        body_hash.finish_hex() != reader.header_.body_blake3) {
+        return std::unexpected(ManifestFailure{ManifestFailure::Kind::BodyMismatch,
+            "manifest body does not match its header (ManifestHashMismatch)"});
+    }
+
+    reader.offset_ = body_start;
+    reader.buffer_start_ = reader.buffer_end_ = 0;
+    return reader;
+}
+
+std::expected<std::optional<Entry>, ManifestFailure> ManifestReader::next()
+{
+    std::string line;
+    for (;;) {
+        auto has_line = read_line(line);
+        if (!has_line) {
+            return std::unexpected(has_line.error());
+        }
+        if (!*has_line) {
+            return std::optional<Entry>{};
+        }
+        Entry entry;
+        try {
+            const auto json = nlohmann::json::parse(line);
+            if (json.at("t").get<std::string>() == "c") {
+                continue; // V1.1 chunk lines; V1 verification reads whole files
+            }
+            entry = entry_from_json(json);
+        } catch (const std::exception& error) {
+            return std::unexpected(malformed(std::string("invalid manifest entry: ") + error.what()));
+        }
+        if (previous_ && !canonical_less(*previous_, entry)) {
+            return std::unexpected(malformed("manifest entries out of canonical order"));
+        }
+        previous_ = entry;
+        return std::optional<Entry>(std::move(entry));
+    }
+}
+
+} // namespace va

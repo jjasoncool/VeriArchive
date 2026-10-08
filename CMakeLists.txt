@@ -54,6 +54,9 @@ add_library(veriarchive_core
     src/core/identity/matcher.cpp
     src/core/identity/volume_json.cpp
     src/core/manifest/entry.cpp
+    src/core/manifest/manifest.cpp
+    src/core/manifest/manifest_reader.cpp
+    src/core/manifest/manifest_writer.cpp
     src/core/repository/repository.cpp
     src/core/repository/sqlite_raii.cpp
     src/core/scan/scanner.cpp
@@ -119,12 +122,15 @@ if(BUILD_TESTING)
         tests/unit/fs_access_test.cpp
         tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
+        tests/unit/manifest_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
         tests/unit/repository_test.cpp
         tests/unit/scanner_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform)
+    target_compile_definitions(veriarchive_tests PRIVATE
+        VERIARCHIVE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
     if(NOT (UNIX AND NOT APPLE))
         # Pure C++ parser; tested on every OS although only Linux uses it.
         target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp)

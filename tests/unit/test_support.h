@@ -23,3 +23,4 @@ void identity_tests();
 void hash_tests();
 void fs_access_tests();
 void scanner_tests();
+void manifest_tests();

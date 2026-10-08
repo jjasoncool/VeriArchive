@@ -13,5 +13,6 @@ int main()
     hash_tests();
     fs_access_tests();
     scanner_tests();
+    manifest_tests();
     return test_failures == 0 ? 0 : 1;
 }
