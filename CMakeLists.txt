@@ -154,12 +154,50 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/verify_view.cpp)
     set_target_properties(veriarchive_gui PROPERTIES OUTPUT_NAME veriarchive-gui WIN32_EXECUTABLE TRUE)
     target_compile_features(veriarchive_gui PRIVATE cxx_std_23)
-    target_compile_definitions(veriarchive_gui PRIVATE VERIARCHIVE_VERSION="${PROJECT_VERSION}")
+    target_compile_definitions(veriarchive_gui PRIVATE
+        VERIARCHIVE_VERSION="${PROJECT_VERSION}"
+        VERIARCHIVE_WITHOUT_SESSION_BUS=$<BOOL:${WIN32}>)
     target_link_libraries(veriarchive_gui PRIVATE VeriArchive::app PkgConfig::GTK4)
     if(WIN32)
         target_sources(veriarchive_gui PRIVATE src/platform/windows/veriarchive.rc)
     endif()
 endif()
+
+# Installation and packaging (cmake --install --component VeriArchive, cpack).
+# Only the VeriArchive component is packaged, so install rules of fetched
+# dependencies (BLAKE3 headers and libraries) stay out. On Windows the install
+# tree is made self-contained: DLLs, GTK resources and licenses (R-121).
+install(TARGETS veriarchive_cli RUNTIME DESTINATION bin COMPONENT VeriArchive)
+if(VERIARCHIVE_BUILD_GUI)
+    install(TARGETS veriarchive_gui RUNTIME DESTINATION bin COMPONENT VeriArchive)
+endif()
+install(FILES README.md DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
+if(WIN32)
+    get_filename_component(VERIARCHIVE_MINGW_PREFIX "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component(VERIARCHIVE_MINGW_PREFIX "${VERIARCHIVE_MINGW_PREFIX}" DIRECTORY)
+    find_program(VERIARCHIVE_OBJDUMP objdump HINTS "${VERIARCHIVE_MINGW_PREFIX}/bin" REQUIRED)
+    install(FILES packaging/windows/NOTICE.txt DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
+    install(CODE "set(VERIARCHIVE_MINGW_PREFIX \"${VERIARCHIVE_MINGW_PREFIX}\")
+set(VERIARCHIVE_OBJDUMP \"${VERIARCHIVE_OBJDUMP}\")" COMPONENT VeriArchive)
+    install(SCRIPT packaging/windows/install_runtime.cmake COMPONENT VeriArchive)
+endif()
+
+set(CPACK_PACKAGE_NAME "VeriArchive")
+set(CPACK_PACKAGE_VENDOR "VeriArchive")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Integrity verification for archive media")
+set(CPACK_GENERATOR ZIP)
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+set(CPACK_COMPONENT_INCLUDE_TOPLEVEL_DIRECTORY ON)
+# Component mode is what makes CPack honour CPACK_COMPONENTS_ALL.
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENTS_ALL VeriArchive)
+if(WIN32)
+    set(CPACK_PACKAGE_FILE_NAME "VeriArchive-${PROJECT_VERSION}-windows-x86_64")
+else()
+    set(CPACK_PACKAGE_FILE_NAME "VeriArchive-${PROJECT_VERSION}-linux-x86_64")
+endif()
+set(CPACK_ARCHIVE_VERIARCHIVE_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}") # zip and its top-level folder
+include(CPack)
 
 if(BUILD_TESTING)
     add_executable(veriarchive_tests
@@ -199,6 +237,15 @@ if(BUILD_TESTING)
         add_test(NAME veriarchive_gui_smoke COMMAND veriarchive_gui)
         set_tests_properties(veriarchive_gui_smoke PROPERTIES
             ENVIRONMENT "VERIARCHIVE_GUI_SMOKE_TEST=1;VERIARCHIVE_REPOSITORY=${CMAKE_CURRENT_BINARY_DIR}/no-repository")
+    endif()
+    if(WIN32)
+        # R-121: the installed package runs with only Windows on PATH.
+        add_test(NAME veriarchive_package
+            COMMAND ${CMAKE_COMMAND}
+                -DBUILD_DIR=${CMAKE_BINARY_DIR}
+                -DPREFIX=${CMAKE_CURRENT_BINARY_DIR}/package-test
+                -DOBJDUMP=${VERIARCHIVE_OBJDUMP}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/check_package.cmake)
     endif()
     add_test(NAME veriarchive_cli_e2e
         COMMAND ${CMAKE_COMMAND}

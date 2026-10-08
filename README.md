@@ -37,6 +37,21 @@ ctest --preset windows-ucrt64-debug
 Release presets are `windows-ucrt64-release` and `linux-release`. CI runs on GitLab
 (`.gitlab-ci.yml`): Windows UCRT64, Ubuntu 24.04 and Fedora.
 
+### Windows package
+
+A self-contained Windows build (programs, every DLL they need, GTK resources and the licenses of
+all bundled libraries) runs on machines without MSYS2:
+
+```sh
+cmake --preset windows-ucrt64-release
+cmake --build --preset windows-ucrt64-release
+cd build/windows-ucrt64-release && cpack   # VeriArchive-<version>-windows-x86_64.zip
+```
+
+`cmake --install build/windows-ucrt64-release --prefix <folder> --component VeriArchive` installs
+the same tree into a folder. The `veriarchive_package` test checks that the installed tree runs
+with only Windows on `PATH` and never imports `msys-2.0.dll` (R-121).
+
 ## Command line
 
 ```sh

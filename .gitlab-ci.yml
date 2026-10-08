@@ -44,8 +44,12 @@ windows-ucrt64:
       C:\msys64\usr\bin\bash.exe -lc "pacman -Sy --noconfirm --needed
       mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
       mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-sqlite3 mingw-w64-ucrt-x86_64-openssl
-      mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-ntldd"
+      mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-gtk4"
   script:
+    # CTest includes veriarchive_package (R-121): the installed package must run
+    # with only Windows on PATH and must not import msys-2.0.dll.
     - C:\msys64\usr\bin\bash.exe -lc "cmake --preset windows-ucrt64-release && cmake --build --preset windows-ucrt64-release && ctest --preset windows-ucrt64-release"
-    # R-121: the CLI must not depend on the MSYS2 POSIX runtime.
-    - C:\msys64\usr\bin\bash.exe -lc "! ntldd -R build/windows-ucrt64-release/veriarchive-cli.exe | grep -i msys-2.0.dll"
+    - C:\msys64\usr\bin\bash.exe -lc "cd build/windows-ucrt64-release && cpack"
+  artifacts:
+    paths:
+      - build/windows-ucrt64-release/VeriArchive-*.zip

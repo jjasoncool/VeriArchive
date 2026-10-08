@@ -1,0 +1,20 @@
+VeriArchive for Windows
+
+This folder is self-contained: it runs without MSYS2. Start bin\veriarchive-gui.exe for the
+graphical interface or use bin\veriarchive-cli.exe from a terminal.
+
+On first use the repository is created in bin\data (when this folder is writable) or in
+%USERPROFILE%\VeriArchive, and remembered in bin\config.json. Back up the repository: losing it
+loses the verification history.
+
+Third-party components
+----------------------
+VeriArchive is dynamically linked against third-party libraries, among them GTK, GLib, Pango,
+Cairo, HarfBuzz and gdk-pixbuf, which are licensed under the GNU Lesser General Public License
+(LGPL) version 2.1 or later, and against SQLite (public domain), OpenSSL (Apache-2.0), the GCC
+runtime (GPL with the GCC Runtime Library Exception) and others.
+
+share\licenses\THIRD-PARTY.txt lists every bundled DLL and the MSYS2 package it comes from;
+share\licenses\<package>\ holds that package's license. The libraries are unmodified builds from
+the MSYS2 project (https://packages.msys2.org), where their source code is available. Under the
+LGPL you may replace any of these DLLs with a compatible build of your own.
