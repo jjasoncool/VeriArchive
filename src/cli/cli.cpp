@@ -1,123 +1,44 @@
-#include "common/utf8.h"
-#include "core/repository/repository.h"
-#include "platform/file_writer.h"
-#include "platform/platform_services.h"
-#include <cstdlib>
+// Entry point shared by main_win.cpp and main_linux.cpp: parses the command line
+// and dispatches to the command group named by the first word.
+#include "cli/cli.h"
+
+#include "cli/commands.h"
+
 #include <iostream>
-#include <string_view>
-#include <vector>
 
 namespace va::cli {
-
 namespace {
 
-constexpr int usage_error = 10;
-constexpr int repository_error = 11;
-
-void print_usage() {
-    std::cout << "Usage: veriarchive-cli [--config P] [--repository P] repo init|info\n";
-}
-
-bool parse_global_options(
-    const std::vector<std::string>& arguments,
-    RepositoryOptions& options,
-    std::size_t& command_index) {
-    while (command_index < arguments.size() && arguments[command_index].starts_with("--")) {
-        const auto& option = arguments[command_index];
-        if ((option != "--repository" && option != "--config") ||
-            command_index + 1 >= arguments.size()) {
-            return false;
-        }
-
-        const auto path = path_from_utf8(arguments[command_index + 1]);
-        if (option == "--repository") {
-            options.explicit_repository = path;
-        } else {
-            options.explicit_config = path;
-        }
-        command_index += 2;
-    }
-    return true;
-}
-
-bool is_repository_command(
-    const std::vector<std::string>& arguments,
-    std::size_t command_index) {
-    if (command_index + 2 != arguments.size() || arguments[command_index] != "repo") {
-        return false;
-    }
-    const auto& action = arguments[command_index + 1];
-    return action == "init" || action == "info";
+void print_usage()
+{
+    std::cout <<
+        "Usage: veriarchive-cli [--config P] [--repository P] [--json] <command>\n"
+        "\n"
+        "  repo init | info\n";
 }
 
 } // namespace
 
-int run(std::vector<std::string> arguments) {
-    RepositoryOptions options;
-    const auto executable = platform::executable_path();
-    const auto config_directory = platform::user_config_dir();
-    const auto home = platform::user_home();
-    if (!executable || !config_directory || !home) {
-        const auto& error = !executable ? executable.error() :
-                            !config_directory ? config_directory.error() : home.error();
-        std::cerr << error.message << '\n';
-        return repository_error;
+int run(std::vector<std::string> raw_arguments)
+{
+    std::string error;
+    const auto arguments = parse_arguments(raw_arguments, error);
+    if (!arguments) {
+        std::cerr << "error: " << error << '\n';
+        return exit_code::usage;
     }
-    options.executable_dir = executable->parent_path();
-    options.user_config_dir = *config_directory;
-    options.user_home = *home;
-
-    if (const char* environment_repository = std::getenv("VERIARCHIVE_REPOSITORY")) {
-        options.environment_repository = path_from_utf8(environment_repository);
-    }
-
-    std::size_t command_index = 0;
-    if (!parse_global_options(arguments, options, command_index)) {
-        std::cerr << "unknown or incomplete option\n";
-        return usage_error;
-    }
-    if (!is_repository_command(arguments, command_index)) {
+    if (arguments->words.empty()) {
         print_usage();
-        return arguments.empty() ? 0 : usage_error;
+        return raw_arguments.empty() ? exit_code::passed : exit_code::usage;
     }
 
-    const RepositoryProbes probes{
-        platform::writable_directory,
-        platform::network_filesystem,
-    };
-    options.initialise = arguments[command_index + 1] == "init";
-    auto context = resolve_repository(options, probes);
-    if (!context) {
-        std::cerr << context.error().message << '\n';
-        return repository_error;
+    const auto& command = arguments->words.front();
+    if (command == "repo") {
+        return repo_command(*arguments);
     }
 
-    const auto writer = platform::make_file_writer();
-    auto result = options.initialise ? initialise_repository(*context, *writer)
-                                     : open_repository(*context);
-    if (!result) {
-        std::cerr << result.error().message << '\n';
-        return repository_error;
-    }
-
-    if (auto recorded = record_repository_uuid(*context, *writer); !recorded) {
-        std::cerr << recorded.error().message << '\n';
-        return repository_error;
-    }
-    if (!context->previous_repository_uuid.empty()) {
-        std::cerr << "warning: repository_uuid changed from " << context->previous_repository_uuid
-                  << " to " << context->repository_uuid << "; recorded the new uuid\n";
-    }
-
-    if (platform::process_is_elevated()) {
-        std::cerr << "warning: VeriArchive is running elevated; "
-                     "repository and home resolution may differ\n";
-    }
-
-    std::cout << "RepositoryRoot: " << path_to_utf8(context->repo.root)
-              << "\nrepository_uuid: " << context->repository_uuid
-              << "\nrepo_selected_by: " << context->repo_selected_by << '\n';
-    return 0;
+    print_usage();
+    return exit_code::usage;
 }
 
 } // namespace va::cli

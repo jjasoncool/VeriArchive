@@ -65,7 +65,10 @@ else()
     message(FATAL_ERROR "VeriArchive currently supports Windows and Linux only")
 endif()
 
-add_executable(veriarchive_cli src/cli/cli.cpp)
+add_executable(veriarchive_cli
+    src/cli/cli.cpp
+    src/cli/cli_support.cpp
+    src/cli/repo_commands.cpp)
 set_target_properties(veriarchive_cli PROPERTIES OUTPUT_NAME veriarchive-cli)
 if(WIN32)
     target_sources(veriarchive_cli PRIVATE src/cli/main_win.cpp src/platform/windows/veriarchive.rc)
