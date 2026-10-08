@@ -742,6 +742,8 @@ Exit codes: `0` PASSED · `2` PASSED_WITH_WARNINGS · `3` FAILED · `4` INCOMPLE
 
 ## B17. GUI (M5)
 
+> Amended by `docs/decisions/0016-gtk4-c-api-for-the-gui.md`: the GUI uses the GTK4 C API (no gtkmm).
+
 Views: Register Archive, Verify Archive, Archive List, Verification History, Settings.
 Archive List columns: label, short uuid, volume label, model, capacity, last FULL (result/date), last verify (mode/result/date), OVERDUE, revision.
 Settings shows: active RepositoryRoot and `repo_selected_by`, `repository_uuid`, config file path, trusted keys (V1.1), backup reminder (R-86).

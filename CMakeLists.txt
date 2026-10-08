@@ -139,6 +139,28 @@ target_compile_features(veriarchive_cli PRIVATE cxx_std_23)
 target_compile_definitions(veriarchive_cli PRIVATE VERIARCHIVE_VERSION="${PROJECT_VERSION}")
 target_link_libraries(veriarchive_cli PRIVATE VeriArchive::app)
 
+# GTK4 GUI (M5, decision 0016). Built when GTK4 is available.
+pkg_check_modules(GTK4 IMPORTED_TARGET gtk4>=4.10)
+option(VERIARCHIVE_BUILD_GUI "Build the GTK4 GUI" ${GTK4_FOUND})
+if(VERIARCHIVE_BUILD_GUI)
+    add_executable(veriarchive_gui
+        src/gui/archive_list_view.cpp
+        src/gui/gui_app.cpp
+        src/gui/gui_support.cpp
+        src/gui/history_view.cpp
+        src/gui/main.cpp
+        src/gui/register_view.cpp
+        src/gui/settings_view.cpp
+        src/gui/verify_view.cpp)
+    set_target_properties(veriarchive_gui PROPERTIES OUTPUT_NAME veriarchive-gui WIN32_EXECUTABLE TRUE)
+    target_compile_features(veriarchive_gui PRIVATE cxx_std_23)
+    target_compile_definitions(veriarchive_gui PRIVATE VERIARCHIVE_VERSION="${PROJECT_VERSION}")
+    target_link_libraries(veriarchive_gui PRIVATE VeriArchive::app PkgConfig::GTK4)
+    if(WIN32)
+        target_sources(veriarchive_gui PRIVATE src/platform/windows/veriarchive.rc)
+    endif()
+endif()
+
 if(BUILD_TESTING)
     add_executable(veriarchive_tests
         tests/unit/test_main.cpp
@@ -172,6 +194,12 @@ if(BUILD_TESTING)
         target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp)
     endif()
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
+    if(VERIARCHIVE_BUILD_GUI AND WIN32)
+        # Builds every GUI view without showing the window (decision 0016).
+        add_test(NAME veriarchive_gui_smoke COMMAND veriarchive_gui)
+        set_tests_properties(veriarchive_gui_smoke PROPERTIES
+            ENVIRONMENT "VERIARCHIVE_GUI_SMOKE_TEST=1;VERIARCHIVE_REPOSITORY=${CMAKE_CURRENT_BINARY_DIR}/no-repository")
+    endif()
     add_test(NAME veriarchive_cli_e2e
         COMMAND ${CMAKE_COMMAND}
             -DCLI=$<TARGET_FILE:veriarchive_cli>

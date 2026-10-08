@@ -141,6 +141,7 @@ class CancelToken {
 public:
     void cancel() { cancelled_.store(true); }
     bool cancelled() const { return cancelled_.load(); }
+    void reset() { cancelled_.store(false); } // before reusing the token for a new operation
 
 private:
     std::atomic_bool cancelled_{false};
