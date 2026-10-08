@@ -1,15 +1,26 @@
 // VeriArchive GUI entry point. It runs unprivileged and never elevates itself
 // (R-08, R-12). VERIARCHIVE_GUI_SMOKE_TEST=1 builds every view without showing
-// the window and exits, so a build can be checked without a desktop.
+// the window, rebuilds it in the other language and back (as a language change
+// does), and exits, so a build can be checked without a desktop.
 #include "gui/gui_app.h"
 
 #include <cstdlib>
+#include <exception>
+#include <string>
 
 int main(int argc, char* argv[])
 {
+    // First, so that even a failure while starting is recorded.
+    va::gui::install_failure_log();
+
     va::gui::GuiState state;
     state.host = va::app::host_info(VERIARCHIVE_VERSION);
-    state.text = va::app::Text(va::app::interface_language(std::nullopt, std::nullopt));
+    try {
+        state.text = va::app::Text(va::app::interface_language(std::nullopt, std::nullopt));
+    } catch (const std::exception& error) {
+        // Start in English; Settings will show what is wrong with the config.
+        va::gui::log_failure(std::string("exception while choosing the language: ") + error.what());
+    }
     va::gui::use_gtk_language(state.text.language());
     static bool smoke_test = std::getenv("VERIARCHIVE_GUI_SMOKE_TEST") != nullptr;
 
@@ -22,7 +33,15 @@ int main(int argc, char* argv[])
     state.application = gtk_application_new("io.veriarchive.Gui", G_APPLICATION_NON_UNIQUE);
     g_signal_connect(state.application, "activate",
         G_CALLBACK(+[](GtkApplication*, gpointer data) {
-            va::gui::activate(*static_cast<va::gui::GuiState*>(data), smoke_test);
+            auto& state = *static_cast<va::gui::GuiState*>(data);
+            va::gui::guarded([&] { va::gui::activate(state, smoke_test); },
+                [&](const va::gui::Report& report) {
+                    // Without a window there is nothing to continue with; the
+                    // reason is in the failure log (and on stderr).
+                    g_printerr("%s\n", report(state.text).c_str());
+                    state.exit_status = 1;
+                    g_application_quit(G_APPLICATION(state.application));
+                });
         }),
         &state);
     // Closing the window cancels a running operation and waits for it, so an
@@ -30,11 +49,13 @@ int main(int argc, char* argv[])
     g_signal_connect(state.application, "shutdown",
         G_CALLBACK(+[](GApplication*, gpointer data) {
             auto& state = *static_cast<va::gui::GuiState*>(data);
-            state.job.cancel();
-            state.job.wait();
+            va::gui::guarded([&] { state.job.abandon(); }, [](const va::gui::Report&) {});
+            // The window is gone. GLib still runs the callbacks already queued
+            // (a language change, say); they check this and do nothing.
+            state.window = nullptr;
         }),
         &state);
     const int status = g_application_run(G_APPLICATION(state.application), argc, argv);
     g_object_unref(state.application);
-    return status;
+    return status != 0 ? status : state.exit_status;
 }

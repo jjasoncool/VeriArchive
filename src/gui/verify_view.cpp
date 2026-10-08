@@ -43,7 +43,7 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
         body += "\n";
         for (const auto& item : outcome.items) {
             body += text(item.status) + "  " + item.path.p +
-                    (item.detail.empty() ? "" : "  (" + text(item.detail) + ")") + "\n";
+                    (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail))) + "\n";
         }
     }
     if (outcome.result == "INCOMPLETE") {
@@ -54,20 +54,39 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
     return body;
 }
 
+// Shows `report` below the buttons and keeps it, so a language change can
+// show it again in the new language.
+void show_report(GuiState& state, Report report)
+{
+    set_text(state.verify_view.report, report(state.text));
+    state.verify_view.shown_report = std::move(report);
+}
+
 void set_running(GuiState& state, bool running)
 {
     auto& view = state.verify_view;
     gtk_widget_set_sensitive(view.start, !running);
     gtk_widget_set_sensitive(view.cancel, running);
     gtk_widget_set_sensitive(view.resume, !running && !view.incomplete_run.empty());
+    lock_language(state, running);
+}
+
+// Shows an unexpected error of a Verify handler (see guarded). A start that
+// failed leaves the buttons as they are when nothing runs.
+void show_error(GuiState& state, Report report)
+{
+    if (!state.job.running()) {
+        set_running(state, false);
+    }
+    show_report(state, std::move(report));
 }
 
 void start_verification(GuiState& state, bool resume)
 {
     auto& view = state.verify_view;
     if (!state.session || state.job.running()) {
-        set_text(view.report, state.session ? state.text("Another operation is running.")
-                                            : state.text("Open a repository first (Settings)."));
+        show_report(state, fixed_message(state.session ? "Another operation is running."
+                                                        : "Open a repository first (Settings)."));
         return;
     }
     VerifyRequest request;
@@ -86,56 +105,64 @@ void start_verification(GuiState& state, bool resume)
         } else {
             request.root = entry_path(view.folder);
             if (request.root->empty()) {
-                set_text(view.report, state.text("Choose the folder to verify, or pick a registered archive."));
+                show_report(state, fixed_message("Choose the folder to verify, or pick a registered archive."));
                 return;
             }
         }
     }
 
     set_running(state, true);
-    set_text(view.report, state.text("Verifying (reading every registered byte) ..."));
+    show_report(state, fixed_message("Verifying (reading every registered byte) ..."));
     // Filled by the worker; read by `done`, which runs only after the worker finished.
     struct Interrupted {
         std::string run_id;
         Uuid archive_uuid;
     };
     auto interrupted = std::make_shared<std::optional<Interrupted>>();
-    // The worker words its report with its own copy of the interface language.
+    // The worker returns its report unworded; it is worded when shown, in the
+    // language in use then.
     state.job.start(state.text, view.progress,
-        [&state, request, interrupted, text = state.text](CancelToken& cancel, IProgressSink& progress)
-            -> std::string {
+        [&state, request, interrupted](CancelToken& cancel, IProgressSink& progress) -> Report {
             auto& session = *state.session;
             auto store = ArchiveStore::open(session.context.repo);
             if (!store) {
-                return text.format("Cannot open the repository: {}", text(store.error().message));
+                return [message = store.error().message](const app::Text& text) {
+                    return text.format("Cannot open the repository: {}", text(message));
+                };
             }
             const auto archive_files = platform::make_file_system_access();
             const auto repository_files = platform::make_file_system_access();
             const auto media = platform::make_media_enumerator();
             VerifyServices services{*archive_files, *repository_files, *media, *store, session.context.repo,
                 session.context.repository_uuid, state.host};
-            const auto outcome = verify_full(services, request, cancel, progress);
+            auto outcome = verify_full(services, request, cancel, progress);
             if (!outcome) {
-                return text.format("Not verified: {}", text(outcome.error().message));
+                return [message = outcome.error().message](const app::Text& text) {
+                    return text.format("Not verified: {}", text(message));
+                };
             }
             if (outcome->result == "INCOMPLETE") {
                 *interrupted = Interrupted{outcome->run_id, outcome->archive_uuid};
             }
-            return report(text, *outcome);
+            return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
         },
-        [&state, request, interrupted](const std::string& text) {
-            auto& view = state.verify_view;
-            if (*interrupted) {
-                view.incomplete_run = (*interrupted)->run_id;
-                view.incomplete_root = request.root;
-                view.incomplete_archive = (*interrupted)->archive_uuid;
-            } else {
-                view.incomplete_run.clear();
-            }
-            set_running(state, false);
-            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.progress), state.text("Done").c_str());
-            set_text(view.report, text);
-            refresh_archive_list(state);
+        [&state, request, interrupted](const Report& result) {
+            guarded(
+                [&] {
+                    auto& view = state.verify_view;
+                    if (*interrupted) {
+                        view.incomplete_run = (*interrupted)->run_id;
+                        view.incomplete_root = request.root;
+                        view.incomplete_archive = (*interrupted)->archive_uuid;
+                    } else {
+                        view.incomplete_run.clear();
+                    }
+                    set_running(state, false);
+                    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.progress), state.text("Done").c_str());
+                    show_report(state, result);
+                    refresh_archive_list(state);
+                },
+                [&](Report error) { show_error(state, std::move(error)); });
         });
 }
 
@@ -196,7 +223,11 @@ GtkWidget* build_verify_view(GuiState& state)
     GtkWidget* choose = gtk_button_new_with_label(state.text("Choose...").c_str());
     g_signal_connect(choose, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
-        choose_folder(state.window, state.verify_view.folder, state.text("Choose the archive folder"));
+        guarded(
+            [&] {
+                choose_folder(state.window, state.verify_view.folder, state.text("Choose the archive folder"));
+            },
+            [&](Report error) { show_error(state, std::move(error)); });
     }), &state);
     gtk_box_append(GTK_BOX(folder_row), view.folder);
     gtk_box_append(GTK_BOX(folder_row), choose);
@@ -219,12 +250,21 @@ GtkWidget* build_verify_view(GuiState& state)
     view.cancel = gtk_button_new_with_label(state.text("Cancel").c_str());
     view.resume = gtk_button_new_with_label(state.text("Resume interrupted run").c_str());
     gtk_widget_set_sensitive(view.cancel, FALSE);
-    gtk_widget_set_sensitive(view.resume, FALSE);
+    // A rebuilt window (language change) can still resume an interrupted run.
+    gtk_widget_set_sensitive(view.resume, !view.incomplete_run.empty());
     g_signal_connect(view.start, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { start_verification(*static_cast<GuiState*>(data), false); }),
+        G_CALLBACK(+[](GtkButton*, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            guarded([&] { start_verification(state, false); },
+                [&](Report error) { show_error(state, std::move(error)); });
+        }),
         &state);
     g_signal_connect(view.resume, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { start_verification(*static_cast<GuiState*>(data), true); }),
+        G_CALLBACK(+[](GtkButton*, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            guarded([&] { start_verification(state, true); },
+                [&](Report error) { show_error(state, std::move(error)); });
+        }),
         &state);
     g_signal_connect(view.cancel, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) { static_cast<GuiState*>(data)->job.cancel(); }), &state);

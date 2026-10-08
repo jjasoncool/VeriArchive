@@ -1,12 +1,33 @@
 #include "gui/gui_support.h"
 
 #include "common/utf8.h"
+#include "platform/platform_services.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <exception>
 #include <format>
+#include <fstream>
 #include <memory>
+#include <string_view>
+#include <system_error>
 
 namespace va::gui {
+
+Report fixed_message(std::string english)
+{
+    return [english = std::move(english)](const app::Text& text) { return text(english); };
+}
+
+Report unexpected_error(std::string what)
+{
+    // The message goes through text() too: some exceptions carry a sentence the
+    // catalog knows, such as "cannot initialise SHA-256".
+    return [what = std::move(what)](const app::Text& text) {
+        return text.format("Unexpected error: {}", text(what));
+    };
+}
 
 std::string format_bytes(std::uint64_t bytes)
 {
@@ -78,6 +99,8 @@ void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title
 {
     GtkFileDialog* dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, title.c_str());
+    // The dialog holds its own reference to the entry, so the answer can be
+    // written even if the window closed meanwhile (the entry is then unused).
     gtk_file_dialog_select_folder(dialog, parent, nullptr,
         +[](GObject* source, GAsyncResult* result, gpointer data) {
             GFile* folder = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, nullptr);
@@ -88,10 +111,136 @@ void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title
                 }
                 g_object_unref(folder);
             }
+            g_object_unref(data);
             g_object_unref(source);
         },
-        entry);
+        g_object_ref(entry));
 }
+
+// ---- Failure log ----------------------------------------------------------
+
+namespace {
+
+// Set once by install_failure_log(), before any other thread starts; only read
+// afterwards.
+std::filesystem::path failure_log_file;
+std::terminate_handler previous_terminate = nullptr;
+GLogLevelFlags glib_always_fatal = G_LOG_FLAG_RECURSION;
+
+// Called by the C++ runtime when an exception is not caught (or a noexcept
+// function throws): the program ends. It records why, so an unexpected close
+// leaves evidence, then lets the standard handler print and abort as usual.
+[[noreturn]] void on_terminate() noexcept
+{
+    std::string reason = "terminate called without an active exception";
+    if (const auto exception = std::current_exception()) {
+        try {
+            std::rethrow_exception(exception);
+        } catch (const std::exception& error) {
+            reason = std::string("uncaught exception: ") + error.what();
+        } catch (...) {
+            reason = "uncaught exception of an unknown type";
+        }
+    }
+    log_failure("the program ended: " + reason);
+    if (previous_terminate) {
+        previous_terminate();
+    }
+    std::abort();
+}
+
+// GLib's structured messages (g_error, g_critical, ... in GTK) arrive here.
+// A fatal one is recorded before GLib ends the program; every message is then
+// written as GLib would write it.
+GLogWriterOutput write_glib_log(GLogLevelFlags level, const GLogField* fields, gsize count, gpointer data)
+{
+    // Messages from the older g_log() calls carry this field; they were
+    // recorded already by handle_old_glib_log.
+    bool old_api = false;
+    for (gsize index = 0; index < count; ++index) {
+        old_api = old_api || std::string_view(fields[index].key) == "GLIB_OLD_LOG_API";
+    }
+    if (!old_api && (level & (G_LOG_FLAG_FATAL | glib_always_fatal)) != 0) {
+        // "(program:pid): Domain-LEVEL **: time: message", after a line break.
+        gchar* line = g_log_writer_format_fields(level, fields, count, FALSE);
+        try {
+            std::string_view formatted(line);
+            formatted.remove_prefix(std::min(formatted.find_first_not_of('\n'), formatted.size()));
+            log_failure(std::string("fatal GLib message: ") + std::string(formatted));
+        } catch (const std::exception&) {
+            // Nothing more can be done while GLib ends the program.
+        }
+        g_free(line);
+    }
+    return g_log_writer_default(level, fields, count, data);
+}
+
+// The older g_log() calls arrive here first (GLib's "assertion failed"
+// criticals among them); G_LOG_FLAG_FATAL says GLib ends the program next.
+void handle_old_glib_log(const gchar* domain, GLogLevelFlags level, const gchar* message, gpointer data)
+{
+    if ((level & G_LOG_FLAG_FATAL) != 0) {
+        try {
+            const std::string_view from = domain ? domain : "";
+            log_failure(std::format("fatal GLib message: {}{}{}", from, from.empty() ? "" : ": ",
+                message ? message : ""));
+        } catch (const std::exception&) {
+            // As above.
+        }
+    }
+    g_log_default_handler(domain, level, message, data);
+}
+
+} // namespace
+
+void install_failure_log()
+{
+    if (const auto directory = platform::user_config_dir()) {
+        failure_log_file = *directory / "veriarchive-gui.log";
+    }
+    previous_terminate = std::set_terminate(on_terminate);
+    // The levels GLib treats as fatal (G_DEBUG=fatal-criticals adds criticals).
+    // GLib can only report them by setting them, so the old value is put back.
+    glib_always_fatal = g_log_set_always_fatal(static_cast<GLogLevelFlags>(G_LOG_FATAL_MASK));
+    g_log_set_always_fatal(glib_always_fatal);
+    // GLib allows one writer per program; this is the only call.
+    g_log_set_writer_func(write_glib_log, nullptr, nullptr);
+    g_log_set_default_handler(handle_old_glib_log, nullptr);
+}
+
+void log_failure(std::string_view what) noexcept
+{
+    if (failure_log_file.empty()) {
+        return;
+    }
+    try {
+        std::error_code error;
+        std::filesystem::create_directories(failure_log_file.parent_path(), error);
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        // The whole line is written at once, so lines from two threads do not mix.
+        const auto line = std::format("{:%Y-%m-%dT%H:%M:%SZ} {}\n", now, what);
+        std::ofstream log(failure_log_file, std::ios::binary | std::ios::app);
+        log.write(line.data(), static_cast<std::streamsize>(line.size()));
+    } catch (const std::exception&) {
+        // Writing the log must never be what ends the program.
+    }
+}
+
+void guarded(const std::function<void()>& work, const std::function<void(Report)>& show) noexcept
+{
+    try {
+        work();
+    } catch (const std::exception& error) {
+        log_failure(std::string("exception in a GUI handler: ") + error.what());
+        try {
+            show(unexpected_error(error.what()));
+        } catch (const std::exception& second) {
+            log_failure(std::string("exception while showing it: ") + second.what());
+        }
+    }
+}
+
+// ---- Job ------------------------------------------------------------------
 
 // Throttled progress: at most five updates a second are posted to the main loop.
 class Job::BarProgress final : public IProgressSink {
@@ -105,21 +254,28 @@ public:
             return;
         }
         last_ = now;
-        auto* update = new Update{text_, bar_, progress};
+        // Each update holds its own reference to the bar: it may arrive after
+        // the window was closed. (The job's reference keeps the bar alive
+        // until then, so taking one here on the worker thread is safe.)
+        auto* update = new Update{text_, GTK_WIDGET(g_object_ref(bar_)), progress};
         g_idle_add(
             +[](gpointer data) -> gboolean {
                 std::unique_ptr<Update> update(static_cast<Update*>(data));
                 const auto& p = update->progress;
-                if (p.items_total == 0) {
-                    gtk_progress_bar_pulse(GTK_PROGRESS_BAR(update->bar));
-                    const auto text = update->text.format("Scanning: {} entries", p.items_done);
-                    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
-                } else {
-                    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(update->bar),
-                        static_cast<double>(p.items_done) / static_cast<double>(p.items_total));
-                    const auto text = update->text.format("Hashing: {} / {} files, {}", p.items_done,
-                        p.items_total, format_bytes(p.bytes_done));
-                    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
+                try {
+                    if (p.items_total == 0) {
+                        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(update->bar));
+                        const auto text = update->text.format("Scanning: {} entries", p.items_done);
+                        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
+                    } else {
+                        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(update->bar),
+                            static_cast<double>(p.items_done) / static_cast<double>(p.items_total));
+                        const auto text = update->text.format("Hashing: {} / {} files, {}", p.items_done,
+                            p.items_total, format_bytes(p.bytes_done));
+                        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
+                    }
+                } catch (const std::exception& error) {
+                    log_failure(std::string("exception while showing progress: ") + error.what());
                 }
                 return G_SOURCE_REMOVE;
             },
@@ -129,8 +285,9 @@ public:
 private:
     struct Update {
         app::Text text;
-        GtkWidget* bar;
+        GtkWidget* bar;  // a reference of its own, given back on the main thread
         Progress progress;
+        ~Update() { g_object_unref(bar); }
     };
     app::Text text_;
     GtkWidget* bar_;
@@ -150,37 +307,63 @@ void Job::wait()
     }
 }
 
+void Job::abandon()
+{
+    abandoned_.store(true);
+    cancel();
+    wait();
+}
+
 void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done done)
 {
     wait();
     cancel_.reset();
-    running_.store(true);
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar), 0.0);
     gtk_progress_bar_set_text(GTK_PROGRESS_BAR(progress_bar), text("Starting...").c_str());
 
     struct Finished {
         Done done;
-        std::string report;
+        Report report;
+        GtkWidget* bar;  // the job's reference, given back on the main thread
         std::atomic<bool>* running;
+        const std::atomic<bool>* abandoned;
     };
-    thread_ = std::thread([this, text, progress_bar, work = std::move(work), done = std::move(done)]() mutable {
-        BarProgress progress(text, progress_bar);
-        std::string report;
-        try {
-            report = work(cancel_, progress);
-        } catch (const std::exception& error) {
-            report = text.format("Unexpected error: {}", error.what());
-        }
-        auto* finished = new Finished{std::move(done), std::move(report), &running_};
-        g_idle_add(
-            +[](gpointer data) -> gboolean {
-                std::unique_ptr<Finished> finished(static_cast<Finished*>(data));
-                finished->running->store(false);
-                finished->done(finished->report);
-                return G_SOURCE_REMOVE;
-            },
-            finished);
-    });
+    // The job keeps the bar alive until it has finished, even if the window closes.
+    g_object_ref(progress_bar);
+    running_.store(true);
+    try {
+        thread_ = std::thread([this, text, progress_bar, work = std::move(work), done = std::move(done)]() mutable {
+            BarProgress progress(text, progress_bar);
+            Report report;
+            try {
+                report = work(cancel_, progress);
+            } catch (const std::exception& error) {
+                log_failure(std::string("exception in an operation: ") + error.what());
+                report = unexpected_error(error.what());
+            }
+            auto* finished = new Finished{std::move(done), std::move(report), progress_bar, &running_, &abandoned_};
+            g_idle_add(
+                +[](gpointer data) -> gboolean {
+                    std::unique_ptr<Finished> finished(static_cast<Finished*>(data));
+                    finished->running->store(false);
+                    if (!finished->abandoned->load()) {
+                        try {
+                            finished->done(finished->report);
+                        } catch (const std::exception& error) {
+                            log_failure(std::string("exception after an operation: ") + error.what());
+                        }
+                    }
+                    g_object_unref(finished->bar);
+                    return G_SOURCE_REMOVE;
+                },
+                finished);
+        });
+    } catch (...) {
+        // No thread could be started (std::system_error): nothing is running.
+        running_.store(false);
+        g_object_unref(progress_bar);
+        throw;
+    }
 }
 
 } // namespace va::gui

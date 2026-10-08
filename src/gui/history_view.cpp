@@ -24,6 +24,43 @@ std::string failure_classes_text(const app::Text& text, const std::string& failu
     }
 }
 
+// Shows `result` below the buttons and keeps it, so a language change can
+// show it again in the new language. Also where a History handler shows an
+// unexpected error (see guarded).
+void show_chain_result(GuiState& state, Report result)
+{
+    gtk_label_set_text(GTK_LABEL(state.history_view.chain), result(state.text).c_str());
+    state.history_view.chain_result = std::move(result);
+}
+
+void check_chain(GuiState& state)
+{
+    if (!state.session) {
+        return;
+    }
+    auto store = ArchiveStore::open(state.session->context.repo);
+    const auto check = store ? store->check_history(state.session->context.repository_uuid)
+                             : std::expected<HistoryCheck, IoError>(std::unexpected(store.error()));
+    if (!check) {
+        show_chain_result(state, [message = check.error().message](const app::Text& text) {
+            return text.format("Cannot check the history: {}", text(message));
+        });
+    } else if (!check->first_broken_run) {
+        show_chain_result(state, [runs = check->runs](const app::Text& text) {
+            return text.format("History intact: {} runs, hash chain verified. (V1 detects edited or deleted rows; "
+                               "signed checkpoints arrive in V1.1.)",
+                runs);
+        });
+    } else {
+        show_chain_result(state,
+            [run = *check->first_broken_run, problem = check->problem](const app::Text& text) {
+                return text.format("History BROKEN at run {}: {}", run, text(problem));
+            });
+    }
+}
+
+} // namespace
+
 void show_runs(GuiState& state)
 {
     auto& view = state.history_view;
@@ -62,31 +99,6 @@ void show_runs(GuiState& state)
     }
 }
 
-void check_chain(GuiState& state)
-{
-    auto& view = state.history_view;
-    const auto& text = state.text;
-    if (!state.session) {
-        return;
-    }
-    auto store = ArchiveStore::open(state.session->context.repo);
-    const auto check = store ? store->check_history(state.session->context.repository_uuid)
-                             : std::expected<HistoryCheck, IoError>(std::unexpected(store.error()));
-    std::string message;
-    if (!check) {
-        message = text.format("Cannot check the history: {}", text(check.error().message));
-    } else if (!check->first_broken_run) {
-        message = text.format("History intact: {} runs, hash chain verified. (V1 detects edited or deleted rows; "
-                              "signed checkpoints arrive in V1.1.)",
-            check->runs);
-    } else {
-        message = text.format("History BROKEN at run {}: {}", *check->first_broken_run, text(check->problem));
-    }
-    gtk_label_set_text(GTK_LABEL(view.chain), message.c_str());
-}
-
-} // namespace
-
 GtkWidget* build_history_view(GuiState& state)
 {
     auto& view = state.history_view;
@@ -101,10 +113,18 @@ GtkWidget* build_history_view(GuiState& state)
     view.archive = gtk_drop_down_new_from_strings(initial);
     GtkWidget* show = gtk_button_new_with_label(text("Show runs").c_str());
     g_signal_connect(show, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { show_runs(*static_cast<GuiState*>(data)); }), &state);
+        G_CALLBACK(+[](GtkButton*, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            guarded([&] { show_runs(state); }, [&](Report error) { show_chain_result(state, std::move(error)); });
+        }),
+        &state);
     GtkWidget* chain = gtk_button_new_with_label(text("Check history chain").c_str());
     g_signal_connect(chain, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { check_chain(*static_cast<GuiState*>(data)); }), &state);
+        G_CALLBACK(+[](GtkButton*, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            guarded([&] { check_chain(state); }, [&](Report error) { show_chain_result(state, std::move(error)); });
+        }),
+        &state);
     gtk_box_append(GTK_BOX(row), view.archive);
     gtk_box_append(GTK_BOX(row), show);
     gtk_box_append(GTK_BOX(row), chain);

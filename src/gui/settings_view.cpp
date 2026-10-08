@@ -4,9 +4,35 @@
 
 #include "common/utf8.h"
 
+#include <iterator>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace va::gui {
+namespace {
+
+// The language drop-down's items, in order; each is shown by its own name.
+constexpr app::Language languages[] = {app::Language::English, app::Language::TraditionalChinese};
+
+guint index_of(app::Language language)
+{
+    for (guint index = 0; index < std::size(languages); ++index) {
+        if (languages[index] == language) {
+            return index;
+        }
+    }
+    return 0;
+}
+
+// Shows an unexpected error of a Settings handler below the settings.
+void show_notice(GuiState& state, Report report)
+{
+    state.settings_view.notice = std::move(report);
+    refresh_settings(state);
+}
+
+} // namespace
 
 void refresh_settings(GuiState& state)
 {
@@ -17,7 +43,8 @@ void refresh_settings(GuiState& state)
     }
     std::string info;
     if (!state.session) {
-        info = text("No repository is open.") + "\n\n" + text(state.session_error) + "\n\n" +
+        info = text("No repository is open.") + "\n\n" + (state.session_error ? state.session_error(text) : "") +
+               "\n\n" +
                text("On first use, initialise a repository: it is created next to the program "
                     "(or in your home folder when that is not writable) and remembered in the config file.");
         gtk_widget_set_visible(view.initialise, TRUE);
@@ -39,10 +66,25 @@ void refresh_settings(GuiState& state)
         }
         gtk_widget_set_visible(view.initialise, FALSE);
     }
-    if (!view.notice.empty()) {
-        info += "\n\n" + text(view.notice);
+    if (view.notice) {
+        info += "\n\n" + view.notice(text);
     }
     gtk_label_set_text(GTK_LABEL(view.info), info.c_str());
+}
+
+void show_language_in_use(GuiState& state)
+{
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(state.settings_view.language), index_of(state.text.language()));
+}
+
+void lock_language(GuiState& state, bool locked)
+{
+    GtkWidget* language = state.settings_view.language;
+    gtk_widget_set_sensitive(language, !locked);
+    // GTK 4 shows a tooltip on an unavailable widget too, so it can say why.
+    gtk_widget_set_tooltip_text(language,
+        locked ? state.text("Finish or cancel the running operation before changing the language.").c_str()
+               : nullptr);
 }
 
 GtkWidget* build_settings_view(GuiState& state)
@@ -56,35 +98,54 @@ GtkWidget* build_settings_view(GuiState& state)
     // Each language is named in itself, so it can be found in any language.
     GtkWidget* language_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(language_row), make_label("Language / 語言:"));
-    const char* languages[] = {"English", "繁體中文", nullptr};
-    view.language = gtk_drop_down_new_from_strings(languages);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(view.language),
-        state.text.language() == app::Language::TraditionalChinese ? 1 : 0);
+    std::vector<std::string> names;
+    for (const auto language : languages) {
+        names.emplace_back(app::language_name(language));
+    }
+    // GTK wants a list of C strings ending with nullptr; it copies them.
+    std::vector<const char*> name_pointers;
+    for (const auto& name : names) {
+        name_pointers.push_back(name.c_str());
+    }
+    name_pointers.push_back(nullptr);
+    view.language = gtk_drop_down_new_from_strings(name_pointers.data());
+    show_language_in_use(state);
     g_signal_connect(view.language, "notify::selected",
         G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
             auto& state = *static_cast<GuiState*>(data);
-            const auto language = gtk_drop_down_get_selected(GTK_DROP_DOWN(source)) == 1
-                                      ? app::Language::TraditionalChinese
-                                      : app::Language::English;
-            if (state.job.running()) {
-                // The running operation reports into this window; switch afterwards.
-                gtk_drop_down_set_selected(GTK_DROP_DOWN(source),
-                    state.text.language() == app::Language::TraditionalChinese ? 1 : 0);
-                return;
-            }
-            // Rebuild after this signal returns: the drop-down belongs to the
-            // window being replaced.
-            struct Change {
-                GuiState* state;
-                app::Language language;
-            };
-            g_idle_add(
-                +[](gpointer data) -> gboolean {
-                    std::unique_ptr<Change> change(static_cast<Change*>(data));
-                    change_language(*change->state, change->language);
-                    return G_SOURCE_REMOVE;
+            guarded(
+                [&] {
+                    const auto selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(source));
+                    if (selected >= std::size(languages)) {  // GTK_INVALID_LIST_POSITION: nothing chosen
+                        return;
+                    }
+                    const auto language = languages[selected];
+                    if (language == state.text.language()) {
+                        return;
+                    }
+                    if (state.job.running()) {
+                        // lock_language keeps this from happening; should it
+                        // anyway, the running operation keeps its window.
+                        show_language_in_use(state);
+                        return;
+                    }
+                    // Rebuild after this signal returns: the drop-down belongs
+                    // to the window being replaced.
+                    struct Change {
+                        GuiState* state;
+                        app::Language language;
+                    };
+                    g_idle_add(
+                        +[](gpointer data) -> gboolean {
+                            std::unique_ptr<Change> change(static_cast<Change*>(data));
+                            auto& state = *change->state;
+                            guarded([&] { change_language(state, change->language); },
+                                [&](const Report& report) { show_notice(state, report); });
+                            return G_SOURCE_REMOVE;
+                        },
+                        new Change{&state, language});
                 },
-                new Change{&state, language});
+                [&](const Report& report) { show_notice(state, report); });
         }),
         &state);
     gtk_box_append(GTK_BOX(language_row), view.language);
@@ -97,7 +158,9 @@ GtkWidget* build_settings_view(GuiState& state)
     gtk_widget_set_halign(view.initialise, GTK_ALIGN_START);
     g_signal_connect(view.initialise, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) {
-            open_repository_session(*static_cast<GuiState*>(data), true);
+            auto& state = *static_cast<GuiState*>(data);
+            guarded([&] { open_repository_session(state, true); },
+                [&](const Report& report) { show_notice(state, report); });
         }),
         &state);
     gtk_box_append(GTK_BOX(box), view.initialise);

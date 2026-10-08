@@ -112,7 +112,13 @@ GtkWidget* build_archive_list_view(GuiState& state)
     GtkWidget* toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget* refresh = gtk_button_new_with_label(text("Refresh").c_str());
     g_signal_connect(refresh, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { refresh_archive_list(*static_cast<GuiState*>(data)); }),
+        G_CALLBACK(+[](GtkButton*, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            guarded([&] { refresh_archive_list(state); },
+                [&](const Report& report) {
+                    gtk_label_set_text(GTK_LABEL(state.archive_list.status), report(state.text).c_str());
+                });
+        }),
         &state);
     view.status = make_label("");
     gtk_box_append(GTK_BOX(toolbar), refresh);

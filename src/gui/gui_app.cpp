@@ -2,17 +2,33 @@
 // (repository) shared by all of them.
 #include "gui/gui_app.h"
 
+#include <algorithm>
+#include <exception>
+#include <string_view>
+
+// Last: on Windows libintl.h redefines printf and its relatives as macros,
+// which should not reach the other headers.
+#include <libintl.h>
+
 namespace va::gui {
 
 void open_repository_session(GuiState& state, bool initialise)
 {
-    auto session = app::open_session({initialise, std::nullopt, std::nullopt});
-    if (session) {
-        state.session = std::move(*session);
-        state.session_error.clear();
-    } else {
+    // An exception from the engines (a std::filesystem error, say) is one more
+    // reason the repository could not be opened, shown in Settings.
+    try {
+        auto session = app::open_session({initialise, std::nullopt, std::nullopt});
+        if (session) {
+            state.session = std::move(*session);
+            state.session_error = nullptr;
+        } else {
+            state.session.reset();
+            state.session_error = fixed_message(session.error());
+        }
+    } catch (const std::exception& error) {
+        log_failure(std::string("exception while opening the repository: ") + error.what());
         state.session.reset();
-        state.session_error = session.error();
+        state.session_error = unexpected_error(error.what());
     }
     refresh_settings(state);
     refresh_archive_list(state);
@@ -48,10 +64,17 @@ void build_window(GuiState& state)
     // Switching back to the list shows the latest results.
     g_signal_connect(stack, "notify::visible-child",
         G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
-            const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
-            if (name && std::string(name) == "archives") {
-                refresh_archive_list(*static_cast<GuiState*>(data));
-            }
+            auto& state = *static_cast<GuiState*>(data);
+            guarded(
+                [&] {
+                    const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
+                    if (name && std::string_view(name) == "archives") {
+                        refresh_archive_list(state);
+                    }
+                },
+                [&](const Report& report) {
+                    gtk_label_set_text(GTK_LABEL(state.archive_list.status), report(state.text).c_str());
+                });
         }),
         &state);
 
@@ -62,6 +85,149 @@ void build_window(GuiState& state)
     gtk_box_append(GTK_BOX(layout), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
     gtk_box_append(GTK_BOX(layout), stack);
     gtk_window_set_child(state.window, layout);
+}
+
+// What the user typed and chose in the window, carried over when a language
+// change replaces it. (What the views show is kept in GuiState as Reports.)
+// The window's position cannot be kept: GTK 4 has no way to set it.
+struct Kept {
+    int width = 0;
+    int height = 0;
+    bool maximized = false;
+    std::string register_folder;
+    std::string register_label;
+    bool new_revision = false;
+    bool force_new_archive = false;
+    bool media_copy = false;
+    bool resume = false;
+    double register_fraction = 0.0;
+    bool register_finished = false;
+    std::string verify_folder;
+    bool strict = false;
+    std::optional<Uuid> verify_archive;  // empty: "The folder above"
+    double verify_fraction = 0.0;
+    bool verify_finished = false;
+    std::optional<Uuid> history_archive;
+    bool runs_shown = false;
+};
+
+std::string entry_text(GtkWidget* entry)
+{
+    return gtk_editable_get_text(GTK_EDITABLE(entry));
+}
+
+bool checked(GtkWidget* check_button)
+{
+    return gtk_check_button_get_active(GTK_CHECK_BUTTON(check_button)) != FALSE;
+}
+
+// The archive chosen in a drop-down whose item `offset + i` is uuids[i].
+std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset)
+{
+    const auto selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop_down));
+    if (selected == GTK_INVALID_LIST_POSITION || selected < offset || selected - offset >= uuids.size()) {
+        return std::nullopt;
+    }
+    return uuids[selected - offset];
+}
+
+// Chooses `archive` again, if the drop-down still lists it.
+void choose_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset,
+    const std::optional<Uuid>& archive)
+{
+    if (!archive) {
+        return;
+    }
+    if (const auto found = std::ranges::find(uuids, *archive); found != uuids.end()) {
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(drop_down), offset + static_cast<guint>(found - uuids.begin()));
+    }
+}
+
+// A finished operation leaves "Done" on its progress bar; before the first
+// one the bar has no text.
+bool finished(GtkWidget* progress_bar)
+{
+    const char* text = gtk_progress_bar_get_text(GTK_PROGRESS_BAR(progress_bar));
+    return text && *text;
+}
+
+Kept keep(const GuiState& state)
+{
+    Kept kept;
+    // GTK keeps the default size up to date as the user resizes, and it is the
+    // size a maximized window returns to.
+    gtk_window_get_default_size(state.window, &kept.width, &kept.height);
+    kept.maximized = gtk_window_is_maximized(state.window) != FALSE;
+
+    const auto& registering = state.register_view;
+    kept.register_folder = entry_text(registering.folder);
+    kept.register_label = entry_text(registering.label);
+    kept.new_revision = checked(registering.new_revision);
+    kept.force_new_archive = checked(registering.force_new_archive);
+    kept.media_copy = checked(registering.media_copy);
+    kept.resume = checked(registering.resume);
+    kept.register_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(registering.progress));
+    kept.register_finished = finished(registering.progress);
+
+    const auto& verifying = state.verify_view;
+    kept.verify_folder = entry_text(verifying.folder);
+    kept.strict = checked(verifying.strict);
+    kept.verify_archive = chosen_archive(verifying.archive, verifying.archive_uuids, 1);
+    kept.verify_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(verifying.progress));
+    kept.verify_finished = finished(verifying.progress);
+
+    const auto& history = state.history_view;
+    kept.history_archive = chosen_archive(history.archive, history.archive_uuids, 0);
+    kept.runs_shown = gtk_widget_get_first_child(history.grid) != nullptr;
+    return kept;
+}
+
+// Puts what `keep` read into the new window, after the views were refreshed.
+void restore(GuiState& state, const Kept& kept)
+{
+    const auto& text = state.text;
+    if (kept.width > 0 && kept.height > 0) {
+        gtk_window_set_default_size(state.window, kept.width, kept.height);
+    }
+    if (kept.maximized) {
+        gtk_window_maximize(state.window);
+    }
+
+    auto& registering = state.register_view;
+    gtk_editable_set_text(GTK_EDITABLE(registering.folder), kept.register_folder.c_str());
+    gtk_editable_set_text(GTK_EDITABLE(registering.label), kept.register_label.c_str());
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.new_revision), kept.new_revision);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.force_new_archive), kept.force_new_archive);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.media_copy), kept.media_copy);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.resume), kept.resume);
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(registering.progress), kept.register_fraction);
+    if (kept.register_finished) {
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(registering.progress), text("Done").c_str());
+    }
+    if (registering.shown_report) {
+        set_text(registering.report, registering.shown_report(text));
+    }
+
+    auto& verifying = state.verify_view;
+    gtk_editable_set_text(GTK_EDITABLE(verifying.folder), kept.verify_folder.c_str());
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(verifying.strict), kept.strict);
+    choose_archive(verifying.archive, verifying.archive_uuids, 1, kept.verify_archive);
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(verifying.progress), kept.verify_fraction);
+    if (kept.verify_finished) {
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(verifying.progress), text("Done").c_str());
+    }
+    if (verifying.shown_report) {
+        set_text(verifying.report, verifying.shown_report(text));
+    }
+
+    auto& history = state.history_view;
+    choose_archive(history.archive, history.archive_uuids, 0, kept.history_archive);
+    if (history.chain_result) {
+        gtk_label_set_text(GTK_LABEL(history.chain), history.chain_result(text).c_str());
+    }
+    if (kept.runs_shown) {
+        show_runs(state);
+    }
 }
 
 } // namespace
@@ -75,7 +241,31 @@ void activate(GuiState& state, bool smoke_test)
     }
 
     if (smoke_test) {
-        g_application_quit(G_APPLICATION(state.application));
+        // Like the Settings drop-down, rebuild once this handler has returned:
+        // in the other language and back, then quit. Nothing is shown and the
+        // config file is not written.
+        g_idle_add(
+            +[](gpointer data) -> gboolean {
+                auto& state = *static_cast<GuiState*>(data);
+                guarded(
+                    [&] {
+                        if (!state.window) {
+                            return;  // shutting down
+                        }
+                        const auto start = state.text.language();
+                        const auto other = start == app::Language::English ? app::Language::TraditionalChinese
+                                                                           : app::Language::English;
+                        rebuild_window(state, other, false);
+                        rebuild_window(state, start, false);
+                    },
+                    [&](const Report& report) {
+                        g_printerr("%s\n", report(state.text).c_str());
+                        state.exit_status = 1;
+                    });
+                g_application_quit(G_APPLICATION(state.application));
+                return G_SOURCE_REMOVE;
+            },
+            &state);
         return;
     }
     gtk_window_present(state.window);
@@ -85,18 +275,39 @@ void use_gtk_language(app::Language language)
 {
     // GTK translates its own texts with gettext, which takes LANGUAGE ahead of
     // the system language. The Windows package ships GTK's zh_TW catalogs.
+    // (Changing the environment is unsafe while another thread reads it; a
+    // language change is refused while an operation runs.)
     g_setenv("LANGUAGE", language == app::Language::TraditionalChinese ? "zh_TW" : "en", TRUE);
+    // gettext keeps the translations it has already found and does not notice
+    // a new LANGUAGE; setting the text domain again makes it look them up
+    // afresh. Without this, GTK's own menus stay Chinese after a switch to English.
+    textdomain(textdomain(nullptr));
 }
 
 void change_language(GuiState& state, app::Language language)
 {
-    if (language == state.text.language()) {
+    // No window: the application is shutting down (see main).
+    if (!state.window || language == state.text.language()) {
         return;
     }
-    state.settings_view.notice.clear();
-    if (auto saved = app::save_language(language, std::nullopt); !saved) {
-        state.settings_view.notice = saved.error();
+    if (state.job.running()) {
+        // An operation started after the choice was made (the drop-down is
+        // locked while one runs). It reports into this window, so the window
+        // stays and the drop-down shows the language in use again.
+        show_language_in_use(state);
+        return;
     }
+    state.settings_view.notice = nullptr;
+    if (auto saved = app::save_language(language, std::nullopt); !saved) {
+        state.settings_view.notice = fixed_message(saved.error());
+    }
+    rebuild_window(state, language, true);
+}
+
+void rebuild_window(GuiState& state, app::Language language, bool show)
+{
+    // Read the old window before build_window points `state` at the new widgets.
+    const Kept kept = keep(state);
     state.text = app::Text(language);
     use_gtk_language(language);
 
@@ -104,12 +315,25 @@ void change_language(GuiState& state, app::Language language)
     // always has a window and keeps running.
     GtkWindow* old_window = state.window;
     build_window(state);
-    refresh_settings(state);
-    refresh_archive_list(state);
-    refresh_archive_choices(state);
-    gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "settings");
-    gtk_window_present(state.window);
-    gtk_window_destroy(old_window);
+    const auto replace_old_window = [&] {
+        gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "settings");
+        if (show) {
+            gtk_window_present(state.window);
+        }
+        gtk_window_destroy(old_window);
+    };
+    try {
+        refresh_settings(state);
+        refresh_archive_list(state);
+        refresh_archive_choices(state);
+        restore(state, kept);
+    } catch (...) {
+        // `state` already points at the new window, so it replaces the old
+        // one even when filling it failed; the caller reports the error.
+        replace_old_window();
+        throw;
+    }
+    replace_old_window();
 }
 
 } // namespace va::gui

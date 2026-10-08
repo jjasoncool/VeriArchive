@@ -37,19 +37,38 @@ std::string report(const app::Text& text, const RegisterOutcome& outcome)
     return body;
 }
 
+// Shows `report` below the buttons and keeps it, so a language change can
+// show it again in the new language.
+void show_report(GuiState& state, Report report)
+{
+    set_text(state.register_view.report, report(state.text));
+    state.register_view.shown_report = std::move(report);
+}
+
 void set_running(GuiState& state, bool running)
 {
     auto& view = state.register_view;
     gtk_widget_set_sensitive(view.start, !running);
     gtk_widget_set_sensitive(view.cancel, running);
+    lock_language(state, running);
+}
+
+// Shows an unexpected error of a Register handler (see guarded). A start that
+// failed leaves the buttons as they are when nothing runs.
+void show_error(GuiState& state, Report report)
+{
+    if (!state.job.running()) {
+        set_running(state, false);
+    }
+    show_report(state, std::move(report));
 }
 
 void start_registration(GuiState& state)
 {
     auto& view = state.register_view;
     if (!state.session || state.job.running()) {
-        set_text(view.report, state.session ? state.text("Another operation is running.")
-                                            : state.text("Open a repository first (Settings)."));
+        show_report(state, fixed_message(state.session ? "Another operation is running."
+                                                        : "Open a repository first (Settings)."));
         return;
     }
     RegisterRequest request;
@@ -63,37 +82,49 @@ void start_registration(GuiState& state)
     request.write_media_copy = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.media_copy));
     request.resume = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.resume));
     if (request.root.empty()) {
-        set_text(view.report, state.text("Choose the folder to register."));
+        show_report(state, fixed_message("Choose the folder to register."));
         return;
     }
 
     set_running(state, true);
-    set_text(view.report, state.text.format("Registering {} ...", path_to_utf8(request.root)));
-    // The worker words its report with its own copy of the interface language.
+    show_report(state, [root = path_to_utf8(request.root)](const app::Text& text) {
+        return text.format("Registering {} ...", root);
+    });
+    // The worker returns its report unworded; it is worded when shown, in the
+    // language in use then.
     state.job.start(state.text, view.progress,
-        [&state, request, text = state.text](CancelToken& cancel, IProgressSink& progress) -> std::string {
+        [&state, request](CancelToken& cancel, IProgressSink& progress) -> Report {
             auto& session = *state.session;
             auto store = ArchiveStore::open(session.context.repo);
             if (!store) {
-                return text.format("Cannot open the repository: {}", text(store.error().message));
+                return [message = store.error().message](const app::Text& text) {
+                    return text.format("Cannot open the repository: {}", text(message));
+                };
             }
             const auto archive_files = platform::make_file_system_access();
             const auto repository_files = platform::make_file_system_access();
             const auto media = platform::make_media_enumerator();
             RegisterServices services{*archive_files, *repository_files, *session.writer, *session.writer,
                 *media, *store, session.context.repo, state.host};
-            const auto outcome = register_archive(services, request, cancel, progress);
+            auto outcome = register_archive(services, request, cancel, progress);
             if (!outcome) {
-                return text.format("Not registered: {}", text(outcome.error().message));
+                return [message = outcome.error().message](const app::Text& text) {
+                    return text.format("Not registered: {}", text(message));
+                };
             }
-            return report(text, *outcome);
+            return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
         },
-        [&state](const std::string& text) {
-            set_running(state, false);
-            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(state.register_view.progress), state.text("Done").c_str());
-            set_text(state.register_view.report, text);
-            refresh_archive_list(state);
-            refresh_archive_choices(state);
+        [&state](const Report& result) {
+            guarded(
+                [&] {
+                    set_running(state, false);
+                    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(state.register_view.progress),
+                        state.text("Done").c_str());
+                    show_report(state, result);
+                    refresh_archive_list(state);
+                    refresh_archive_choices(state);
+                },
+                [&](Report error) { show_error(state, std::move(error)); });
         });
 }
 
@@ -117,7 +148,11 @@ GtkWidget* build_register_view(GuiState& state)
     GtkWidget* choose = gtk_button_new_with_label(state.text("Choose...").c_str());
     g_signal_connect(choose, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
-        choose_folder(state.window, state.register_view.folder, state.text("Choose the archive folder"));
+        guarded(
+            [&] {
+                choose_folder(state.window, state.register_view.folder, state.text("Choose the archive folder"));
+            },
+            [&](Report error) { show_error(state, std::move(error)); });
     }), &state);
     gtk_box_append(GTK_BOX(folder_row), view.folder);
     gtk_box_append(GTK_BOX(folder_row), choose);
@@ -145,7 +180,11 @@ GtkWidget* build_register_view(GuiState& state)
     view.cancel = gtk_button_new_with_label(state.text("Cancel").c_str());
     gtk_widget_set_sensitive(view.cancel, FALSE);
     g_signal_connect(view.start, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { start_registration(*static_cast<GuiState*>(data)); }), &state);
+        G_CALLBACK(+[](GtkButton*, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            guarded([&] { start_registration(state); }, [&](Report error) { show_error(state, std::move(error)); });
+        }),
+        &state);
     g_signal_connect(view.cancel, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) { static_cast<GuiState*>(data)->job.cancel(); }), &state);
     gtk_box_append(GTK_BOX(buttons), view.start);

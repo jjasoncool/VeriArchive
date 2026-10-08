@@ -160,7 +160,9 @@ if(VERIARCHIVE_BUILD_GUI)
     target_compile_definitions(veriarchive_gui PRIVATE
         VERIARCHIVE_VERSION="${PROJECT_VERSION}"
         VERIARCHIVE_WITHOUT_SESSION_BUS=$<BOOL:${WIN32}>)
-    target_link_libraries(veriarchive_gui PRIVATE VeriArchive::app PkgConfig::GTK4)
+    # libintl: the GUI resets GTK's translation cache when the language changes.
+    find_package(Intl REQUIRED)
+    target_link_libraries(veriarchive_gui PRIVATE VeriArchive::app PkgConfig::GTK4 Intl::Intl)
     if(WIN32)
         target_sources(veriarchive_gui PRIVATE src/platform/windows/veriarchive.rc)
     endif()
@@ -238,10 +240,15 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32)
-        # Builds every GUI view without showing the window (decision 0016).
-        add_test(NAME veriarchive_gui_smoke COMMAND veriarchive_gui)
-        set_tests_properties(veriarchive_gui_smoke PROPERTIES
-            ENVIRONMENT "VERIARCHIVE_GUI_SMOKE_TEST=1;VERIARCHIVE_REPOSITORY=${CMAKE_CURRENT_BINARY_DIR}/no-repository")
+        # Builds every GUI view without showing the window (decision 0016), then
+        # rebuilds it in the other language and back (decision 0017). APPDATA
+        # keeps the config and the failure log out of the developer's profile.
+        foreach(language en zh-TW)
+            add_test(NAME veriarchive_gui_smoke_${language} COMMAND veriarchive_gui)
+            set_tests_properties(veriarchive_gui_smoke_${language} PROPERTIES
+                ENVIRONMENT "VERIARCHIVE_GUI_SMOKE_TEST=1;VERIARCHIVE_LANG=${language};VERIARCHIVE_REPOSITORY=${CMAKE_CURRENT_BINARY_DIR}/no-repository;APPDATA=${CMAKE_CURRENT_BINARY_DIR}/gui-smoke-appdata"
+                FAIL_REGULAR_EXPRESSION "CRITICAL|WARNING")
+        endforeach()
     endif()
     if(WIN32)
         # R-121: the installed package runs with only Windows on PATH.

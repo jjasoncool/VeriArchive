@@ -16,9 +16,13 @@ struct GuiState {
     app::Text text;                        // interface language (decision 0017)
     HostInfo host;
     std::optional<app::Session> session;   // empty until a repository is open
-    std::string session_error;
+    Report session_error;                  // why no repository is open
     Job job;                               // the one long operation running, if any
+    int exit_status = 0;                   // 1 when an unexpected error cut the smoke test or the start short
 
+    // The widgets below belong to the current window; a language change
+    // replaces them. The Reports are what a view shows, kept so the new window
+    // can word them in the new language.
     struct {
         GtkWidget* grid = nullptr;
         GtkWidget* status = nullptr;
@@ -35,6 +39,7 @@ struct GuiState {
         GtkWidget* cancel = nullptr;
         GtkWidget* progress = nullptr;
         GtkWidget* report = nullptr;
+        Report shown_report;
     } register_view;
 
     struct {
@@ -46,6 +51,7 @@ struct GuiState {
         GtkWidget* cancel = nullptr;
         GtkWidget* progress = nullptr;
         GtkWidget* report = nullptr;
+        Report shown_report;
         std::vector<Uuid> archive_uuids;   // index i+1 of the drop-down
         std::string incomplete_run;        // last INCOMPLETE run, for Resume
         std::optional<std::filesystem::path> incomplete_root;
@@ -56,6 +62,7 @@ struct GuiState {
         GtkWidget* archive = nullptr;
         GtkWidget* grid = nullptr;
         GtkWidget* chain = nullptr;
+        Report chain_result;               // shown in `chain`
         std::vector<Uuid> archive_uuids;
     } history_view;
 
@@ -63,7 +70,7 @@ struct GuiState {
         GtkWidget* info = nullptr;
         GtkWidget* initialise = nullptr;
         GtkWidget* language = nullptr;     // drop-down: English, 繁體中文
-        std::string notice;                // e.g. the language could not be saved
+        Report notice;                     // e.g. the language could not be saved
     } settings_view;
 };
 
@@ -78,18 +85,33 @@ void refresh_archive_list(GuiState& state);
 void refresh_archive_choices(GuiState& state);
 void refresh_settings(GuiState& state);
 
+// Shows the recorded runs of the archive chosen in Verification History.
+void show_runs(GuiState& state);
+
+// The Settings language drop-down. show_language_in_use selects the language
+// in use. lock_language makes the drop-down unavailable while an operation
+// runs, because a language change rebuilds the window the operation reports into.
+void show_language_in_use(GuiState& state);
+void lock_language(GuiState& state, bool locked);
+
 // Opens the repository (or initialises it on first run) and refreshes every view.
 void open_repository_session(GuiState& state, bool initialise);
 
-// Builds the window; `smoke_test` builds everything without showing it, then quits.
+// Builds the window and shows it. With `smoke_test` nothing is shown: the
+// window is built, rebuilt in the other language and back (as a language
+// change does), and the program quits.
 void activate(GuiState& state, bool smoke_test);
 
-// Makes GTK's own texts (dialog buttons, ...) follow the interface language;
-// call before GTK starts.
+// Makes GTK's own texts (dialog buttons, ...) follow the interface language.
 void use_gtk_language(app::Language language);
 
-// Switches the interface language: remembers it in the config file and
-// rebuilds the window in the new language, showing Settings.
+// Switches the interface language: remembers it in the config file, then
+// rebuilds the window in the new language and shows it, on Settings.
 void change_language(GuiState& state, app::Language language);
+
+// Replaces the window with one in `language`, keeping what the user typed,
+// chose and was shown; nothing is saved. `show` presents the new window (the
+// smoke test rebuilds without showing anything).
+void rebuild_window(GuiState& state, app::Language language, bool show);
 
 } // namespace va::gui
