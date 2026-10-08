@@ -42,7 +42,7 @@ std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveSto
                 candidate.identity = header->identity;
                 candidate.root_subpath = header->root_subpath;
             } else {
-                candidate.previous_identities.push_back(header->identity);
+                candidate.previous_carriers.push_back({header->identity, header->root_subpath});
             }
         }
         candidates.push_back(std::move(candidate));

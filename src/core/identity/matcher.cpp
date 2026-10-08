@@ -235,9 +235,14 @@ MatchOutcome match_identity(
         selected = mismatched;
         outcome.result = MatchResult::Mismatch;
     } else {
-        for (const auto* candidate : same_root) {
-            for (const auto& previous : candidate->previous_identities) {
-                const auto result = classify(evidence.volume, previous);
+        // An earlier carrier is recognised at the root it had then.
+        for (const auto& candidate_value : candidates) {
+            const auto* candidate = &candidate_value;
+            for (const auto& previous : candidate->previous_carriers) {
+                if (unicode_fold(previous.root_subpath) != wanted_root) {
+                    continue;
+                }
+                const auto result = classify(evidence.volume, previous.identity);
                 if (result == MatchResult::Match || result == MatchResult::MatchWeak) {
                     selected = candidate;
                     outcome.result = MatchResult::PreviousCarrier;

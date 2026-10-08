@@ -23,13 +23,19 @@ enum class MatchResult {
 // "MATCH", "MATCH_WEAK", ... as stored in media_evidence.match_result.
 std::string_view to_string(MatchResult result);
 
+// A carrier of an earlier revision, with the root it had there (decision 0004).
+struct PreviousCarrier {
+    VolumeInfo identity;
+    std::string root_subpath;
+};
+
 // One registered archive as the matcher sees it.
 struct ArchiveCandidate {
     Uuid archive_uuid;
     std::string root_subpath;               // ArchivePath form, "" = volume root
     bool retired = false;                   // decision 0003: still a candidate
     VolumeInfo identity;                    // carrier of the latest revision
-    std::vector<VolumeInfo> previous_identities; // carriers of earlier revisions
+    std::vector<PreviousCarrier> previous_carriers; // carriers of earlier revisions
 };
 
 struct MatchOutcome {

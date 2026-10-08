@@ -125,7 +125,7 @@ void retired_and_previous_carriers_are_recognised()
     CHECK(has_detail(outcome, "retired"));
 
     auto relocated = candidate("A", volume(disk_b, "NEW-DISK"));
-    relocated.previous_identities.push_back(volume(disk_a, "OLD-DISK"));
+    relocated.previous_carriers.push_back({volume(disk_a, "OLD-DISK"), ""});
     outcome = va::match_identity(evidence(volume(disk_a, "OLD-DISK")), "", std::vector{relocated});
     CHECK(outcome.result == va::MatchResult::PreviousCarrier);
     CHECK(outcome.archives == std::vector<va::Uuid>{"A"});
