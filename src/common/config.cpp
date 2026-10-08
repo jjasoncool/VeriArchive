@@ -41,9 +41,11 @@ std::expected<std::optional<Config>, IoError> read_config(const std::filesystem:
             if (!policy.is_object()) {
                 return std::unexpected(IoError{IoErrorKind::Other, 0, "Policy must be an object"});
             }
-            config.policy.full_verify_max_age_days = policy.value("full_verify_max_age_days", 365);
-            config.policy.any_verify_max_age_days = policy.value("any_verify_max_age_days", 90);
-            config.policy.strict_metadata = policy.value("strict_metadata", false);
+            config.policy.full_verify_max_age_days =
+                policy.value("full_verify_max_age_days", config.policy.full_verify_max_age_days);
+            config.policy.any_verify_max_age_days =
+                policy.value("any_verify_max_age_days", config.policy.any_verify_max_age_days);
+            config.policy.strict_metadata = policy.value("strict_metadata", config.policy.strict_metadata);
         }
         if (document.contains("trusted_keys")) {
             if (!document.at("trusted_keys").is_array()) {

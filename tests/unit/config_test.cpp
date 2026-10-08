@@ -48,6 +48,17 @@ void config_tests()
     std::ofstream(path) << "{\"repository\":42}";
     CHECK(!va::read_config(path));
 
+    // R-105
+    for (const char* text : {"{}", "{\"policy\":{}}"}) {
+        std::ofstream(path) << text;
+        const auto defaults = va::read_config(path);
+        CHECK(defaults && defaults->has_value());
+        if (defaults && *defaults) {
+            CHECK((*defaults)->policy.full_verify_max_age_days == 365);
+            CHECK((*defaults)->policy.any_verify_max_age_days == 180);
+        }
+    }
+
     const auto sentinel = root / ".veriarchive-write-test";
     std::ofstream(sentinel) << "must survive";
     CHECK(va::platform::writable_directory(root));

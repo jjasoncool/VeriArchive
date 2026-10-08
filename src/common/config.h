@@ -17,7 +17,7 @@ struct TrustedKey {
 
 struct Policy {
     int full_verify_max_age_days = 365;
-    int any_verify_max_age_days = 90;
+    int any_verify_max_age_days = 180;
     bool strict_metadata = false;
 };
 
