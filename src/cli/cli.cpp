@@ -17,7 +17,8 @@ void print_usage()
         "  repo init | info\n"
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
-        "           [--force-new-archive] [--copy-of UUID]\n";
+        "           [--force-new-archive] [--copy-of UUID]\n"
+        "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n";
 }
 
 } // namespace
@@ -44,6 +45,9 @@ int run(std::vector<std::string> raw_arguments)
     }
     if (command == "register") {
         return register_command(*arguments);
+    }
+    if (command == "verify") {
+        return verify_command(*arguments);
     }
 
     print_usage();

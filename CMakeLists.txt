@@ -108,6 +108,7 @@ add_executable(veriarchive_cli
     src/cli/cli_support.cpp
     src/cli/media_commands.cpp
     src/cli/register_commands.cpp
+    src/cli/verify_commands.cpp
     src/cli/repo_commands.cpp)
 set_target_properties(veriarchive_cli PROPERTIES OUTPUT_NAME veriarchive-cli)
 if(WIN32)
