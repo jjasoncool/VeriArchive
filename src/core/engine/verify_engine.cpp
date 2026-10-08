@@ -482,13 +482,13 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                             Severity::Warning);
                         return true;
                     }
-                    outcome.coverage_bytes += result.size;
                     if (result.b3 != was.b3 || result.sha256 != was.sha256 || !was.size ||
                         result.size != *was.size) {
                         comparison.add(was, "Modified",
                             was.size && result.size != *was.size ? "size differs" : "content differs",
                             Severity::Failure);
                     } else {
+                        outcome.coverage_bytes += result.size; // read and matched
                         comparison.verified_or_metadata(was, is);
                     }
                     return true;

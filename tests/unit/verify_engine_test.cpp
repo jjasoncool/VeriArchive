@@ -86,6 +86,7 @@ void content_changes_fail()
     CHECK(status_of(outcome, "empty") == "TypeChanged");
     CHECK(status_of(outcome, "System Volume Information/x") == "Verified");
     CHECK(status_of(outcome, "photos/a.jpg") == "Verified");
+    CHECK(outcome.coverage_bytes == 20000); // only bytes that were read and matched
 }
 
 void unreadable_files_fail_with_their_reason()
