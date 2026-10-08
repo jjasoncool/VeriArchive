@@ -74,10 +74,10 @@ std::filesystem::path entry_path(GtkWidget* entry)
     return path_from_utf8(gtk_editable_get_text(GTK_EDITABLE(entry)));
 }
 
-void choose_folder(GtkWindow* parent, GtkWidget* entry)
+void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title)
 {
     GtkFileDialog* dialog = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dialog, "Choose the archive folder");
+    gtk_file_dialog_set_title(dialog, title.c_str());
     gtk_file_dialog_select_folder(dialog, parent, nullptr,
         +[](GObject* source, GAsyncResult* result, gpointer data) {
             GFile* folder = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, nullptr);
@@ -96,7 +96,7 @@ void choose_folder(GtkWindow* parent, GtkWidget* entry)
 // Throttled progress: at most five updates a second are posted to the main loop.
 class Job::BarProgress final : public IProgressSink {
 public:
-    explicit BarProgress(GtkWidget* bar) : bar_(bar) {}
+    BarProgress(const app::Text& text, GtkWidget* bar) : text_(text), bar_(bar) {}
 
     void on_progress(const Progress& progress) override
     {
@@ -105,20 +105,20 @@ public:
             return;
         }
         last_ = now;
-        auto* update = new Update{bar_, progress};
+        auto* update = new Update{text_, bar_, progress};
         g_idle_add(
             +[](gpointer data) -> gboolean {
                 std::unique_ptr<Update> update(static_cast<Update*>(data));
                 const auto& p = update->progress;
                 if (p.items_total == 0) {
                     gtk_progress_bar_pulse(GTK_PROGRESS_BAR(update->bar));
-                    const auto text = "Scanning: " + std::to_string(p.items_done) + " entries";
+                    const auto text = update->text.format("Scanning: {} entries", p.items_done);
                     gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
                 } else {
                     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(update->bar),
                         static_cast<double>(p.items_done) / static_cast<double>(p.items_total));
-                    const auto text = "Hashing: " + std::to_string(p.items_done) + " / " +
-                                      std::to_string(p.items_total) + " files, " + format_bytes(p.bytes_done);
+                    const auto text = update->text.format("Hashing: {} / {} files, {}", p.items_done,
+                        p.items_total, format_bytes(p.bytes_done));
                     gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
                 }
                 return G_SOURCE_REMOVE;
@@ -128,9 +128,11 @@ public:
 
 private:
     struct Update {
+        app::Text text;
         GtkWidget* bar;
         Progress progress;
     };
+    app::Text text_;
     GtkWidget* bar_;
     std::chrono::steady_clock::time_point last_{};
 };
@@ -148,26 +150,26 @@ void Job::wait()
     }
 }
 
-void Job::start(GtkWidget* progress_bar, Work work, Done done)
+void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done done)
 {
     wait();
     cancel_.reset();
     running_.store(true);
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar), 0.0);
-    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(progress_bar), "Starting...");
+    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(progress_bar), text("Starting...").c_str());
 
     struct Finished {
         Done done;
         std::string report;
         std::atomic<bool>* running;
     };
-    thread_ = std::thread([this, progress_bar, work = std::move(work), done = std::move(done)]() mutable {
-        BarProgress progress(progress_bar);
+    thread_ = std::thread([this, text, progress_bar, work = std::move(work), done = std::move(done)]() mutable {
+        BarProgress progress(text, progress_bar);
         std::string report;
         try {
             report = work(cancel_, progress);
         } catch (const std::exception& error) {
-            report = std::string("Unexpected error: ") + error.what();
+            report = text.format("Unexpected error: {}", error.what());
         }
         auto* finished = new Finished{std::move(done), std::move(report), &running_};
         g_idle_add(

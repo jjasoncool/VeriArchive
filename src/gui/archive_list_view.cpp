@@ -9,12 +9,12 @@
 namespace va::gui {
 namespace {
 
-std::string run_text(const std::optional<VerifyRunRecord>& run, bool with_mode)
+std::string run_text(const app::Text& text, const std::optional<VerifyRunRecord>& run, bool with_mode)
 {
     if (!run) {
-        return "never";
+        return text("never");
     }
-    return (with_mode ? run->mode + " " : "") + run->result + "\n" + run->finished;
+    return (with_mode ? text(run->mode) + " " : "") + text(run->result) + "\n" + run->finished;
 }
 
 GtkWidget* cell(const std::string& text, bool bold = false, bool warning = false)
@@ -40,32 +40,33 @@ GtkWidget* cell(const std::string& text, bool bold = false, bool warning = false
 void refresh_archive_list(GuiState& state)
 {
     auto& view = state.archive_list;
+    const auto& text = state.text;
     if (!view.grid) {
         return;
     }
     clear_grid(view.grid);
     if (!state.session) {
-        gtk_label_set_text(GTK_LABEL(view.status), "No repository is open; see Settings.");
+        gtk_label_set_text(GTK_LABEL(view.status), text("No repository is open; see Settings.").c_str());
         return;
     }
     auto store = ArchiveStore::open(state.session->context.repo);
     if (!store) {
-        gtk_label_set_text(GTK_LABEL(view.status), store.error().message.c_str());
+        gtk_label_set_text(GTK_LABEL(view.status), text(store.error().message).c_str());
         return;
     }
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     const auto statuses = archive_statuses(*store, state.session->context.config.policy, now);
     if (!statuses) {
-        gtk_label_set_text(GTK_LABEL(view.status), statuses.error().message.c_str());
+        gtk_label_set_text(GTK_LABEL(view.status), text(statuses.error().message).c_str());
         return;
     }
-    const auto count = std::to_string(statuses->size()) + (statuses->size() == 1 ? " archive" : " archives");
+    const auto count = text.format(statuses->size() == 1 ? "{} archive" : "{} archives", statuses->size());
     gtk_label_set_text(GTK_LABEL(view.status), count.c_str());
 
     const char* headers[] = {"Label", "UUID", "Volume", "Model", "Capacity", "Last FULL verify",
         "Last verify", "Overdue", "Rev", "Status"};
     for (int column = 0; column < 10; ++column) {
-        gtk_grid_attach(GTK_GRID(view.grid), cell(headers[column], true), column, 0, 1, 1);
+        gtk_grid_attach(GTK_GRID(view.grid), cell(text(headers[column]), true), column, 0, 1, 1);
     }
     int row = 1;
     for (const auto& status : *statuses) {
@@ -86,11 +87,11 @@ void refresh_archive_list(GuiState& state)
         gtk_grid_attach(GTK_GRID(view.grid), cell(volume), 2, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(model), 3, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(capacity), 4, row, 1, 1);
-        gtk_grid_attach(GTK_GRID(view.grid), cell(run_text(status.last_full, false)), 5, row, 1, 1);
-        gtk_grid_attach(GTK_GRID(view.grid), cell(run_text(status.last_any, true), false, failed), 6, row, 1, 1);
-        gtk_grid_attach(GTK_GRID(view.grid), cell(overdue ? "OVERDUE" : "", false, overdue), 7, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(view.grid), cell(run_text(text, status.last_full, false)), 5, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(view.grid), cell(run_text(text, status.last_any, true), false, failed), 6, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(view.grid), cell(overdue ? text("OVERDUE") : "", false, overdue), 7, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell("r" + std::to_string(status.archive.current_revision)), 8, row, 1, 1);
-        gtk_grid_attach(GTK_GRID(view.grid), cell(status.archive.status), 9, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(view.grid), cell(text(status.archive.status)), 9, row, 1, 1);
         ++row;
     }
 }
@@ -98,15 +99,16 @@ void refresh_archive_list(GuiState& state)
 GtkWidget* build_archive_list_view(GuiState& state)
 {
     auto& view = state.archive_list;
+    const auto& text = state.text;
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     set_margins(box, 16);
-    gtk_box_append(GTK_BOX(box), make_heading("Archives"));
-    gtk_box_append(GTK_BOX(box), make_label(
+    gtk_box_append(GTK_BOX(box), make_heading(text("Archives")));
+    gtk_box_append(GTK_BOX(box), make_label(text(
         "Each archive shows when it was last read in full (FULL verify) and when it was last "
-        "verified at all. A result is only as current as its date."));
+        "verified at all. A result is only as current as its date.")));
 
     GtkWidget* toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget* refresh = gtk_button_new_with_label("Refresh");
+    GtkWidget* refresh = gtk_button_new_with_label(text("Refresh").c_str());
     g_signal_connect(refresh, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) { refresh_archive_list(*static_cast<GuiState*>(data)); }),
         &state);

@@ -2,6 +2,7 @@
 // Shared GUI pieces (GTK4 C API, decision 0016): small widget helpers and Job,
 // which runs a long operation on a worker thread while progress and completion
 // are delivered on the GTK main thread (the only thread allowed to touch widgets).
+#include "app/text.h"
 #include "core/interfaces.h"
 
 #include <gtk/gtk.h>
@@ -26,11 +27,12 @@ void clear_grid(GtkWidget* grid);
 // Path typed in (or chosen into) an entry.
 std::filesystem::path entry_path(GtkWidget* entry);
 
-// Opens a folder chooser; the chosen folder is written into `entry`.
-void choose_folder(GtkWindow* parent, GtkWidget* entry);
+// Opens a folder chooser titled `title`; the chosen folder is written into `entry`.
+void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title);
 
 // One long operation at a time. `work` runs on a worker thread and returns the
-// report text; `done` then runs on the main thread. Progress goes to `bar`.
+// report text; `done` then runs on the main thread. Progress goes to `bar`,
+// worded in the language of `text`.
 class Job {
 public:
     using Work = std::function<std::string(CancelToken&, IProgressSink&)>;
@@ -38,7 +40,7 @@ public:
 
     ~Job();
     bool running() const { return running_.load(); }
-    void start(GtkWidget* progress_bar, Work work, Done done);
+    void start(const app::Text& text, GtkWidget* progress_bar, Work work, Done done);
     void cancel() { cancel_.cancel(); }
     void wait();
 

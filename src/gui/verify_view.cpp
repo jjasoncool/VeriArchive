@@ -19,35 +19,39 @@ constexpr const char* guarantee =
     "V1 detects accidental corruption and unintended change; tamper evidence (signed manifests) "
     "begins in V1.1.";
 
-std::string report(const VerifyOutcome& outcome)
+std::string report(const app::Text& text, const VerifyOutcome& outcome)
 {
-    std::string text = "FULL VERIFY " + outcome.result + "\n\n" + outcome.label + " (" +
-                       outcome.archive_uuid + ") revision " + std::to_string(outcome.revision) +
-                       "\nRoot: " + path_to_utf8(outcome.root) +
-                       "\nIdentity: " + std::string(to_string(outcome.identity.result)) +
-                       "\nCoverage: " + format_bytes(outcome.coverage_bytes) + " of " +
-                       format_bytes(outcome.registered_bytes) + " registered bytes read and matched\nItems:";
+    std::string body =
+        text.format("FULL VERIFY {}", text(outcome.result)) + "\n\n" +
+        text.format("{} ({}) revision {}", outcome.label, outcome.archive_uuid, outcome.revision) + "\n" +
+        text.format("Root: {}", path_to_utf8(outcome.root)) + "\n" +
+        text.format("Identity: {}", text(to_string(outcome.identity.result))) + "\n" +
+        text.format("Coverage: {} of {} registered bytes read and matched", format_bytes(outcome.coverage_bytes),
+            format_bytes(outcome.registered_bytes)) +
+        "\n" + text("Items:");
     for (const auto& [status, count] : outcome.counts) {
-        text += "  " + status + " " + std::to_string(count);
+        body += "  " + text(status) + " " + std::to_string(count);
     }
-    text += "\n";
+    body += "\n";
     for (const auto& failure : outcome.failure_classes) {
-        text += "Failure: " + failure + "\n";
+        body += text.format("Failure: {}", text(failure)) + "\n";
     }
     for (const auto& warning : outcome.warnings) {
-        text += "Warning: " + warning + "\n";
+        body += text.format("Warning: {}", text(warning)) + "\n";
     }
     if (!outcome.items.empty()) {
-        text += "\n";
+        body += "\n";
         for (const auto& item : outcome.items) {
-            text += item.status + "  " + item.path.p + (item.detail.empty() ? "" : "  (" + item.detail + ")") + "\n";
+            body += text(item.status) + "  " + item.path.p +
+                    (item.detail.empty() ? "" : "  (" + text(item.detail) + ")") + "\n";
         }
     }
     if (outcome.result == "INCOMPLETE") {
-        text += "\nThe run was interrupted; use Resume to continue without re-reading verified files.\n";
+        body += "\n" + text("The run was interrupted; use Resume to continue without re-reading verified files.") +
+                "\n";
     }
-    text += "\nRun: " + outcome.run_id + "\n" + guarantee + "\n";
-    return text;
+    body += "\n" + text.format("Run: {}", outcome.run_id) + "\n" + text(guarantee) + "\n";
+    return body;
 }
 
 void set_running(GuiState& state, bool running)
@@ -62,7 +66,8 @@ void start_verification(GuiState& state, bool resume)
 {
     auto& view = state.verify_view;
     if (!state.session || state.job.running()) {
-        set_text(view.report, state.session ? "Another operation is running." : "Open a repository first (Settings).");
+        set_text(view.report, state.session ? state.text("Another operation is running.")
+                                            : state.text("Open a repository first (Settings)."));
         return;
     }
     VerifyRequest request;
@@ -81,26 +86,28 @@ void start_verification(GuiState& state, bool resume)
         } else {
             request.root = entry_path(view.folder);
             if (request.root->empty()) {
-                set_text(view.report, "Choose the folder to verify, or pick a registered archive.");
+                set_text(view.report, state.text("Choose the folder to verify, or pick a registered archive."));
                 return;
             }
         }
     }
 
     set_running(state, true);
-    set_text(view.report, "Verifying (reading every registered byte) ...");
+    set_text(view.report, state.text("Verifying (reading every registered byte) ..."));
     // Filled by the worker; read by `done`, which runs only after the worker finished.
     struct Interrupted {
         std::string run_id;
         Uuid archive_uuid;
     };
     auto interrupted = std::make_shared<std::optional<Interrupted>>();
-    state.job.start(view.progress,
-        [&state, request, interrupted](CancelToken& cancel, IProgressSink& progress) -> std::string {
+    // The worker words its report with its own copy of the interface language.
+    state.job.start(state.text, view.progress,
+        [&state, request, interrupted, text = state.text](CancelToken& cancel, IProgressSink& progress)
+            -> std::string {
             auto& session = *state.session;
             auto store = ArchiveStore::open(session.context.repo);
             if (!store) {
-                return "Cannot open the repository: " + store.error().message;
+                return text.format("Cannot open the repository: {}", text(store.error().message));
             }
             const auto archive_files = platform::make_file_system_access();
             const auto repository_files = platform::make_file_system_access();
@@ -109,12 +116,12 @@ void start_verification(GuiState& state, bool resume)
                 session.context.repository_uuid, state.host};
             const auto outcome = verify_full(services, request, cancel, progress);
             if (!outcome) {
-                return "Not verified: " + outcome.error().message;
+                return text.format("Not verified: {}", text(outcome.error().message));
             }
             if (outcome->result == "INCOMPLETE") {
                 *interrupted = Interrupted{outcome->run_id, outcome->archive_uuid};
             }
-            return report(*outcome);
+            return report(text, *outcome);
         },
         [&state, request, interrupted](const std::string& text) {
             auto& view = state.verify_view;
@@ -126,7 +133,7 @@ void start_verification(GuiState& state, bool resume)
                 view.incomplete_run.clear();
             }
             set_running(state, false);
-            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.progress), "Done");
+            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.progress), state.text("Done").c_str());
             set_text(view.report, text);
             refresh_archive_list(state);
         });
@@ -163,7 +170,7 @@ void refresh_archive_choices(GuiState& state)
         g_object_unref(model);
     };
 
-    std::vector<std::string> verify_items{"The folder above"};
+    std::vector<std::string> verify_items{state.text("The folder above")};
     verify_items.insert(verify_items.end(), labels.begin(), labels.end());
     set_choices(state.verify_view.archive, verify_items);
     state.verify_view.archive_uuids = uuids;
@@ -177,38 +184,40 @@ GtkWidget* build_verify_view(GuiState& state)
     auto& view = state.verify_view;
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     set_margins(box, 16);
-    gtk_box_append(GTK_BOX(box), make_heading("Verify Archive"));
-    gtk_box_append(GTK_BOX(box), make_label(
+    gtk_box_append(GTK_BOX(box), make_heading(state.text("Verify Archive")));
+    gtk_box_append(GTK_BOX(box), make_label(state.text(
         "FULL verification re-reads every registered file from the medium and compares it with "
-        "the baseline. Only FULL VERIFY PASSED means 100% of the registered content was read and matched."));
+        "the baseline. Only FULL VERIFY PASSED means 100% of the registered content was read and matched.")));
 
     GtkWidget* folder_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     view.folder = gtk_entry_new();
     gtk_widget_set_hexpand(view.folder, TRUE);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(view.folder), "Archive folder or volume root");
-    GtkWidget* choose = gtk_button_new_with_label("Choose...");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(view.folder), state.text("Archive folder or volume root").c_str());
+    GtkWidget* choose = gtk_button_new_with_label(state.text("Choose...").c_str());
     g_signal_connect(choose, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
-        choose_folder(state.window, state.verify_view.folder);
+        choose_folder(state.window, state.verify_view.folder, state.text("Choose the archive folder"));
     }), &state);
     gtk_box_append(GTK_BOX(folder_row), view.folder);
     gtk_box_append(GTK_BOX(folder_row), choose);
     gtk_box_append(GTK_BOX(box), folder_row);
 
     GtkWidget* archive_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(archive_row), make_label("Verify:"));
-    const char* initial[] = {"The folder above", nullptr};
+    gtk_box_append(GTK_BOX(archive_row), make_label(state.text("Verify:")));
+    const auto folder_above = state.text("The folder above");
+    const char* initial[] = {folder_above.c_str(), nullptr};
     view.archive = gtk_drop_down_new_from_strings(initial);
     gtk_box_append(GTK_BOX(archive_row), view.archive);
     gtk_box_append(GTK_BOX(box), archive_row);
 
-    view.strict = gtk_check_button_new_with_label("Strict metadata (timestamp and attribute differences fail the run)");
+    view.strict = gtk_check_button_new_with_label(
+        state.text("Strict metadata (timestamp and attribute differences fail the run)").c_str());
     gtk_box_append(GTK_BOX(box), view.strict);
 
     GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    view.start = gtk_button_new_with_label("Verify (FULL)");
-    view.cancel = gtk_button_new_with_label("Cancel");
-    view.resume = gtk_button_new_with_label("Resume interrupted run");
+    view.start = gtk_button_new_with_label(state.text("Verify (FULL)").c_str());
+    view.cancel = gtk_button_new_with_label(state.text("Cancel").c_str());
+    view.resume = gtk_button_new_with_label(state.text("Resume interrupted run").c_str());
     gtk_widget_set_sensitive(view.cancel, FALSE);
     gtk_widget_set_sensitive(view.resume, FALSE);
     g_signal_connect(view.start, "clicked",

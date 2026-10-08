@@ -12,6 +12,8 @@ namespace va::gui {
 struct GuiState {
     GtkApplication* application = nullptr;
     GtkWindow* window = nullptr;
+    GtkWidget* stack = nullptr;            // the five views
+    app::Text text;                        // interface language (decision 0017)
     HostInfo host;
     std::optional<app::Session> session;   // empty until a repository is open
     std::string session_error;
@@ -60,6 +62,8 @@ struct GuiState {
     struct {
         GtkWidget* info = nullptr;
         GtkWidget* initialise = nullptr;
+        GtkWidget* language = nullptr;     // drop-down: English, 繁體中文
+        std::string notice;                // e.g. the language could not be saved
     } settings_view;
 };
 
@@ -79,5 +83,13 @@ void open_repository_session(GuiState& state, bool initialise);
 
 // Builds the window; `smoke_test` builds everything without showing it, then quits.
 void activate(GuiState& state, bool smoke_test);
+
+// Makes GTK's own texts (dialog buttons, ...) follow the interface language;
+// call before GTK starts.
+void use_gtk_language(app::Language language);
+
+// Switches the interface language: remembers it in the config file and
+// rebuilds the window in the new language, showing Settings.
+void change_language(GuiState& state, app::Language language);
 
 } // namespace va::gui

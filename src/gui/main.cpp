@@ -9,6 +9,8 @@ int main(int argc, char* argv[])
 {
     va::gui::GuiState state;
     state.host = va::app::host_info(VERIARCHIVE_VERSION);
+    state.text = va::app::Text(va::app::interface_language(std::nullopt, std::nullopt));
+    va::gui::use_gtk_language(state.text.language());
     static bool smoke_test = std::getenv("VERIARCHIVE_GUI_SMOKE_TEST") != nullptr;
 
     // Windows has no D-Bus session bus. Without an address GLib would try to
