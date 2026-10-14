@@ -9,7 +9,12 @@ stages:
   script:
     - cmake --preset linux-release
     - cmake --build --preset linux-release
-    - ctest --preset linux-release
+    # What the runner shows of its disks: identity matching depends on it, and
+    # containers often lack the udev database and /dev/disk links.
+    - build/linux-release/veriarchive-cli --lang en media list || true
+    - grep " $CI_PROJECT_DIR\| /builds" /proc/self/mountinfo || true
+    - ls /run/udev/data /dev/disk 2>&1 | head -5 || true
+    - ctest --preset linux-release --output-on-failure
     # R-122: forbidden constructs in src/core and src/common.
     - "! grep -rnE 'current_path\\(\\)|\\.string\\(\\)|<windows\\.h>|<libudev\\.h>' src/core src/common"
 
