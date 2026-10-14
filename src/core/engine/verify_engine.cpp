@@ -277,11 +277,18 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         }
     }
 
+    const bool no_filesystem_id = std::ranges::find(identity.details, "filesystem-id-unavailable") !=
+                                  identity.details.end();
     for (const auto& detail : identity.details) {
+        if (detail == "filesystem-id-unavailable" && identity.result == MatchResult::MatchWeak) {
+            continue; // said by the MATCH_WEAK line below
+        }
         outcome.warnings.push_back("identity: " + detail);
     }
     if (identity.result == MatchResult::MatchWeak) {
-        outcome.warnings.push_back("identity: no hardware serial to compare (MATCH_WEAK)");
+        outcome.warnings.push_back(no_filesystem_id
+                ? "identity: the filesystem id cannot be read; the volume was recognised by its device (MATCH_WEAK)"
+                : "identity: no hardware serial to compare (MATCH_WEAK)");
     }
     if (identity.result == MatchResult::Mismatch) {
         outcome.failure_classes.push_back("MediaIdentityMismatch");

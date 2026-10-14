@@ -451,6 +451,8 @@ constexpr CatalogEntry entries[] = {
         "執行 {} 無法繼續：自開始以來媒體身分或封存版次已改變；請執行新的驗證"},
     {"identity: no hardware serial to compare (MATCH_WEAK)",
         "媒體身分：沒有可比對的硬體序號（弱相符）"},
+    {"identity: the filesystem id cannot be read; the volume was recognised by its device (MATCH_WEAK)",
+        "媒體身分：讀不到檔案系統 UUID，改以硬碟序號和容量辨識（弱相符）"},
     {"scan: {}", "掃描：{}", Match::Cause},
     {"verification finished as PASSED but could not be recorded: {}",
         "驗證結果為通過，但無法記錄：{}",
@@ -624,6 +626,7 @@ constexpr CatalogEntry entries[] = {
     {"filesystem-type-differs", "檔案系統類型不同"},
     {"model-differs", "型號不同"},
     {"device-replaced", "裝置已更換"},
+    {"filesystem-id-unavailable", "讀不到檔案系統 UUID"},
     // Shown as "identity: retired": the archive is retired, not the identity.
     {"retired", "封存已停用"},
     {"identity-file-copied", "身分檔案是從其他媒體複製而來"},

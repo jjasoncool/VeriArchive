@@ -72,6 +72,19 @@ void malformed_values_are_invalid()
     CHECK(!fixture.store.archives() || fixture.store.archives()->empty());
 }
 
+// R-97 still holds where the filesystem id cannot be read (decision 0018):
+// the device and the volume size recognise the registered volume.
+void registered_root_without_filesystem_id_needs_a_flag()
+{
+    Fixture fixture;
+    fixture.media.volume.filesystem_uuid.clear();
+    fixture.media.volume.filesystem_uuid_short.clear();
+    fixture.archive.add_file("a.txt", "a");
+    CHECK(fixture.run(at("/vol")).has_value());
+    const auto again = fixture.run(at("/vol"));
+    CHECK(!again && again.error().kind == va::RegisterFailure::Kind::Refused);
+}
+
 // R-97: a registered volume is refused unless the operator says what to do.
 void registered_root_needs_a_flag()
 {
@@ -262,6 +275,7 @@ void register_engine_tests()
     first_registration_writes_manifest_and_index();
     malformed_values_are_invalid();
     registered_root_needs_a_flag();
+    registered_root_without_filesystem_id_needs_a_flag();
     overlapping_roots_are_refused();
     unreadable_files_are_recorded();
     retired_archive_takes_no_revision();

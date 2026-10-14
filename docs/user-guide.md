@@ -102,7 +102,7 @@ A result always carries its mode and date: only FULL VERIFY PASSED means 100% of
 | Result | Meaning | Exit code |
 |---|---|---|
 | PASSED | every registered byte was read and matched | 0 |
-| PASSED_WITH_WARNINGS | content matched, but something needs attention (no hardware serial to compare, metadata differences) | 2 |
+| PASSED_WITH_WARNINGS | content matched, but something needs attention (no hardware serial to compare, an unreadable filesystem id, metadata differences) | 2 |
 | FAILED | files were modified, missing or unreadable, or the manifest or media identity is wrong | 3 |
 | INCOMPLETE | the verification was interrupted (cancelled, disk removed); it can be resumed | 4 |
 

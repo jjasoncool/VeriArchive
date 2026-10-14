@@ -115,6 +115,16 @@ MatchResult classify(const VolumeInfo& seen, const VolumeInfo& recorded)
         }
         return devices == Comparison::Unavailable ? MatchResult::MatchWeak : MatchResult::Migrated;
     }
+    // Decision 0018: the filesystem id cannot be read on one side (e.g. Linux
+    // without the udev database) but the device matches. The volume's size is
+    // then the only evidence about the filesystem: the same size is the same
+    // volume, recognised weakly; another size is another filesystem on that
+    // device, such as a second partition.
+    if (filesystem == Comparison::Unavailable && devices == Comparison::Same) {
+        return differs_by_more_than_one_percent(seen.capacity_bytes, recorded.capacity_bytes)
+                   ? MatchResult::Mismatch
+                   : MatchResult::MatchWeak;
+    }
     return devices == Comparison::Same ? MatchResult::Mismatch : MatchResult::Unknown;
 }
 
@@ -123,6 +133,9 @@ MatchResult classify(const VolumeInfo& seen, const VolumeInfo& recorded)
 void add_secondary_details(const VolumeInfo& seen, const VolumeInfo& recorded,
     MatchOutcome& outcome)
 {
+    if (compare_filesystem(seen, recorded) == Comparison::Unavailable) {
+        outcome.details.push_back("filesystem-id-unavailable"); // decision 0018
+    }
     if (seen.volume_label != recorded.volume_label) {
         outcome.details.push_back("volume-label-differs");
     }

@@ -4,6 +4,7 @@
 
 #include "core/engine/item_rules.h"
 
+#include <algorithm>
 #include <fstream>
 
 namespace {
@@ -331,6 +332,22 @@ void item_rules()
 
 } // namespace
 
+// Decision 0018: a filesystem id that can no longer be read (Linux without
+// the udev database) on the same device and size is a weak match: the content
+// is verified and the result says why it is only PASSED_WITH_WARNINGS.
+void unreadable_filesystem_id_warns()
+{
+    Registered fixture;
+    fixture.media.volume.filesystem_uuid.clear();
+    fixture.media.volume.filesystem_uuid_short.clear();
+    const auto outcome = fixture.verify_ok();
+    CHECK(outcome.result == "PASSED_WITH_WARNINGS");
+    CHECK(outcome.identity.result == va::MatchResult::MatchWeak);
+    CHECK(std::ranges::count(outcome.warnings,
+              "identity: the filesystem id cannot be read; the volume was recognised by its device (MATCH_WEAK)") == 1);
+    CHECK(std::ranges::count(outcome.warnings, "identity: filesystem-id-unavailable") == 0);
+}
+
 void verify_engine_tests()
 {
     unchanged_archive_passes();
@@ -341,6 +358,7 @@ void verify_engine_tests()
     known_unreadable_entries_warn();
     tampered_manifest_fails();
     identity_outcomes();
+    unreadable_filesystem_id_warns();
     verify_by_archive_uuid();
     unrepresentable_names_warn();
     link_targets_across_systems();

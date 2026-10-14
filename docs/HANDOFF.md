@@ -600,6 +600,7 @@ class IEntropySource { public: virtual ~IEntropySource() = default;
 > Amended by `docs/decisions/0001-archive-matching-includes-root-subpath.md`: candidates are first narrowed by `root_subpath`; archives on the same volume with different, non-overlapping roots are not `AMBIGUOUS`.
 > Amended by `docs/decisions/0004-relocation-writes-a-new-revision.md`: `MIGRATED` acceptance and relocation are `archive relocate`, which writes a new revision; media matching only an older revision's identity is `PREVIOUS_CARRIER`.
 > Amended by `docs/decisions/0003-retired-archives.md`: retired archives remain match candidates.
+> Amended by `docs/decisions/0018-unreadable-filesystem-id.md`: a `filesystem_uuid` unavailable on either side with a matching device is `MATCH_WEAK` when the volume capacity agrees within 1 %, otherwise `MISMATCH`.
 
 Evidence at verify time (`MediaEvidence`) is compared against every registered archive's latest `identity` snapshot. Primary evidence: `filesystem_uuid` (per §B1.3) and device `serial`/`wwn` (either matching counts as a device match).
 

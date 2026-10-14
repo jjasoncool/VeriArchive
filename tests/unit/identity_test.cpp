@@ -192,6 +192,35 @@ void filesystem_identifiers()
 
 } // namespace
 
+// Decision 0018: a filesystem id that cannot be read (Linux without the udev
+// database) on a matching device is a weak match when the volume size agrees,
+// and another filesystem on that device (a second partition) when it does not.
+void unreadable_filesystem_id()
+{
+    const std::vector archives{candidate("A", volume("", "SERIAL-1"))};
+
+    auto outcome = va::match_identity(evidence(volume("", "SERIAL-1")), "", archives);
+    CHECK(outcome.result == va::MatchResult::MatchWeak);
+    CHECK(outcome.archives == std::vector<va::Uuid>{"A"});
+    CHECK(has_detail(outcome, "filesystem-id-unavailable"));
+
+    // Read at registration, unreadable now: still the same device and size.
+    const std::vector recorded_with_id{candidate("A", volume(disk_a, "SERIAL-1"))};
+    outcome = va::match_identity(evidence(volume("", "SERIAL-1")), "", recorded_with_id);
+    CHECK(outcome.result == va::MatchResult::MatchWeak);
+
+    auto other_partition = volume("", "SERIAL-1");
+    other_partition.capacity_bytes = 500000;
+    outcome = va::match_identity(evidence(other_partition), "", archives);
+    CHECK(outcome.result == va::MatchResult::Mismatch);
+    CHECK(has_detail(outcome, "capacity-differs"));
+
+    outcome = va::match_identity(evidence(volume("", "SERIAL-2")), "", archives);
+    CHECK(outcome.result == va::MatchResult::Unknown);
+    outcome = va::match_identity(evidence(volume("", "")), "", archives);
+    CHECK(outcome.result == va::MatchResult::Unknown);
+}
+
 void identity_tests()
 {
     decision_table_rows();
@@ -202,4 +231,5 @@ void identity_tests()
     ntfs_short_serial_matches_full_serial();
     serial_comparison();
     filesystem_identifiers();
+    unreadable_filesystem_id();
 }
