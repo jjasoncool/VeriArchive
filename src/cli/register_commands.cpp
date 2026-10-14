@@ -17,6 +17,8 @@ namespace {
 int failure_code(RegisterFailure::Kind kind)
 {
     switch (kind) {
+    case RegisterFailure::Kind::Invalid:
+        return exit_code::usage;
     case RegisterFailure::Kind::Refused:
         return exit_code::identity_decision;
     case RegisterFailure::Kind::Incomplete:

@@ -46,6 +46,9 @@ if(NOT files EQUAL 4)
     message(FATAL_ERROR "expected 4 files, got ${files}")
 endif()
 
+# A malformed label is a usage error, not an operator decision.
+run_cli("10" register "${ROOT}" --label OS-1)
+
 # Registering the same root again needs an operator decision (R-97).
 run_cli("12" register "${ROOT}")
 

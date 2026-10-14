@@ -48,6 +48,7 @@ struct RegisterOutcome {
 
 struct RegisterFailure {
     enum class Kind {
+        Invalid,     // a value of the request is malformed, e.g. the label (exit 10)
         Refused,     // needs an operator decision or flag (exit 12)
         Media,       // the root or its volume cannot be read (exit 11)
         Repository,  // manifest or database could not be written (exit 11)

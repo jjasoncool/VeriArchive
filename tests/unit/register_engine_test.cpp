@@ -55,6 +55,23 @@ void first_registration_writes_manifest_and_index()
     CHECK(archive && *archive && (*archive)->status == "REGISTERED" && (*archive)->current_revision == 1);
 }
 
+// A malformed value is a usage error (exit 10), not an operator decision.
+void malformed_values_are_invalid()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a");
+    auto request = at("/vol");
+    request.label = "OS00222-TEST";
+    const auto label = fixture.run(request);
+    CHECK(!label && label.error().kind == va::RegisterFailure::Kind::Invalid);
+
+    request = at("/vol");
+    request.copy_of = "not-a-uuid";
+    const auto copy_of = fixture.run(request);
+    CHECK(!copy_of && copy_of.error().kind == va::RegisterFailure::Kind::Invalid);
+    CHECK(!fixture.store.archives() || fixture.store.archives()->empty());
+}
+
 // R-97: a registered volume is refused unless the operator says what to do.
 void registered_root_needs_a_flag()
 {
@@ -243,6 +260,7 @@ void unidentifiable_volume_fails()
 void register_engine_tests()
 {
     first_registration_writes_manifest_and_index();
+    malformed_values_are_invalid();
     registered_root_needs_a_flag();
     overlapping_roots_are_refused();
     unreadable_files_are_recorded();

@@ -174,10 +174,10 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     using Kind = RegisterFailure::Kind;
     auto& store = services.store;
     if (request.label && !std::regex_match(*request.label, std::regex("ARCH-[0-9]{4,}"))) {
-        return fail(Kind::Refused, "labels have the form ARCH-NNNN");
+        return fail(Kind::Invalid, "labels have the form ARCH-NNNN");
     }
     if (request.copy_of && !is_canonical_uuid(*request.copy_of)) {
-        return fail(Kind::Refused, "--copy-of needs an archive uuid");
+        return fail(Kind::Invalid, "--copy-of needs an archive uuid");
     }
 
     const auto volume = services.media.volume_for_path(request.root);
