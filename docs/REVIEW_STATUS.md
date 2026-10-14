@@ -23,19 +23,32 @@ package runs without MSYS2 in both languages.
 
 Measured locally (Release build, Windows 11, WD SN850X NVMe, uncached reads, four 512 MiB
 files): FULL verify at about 4.5 GB/s with eight readers and about 1.47 GB/s with one reader
-(the HDD setting, limited by SHA-256). Hashing therefore stays well above HDD speeds; the HDD
-acceptance against `dd` still has to be measured on a real HDD.
+(the HDD setting, limited by SHA-256). Hashing therefore stays well above HDD speeds.
+
+Measured on a real HDD (Release build, internal SATA WD WD221KFGX 20 TB, NTFS, data registered
+read-only into a repository on another disk), against an uncached sequential read of the same
+files as the `dd` baseline:
+
+| Data | Baseline | Registration | FULL verify |
+|---|---|---|---|
+| 154 GB, 2 166 files | 150.0 MB/s | 154.6 MB/s (103 %) | 153.8 MB/s (103 %), PASSED, identity MATCH |
+| 4.3 GB, 1 607 files | 101 MB/s | 105 MB/s | 138 MB/s, PASSED, identity MATCH |
+
+R-120's HDD throughput criterion (≥ 80 % of `dd`) is met. `sha256sum -c` of the exported list
+agreed with every file of the 4.3 GB archive, and an archive given by uuid was found on the disk.
 
 ## Still required before acceptance
 
 - **Linux compilation and tests.** The Linux platform files have not been compiled yet (no Linux
   environment was available); the GitLab pipeline is the first place they build.
-- **Hardware acceptance (M2, M3).** `media list` on internal SATA/NVMe, USB bridges with and
-  without serials, exFAT and NTFS external disks; the NTFS serial relationship on one medium seen
-  from both OSes; the 100 000-file / 20 GB fixture; register on Windows and verify on Linux and
-  the reverse; uncached-read audits; throughput ≥ 80 % of `dd` on an HDD.
-- **Packaging (R-121).** Windows package with GTK4 DLLs, schemas, icon theme and LGPL notices;
-  `ntldd` check (in CI).
+- **Hardware acceptance (M2, M3).** Done on Windows for an internal SATA HDD (model, serial,
+  NTFS serial, identity MATCH, throughput above). Still open: USB bridges with and without
+  serials, exFAT and NTFS external disks; the NTFS serial relationship on one medium seen from both
+  OSes; the 100 000-file / 20 GB fixture; register on Windows and verify on Linux and the reverse;
+  uncached-read audits.
+- **Packaging (R-121).** The Windows package is built and checked locally (`veriarchive_package`:
+  the installed tree runs in both languages with only Windows on `PATH` and imports no
+  `msys-2.0.dll`); it still has to pass in the GitLab Windows job and on a machine without MSYS2.
 - **CMake 4 deprecation.** CMake ≥ 4 warns that `SQLite::SQLite3` is deprecated in favour of
   `SQLite3::SQLite3`; switching needs a fallback because CMake 3.28's FindSQLite3 only defines
   the old name.
