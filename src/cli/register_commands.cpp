@@ -33,7 +33,7 @@ void print_outcome(const app::Text& text, const RegisterOutcome& outcome, const 
     std::cout << text.format("Registered {} ({}) revision {}", outcome.label, outcome.archive_uuid,
                      outcome.revision)
               << "\n  " << text.format("root: {}", path_to_utf8(root))
-              << "\n  " << text.format("files: {}  directories: {}  links: {}  hashed bytes: {}",
+              << "\n  " << text.format("files: {}  empty directories: {}  links: {}  hashed bytes: {}",
                      outcome.counts.files, outcome.counts.dirs, outcome.counts.links, outcome.counts.bytes)
               << "\n  " << text.format("manifest: {}", path_to_utf8(outcome.manifest)) << '\n';
     if (!outcome.unreadable.empty()) {

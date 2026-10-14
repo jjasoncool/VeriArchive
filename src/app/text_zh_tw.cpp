@@ -125,8 +125,8 @@ constexpr CatalogEntry entries[] = {
     // src/cli/register_commands.cpp
     {"Registered {} ({}) revision {}", "已註冊 {}（{}）版次 {}"},
     {"root: {}", "根目錄：{}"},
-    {"files: {}  directories: {}  links: {}  hashed bytes: {}",
-        "檔案：{}  資料夾：{}  連結：{}  已計算雜湊位元組：{}"},
+    {"files: {}  empty directories: {}  links: {}  hashed bytes: {}",
+        "檔案：{}  空資料夾：{}  連結：{}  已計算雜湊位元組：{}"},
     {"manifest: {}", "清單檔：{}", Match::Cause},
     {"unreadable at registration ({}; recorded without hashes, never reported as verified):",
         "註冊時無法讀取（{} 個；已記錄但不含雜湊，絕不會回報為已驗證）："},

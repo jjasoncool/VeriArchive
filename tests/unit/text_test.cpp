@@ -281,8 +281,8 @@ void translation_tests()
     CHECK(chinese("warning: identity: retired") == "警告：媒體身分：封存已停用");
     CHECK(chinese("RETIRED") == "已停用");
     CHECK(chinese("l -> f") == "連結 → 檔案");
-    CHECK(chinese.format("files: {}  directories: {}  links: {}  hashed bytes: {}", 2, 1, 0, 12) ==
-          "檔案：2  資料夾：1  連結：0  已計算雜湊位元組：12");
+    CHECK(chinese.format("files: {}  empty directories: {}  links: {}  hashed bytes: {}", 2, 1, 0, 12) ==
+          "檔案：2  空資料夾：1  連結：0  已計算雜湊位元組：12");
     CHECK(chinese("warning: the media holds revision 2, newer than the repository's 1: "
                   "the repository may have been rolled back") ==
           "警告：媒體上有版次 2，比儲存庫的版次 1 新：儲存庫可能已被回復到較舊的狀態");
