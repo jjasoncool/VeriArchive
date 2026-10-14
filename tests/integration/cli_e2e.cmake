@@ -113,7 +113,19 @@ endif()
 # History is chained and intact (R-18); listing works.
 run_cli("0" repo verify-history)
 run_cli("0" archive list)
-run_cli("0" history "${archive_uuid}")
+# People see local time with its offset from UTC; --json keeps UTC.
+if(NOT last_output MATCHES "[0-9]+-[0-9]+-[0-9]+ [0-9]+:[0-9]+:[0-9]+（UTC")
+    message(FATAL_ERROR "archive list does not show local time with its offset:\n${last_output}")
+endif()
+run_cli("0" --lang en history "${archive_uuid}")
+if(NOT last_output MATCHES "[0-9]+-[0-9]+-[0-9]+ [0-9]+:[0-9]+:[0-9]+ \\(UTC")
+    message(FATAL_ERROR "history does not show local time with its offset:\n${last_output}")
+endif()
+run_cli("0" history "${archive_uuid}" --json)
+string(JSON finished GET "${last_output}" runs 0 finished)
+if(NOT finished MATCHES "^[0-9]+-[0-9]+-[0-9]+T[0-9]+:[0-9]+:[0-9]+Z$")
+    message(FATAL_ERROR "--json history is not in UTC: ${finished}")
+endif()
 
 # Export -> import into a second repository (R-87).
 run_cli("0" export "${archive_prefix}" --out "${WORK}/export")

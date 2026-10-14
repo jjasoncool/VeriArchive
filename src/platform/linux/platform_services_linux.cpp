@@ -1,6 +1,7 @@
 #include "platform/platform_services.h"
 #include "platform/linux/mountinfo.h"
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <stdexcept>
 #include <sys/statfs.h>
@@ -115,6 +116,18 @@ std::string host_name()
         return {};
     }
     return name;
+}
+
+std::chrono::seconds utc_offset(std::chrono::sys_seconds time)
+{
+    // localtime_r follows TZ and /etc/localtime; tm_gmtoff is the offset east
+    // of UTC at that moment, daylight saving time included.
+    const auto seconds = static_cast<std::time_t>(time.time_since_epoch().count());
+    std::tm local{};
+    if (localtime_r(&seconds, &local) == nullptr) {
+        return std::chrono::seconds{0};
+    }
+    return std::chrono::seconds(local.tm_gmtoff);
 }
 
 std::string ui_language()

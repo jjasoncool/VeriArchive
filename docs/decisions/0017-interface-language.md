@@ -20,6 +20,10 @@ The operator works in Traditional Chinese; the specification, code, manifests an
 - `--json` output, exit codes, the codes inside JSON (`PASSED`, `Modified`, `MATCH_WEAK`).
 - Manifests, the history database, config keys, file names, uuids, labels and paths.
 
+## Times
+
+Timestamps are stored and exported in UTC (`2026-10-14T00:13:53Z`). The CLI's text output and the GUI show them in the system's local time with the offset from UTC in force at that moment, daylight saving time included: `2026-10-14 08:13:53 (UTC+8)`, in Chinese `2026-10-14 08:13:53（UTC+8）`. The offset keeps the moment unambiguous when a report is read in another time zone. `--json` output keeps the UTC timestamps.
+
 ## Choosing the language
 
 `--lang en|zh-TW` (CLI), then `VERIARCHIVE_LANG`, then the config file's `"language"`, then the operating system's display language (on Linux gettext's order: `LANGUAGE`, which may be a `:`-separated list and is ignored under the C or POSIX locale, then `LC_ALL`, `LC_MESSAGES`, `LANG`), then English. Command-line errors found before the command runs follow `--lang` and `--config` too.

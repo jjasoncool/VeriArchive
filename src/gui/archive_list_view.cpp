@@ -2,6 +2,7 @@
 // verify and the last verify of any mode with dates, plus OVERDUE (R-21).
 #include "gui/gui_app.h"
 
+#include "app/local_time.h"
 #include "core/engine/archive_status.h"
 
 #include <chrono>
@@ -14,7 +15,7 @@ std::string run_text(const app::Text& text, const std::optional<VerifyRunRecord>
     if (!run) {
         return text("never");
     }
-    return (with_mode ? text(run->mode) + " " : "") + text(run->result) + "\n" + run->finished;
+    return (with_mode ? text(run->mode) + " " : "") + text(run->result) + "\n" + app::local_time(run->finished, text);
 }
 
 GtkWidget* cell(const std::string& text, bool bold = false, bool warning = false)

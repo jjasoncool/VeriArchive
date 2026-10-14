@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <filesystem>
 #include <expected>
 #include <string>
@@ -22,6 +23,9 @@ std::string host_name();
 // priority list taken from LANGUAGE, such as "fr:zh_TW:en", which
 // app::resolve_language splits.
 std::string ui_language();
+// How far the system's local time is ahead of UTC at `time`, with daylight
+// saving time as it was then (Taiwan: +8 h). Zero when it cannot be determined.
+std::chrono::seconds utc_offset(std::chrono::sys_seconds time);
 // Makes std::cout and std::cerr show UTF-8 text correctly in a Windows console
 // window, whatever its code page (often a legacy one such as Big5): text for a
 // console is written as UTF-16 through WriteConsoleW. The console's code page is

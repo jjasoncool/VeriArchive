@@ -4,6 +4,8 @@
 // mode, with dates and OVERDUE flags, never a bare "integrity status" (R-21).
 #include "cli/commands.h"
 
+#include "app/local_time.h"
+
 #include "common/utf8.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/relocate_engine.h"
@@ -26,9 +28,10 @@ std::string last_verify_line(const app::Text& text, const std::optional<VerifyRu
     if (!run) {
         line = with_mode ? text("Last verify: never") : text("Last FULL verify: never");
     } else if (with_mode) {
-        line = text.format("Last verify: {} {} on {}", text(run->mode), text(run->result), run->finished);
+        line = text.format("Last verify: {} {} on {}", text(run->mode), text(run->result),
+            app::local_time(run->finished, text));
     } else {
-        line = text.format("Last FULL verify: {} on {}", text(run->result), run->finished);
+        line = text.format("Last FULL verify: {} on {}", text(run->result), app::local_time(run->finished, text));
     }
     return overdue ? line + "  " + text("OVERDUE") : line;
 }
@@ -191,7 +194,7 @@ int show(const Arguments& arguments, Opened& opened)
     std::cout << display_label(*status) << "  " << status->archive.archive_uuid << "\n  "
               << text.format("status: {}  revision: {}", text(status->archive.status),
                      status->archive.current_revision)
-              << "\n  " << text.format("registered: {}", status->archive.created) << "\n  "
+              << "\n  " << text.format("registered: {}", app::local_time(status->archive.created, text)) << "\n  "
               << text.format("root_subpath: {}",
                      status->archive.root_subpath.empty() ? text("(volume root)") : status->archive.root_subpath)
               << '\n';
@@ -219,7 +222,7 @@ int show(const Arguments& arguments, Opened& opened)
               << last_verify_line(text, status->last_any, true, status->any_overdue) << "\n  "
               << text("revisions:") << '\n';
     for (const auto& revision : *revisions) {
-        std::cout << "    r" << revision.revision << "  " << revision.created << "  "
+        std::cout << "    r" << revision.revision << "  " << app::local_time(revision.created, text) << "  "
                   << revision.manifest_relpath << '\n';
     }
     return exit_code::passed;
@@ -377,8 +380,8 @@ int history_command(const Arguments& arguments)
     }
     for (const auto& run : *runs) {
         std::cout << "  "
-                  << text.format("{}  {} VERIFY {}  r{}  {} bytes", run.finished, text(run.mode), text(run.result),
-                         run.revision, run.coverage_bytes.value_or(0))
+                  << text.format("{}  {} VERIFY {}  r{}  {} bytes", app::local_time(run.finished, text),
+                         text(run.mode), text(run.result), run.revision, run.coverage_bytes.value_or(0))
                   << (run.failure_classes.empty() ? "" : "  " + failure_classes_text(text, run.failure_classes))
                   << "  " << run.run_id << '\n';
     }

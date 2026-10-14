@@ -114,6 +114,7 @@ endif()
 
 # Composition-root helpers shared by the CLI and the GUI (R-05).
 add_library(veriarchive_app
+    src/app/local_time.cpp
     src/app/session.cpp
     src/app/text.cpp
     src/app/text_zh_tw.cpp)
@@ -218,6 +219,7 @@ if(BUILD_TESTING)
         tests/unit/hash_pipeline_test.cpp
         tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
+        tests/unit/local_time_test.cpp
         tests/unit/manifest_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp

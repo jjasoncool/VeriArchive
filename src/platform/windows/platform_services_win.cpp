@@ -140,6 +140,34 @@ std::string host_name()
     return utf16_to_utf8(std::u16string(name, name + length));
 }
 
+std::chrono::seconds utc_offset(std::chrono::sys_seconds time)
+{
+    // Ask Windows for its own time zone rather than the C library's localtime,
+    // which follows a TZ environment variable when one is set (some shells set
+    // it, in a form the Windows C library misreads).
+    // FILETIME counts 100 ns intervals since 1601-01-01; Unix time starts 1970.
+    constexpr long long seconds_1601_to_1970 = 11'644'473'600LL;
+    constexpr long long ticks_per_second = 10'000'000LL;
+    const long long ticks = (time.time_since_epoch().count() + seconds_1601_to_1970) * ticks_per_second;
+    if (ticks < 0) {
+        return std::chrono::seconds{0};
+    }
+    const FILETIME utc_file{static_cast<DWORD>(ticks), static_cast<DWORD>(ticks >> 32)};
+    SYSTEMTIME utc{};
+    SYSTEMTIME local{};
+    DYNAMIC_TIME_ZONE_INFORMATION zone{};
+    FILETIME local_file{};
+    if (!FileTimeToSystemTime(&utc_file, &utc) ||
+        GetDynamicTimeZoneInformation(&zone) == TIME_ZONE_ID_INVALID ||
+        !SystemTimeToTzSpecificLocalTimeEx(&zone, &utc, &local) ||
+        !SystemTimeToFileTime(&local, &local_file)) {
+        return std::chrono::seconds{0};
+    }
+    const long long local_ticks =
+        (static_cast<long long>(local_file.dwHighDateTime) << 32) | local_file.dwLowDateTime;
+    return std::chrono::seconds((local_ticks - ticks) / ticks_per_second);
+}
+
 std::string ui_language()
 {
     // The display language, not the regional format: an English Windows set to

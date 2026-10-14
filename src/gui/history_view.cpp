@@ -2,6 +2,8 @@
 // of the hash chain that protects the history (R-18, R-90).
 #include "gui/gui_app.h"
 
+#include "app/local_time.h"
+
 namespace va::gui {
 namespace {
 
@@ -87,7 +89,7 @@ void show_runs(GuiState& state)
     int row = 1;
     for (auto it = runs->rbegin(); it != runs->rend(); ++it, ++row) {
         const auto& run = *it;
-        const std::string cells[] = {run.finished, text(run.mode), text(run.result),
+        const std::string cells[] = {app::local_time(run.finished, text), text(run.mode), text(run.result),
             "r" + std::to_string(run.revision), format_bytes(run.coverage_bytes.value_or(0)),
             failure_classes_text(text, run.failure_classes), run.run_id};
         for (int column = 0; column < 7; ++column) {

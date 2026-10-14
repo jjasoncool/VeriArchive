@@ -34,3 +34,4 @@ void rebuild_index_tests();
 void transfer_tests();
 void relocate_tests();
 void text_tests();
+void local_time_tests();
