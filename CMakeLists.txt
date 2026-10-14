@@ -241,7 +241,10 @@ if(BUILD_TESTING)
         target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp)
     endif()
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
-    if(VERIARCHIVE_BUILD_GUI AND WIN32)
+    if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
+        # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.
+        message(STATUS "GUI smoke tests skipped: this Windows has no opengl32.dll (Server Core)")
+    elseif(VERIARCHIVE_BUILD_GUI AND WIN32)
         # Builds every GUI view without showing the window (decision 0016), then
         # rebuilds it in the other language and back (decision 0017). APPDATA
         # keeps the config and the failure log out of the developer's profile.

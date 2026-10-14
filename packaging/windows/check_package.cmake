@@ -9,6 +9,8 @@ foreach(variable BUILD_DIR PREFIX OBJDUMP)
     endif()
 endforeach()
 
+include("${CMAKE_CURRENT_LIST_DIR}/desktop_dlls.cmake")
+
 file(REMOVE_RECURSE "${PREFIX}")
 execute_process(COMMAND "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --prefix "${PREFIX}" --component VeriArchive
     RESULT_VARIABLE installed OUTPUT_QUIET)
@@ -31,7 +33,8 @@ foreach(binary IN LISTS binaries)
         if(lower MATCHES "^api-ms-|^ext-ms-")
             continue()
         endif()
-        if(NOT EXISTS "${PREFIX}/bin/${dll}" AND NOT EXISTS "$ENV{SystemRoot}/System32/${dll}")
+        veriarchive_desktop_only("${dll}" desktop_only)
+        if(NOT desktop_only AND NOT EXISTS "${PREFIX}/bin/${dll}" AND NOT EXISTS "$ENV{SystemRoot}/System32/${dll}")
             message(FATAL_ERROR "${binary} imports ${dll}, which is neither bundled nor part of Windows")
         endif()
     endforeach()
@@ -67,7 +70,9 @@ execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" "${PREFIX}/bin
 if(NOT cli EQUAL 10 OR NOT chinese_usage MATCHES "用法：veriarchive-cli")
     message(FATAL_ERROR "the packaged CLI does not show Traditional Chinese (exit ${cli})\n${chinese_usage}")
 endif()
-if(EXISTS "${PREFIX}/bin/veriarchive-gui.exe")
+if(EXISTS "${PREFIX}/bin/veriarchive-gui.exe" AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
+    message(STATUS "GUI start not checked: this Windows has no opengl32.dll (Server Core)")
+elseif(EXISTS "${PREFIX}/bin/veriarchive-gui.exe")
     # Both interface languages; in Chinese GTK also loads its own zh_TW texts.
     foreach(language en zh-TW)
         execute_process(COMMAND "${CMAKE_COMMAND}" -E env "${clean_path}" VERIARCHIVE_GUI_SMOKE_TEST=1

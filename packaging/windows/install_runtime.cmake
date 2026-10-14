@@ -15,6 +15,8 @@ if(POLICY CMP0207)
     cmake_policy(SET CMP0207 NEW) # normalise paths before matching exclude patterns
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/desktop_dlls.cmake")
+
 set(prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
 set(mingw "${VERIARCHIVE_MINGW_PREFIX}")
 set(loader_dir "lib/gdk-pixbuf-2.0/2.10.0")
@@ -34,12 +36,20 @@ file(GET_RUNTIME_DEPENDENCIES
     PRE_EXCLUDE_REGEXES "^api-ms-" "^ext-ms-"
     POST_EXCLUDE_REGEXES "^[A-Za-z]:[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\]")
 
-# Whatever is not found in the MinGW tree must be part of Windows itself.
+# Whatever is not found in the MinGW tree must be part of Windows itself. All
+# missing DLLs are reported together.
+set(missing "")
 foreach(dll IN LISTS unresolved)
-    if(NOT EXISTS "$ENV{SystemRoot}/System32/${dll}")
-        message(FATAL_ERROR "Unresolved runtime dependency: ${dll}")
+    veriarchive_desktop_only("${dll}" desktop_only)
+    if(desktop_only)
+        message(STATUS "${dll} belongs to desktop Windows but is missing on this machine; not bundled")
+    elseif(NOT EXISTS "$ENV{SystemRoot}/System32/${dll}")
+        list(APPEND missing "${dll}")
     endif()
 endforeach()
+if(missing)
+    message(FATAL_ERROR "Unresolved runtime dependencies: ${missing}")
+endif()
 
 set(bundled "")
 foreach(dll IN LISTS resolved)
