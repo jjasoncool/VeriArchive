@@ -153,7 +153,7 @@ veriarchive-cli archive retire <uuid>            # 停用：不再需要定期�
 veriarchive-cli archive relocate <uuid> <根目錄> # 封存搬到新磁碟後，確認並驗證新載體
 ```
 
-`archive show`、`retire`、`relocate` 與 `history` 的 uuid 可以只打前 8 個以上的字元，只要不會和其他封存混淆。
+`archive show`、`retire`、`relocate`、`history`、`export` 與 `export-sha256sums` 的 uuid 可以只打前 8 個以上的字元，只要不會和其他封存混淆。
 
 ## 驗證歷程
 

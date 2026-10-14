@@ -87,14 +87,14 @@ nlohmann::json status_json(const ArchiveStatus& status)
     return json;
 }
 
-// Accepts a full uuid or a unique prefix of at least 8 characters.
+// Accepts a full uuid or a unique prefix of at least 8 characters (names_archive).
 std::expected<ArchiveStatus, Failure> find_status(const std::vector<ArchiveStatus>& statuses,
     const std::string& word)
 {
     std::optional<ArchiveStatus> found;
     for (const auto& status : statuses) {
         const auto& uuid = status.archive.archive_uuid;
-        if (uuid == word || (word.size() >= 8 && uuid.starts_with(word))) {
+        if (names_archive(uuid, word)) {
             if (found) {
                 return std::unexpected(Failure{exit_code::usage, "several archives start with " + word});
             }

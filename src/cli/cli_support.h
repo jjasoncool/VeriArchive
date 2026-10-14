@@ -5,6 +5,7 @@
 #include "app/text.h"
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
+#include "core/repository/archive_store.h"
 #include "core/repository/repository.h"
 
 #include <chrono>
@@ -77,6 +78,14 @@ std::optional<Failure> check_options(const Arguments& arguments,
 // A path typed by the user; relative paths are taken relative to the shell's
 // working directory, as users expect.
 std::filesystem::path user_path(const std::string& word);
+
+// Whether `word` on the command line names the archive `uuid`: the full uuid,
+// or a prefix of at least 8 characters.
+bool names_archive(const Uuid& uuid, const std::string& word);
+
+// The archive a command names (see names_archive). A usage failure when no
+// archive or more than one matches.
+std::expected<Uuid, Failure> find_archive_uuid(ArchiveStore& store, const std::string& word);
 
 // Operating system, host name and version for manifests and history.
 HostInfo host_info();

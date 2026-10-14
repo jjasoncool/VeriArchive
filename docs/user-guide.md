@@ -153,7 +153,7 @@ veriarchive-cli archive retire <uuid>             # no longer expected to be ver
 veriarchive-cli archive relocate <uuid> <root>    # after moving an archive to a new disk: confirm and verify it
 ```
 
-`archive show`, `retire`, `relocate` and `history` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
+`archive show`, `retire`, `relocate`, `history`, `export` and `export-sha256sums` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
 
 ## Verification history
 

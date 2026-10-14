@@ -88,8 +88,11 @@ if(NOT language STREQUAL "zh-TW")
     message(FATAL_ERROR "the config file lost its language: ${config}")
 endif()
 
-# R-67: the sha256sum export lists every file.
-run_cli("0" export-sha256sums "${archive_uuid}" --out "${WORK}/sums.txt")
+# R-67: the sha256sum export lists every file. Like `archive show`, the export
+# commands accept the first 8 or more characters of the uuid.
+string(SUBSTRING "${archive_uuid}" 0 8 archive_prefix)
+run_cli("10" export-sha256sums "abc" --out "${WORK}/sums.txt")
+run_cli("0" export-sha256sums "${archive_prefix}" --out "${WORK}/sums.txt")
 file(READ "${WORK}/sums.txt" sums)
 string(REGEX MATCHALL "\n" newlines "${sums}")
 list(LENGTH newlines sum_lines)
@@ -113,7 +116,7 @@ run_cli("0" archive list)
 run_cli("0" history "${archive_uuid}")
 
 # Export -> import into a second repository (R-87).
-run_cli("0" export "${archive_uuid}" --out "${WORK}/export")
+run_cli("0" export "${archive_prefix}" --out "${WORK}/export")
 file(WRITE "${WORK}/config2.json" "{}\n")
 set(GLOBAL --config "${WORK}/config2.json")
 run_cli("0" --repository "${WORK}/repo2" repo init)

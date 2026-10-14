@@ -32,7 +32,11 @@ int export_sha256sums_command(const Arguments& arguments)
     if (!store) {
         return report_failure(arguments, {exit_code::repository, store.error().message});
     }
-    const auto archive = store->find_archive(arguments.words[1]);
+    const auto archive_uuid = find_archive_uuid(*store, arguments.words[1]);
+    if (!archive_uuid) {
+        return report_failure(arguments, archive_uuid.error());
+    }
+    const auto archive = store->find_archive(*archive_uuid);
     if (!archive || !*archive) {
         return report_failure(arguments, {exit_code::usage, "no archive " + arguments.words[1]});
     }
@@ -82,9 +86,13 @@ int export_command(const Arguments& arguments)
     if (!store) {
         return report_failure(arguments, {exit_code::repository, store.error().message});
     }
+    const auto archive_uuid = find_archive_uuid(*store, arguments.words[1]);
+    if (!archive_uuid) {
+        return report_failure(arguments, archive_uuid.error());
+    }
     const auto files = platform::make_file_system_access();
     const auto exported = export_archive(*store, *files, *session->writer, session->context.repo,
-        arguments.words[1], user_path(*out));
+        *archive_uuid, user_path(*out));
     if (!exported) {
         return report_failure(arguments, {exit_code::failed, exported.error()});
     }

@@ -137,6 +137,32 @@ std::filesystem::path user_path(const std::string& word)
     return error ? path_from_utf8(word) : path.lexically_normal();
 }
 
+bool names_archive(const Uuid& uuid, const std::string& word)
+{
+    return uuid == word || (word.size() >= 8 && uuid.starts_with(word));
+}
+
+std::expected<Uuid, Failure> find_archive_uuid(ArchiveStore& store, const std::string& word)
+{
+    const auto archives = store.archives();
+    if (!archives) {
+        return std::unexpected(Failure{exit_code::repository, archives.error().message});
+    }
+    std::optional<Uuid> found;
+    for (const auto& archive : *archives) {
+        if (names_archive(archive.archive_uuid, word)) {
+            if (found) {
+                return std::unexpected(Failure{exit_code::usage, "several archives start with " + word});
+            }
+            found = archive.archive_uuid;
+        }
+    }
+    if (!found) {
+        return std::unexpected(Failure{exit_code::usage, "no archive " + word});
+    }
+    return *found;
+}
+
 HostInfo host_info()
 {
     return app::host_info(VERIARCHIVE_VERSION);
