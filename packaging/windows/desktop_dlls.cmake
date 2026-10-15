@@ -1,10 +1,11 @@
 # DLLs that every desktop edition of Windows has in System32, but that Windows
-# Server Core (the GitLab Windows runners' containers) leaves out. GTK4 imports
-# them, so they are never bundled; on a build machine without them the package
-# is still built, and only the GUI cannot start there.
+# Server Core (the GitLab Windows runners' containers) leaves out: OpenGL, the
+# desktop window manager and DirectComposition, which GTK4 imports. They are
+# never bundled; on a build machine without them the package is still built,
+# and only the GUI cannot start there.
 #
 # Included by install_runtime.cmake and check_package.cmake.
-set(VERIARCHIVE_DESKTOP_DLLS opengl32.dll glu32.dll dwmapi.dll uxtheme.dll)
+set(VERIARCHIVE_DESKTOP_DLLS opengl32.dll glu32.dll dwmapi.dll uxtheme.dll dcomp.dll)
 
 # True when `dll` is missing from this Windows but belongs to every desktop one.
 function(veriarchive_desktop_only dll result)
