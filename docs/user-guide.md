@@ -241,6 +241,8 @@ The Archive List view, or `veriarchive-cli archive list`, shows for each archive
 - **Last verify**: result and date of the last verification of any mode
 - **OVERDUE**: no FULL verify for 365 days or no verification for 180 days (adjust under `policy` in the config file)
 
+Above the archives, the Archive List view also shows the registrations and verifications that have not finished, with their progress, also those started from the command line.
+
 Times are shown in this computer's local time with the offset from UTC, for example `2026-10-14 08:13:53 (UTC+8)`. `--json` output and the history database always use UTC, for example `2026-10-14T00:13:53Z`.
 
 More archive commands:

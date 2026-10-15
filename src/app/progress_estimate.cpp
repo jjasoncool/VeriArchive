@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <vector>
 
 namespace va::app {
 
@@ -11,6 +12,12 @@ namespace {
 // Tuning, in seconds unless stated otherwise. Checked against simulated
 // registrations in tests/unit/progress_estimate_test.cpp.
 constexpr double window = 180;              // "recent": speed and full-weight intervals
+// Reports on steps: steps can come minutes apart (one large file between two
+// checkpoints). The window then grows to this many times their usual spacing,
+// the median of the last few, so that it holds three of them and they can give
+// a time left (min_moving_intervals).
+constexpr double steps_in_window = 3.5;
+constexpr std::size_t spacings_kept = 8;
 constexpr double sample_spacing = 2;        // reports closer than this share one sample
 constexpr double warm_up = 60;              // no time left before this much hashing
 constexpr std::size_t min_moving_intervals = 3; // ... nor before this many intervals with progress
@@ -82,6 +89,8 @@ void ProgressEstimate::Sums::add(const Sums& other, double weight)
     mib_seconds += weight * other.mib_seconds;
 }
 
+ProgressEstimate::ProgressEstimate(Reports reports) : reports_(reports), window_(window) {}
+
 void ProgressEstimate::update(const Progress& progress, Clock::time_point now)
 {
     const bool new_operation = !start_ || progress.items_total != last_.items_total ||
@@ -113,14 +122,31 @@ void ProgressEstimate::update(const Progress& progress, Clock::time_point now)
     intervals_.push_back({now_, now_ - previous.time,
         static_cast<double>(progress.items_done - previous.items),
         static_cast<double>(progress.bytes_done - previous.bytes) / bytes_per_mib});
+    if (reports_ == Reports::on_steps) {
+        size_window(now_ - previous.time);
+    }
     // Intervals that ended before the window move into the history, and the
     // sample each one started at goes with it.
-    while (!intervals_.empty() && intervals_.front().end <= now_ - window) {
+    while (!intervals_.empty() && intervals_.front().end <= now_ - window_) {
         add_to_history(intervals_.front());
         intervals_.pop_front();
         samples_.pop_front();
     }
     estimate();
+}
+
+void ProgressEstimate::size_window(double spacing)
+{
+    spacings_.push_back(spacing);
+    if (spacings_.size() > spacings_kept) {
+        spacings_.pop_front();
+    }
+    // The median: one large file, a step far later than the others, does not
+    // stretch the window.
+    std::vector<double> sorted(spacings_.begin(), spacings_.end());
+    const auto middle = sorted.begin() + static_cast<std::ptrdiff_t>(sorted.size() / 2);
+    std::ranges::nth_element(sorted, middle);
+    window_ = std::max(window, steps_in_window * *middle);
 }
 
 void ProgressEstimate::add_to_history(const Interval& interval)
@@ -145,7 +171,7 @@ void ProgressEstimate::estimate()
         moving += interval.items > 0 || interval.mib > 0;
     }
     // History weight: 1 for an interval that has just left the window.
-    sums.add(history_, std::exp2(-(now_ - window - history_time_) / history_half_life));
+    sums.add(history_, std::exp2(-(now_ - window_ - history_time_) / history_half_life));
     const auto model = fit(sums.items_items, sums.items_mib, sums.mib_mib, sums.items_seconds,
         sums.mib_seconds, with_bytes);
 

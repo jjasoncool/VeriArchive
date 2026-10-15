@@ -28,5 +28,6 @@ int main()
     compare_archives_tests();
     vpd_tests();
     progress_estimate_tests();
+    unfinished_operations_tests();
     return test_failures == 0 ? 0 : 1;
 }

@@ -287,6 +287,30 @@ constexpr CatalogEntry entries[] = {
         "每個封存都會顯示上次完整讀取（完整驗證）的時間，以及上次進行任何驗證的時間。"
         "結果只反映其日期當時的狀態。"},
     {"Refresh", "重新整理"},
+    // src/gui/archive_list_view.cpp, src/app/unfinished_operations.cpp: unfinished
+    // operations (decision 0022)
+    {"Unfinished operations", "未完成的作業"},
+    {"Registrations and verifications that have not finished, also those started from the command line. "
+        "The numbers move each time an operation saves its progress: after every 1000 files, or once a "
+        "minute when a file finishes; not while it scans.",
+        "尚未完成的註冊與驗證，包括從命令列啟動的。每當作業儲存進度，數字就會更新：每 1000 個檔案一次，"
+        "或在檔案完成時每分鐘一次；掃描期間不會更新。"},
+    {"Root", "根目錄"},
+    {"Operation", "作業"},
+    {"Progress", "進度"},
+    {"Registration", "註冊"},
+    {"Verification", "驗證"},
+    {"{} of about {} ({}%)", "{} / 約 {}（{}%）", Match::FormatOnly},
+    {"{} done", "已完成 {}", Match::FormatOnly},
+    {"{} of {} files", "{} / {} 個檔案", Match::FormatOnly},
+    {"{} files", "{} 個檔案", Match::FormatOnly},
+    {"waiting for progress...", "等待進度更新……"},
+    {"running", "執行中"},
+    {"no progress seen for {} minutes; it may have stopped", "已 {} 分鐘未見進度，可能已停止", Match::FormatOnly},
+    {"no progress seen for {} hours; it may have stopped", "已 {} 小時未見進度，可能已停止", Match::FormatOnly},
+    {"stopped; it can be resumed", "已停止；可以繼續"},
+    {"stopped; it cannot be resumed (the archive has a newer revision)", "已停止；無法繼續（封存已有較新的版次）"},
+    {"Cannot read the unfinished operations: {}", "無法讀取未完成的作業：{}", Match::FormatOnly},
     // src/gui/history_view.cpp
     {"Finished", "完成時間"},
     {"Mode", "模式"},

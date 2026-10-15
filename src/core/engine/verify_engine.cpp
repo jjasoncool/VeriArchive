@@ -4,6 +4,7 @@
 #include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/engine/comparison.h"
+#include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/identity/volume_json.h"
 #include "core/manifest/manifest_reader.h"
@@ -259,22 +260,31 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     outcome.identity = identity;
     const auto started = current_timestamp();
 
-    // Make this run resumable from now on, carrying over a resumed run's checkpoints.
+    // Make this run resumable from now on, carrying over a resumed run's
+    // checkpoints. The record also says where the run reads and, while it
+    // works, that it does ("updated"; decision 0022).
     std::set<std::string> content_verified;
-    (void)store.set_setting(run_setting(outcome.run_id),
-        nlohmann::json{{"archive_uuid", outcome.archive_uuid}, {"revision", outcome.revision},
-            {"started", started}}.dump());
+    nlohmann::json run_record{{"archive_uuid", outcome.archive_uuid}, {"revision", outcome.revision},
+        {"started", started}, {"root", path_to_utf8(located->root)}, {"updated", started}};
+    (void)store.set_setting(run_setting(outcome.run_id), run_record.dump());
+    Heartbeat heartbeat(store, run_setting(outcome.run_id), std::move(run_record), progress);
     if (resume) {
         if (auto previous = store.progress(*request.resume_run)) {
             content_verified = std::move(*previous);
         }
         const std::vector<std::string> keys(content_verified.begin(), content_verified.end());
-        if (store.begin()) {
-            (void)store.add_progress(outcome.run_id, keys);
-            (void)store.clear_progress(*request.resume_run);
-            (void)store.remove_setting(run_setting(*request.resume_run));
-            (void)store.commit();
-        }
+        // All or nothing. When it fails, the run still skips what the run it
+        // resumes verified (the keys are in memory), and that run stays as it
+        // was, resumable.
+        (void)store.write_transaction([&]() -> std::expected<void, IoError> {
+            if (auto added = store.add_progress(outcome.run_id, keys); !added) {
+                return added;
+            }
+            if (auto cleared = store.clear_progress(*request.resume_run); !cleared) {
+                return cleared;
+            }
+            return store.remove_setting(run_setting(*request.resume_run));
+        });
     }
 
     const bool no_filesystem_id = std::ranges::find(identity.details, "filesystem-id-unavailable") !=
@@ -306,6 +316,20 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             manifest = std::move(*loaded);
             outcome.registered_bytes = manifest->header.counts.bytes;
             check_media_copies(services, located->root, outcome);
+            // What there is to read: the files (and streams) whose content
+            // has hashes, as the checkpoints count them. Those unreadable at
+            // registration have none and are never checkpointed (decision 0010).
+            std::uint64_t files_total = 0;
+            std::uint64_t bytes_total = 0;
+            for (const auto& entry : manifest->entries) {
+                if ((entry.type == 'f' || entry.type == 's') && !entry.b3.empty()) {
+                    ++files_total;
+                    bytes_total += entry.size.value_or(0);
+                }
+            }
+            heartbeat.set("files_total", files_total);
+            heartbeat.set("bytes_total", bytes_total);
+            heartbeat.beat();
         }
     }
 
@@ -327,13 +351,18 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         input.recorded = &manifest->entries;
         input.strict_metadata = request.strict_metadata;
         input.content_verified = std::move(content_verified);
+        // A checkpoint that cannot be saved is rolled back, so its open
+        // transaction cannot swallow the next checkpoints and the run's
+        // record; its keys are tried again with the next checkpoint. The run
+        // goes on: checkpoints only spare re-reading after an interruption.
+        std::vector<std::string> unsaved;
         input.checkpoint = [&](const std::vector<std::string>& keys) {
-            if (store.begin()) {
-                (void)store.add_progress(outcome.run_id, keys);
-                (void)store.commit();
+            unsaved.insert(unsaved.end(), keys.begin(), keys.end());
+            if (store.write_transaction([&] { return store.add_progress(outcome.run_id, unsaved); })) {
+                unsaved.clear();
             }
         };
-        comparison = compare_with_manifest(services.archive_files, input, cancel, progress);
+        comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
         if (!comparison.scan_error.empty()) {
             outcome.failure_classes.push_back("FilesystemAccessError");
             outcome.warnings.push_back("scan: " + comparison.scan_error);

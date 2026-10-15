@@ -2,8 +2,12 @@
 
 #include "engine_fixture.h"
 
+#include "common/time.h"
+#include "core/engine/heartbeat.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 
@@ -268,6 +272,105 @@ void unidentifiable_volume_fails()
     CHECK(!outcome && outcome.error().kind == va::RegisterFailure::Kind::Media);
 }
 
+// Reads the registration's plan whenever hashing reports progress, as the
+// GUI's Archive List would read it from another process.
+class PlanWatcher final : public va::IProgressSink {
+public:
+    explicit PlanWatcher(va::ArchiveStore& store) : store_(store) {}
+    void on_progress(const va::Progress& progress) override
+    {
+        if (progress.items_total == 0) {
+            return; // scanning
+        }
+        if (const auto plans = store_.settings_with_prefix("registration:"); plans && plans->size() == 1) {
+            plans_seen.push_back(nlohmann::json::parse(plans->front().second, nullptr, false));
+        }
+    }
+    std::vector<nlohmann::json> plans_seen;
+
+private:
+    va::ArchiveStore& store_;
+};
+
+// Decision 0022: once the scan has counted them, the plan says how many files
+// and bytes there are to hash, those an interrupted attempt hashed included
+// (they count as done), and "updated" says when it last worked.
+void plan_records_totals_and_updated()
+{
+    Fixture fixture;
+    for (int index = 1; index <= 6; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, static_cast<char>('a' + index)));
+    }
+    fixture.archive.add_file("empty", "");
+    fixture.archive.node("f4").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.run(at("/vol"));
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    const auto stored = fixture.store.settings_with_prefix("registration:");
+    CHECK(stored && stored->size() == 1);
+    if (!stored || stored->size() != 1) {
+        return;
+    }
+    const auto plan = nlohmann::json::parse(stored->front().second, nullptr, false);
+    CHECK(plan.value("files_total", 0) == 7 && plan.value("bytes_total", 0) == 6000);
+    CHECK(va::parse_timestamp(plan.value("updated", std::string{})).has_value());
+    // The attempt ended without finishing, and its plan says so last.
+    CHECK(va::parse_timestamp(plan.value("stopped", std::string{})).has_value());
+
+    // The resumed attempt hashes only what is left, and its plan still counts all.
+    fixture.archive.node("f4").open_error.reset();
+    PlanWatcher watcher(fixture.store);
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+    auto request = at("/vol");
+    request.resume = true;
+    const auto resumed = va::register_archive(services, request, fixture.cancel, watcher);
+    CHECK(resumed.has_value());
+    CHECK(!watcher.plans_seen.empty());
+    for (const auto& seen : watcher.plans_seen) {
+        CHECK(seen.value("files_total", 0) == 7 && seen.value("bytes_total", 0) == 6000);
+        CHECK(seen.value("root", std::string{}) == va::path_to_utf8(std::filesystem::path("/vol")));
+        CHECK(!seen.contains("stopped"));  // working again
+    }
+    // Finished: the plan is gone.
+    const auto left = fixture.store.settings_with_prefix("registration:");
+    CHECK(left && left->empty());
+}
+
+// The heartbeat repeats the record with the time, at most once per interval,
+// and never brings back a record that its operation removed on finishing.
+void heartbeat_updates_only_its_record()
+{
+    test::TestRepository repository;
+    auto store = repository.store();
+    test::NullProgress forward;
+    CHECK(store.set_setting("registration:x", R"({"archive_uuid":"x"})"));
+    va::Heartbeat heartbeat(store, "registration:x", nlohmann::json{{"archive_uuid", "x"}}, forward,
+        std::chrono::seconds(0));
+    heartbeat.set("files_total", 3);
+    heartbeat.on_progress({});
+    const auto written = store.setting("registration:x");
+    const auto record = nlohmann::json::parse(written.value_or(""), nullptr, false);
+    CHECK(record.value("files_total", 0) == 3 && record.value("archive_uuid", std::string{}) == "x");
+    CHECK(va::parse_timestamp(record.value("updated", std::string{})).has_value());
+
+    // An attempt that ends without finishing writes when it stopped.
+    heartbeat.stop();
+    const auto stopped = nlohmann::json::parse(store.setting("registration:x").value_or(""), nullptr, false);
+    CHECK(va::parse_timestamp(stopped.value("stopped", std::string{})).has_value());
+    CHECK(stopped.value("files_total", 0) == 3);
+
+    CHECK(store.remove_setting("registration:x"));
+    heartbeat.beat();
+    heartbeat.stop();
+    CHECK(store.setting("registration:x") == std::string{});
+
+    // With the usual interval, reports in quick succession write nothing.
+    CHECK(store.set_setting("run:y", "{}"));
+    va::Heartbeat slow(store, "run:y", nlohmann::json::object(), forward);
+    slow.on_progress({});
+    CHECK(store.setting("run:y") == std::string("{}"));
+}
+
 } // namespace
 
 void register_engine_tests()
@@ -283,4 +386,6 @@ void register_engine_tests()
     media_copy_is_written_and_checked();
     copied_identity_file_fails();
     unidentifiable_volume_fails();
+    plan_records_totals_and_updated();
+    heartbeat_updates_only_its_record();
 }

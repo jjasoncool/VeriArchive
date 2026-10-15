@@ -5,6 +5,7 @@
 #include "core/hash/hashers.h"
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 
 namespace va {
@@ -207,7 +208,13 @@ private:
     void add(Entry entry, std::filesystem::path native)
     {
         result_.entries.push_back({std::move(entry), std::move(native)});
-        if (result_.entries.size() % 1000 == 0) {
+        // Every 1000 entries, and at least once a second while entries are
+        // found: a slow scan (a network share, a failing device) still reports,
+        // and the engines' records say through these reports that they work
+        // (core/engine/heartbeat.h).
+        const auto now = std::chrono::steady_clock::now();
+        if (result_.entries.size() % 1000 == 0 || now - last_report_ >= std::chrono::seconds(1)) {
+            last_report_ = now;
             progress_.on_progress({0, 0, result_.entries.size(), 0, result_.entries.back().entry.path.p});
         }
     }
@@ -218,6 +225,7 @@ private:
     CancelToken& cancel_;
     IProgressSink& progress_;
     ScanResult result_;
+    std::chrono::steady_clock::time_point last_report_ = std::chrono::steady_clock::now();
 };
 
 } // namespace

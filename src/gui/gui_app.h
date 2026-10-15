@@ -2,14 +2,47 @@
 // The GUI's state and its six views: the five of HANDOFF §B17 (Archive List,
 // Register Archive, Verify Archive, Verification History, Settings) and
 // Compare Archives (decision 0020).
+#include "app/unfinished_operations.h"
 #include "app/session.h"
 #include "gui/gui_support.h"
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace va::gui {
+
+// Unfinished registrations and verifications, wherever they run (the command
+// line, this window), read from the repository every few seconds while the
+// Archive List is shown (archive_list_view.cpp). Each read runs on a thread of
+// its own, so a slow one never holds up the window. Kept across windows, so a
+// language change keeps the speed and time left.
+struct OperationsPoll {
+    std::thread thread;                         // the read in flight, or the last one
+    bool busy = false;                          // a read is in flight (main thread only)
+    std::chrono::steady_clock::time_point started{};  // when the last read began
+    std::chrono::steady_clock::duration took{};       // how long the last read took
+    guint timer = 0;                            // the GLib timeout; 0 while the list is hidden
+    GtkWidget* served = nullptr;                // the Archive List the timer refreshes
+    std::filesystem::path repository;           // the RepositoryRoot the watches belong to
+    bool has_read = false;                      // a read of it was applied: the next one can tell what ended
+    std::vector<app::OperationWatch> watches;   // the operations of the latest read
+    Report error;                               // why the latest read failed
+
+    OperationsPoll() = default;
+    OperationsPoll(const OperationsPoll&) = delete;
+    OperationsPoll& operator=(const OperationsPoll&) = delete;
+    // The program waits for a read still in flight before it ends.
+    ~OperationsPoll()
+    {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+};
 
 struct GuiState {
     GtkApplication* application = nullptr;
@@ -20,6 +53,7 @@ struct GuiState {
     std::optional<app::Session> session;   // empty until a repository is open
     Report session_error;                  // why no repository is open
     Job job;                               // the one long operation running, if any
+    OperationsPoll operations;             // every unfinished operation, for the Archive List
     int exit_status = 0;                   // 1 when an unexpected error cut the smoke test, the start or the screenshots short
     // Set from VERIARCHIVE_GUI_SCREENSHOTS: take the documentation screenshots
     // into this folder, then quit (screenshots.cpp).
@@ -31,6 +65,9 @@ struct GuiState {
     struct {
         GtkWidget* grid = nullptr;
         GtkWidget* status = nullptr;
+        GtkWidget* operations = nullptr;       // "Unfinished operations", hidden when there are none
+        GtkWidget* operations_note = nullptr;  // what the section shows, or why it cannot
+        GtkWidget* operations_grid = nullptr;
     } archive_list;
 
     struct {
@@ -100,6 +137,8 @@ GtkWidget* build_history_view(GuiState& state);
 GtkWidget* build_settings_view(GuiState& state);
 
 // Reload data shown by the views (after the repository changes).
+// refresh_archive_list also shows the unfinished operations of the latest
+// read again; the reads themselves run while the Archive List is shown.
 void refresh_archive_list(GuiState& state);
 void refresh_archive_choices(GuiState& state);
 void refresh_settings(GuiState& state);

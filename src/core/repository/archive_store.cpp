@@ -1,9 +1,16 @@
 #include "core/repository/archive_store.h"
 
 #include "common/canonical_json.h"
+#include "common/time.h"
 #include "core/hash/hashers.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <chrono>
 #include <format>
+#include <tuple>
+#include <utility>
 
 namespace va {
 namespace {
@@ -14,6 +21,94 @@ using repository_detail::SqliteStatement;
 std::int64_t as_int(std::uint64_t value)
 {
     return static_cast<std::int64_t>(value);
+}
+
+// Members of a setting's JSON, read without exceptions: a value of another
+// type (a damaged setting) reads as missing, so it cannot hide the others.
+std::string json_text(const nlohmann::json& object, const char* name)
+{
+    const auto found = object.find(name);
+    return found != object.end() && found->is_string() ? found->get<std::string>() : std::string{};
+}
+
+std::optional<std::uint64_t> json_unsigned(const nlohmann::json& object, const char* name)
+{
+    const auto found = object.find(name);
+    if (found == object.end() || !found->is_number_unsigned()) {
+        return std::nullopt;
+    }
+    return found->get<std::uint64_t>();
+}
+
+// The two numbers of a "SELECT COUNT(*), COALESCE(SUM(...), 0)" whose values
+// are bound; the statement is reset for the next use.
+std::expected<std::pair<std::uint64_t, std::uint64_t>, IoError> count_and_bytes(SqliteStatement& statement)
+{
+    const auto row = statement.step();
+    if (!row) {
+        return std::unexpected(row.error());
+    }
+    std::pair<std::uint64_t, std::uint64_t> result{0, 0};
+    if (*row) {
+        result = {static_cast<std::uint64_t>(statement.integer(0)), static_cast<std::uint64_t>(statement.integer(1))};
+    }
+    statement.reset();
+    return result;
+}
+
+// A read transaction: every query inside it sees the database as it was when
+// the first one ran, even while another process commits checkpoints. Without
+// it a run that finishes between two queries could show as half cleared up.
+// DEFERRED takes no write lock, so the process doing the work never waits.
+//
+// Only in WAL mode, which the repository sets up (R-91). In the older
+// rollback-journal mode (a database where WAL could not be turned on, such as
+// one on a network share) a reader's lock keeps a writer from committing, and
+// one read across every run could outlast the writer's 5-second wait: its
+// checkpoints would fail. Without the snapshot each query holds the lock only
+// while it runs, and a run that finishes meanwhile shows for one read at most.
+class ReadSnapshot {
+public:
+    explicit ReadSnapshot(const SqliteDatabase& database)
+        : database_(database), open_(write_ahead_log(database) && database.execute("BEGIN DEFERRED;").has_value())
+    {
+    }
+    ~ReadSnapshot()
+    {
+        if (open_) {
+            (void)database_.execute("COMMIT;");
+        }
+    }
+    ReadSnapshot(const ReadSnapshot&) = delete;
+    ReadSnapshot& operator=(const ReadSnapshot&) = delete;
+
+private:
+    static bool write_ahead_log(const SqliteDatabase& database)
+    {
+        auto mode = database.prepare("PRAGMA journal_mode;");
+        if (!mode) {
+            return false;
+        }
+        const auto row = mode->step();
+        return row && *row && mode->text(0) == "wal";
+    }
+
+    const SqliteDatabase& database_;
+    bool open_;
+};
+
+// A verification never recorded whose setting has said nothing for this long
+// has stopped (its process was killed): a working run writes its "updated"
+// every 30 seconds. A later verification of the same archive that started,
+// worked or finished this long after the run last said anything supersedes it.
+constexpr auto silent_before_superseded = std::chrono::minutes(5);
+
+// True when `later` is at least that long after `since`; false when either is
+// not known (a timestamp missing or unreadable).
+bool silent_between(const std::optional<std::chrono::sys_seconds>& since,
+    const std::optional<std::chrono::sys_seconds>& later)
+{
+    return since && later && *later - *since >= silent_before_superseded;
 }
 
 void bind_optional_text(SqliteStatement& statement, int index, const std::string& value)
@@ -131,6 +226,22 @@ std::expected<ArchiveStore, IoError> ArchiveStore::open(const RepositoryLayout& 
     return ArchiveStore(std::move(*database));
 }
 
+std::expected<ArchiveStore, IoError> ArchiveStore::open_read_only(const RepositoryLayout& layout)
+{
+    // SQLITE_OPEN_READONLY: a missing file is an error rather than a new,
+    // empty database, and a read-only connection never writes the database
+    // file, not even the WAL checkpoint the last writer to close would make.
+    // query_only refuses a write by mistake as well.
+    auto database = SqliteDatabase::open(layout.database(), true);
+    if (!database) {
+        return std::unexpected(database.error());
+    }
+    if (auto configured = database->execute("PRAGMA busy_timeout=5000; PRAGMA query_only=1;"); !configured) {
+        return std::unexpected(configured.error());
+    }
+    return ArchiveStore(std::move(*database));
+}
+
 std::expected<void, IoError> ArchiveStore::begin()
 {
     return database_.execute("BEGIN IMMEDIATE;");
@@ -144,6 +255,22 @@ std::expected<void, IoError> ArchiveStore::commit()
 void ArchiveStore::rollback()
 {
     (void)database_.execute("ROLLBACK;");
+}
+
+std::expected<void, IoError> ArchiveStore::write_transaction(
+    const std::function<std::expected<void, IoError>()>& writes)
+{
+    if (auto begun = begin(); !begun) {
+        return begun;
+    }
+    auto written = writes();
+    if (written) {
+        written = commit();
+    }
+    if (!written) {
+        rollback();
+    }
+    return written;
 }
 
 std::expected<std::string, IoError> ArchiveStore::setting(const std::string& key)
@@ -169,6 +296,15 @@ std::expected<void, IoError> ArchiveStore::set_setting(const std::string& key, c
         return std::unexpected(statement.error());
     }
     return statement->bind(1, key).bind(2, value).run();
+}
+
+std::expected<void, IoError> ArchiveStore::update_setting(const std::string& key, const std::string& value)
+{
+    auto statement = database_.prepare("UPDATE settings SET value = ? WHERE key = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    return statement->bind(1, value).bind(2, key).run();
 }
 
 std::expected<void, IoError> ArchiveStore::remove_setting(const std::string& key)
@@ -680,6 +816,300 @@ std::expected<void, IoError> ArchiveStore::clear_progress(const std::string& run
         return std::unexpected(statement.error());
     }
     return statement->bind(1, run_id).run();
+}
+
+std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_registrations()
+{
+    const ReadSnapshot snapshot(database_);
+    const auto plans = settings_with_prefix("registration:");
+    if (!plans) {
+        return std::unexpected(plans.error());
+    }
+    // The archive row is written together with the plan (register_engine.cpp);
+    // for a new revision it is the existing archive, with the same root.
+    auto archive = database_.prepare("SELECT root_subpath FROM archives WHERE archive_uuid = ?");
+    // Checkpoints hold only hashed files, so every row counts.
+    auto hashed = database_.prepare(
+        "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE archive_uuid = ? AND revision = ?");
+    if (!archive || !hashed) {
+        return std::unexpected(!archive ? archive.error() : hashed.error());
+    }
+
+    std::vector<PendingRegistration> result;
+    for (const auto& [key, value] : *plans) {
+        const auto plan = nlohmann::json::parse(value, nullptr, false);
+        if (!plan.is_object()) {
+            continue;
+        }
+        PendingRegistration registration;
+        registration.archive_uuid = json_text(plan, "archive_uuid");
+        const auto revision = json_unsigned(plan, "revision");
+        if (registration.archive_uuid.empty() || !revision) {
+            continue; // not a plan this version wrote
+        }
+        registration.revision = static_cast<std::uint32_t>(*revision);
+        registration.label = json_text(plan, "label");
+        registration.root = json_text(plan, "root");
+        registration.started = json_text(plan, "created");
+        registration.files_total = json_unsigned(plan, "files_total");
+        registration.bytes_total = json_unsigned(plan, "bytes_total");
+        registration.updated = json_text(plan, "updated");
+        registration.stopped = json_text(plan, "stopped");
+
+        archive->bind(1, registration.archive_uuid);
+        const auto found = archive->step();
+        if (!found) {
+            return std::unexpected(found.error());
+        }
+        registration.volume_root = *found && archive->text(0).empty();
+        archive->reset();
+
+        hashed->bind(1, registration.archive_uuid).bind(2, static_cast<std::int64_t>(registration.revision));
+        const auto done = count_and_bytes(*hashed);
+        if (!done) {
+            return std::unexpected(done.error());
+        }
+        std::tie(registration.files_done, registration.bytes_done) = *done;
+        result.push_back(std::move(registration));
+    }
+    std::ranges::sort(result, {}, [](const PendingRegistration& registration) {
+        return std::tie(registration.started, registration.label, registration.archive_uuid);
+    });
+    return result;
+}
+
+std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfinished_verifications(
+    std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted)
+{
+    const ReadSnapshot snapshot(database_);
+    const auto runs = settings_with_prefix("run:");
+    if (!runs) {
+        return std::unexpected(runs.error());
+    }
+    auto recorded = database_.prepare("SELECT result, rowid, finished FROM verify_runs WHERE run_id = ?");
+    auto archive = database_.prepare("SELECT label, current_revision FROM archives WHERE archive_uuid = ?");
+    // Every run of an archive ever recorded, in the order recorded (rowid).
+    // verify_runs holds one row per verification, so this stays small.
+    auto history = database_.prepare("SELECT rowid, started, finished FROM verify_runs WHERE archive_uuid = ?");
+    auto header = database_.prepare(
+        "SELECT header_json FROM archive_revisions WHERE archive_uuid = ? AND revision = ?");
+    // Each checkpointed entry's size comes from the files index of the revision,
+    // looked up by its primary key.
+    auto matched = database_.prepare(
+        "SELECT COUNT(*), COALESCE(SUM(f.size), 0) FROM verify_progress AS p "
+        "LEFT JOIN files AS f ON f.archive_uuid = ? AND f.revision = ? AND f.path = p.path "
+        "AND f.raw_hex = p.raw_hex AND f.stream = p.stream WHERE p.run_id = ?");
+    for (const auto* statement : {&recorded, &archive, &history, &header, &matched}) {
+        if (!*statement) {
+            return std::unexpected(statement->error());
+        }
+    }
+
+    // First what the settings and the history rows say about each run. The
+    // costly part, counting checkpoints, comes last and only for the runs shown.
+    struct Candidate {
+        UnfinishedVerification run;
+        bool totals_recorded = false;  // the setting has files_total and bytes_total
+        std::int64_t row = 0;          // its history row, when recorded INCOMPLETE
+        Timestamp stopped;             // when it was recorded INCOMPLETE
+    };
+    std::vector<Candidate> candidates;
+    for (const auto& [key, value] : *runs) {
+        const auto setting = nlohmann::json::parse(value, nullptr, false);
+        if (!setting.is_object()) {
+            continue;
+        }
+        Candidate candidate;
+        auto& run = candidate.run;
+        run.run_id = key.substr(std::string_view("run:").size());
+        run.archive_uuid = json_text(setting, "archive_uuid");
+        const auto revision = json_unsigned(setting, "revision");
+        if (run.archive_uuid.empty() || !revision) {
+            continue;
+        }
+        run.revision = static_cast<std::uint32_t>(*revision);
+        run.started = json_text(setting, "started");
+        run.root = json_text(setting, "root");
+        run.updated = json_text(setting, "updated");
+        const auto files_total = json_unsigned(setting, "files_total");
+        const auto bytes_total = json_unsigned(setting, "bytes_total");
+        candidate.totals_recorded = files_total && bytes_total;
+        run.files_total = files_total.value_or(0);
+        run.bytes_total = bytes_total.value_or(0);
+
+        // A run is recorded when it ends. An INCOMPLETE one keeps its setting
+        // for --resume; any other result removes it in the same transaction.
+        recorded->bind(1, run.run_id);
+        const auto has_row = recorded->step();
+        if (!has_row) {
+            return std::unexpected(has_row.error());
+        }
+        const bool finished = *has_row && recorded->text(0) != "INCOMPLETE";
+        run.recorded_incomplete = *has_row && !finished;
+        if (run.recorded_incomplete) {
+            candidate.row = recorded->integer(1);
+            candidate.stopped = recorded->text(2);
+        }
+        recorded->reset();
+        if (finished) {
+            continue;
+        }
+
+        archive->bind(1, run.archive_uuid);
+        const auto has_archive = archive->step();
+        if (!has_archive) {
+            return std::unexpected(has_archive.error());
+        }
+        run.label = *has_archive ? archive->text(0) : std::string{};
+        // R-104: a run resumes only while its archive is at the revision it verifies.
+        run.resumable = *has_archive && static_cast<std::uint32_t>(archive->integer(1)) == run.revision;
+        archive->reset();
+        // Stopped, and cannot be resumed: nothing will ever finish it. A run
+        // never recorded has stopped once its record has said nothing for
+        // minutes (its process was killed); until then it may still work and
+        // is listed. One of an older version, without "updated", may still
+        // work as well.
+        const bool silent = silent_between(parse_timestamp(run.updated), now);
+        if (!run.resumable && (run.recorded_incomplete || silent)) {
+            continue;
+        }
+        candidates.push_back(std::move(candidate));
+    }
+
+    // The history of each archive with an unfinished run.
+    struct Recorded {
+        std::int64_t row;   // rowid: rows are numbered in the order recorded
+        Timestamp started;
+        Timestamp finished;
+    };
+    std::map<Uuid, std::vector<Recorded>> histories;
+    for (const auto& candidate : candidates) {
+        const auto& archive_uuid = candidate.run.archive_uuid;
+        if (histories.contains(archive_uuid)) {
+            continue;
+        }
+        auto& rows = histories[archive_uuid];
+        history->bind(1, archive_uuid);
+        for (;;) {
+            const auto row = history->step();
+            if (!row) {
+                return std::unexpected(row.error());
+            }
+            if (!*row) {
+                break;
+            }
+            rows.push_back({history->integer(0), history->text(1), history->text(2)});
+        }
+        history->reset();
+    }
+
+    // A later verification of the same archive supersedes a run that stopped:
+    // a finished one gives the archive a newer result, and a newer attempt is
+    // the one to follow or resume. Without this, every cancelled run would be
+    // listed for good.
+    const auto superseded = [&](const Candidate& candidate) {
+        const auto& run = candidate.run;
+        const auto& rows = histories.at(run.archive_uuid);
+        const auto same_archive = [&](const Candidate& other) {
+            return &other != &candidate && other.run.archive_uuid == run.archive_uuid;
+        };
+        if (run.recorded_incomplete) {
+            // Any run of the archive recorded after it (rowids grow), or one
+            // started after it stopped that is not recorded yet.
+            return std::ranges::any_of(rows, [&](const Recorded& row) { return row.row > candidate.row; }) ||
+                   std::ranges::any_of(candidates, [&](const Candidate& other) {
+                       return same_archive(other) && !other.run.recorded_incomplete &&
+                              other.run.started > candidate.stopped;
+                   });
+        }
+        // Never recorded: it runs now, or its process was killed. It counts
+        // as stopped and superseded when another verification of the archive
+        // started, worked (its "updated") or was recorded when this one had
+        // been silent for minutes: a restart two minutes after the kill that
+        // has since finished, or still works, is the one to follow. A run
+        // that works says so every 30 seconds, so nothing is that much later
+        // than it and it is never left out.
+        if (!run.updated.empty()) {
+            const auto silent_since = parse_timestamp(run.updated);
+            return std::ranges::any_of(rows,
+                       [&](const Recorded& row) {
+                           // Recorded when it ended, never before it started.
+                           return silent_between(silent_since,
+                               parse_timestamp(row.finished.empty() ? row.started : row.finished));
+                       }) ||
+                   std::ranges::any_of(candidates, [&](const Candidate& other) {
+                       return same_archive(other) &&
+                              (silent_between(silent_since, parse_timestamp(other.run.started)) ||
+                                  silent_between(silent_since, parse_timestamp(other.run.updated)));
+                   });
+        }
+        // A run of an older version never says it works, so nothing after its
+        // start tells that it stopped: only a verification started minutes
+        // after it supersedes it.
+        const auto started = parse_timestamp(run.started);
+        return std::ranges::any_of(rows,
+                   [&](const Recorded& row) { return silent_between(started, parse_timestamp(row.started)); }) ||
+               std::ranges::any_of(candidates, [&](const Candidate& other) {
+                   return same_archive(other) && silent_between(started, parse_timestamp(other.run.started));
+               });
+    };
+    std::vector<bool> shown;
+    shown.reserve(candidates.size());
+    for (const auto& candidate : candidates) {
+        shown.push_back(!superseded(candidate));
+    }
+
+    std::vector<UnfinishedVerification> result;
+    for (std::size_t index = 0; index < candidates.size(); ++index) {
+        if (!shown[index]) {
+            continue;
+        }
+        auto& candidate = candidates[index];
+        auto& run = candidate.run;
+        // Runs from before decision 0022 have no totals and no root in their
+        // setting: the manifest header has the revision's counts (unreadable
+        // entries included) and where it was registered.
+        if (!candidate.totals_recorded || run.root.empty()) {
+            header->bind(1, run.archive_uuid).bind(2, static_cast<std::int64_t>(run.revision));
+            const auto has_header = header->step();
+            if (!has_header) {
+                return std::unexpected(has_header.error());
+            }
+            if (*has_header) {
+                const auto json = nlohmann::json::parse(header->text(0), nullptr, false);
+                const auto counts = json.is_object() ? json.find("counts") : json.end();
+                if (!candidate.totals_recorded && counts != json.end() && counts->is_object()) {
+                    run.files_total = json_unsigned(*counts, "files").value_or(0) +
+                                      json_unsigned(*counts, "streams").value_or(0);
+                    run.bytes_total = json_unsigned(*counts, "bytes").value_or(0);
+                }
+                if (run.root.empty() && json.is_object()) {
+                    run.root = json_text(json, "root_hint");
+                }
+            }
+            header->reset();
+        }
+
+        // A run recorded INCOMPLETE never changes again: an earlier count holds.
+        if (const auto known = counted.find(run.run_id); run.recorded_incomplete && known != counted.end()) {
+            run.files_done = known->second.files;
+            run.bytes_done = known->second.bytes;
+        } else {
+            matched->bind(1, run.archive_uuid)
+                .bind(2, static_cast<std::int64_t>(run.revision))
+                .bind(3, run.run_id);
+            const auto done = count_and_bytes(*matched);
+            if (!done) {
+                return std::unexpected(done.error());
+            }
+            std::tie(run.files_done, run.bytes_done) = *done;
+        }
+        result.push_back(std::move(run));
+    }
+    std::ranges::sort(result, {}, [](const UnfinishedVerification& run) {
+        return std::tie(run.started, run.label, run.run_id);
+    });
+    return result;
 }
 
 } // namespace va

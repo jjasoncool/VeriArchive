@@ -2,7 +2,10 @@
 
 #include "engine_fixture.h"
 
+#include "common/time.h"
 #include "core/engine/item_rules.h"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <fstream>
@@ -346,6 +349,56 @@ void resume_refused_after_new_revision()
     CHECK(!resumed && resumed.error().kind == va::VerifyStop::Kind::Decision);
 }
 
+// Reads the run's record whenever hashing reports progress, as the GUI's
+// Archive List would read it from another process.
+class RunWatcher final : public va::IProgressSink {
+public:
+    explicit RunWatcher(va::ArchiveStore& store) : store_(store) {}
+    void on_progress(const va::Progress& progress) override
+    {
+        if (progress.items_total == 0) {
+            return; // scanning
+        }
+        if (const auto runs = store_.settings_with_prefix("run:"); runs && runs->size() == 1) {
+            records_seen.push_back(nlohmann::json::parse(runs->front().second, nullptr, false));
+        }
+    }
+    std::vector<nlohmann::json> records_seen;
+
+private:
+    va::ArchiveStore& store_;
+};
+
+// Decision 0022: the run's record says where it reads, how much there is to
+// read (the files with content hashes; one unreadable at registration has
+// none and is never checkpointed) and when it last worked.
+void run_record_says_where_and_how_much()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("a.txt", "aaaa");
+    fixture.archive.add_file("b.txt", "bbbbbb");
+    fixture.archive.add_file("locked.txt", "secret").open_error =
+        va::IoError{va::IoErrorKind::PermissionDenied, 5, "access denied"};
+    CHECK(fixture.register_root(fixture.archive.root()).has_value());
+
+    RunWatcher watcher(fixture.store);
+    va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    const auto outcome = va::verify_full(services, request, fixture.cancel, watcher);
+    CHECK(outcome.has_value());
+    CHECK(!watcher.records_seen.empty());
+    for (const auto& record : watcher.records_seen) {
+        CHECK(record.value("root", std::string{}) == va::path_to_utf8(fixture.archive.root()));
+        CHECK(record.value("files_total", 0) == 2 && record.value("bytes_total", 0) == 10);
+        CHECK(va::parse_timestamp(record.value("updated", std::string{})).has_value());
+    }
+    // Finished: the record is gone.
+    const auto left = fixture.store.settings_with_prefix("run:");
+    CHECK(left && left->empty());
+}
+
 void item_rules()
 {
     CHECK(va::mtime_matches("ntfs", 1'000'000'000, 1'900'000'000));
@@ -396,5 +449,6 @@ void verify_engine_tests()
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
     resume_refused_after_new_revision();
+    run_record_says_where_and_how_much();
     item_rules();
 }

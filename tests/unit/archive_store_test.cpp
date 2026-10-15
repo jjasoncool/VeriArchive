@@ -1,6 +1,9 @@
 #include "test_support.h"
 
+#include "common/time.h"
 #include "test_repository.h"
+
+#include <chrono>
 
 namespace {
 
@@ -115,6 +118,379 @@ void items_and_progress()
     CHECK(progress && progress->empty());
 }
 
+va::Entry file_entry(std::string path, std::uint64_t size)
+{
+    va::Entry entry;
+    entry.path.p = std::move(path);
+    entry.size = size;
+    entry.b3 = "b3";
+    entry.sha256 = "sha256";
+    return entry;
+}
+
+// Registrations that have not finished, as the register engine leaves them:
+// the plan in settings, hashed files checkpointed under the new revision.
+// Sample roots only (Z:, Y:), never a real volume's.
+void pending_registrations_with_checkpoints()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const std::string whole = "c0ffee00-0000-4000-8000-000000000001";
+    const std::string folder = "c0ffee00-0000-4000-8000-000000000002";
+    CHECK(store.insert_archive({whole, "ARCH-0001", "2026-10-15T01:00:00Z", 0, "REGISTRATION_INCOMPLETE", "", ""}));
+    CHECK(store.insert_archive({folder, "ARCH-0002", "2026-10-15T01:00:20Z", 2, "REGISTERED", "範例/Photos", ""}));
+    CHECK(store.set_setting("registration:" + whole,
+        R"({"archive_uuid":")" + whole +
+            R"(","created":"2026-10-15T01:00:00Z","label":"ARCH-0001","new_archive":true,"revision":1,"root":"Z:\\"})"));
+    // A new revision of a folder archive, from a plan that records its totals
+    // and that its attempt stopped.
+    CHECK(store.set_setting("registration:" + folder,
+        R"({"archive_uuid":")" + folder +
+            R"(","created":"2026-10-15T01:00:20Z","label":"ARCH-0002","new_archive":false,"revision":3,)"
+            R"("root":"Y:\\範例\\Photos","files_total":10,"bytes_total":5000,"updated":"2026-10-15T02:00:00Z",)"
+            R"("stopped":"2026-10-15T02:00:00Z"})"));
+    // Damaged settings are passed over, not fatal.
+    CHECK(store.set_setting("registration:broken", "not json"));
+    CHECK(store.set_setting("registration:odd", R"({"archive_uuid":"x","revision":"1"})"));
+
+    CHECK(store.upsert_file_rows(whole, 1, {file_entry("a.mkv", 1000), file_entry("b.mkv", 2500)}));
+    CHECK(store.upsert_file_rows(folder, 3, {file_entry("c.jpg", 40)}));
+    // The revision before, fully indexed: not part of the progress.
+    CHECK(store.insert_file_rows(folder, 2, {file_entry("old.jpg", 999)}));
+
+    const auto pending = store.pending_registrations();
+    CHECK(pending && pending->size() == 2);
+    if (!pending || pending->size() != 2) {
+        return;
+    }
+    const auto& first = pending->front();  // the older plan first
+    CHECK(first.archive_uuid == whole && first.label == "ARCH-0001" && first.root == "Z:\\");
+    CHECK(first.volume_root && first.revision == 1 && first.started == "2026-10-15T01:00:00Z");
+    CHECK(first.files_done == 2 && first.bytes_done == 3500);
+    CHECK(!first.files_total && !first.bytes_total && first.updated.empty() && first.stopped.empty());
+    const auto& second = pending->back();
+    CHECK(second.archive_uuid == folder && !second.volume_root && second.revision == 3);
+    CHECK(second.root == "Y:\\範例\\Photos");
+    CHECK(second.files_done == 1 && second.bytes_done == 40);
+    CHECK(second.files_total == std::optional<std::uint64_t>(10) &&
+          second.bytes_total == std::optional<std::uint64_t>(5000));
+    CHECK(second.updated == "2026-10-15T02:00:00Z" && second.stopped == "2026-10-15T02:00:00Z");
+
+    // A finished registration removes its plan; nothing is pending then.
+    CHECK(store.remove_setting("registration:" + whole));
+    CHECK(store.remove_setting("registration:" + folder));
+    const auto none = store.pending_registrations();
+    CHECK(none && none->empty());
+}
+
+const std::string verified_archive = "28ff645e-a220-4aac-ae0b-6c328bf1a2b3";
+
+// An archive at `revision` whose revision 1 has three files and a stream
+// (650 bytes in all), as unfinished verifications of it need.
+void add_verified_archive(va::ArchiveStore& store, std::uint32_t revision = 1)
+{
+    CHECK(store.insert_archive({verified_archive, "ARCH-0007", "2026-10-08T00:00:00Z", revision, "REGISTERED", "", ""}));
+    CHECK(store.insert_revision({verified_archive, 1, "manifests/x/r0001.vam",
+        R"({"counts":{"files":3,"dirs":1,"links":0,"streams":1,"chunks":0,"bytes":650},"root_hint":"Z:\\範例"})",
+        "h", "b", "", "2026-10-08T00:00:00Z"}));
+    auto stream = file_entry("c.txt", 50);
+    stream.type = 's';
+    stream.stream = "Zone.Identifier";
+    CHECK(store.insert_file_rows(verified_archive, 1,
+        {file_entry("a.txt", 100), file_entry("b.txt", 200), file_entry("c.txt", 300), stream}));
+}
+
+// The setting a verification of the sample archive's revision 1 leaves.
+void add_run_setting(va::ArchiveStore& store, const std::string& run_id, const std::string& started,
+    const std::string& more = "")
+{
+    CHECK(store.set_setting("run:" + run_id, R"({"archive_uuid":")" + verified_archive +
+                                                  R"(","revision":1,"started":")" + started + R"(")" + more + "}"));
+}
+
+// A recorded run of the sample archive.
+void record_run(va::ArchiveStore& store, const TestRepository& repository, const std::string& run_id,
+    const std::string& result, const std::string& started, const std::string& finished)
+{
+    auto record = run(run_id, result);
+    record.started = started;
+    record.finished = finished;
+    CHECK(store.append_verify_run(record, repository.context.repository_uuid));
+}
+
+// The time the unfinished verifications are read at, unless a test says
+// otherwise: long after the runs below said anything.
+std::chrono::sys_seconds at(const char* timestamp)
+{
+    return va::parse_timestamp(timestamp).value_or(std::chrono::sys_seconds{});
+}
+const auto read_at = at("2026-10-20T12:00:00Z");
+
+std::vector<std::string> unfinished_run_ids(va::ArchiveStore& store, std::chrono::sys_seconds now = read_at)
+{
+    std::vector<std::string> ids;
+    if (const auto runs = store.unfinished_verifications(now)) {
+        for (const auto& run : *runs) {
+            ids.push_back(run.run_id);
+        }
+    } else {
+        CHECK(false);
+    }
+    return ids;
+}
+
+// Verifications that have not finished: one running (no history row yet), one
+// recorded INCOMPLETE, and one finished earlier whose leftover setting is
+// passed over. The two unfinished ones overlap in time, so neither is a later
+// attempt that supersedes the other.
+void unfinished_verifications_with_checkpoints()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    add_verified_archive(store);
+    auto stream = file_entry("c.txt", 50);
+    stream.type = 's';
+    stream.stream = "Zone.Identifier";
+
+    add_run_setting(store, "done-1", "2026-10-13T03:00:00Z");
+    record_run(store, repository, "done-1", "PASSED", "2026-10-13T03:00:00Z", "2026-10-13T04:00:00Z");
+
+    add_run_setting(store, "running-1", "2026-10-15T03:00:00Z");
+    CHECK(store.add_progress("running-1", {va::entry_key(file_entry("a.txt", 0)), va::entry_key(stream)}));
+
+    add_run_setting(store, "stopped-1", "2026-10-15T02:00:00Z", R"(,"root":"Y:\\範例")");
+    CHECK(store.add_progress("stopped-1", {va::entry_key(file_entry("c.txt", 0))}));
+    record_run(store, repository, "stopped-1", "INCOMPLETE", "2026-10-15T02:00:00Z", "2026-10-15T03:30:00Z");
+
+    const auto runs = store.unfinished_verifications(read_at);
+    CHECK(runs && runs->size() == 2);
+    if (!runs || runs->size() != 2) {
+        return;
+    }
+    const auto& interrupted = runs->front();  // started first
+    CHECK(interrupted.run_id == "stopped-1" && interrupted.recorded_incomplete && interrupted.resumable);
+    CHECK(interrupted.root == "Y:\\範例" && interrupted.label == "ARCH-0007");
+    CHECK(interrupted.files_done == 1 && interrupted.bytes_done == 300);
+    const auto& running = runs->back();
+    CHECK(running.run_id == "running-1" && !running.recorded_incomplete && running.revision == 1);
+    CHECK(running.resumable);
+    CHECK(running.root == "Z:\\範例");  // the setting has no root: where it was registered
+    CHECK(running.files_done == 2 && running.bytes_done == 150);
+    // No totals in the setting (a run of an older version): the header's counts.
+    CHECK(running.files_total == 4 && running.bytes_total == 650);
+
+    // Recorded INCOMPLETE, it never changes: a count from an earlier read is
+    // taken as it is, the checkpoints are not counted again. A running one is.
+    const auto again =
+        store.unfinished_verifications(read_at, {{"stopped-1", {7, 7000}}, {"running-1", {9, 9000}}});
+    CHECK(again && again->size() == 2);
+    if (again && again->size() == 2) {
+        CHECK(again->front().files_done == 7 && again->front().bytes_done == 7000);
+        CHECK(again->back().files_done == 2 && again->back().bytes_done == 150);
+    }
+}
+
+// The record a verification of this version writes: its root and totals
+// (the files whose content is read, decision 0022) and its "updated".
+void unfinished_verification_totals_from_its_record()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    add_verified_archive(store);
+    add_run_setting(store, "run-1", "2026-10-15T03:00:00Z",
+        R"(,"root":"Y:\\範例","files_total":3,"bytes_total":600,"updated":"2026-10-15T03:30:00Z")");
+    const auto runs = store.unfinished_verifications(read_at);
+    CHECK(runs && runs->size() == 1);
+    if (runs && runs->size() == 1) {
+        const auto& run = runs->front();
+        CHECK(run.root == "Y:\\範例" && run.files_total == 3 && run.bytes_total == 600);
+        CHECK(run.updated == "2026-10-15T03:30:00Z");
+    }
+}
+
+// Stopped runs that nothing will finish are not listed (decision 0022).
+void superseded_verifications_are_left_out()
+{
+    {
+        // Cancelled, then a later run of the archive finished: the newer
+        // result stands, and so does a later attempt that stopped as well.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "old-1", "2026-10-10T00:00:00Z");
+        record_run(store, repository, "old-1", "INCOMPLETE", "2026-10-10T00:00:00Z", "2026-10-10T01:00:00Z");
+        record_run(store, repository, "full-1", "PASSED", "2026-10-11T00:00:00Z", "2026-10-11T05:00:00Z");
+        add_run_setting(store, "old-2", "2026-10-12T00:00:00Z");
+        record_run(store, repository, "old-2", "INCOMPLETE", "2026-10-12T00:00:00Z", "2026-10-12T01:00:00Z");
+        add_run_setting(store, "old-3", "2026-10-13T00:00:00Z");
+        record_run(store, repository, "old-3", "INCOMPLETE", "2026-10-13T00:00:00Z", "2026-10-13T01:00:00Z");
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"old-3"});
+
+        // A verification started after the newest stopped one supersedes it
+        // while it runs.
+        add_run_setting(store, "now-1", "2026-10-14T00:00:00Z", R"(,"updated":"2026-10-14T00:10:00Z")");
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"now-1"});
+    }
+    {
+        // A run of a revision the archive has left cannot be resumed (R-104).
+        // Recorded INCOMPLETE, it is not listed. Never recorded, it is listed
+        // while it may still work, though it could not be resumed if it
+        // stopped; once its record has said nothing for 5 minutes (its process
+        // was killed), it is not. A run of an older version never says it
+        // works ("updated"), so it may still work and stays listed.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store, 2);
+        add_run_setting(store, "old-revision", "2026-10-10T00:00:00Z");
+        record_run(store, repository, "old-revision", "INCOMPLETE", "2026-10-10T00:00:00Z", "2026-10-10T01:00:00Z");
+        add_run_setting(store, "working", "2026-10-15T00:00:00Z", R"(,"updated":"2026-10-15T00:20:00Z")");
+        const auto runs = store.unfinished_verifications(at("2026-10-15T00:21:00Z"));
+        CHECK(runs && runs->size() == 1);
+        if (runs && runs->size() == 1) {
+            CHECK(runs->front().run_id == "working" && !runs->front().resumable);
+        }
+        CHECK(unfinished_run_ids(store, at("2026-10-15T00:24:59Z")) == std::vector<std::string>{"working"});
+        CHECK(unfinished_run_ids(store, at("2026-10-15T00:25:00Z")).empty());
+        add_run_setting(store, "older-version", "2026-10-16T00:00:00Z");
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"older-version"});
+    }
+    {
+        // Never recorded (its process was killed): superseded by a later
+        // verification that started, worked or was recorded when it had been
+        // silent for minutes; not by one that started, or even finished, while
+        // it still said it was working.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "killed", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T02:00:00Z")");
+        add_run_setting(store, "alive", "2026-10-12T00:00:00Z", R"(,"updated":"2026-10-12T04:01:00Z")");
+        record_run(store, repository, "beside", "PASSED", "2026-10-12T02:58:00Z", "2026-10-12T04:00:00Z");
+        CHECK(unfinished_run_ids(store, at("2026-10-12T04:01:30Z")) == std::vector<std::string>{"alive"});
+    }
+    {
+        // Killed at 00:30 (its console window closed) and started again two
+        // minutes later. Until the killed run has been silent for 5 minutes
+        // both are listed: either may be the one that works. Then the new
+        // attempt is the one to follow, while it works and once it is
+        // recorded, here PASSED at 05:00.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "killed", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T00:30:00Z")");
+        add_run_setting(store, "again", "2026-10-10T00:32:00Z", R"(,"updated":"2026-10-10T00:34:30Z")");
+        CHECK(unfinished_run_ids(store, at("2026-10-10T00:34:40Z")) ==
+              (std::vector<std::string>{"killed", "again"}));
+        add_run_setting(store, "again", "2026-10-10T00:32:00Z", R"(,"updated":"2026-10-10T00:35:00Z")");
+        CHECK(unfinished_run_ids(store, at("2026-10-10T00:35:10Z")) == std::vector<std::string>{"again"});
+        CHECK(store.remove_setting("run:again"));
+        record_run(store, repository, "again", "PASSED", "2026-10-10T00:32:00Z", "2026-10-10T05:00:00Z");
+        CHECK(unfinished_run_ids(store).empty());
+    }
+    {
+        // A run of an older version never says it works, so a verification
+        // recorded long after it started says nothing of it: only one started
+        // 5 minutes or more after it supersedes it.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "older", "2026-10-10T00:00:00Z");
+        record_run(store, repository, "before", "PASSED", "2026-10-09T23:58:00Z", "2026-10-10T03:00:00Z");
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"older"});
+        record_run(store, repository, "later", "PASSED", "2026-10-10T00:05:00Z", "2026-10-10T04:00:00Z");
+        CHECK(unfinished_run_ids(store).empty());
+    }
+    {
+        // A verification recorded within minutes of the kill, such as one
+        // that ended at once, did not do the killed run's work: it stays.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "killed", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T00:30:00Z")");
+        record_run(store, repository, "brief", "FAILED", "2026-10-10T00:31:00Z", "2026-10-10T00:34:00Z");
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"killed"});
+    }
+}
+
+// Watching opens the database read only: one that is missing reads as an
+// error, and no empty database is left behind.
+void read_only_open_creates_nothing()
+{
+    TestRepository repository;
+    auto missing = repository.context.repo;
+    missing.root = missing.root.parent_path() / "no-repository";
+    std::filesystem::create_directories(missing.root);
+    const auto opened = va::ArchiveStore::open_read_only(missing);
+    CHECK(!opened);
+    CHECK(!std::filesystem::exists(missing.database()));
+
+    // The real one opens, and reads.
+    auto store = va::ArchiveStore::open_read_only(repository.context.repo);
+    CHECK(store.has_value());
+    if (store) {
+        CHECK(store->pending_registrations().has_value());
+        CHECK(store->unfinished_verifications(read_at).has_value());
+        // Writing is refused.
+        CHECK(!store->set_setting("x", "y"));
+    }
+}
+
+// In the rollback-journal mode (a database where WAL could not be turned on)
+// the reads go without a snapshot, query by query, and still read it all.
+void reads_without_write_ahead_log()
+{
+    TestRepository repository;
+    repository.execute("PRAGMA journal_mode=DELETE;");
+    auto store = repository.store();
+    add_verified_archive(store);
+    add_run_setting(store, "run-1", "2026-10-15T03:00:00Z");
+    CHECK(store.set_setting("registration:" + verified_archive,
+        R"({"archive_uuid":")" + verified_archive + R"(","revision":2,"created":"2026-10-15T01:00:00Z"})"));
+    auto watching = va::ArchiveStore::open_read_only(repository.context.repo);
+    CHECK(watching.has_value());
+    if (watching) {
+        const auto registrations = watching->pending_registrations();
+        CHECK(registrations && registrations->size() == 1);
+        const auto runs = watching->unfinished_verifications(read_at);
+        CHECK(runs && runs->size() == 1);
+    }
+    // Nothing is left open: the writer commits at once.
+    CHECK(store.write_transaction([&] { return store.set_setting("after", "1"); }).has_value());
+}
+
+// A transaction whose writes fail is rolled back: nothing of it stays, and
+// the next one can begin (a failed checkpoint must not leave it open).
+void failed_write_transaction_is_rolled_back()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const std::string archive_uuid = "c0ffee00-0000-4000-8000-000000000002";
+    const auto failed = store.write_transaction([&]() -> std::expected<void, va::IoError> {
+        if (auto written = store.set_setting("checkpoint", "1"); !written) {
+            return written;
+        }
+        // The same file twice: the primary key refuses the second.
+        return store.insert_file_rows(archive_uuid, 1, {file_entry("a", 1), file_entry("a", 1)});
+    });
+    CHECK(!failed);
+    CHECK(store.setting("checkpoint") == std::string{});
+    const auto next = store.write_transaction([&] { return store.set_setting("checkpoint", "2"); });
+    CHECK(next.has_value());
+    CHECK(store.setting("checkpoint") == std::string("2"));
+}
+
+// update_setting changes a setting that exists and never creates one: a late
+// "updated" from an operation that has finished cannot bring its record back.
+void update_setting_never_creates()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    CHECK(store.update_setting("run:gone", "{}"));
+    CHECK(store.setting("run:gone") == std::string{});
+    CHECK(store.set_setting("run:here", "1"));
+    CHECK(store.update_setting("run:here", "2"));
+    CHECK(store.setting("run:here") == std::string("2"));
+}
+
 } // namespace
 
 void archive_store_tests()
@@ -122,4 +498,12 @@ void archive_store_tests()
     archives_revisions_and_labels();
     history_chain_detects_tampering();
     items_and_progress();
+    pending_registrations_with_checkpoints();
+    unfinished_verifications_with_checkpoints();
+    unfinished_verification_totals_from_its_record();
+    superseded_verifications_are_left_out();
+    read_only_open_creates_nothing();
+    reads_without_write_ahead_log();
+    failed_write_transaction_is_rolled_back();
+    update_setting_never_creates();
 }

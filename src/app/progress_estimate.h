@@ -35,6 +35,11 @@
 // the computer slept, the process was stopped, or its terminal stopped taking
 // output. The pause is taken out of the estimator's timeline, so it does not
 // count as an hour of very slow work.
+//
+// When reports come only on steps (another process's checkpoints, which can
+// be many minutes apart while it reads large files), "the last few minutes"
+// grow to hold the last few steps, so their spacing never keeps the time left
+// from being estimated.
 #include "app/text.h"
 #include "core/interfaces.h"
 
@@ -67,7 +72,7 @@ public:
                    // pipeline): a long silence is a pause, not work
     };
 
-    explicit ProgressEstimate(Reports reports = Reports::on_steps) : reports_(reports) {}
+    explicit ProgressEstimate(Reports reports = Reports::on_steps);
 
     // Takes one progress report and the time it arrived; call it for every
     // report. A report that counts less than the one before, or has a different
@@ -89,8 +94,8 @@ public:
     // counted while items remain (empty files), so 100 % means done.
     std::optional<double> fraction() const;
 
-    // Bytes per second over the last few minutes; nothing during the first
-    // seconds.
+    // Bytes per second over the last few minutes (on steps: over at least the
+    // last few steps); nothing during the first seconds.
     std::optional<double> bytes_per_second() const;
 
     // The time left; nothing while estimating: during the first minute, until
@@ -122,6 +127,8 @@ private:
         void add(const Sums& other, double weight);
     };
 
+    // Reports on steps: takes the spacing of the latest step into the window's length.
+    void size_window(double spacing);
     void add_to_history(const Interval& interval);
     void estimate();
 
@@ -130,6 +137,8 @@ private:
     std::optional<Clock::time_point> start_;  // the operation's first report, moved forward past pauses
     Clock::time_point last_report_{};         // when the latest report arrived
     double now_ = 0;                          // the latest report
+    double window_;                           // seconds counted as recent: 3 minutes, or more on steps
+    std::deque<double> spacings_;             // reports on steps: the last few steps' spacing, seconds
     std::deque<Sample> samples_;              // the window's samples: one more than intervals
     std::deque<Interval> intervals_;          // the last few minutes
     Sums history_;                            // older intervals, weighted as of history_time_

@@ -454,6 +454,8 @@ struct AppContext {                 // built once in the composition root, passe
 
 ## B8. Database schema v1 (all tables created by V1; V1.1 only fills columns and adds tables)
 
+> Amended by `docs/decisions/0022-unfinished-operations-in-archive-list.md`: the `settings` records of an unfinished registration (`registration:<archive_uuid>`) and verification (`run:<run_id>`) also hold `files_total`, `bytes_total` and `updated` (when it last worked, UTC, at least every 60 s while it works), a registration's also `stopped` (when an attempt ended without finishing), a verification's also its `root`; no schema change.
+
 ```sql
 CREATE TABLE schema_version (version INTEGER NOT NULL);
 
@@ -763,6 +765,7 @@ Exit codes: `0` PASSED · `2` PASSED_WITH_WARNINGS · `3` FAILED · `4` INCOMPLE
 > Amended by `docs/decisions/0016-gtk4-c-api-for-the-gui.md`: the GUI uses the GTK4 C API (no gtkmm).
 > Amended by `docs/decisions/0017-interface-language.md`: Settings has a language drop-down (English, 繁體中文).
 > Amended by `docs/decisions/0020-archive-comparison.md`: a sixth view, Compare Archives, after Verify Archive; it reads no media, shows progress in entries and allows cancel, and has no resume (it writes nothing). A screenshot mode (`VERIARCHIVE_GUI_SCREENSHOTS`) makes the user guide's pictures.
+> Amended by `docs/decisions/0022-unfinished-operations-in-archive-list.md`: above the archives, the Archive List shows the registrations and verifications that have not finished, wherever they were started, with their progress and a state that claims no more than the repository shows (`running`, `... it may have stopped`, `stopped; it can be resumed`); it reads the repository read only, every 5 s while shown, and leaves out stopped verifications that nothing can finish any more.
 
 Views: Register Archive, Verify Archive, Archive List, Verification History, Settings.
 Archive List columns: label, short uuid, volume label, model, capacity, last FULL (result/date), last verify (mode/result/date), OVERDUE, revision.

@@ -5,6 +5,7 @@
 #include "common/unicode.h"
 #include "common/uuid.h"
 #include "core/hash/hash_pipeline.h"
+#include "core/engine/heartbeat.h"
 #include "core/engine/transfer.h"
 #include "core/identity/volume_json.h"
 #include "core/write_file.h"
@@ -288,6 +289,33 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
     }
 
+    // The plan says while the registration works that it does ("updated"), and
+    // after the scan how much there is to do (decision 0022). A resumed
+    // registration starts from the plan as stored, so the totals of the
+    // attempt before show until its own scan has counted them; the stop of
+    // the attempt before no longer holds.
+    auto plan_record = plan_json(plan, request.root);
+    if (request.resume) {
+        if (const auto stored = store.setting(pending_key(plan.archive_uuid))) {
+            if (auto parsed = nlohmann::json::parse(*stored, nullptr, false); parsed.is_object()) {
+                parsed.erase("stopped");
+                plan_record = std::move(parsed);
+            }
+        }
+    }
+    Heartbeat heartbeat(store, pending_key(plan.archive_uuid), std::move(plan_record), progress);
+    heartbeat.beat();
+    // However this attempt returns without finishing (cancelled, the device
+    // removed, a failure), the plan says last that it stopped ("stopped"), so
+    // the Archive List shows it stopped at once and not working for minutes.
+    // A finished registration has removed its plan by then: the write
+    // changes nothing. The write is in a destructor, which runs on every way
+    // out of this function, so no return below can forget it.
+    struct StopMark {
+        Heartbeat& heartbeat;
+        ~StopMark() { heartbeat.stop(); }
+    } stop_mark{heartbeat};
+
     // R-89: identity.json goes on the media before the scan, so the scan excludes
     // it (.veriarchive/) and it is never reported as New.
     const auto media_directory = request.root / ".veriarchive";
@@ -308,7 +336,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         return fail(Kind::Incomplete, why + "; continue with `register <root_path> --resume`");
     };
     ScanOptions scan_options;
-    auto scanned = scan_tree(services.archive_files, request.root, scan_options, cancel, progress);
+    auto scanned = scan_tree(services.archive_files, request.root, scan_options, cancel, heartbeat);
     if (!scanned) {
         const auto kind = scanned.error().kind;
         if (kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved) {
@@ -318,11 +346,17 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     }
 
     std::vector<HashJob> jobs;
+    // Every readable file, those an interrupted attempt hashed included: the
+    // files done are counted from the checkpoints, which hold those too.
+    std::uint64_t files_total = 0;
+    std::uint64_t bytes_total = 0;
     for (std::size_t index = 0; index < scanned->entries.size(); ++index) {
         auto& entry = scanned->entries[index].entry;
         if (entry.type != 'f' || !entry.unreadable.empty()) {
             continue;
         }
+        ++files_total;
+        bytes_total += entry.size.value_or(0);
         const auto hit = cached.find(entry_key(entry));
         if (hit != cached.end() && !hit->second.b3.empty() && hit->second.size == entry.size &&
             hit->second.mtime_ns == entry.mtime_ns) {
@@ -333,21 +367,31 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         // The scanned size lets progress count bytes (share done, time left).
         jobs.push_back({index, scanned->entries[index].native, entry.size.value_or(0)});
     }
+    heartbeat.set("files_total", files_total);
+    heartbeat.set("bytes_total", bytes_total);
+    heartbeat.beat();
 
+    // Hashed files not yet saved. A checkpoint that cannot be saved is rolled
+    // back, so its open transaction cannot swallow the next checkpoints and
+    // the final record; its files are tried again with the next checkpoint.
+    // The registration goes on: checkpoints only spare re-reading after an
+    // interruption (R-104).
     std::vector<Entry> checkpoint;
+    std::size_t hashed_since_checkpoint = 0;
     auto last_checkpoint = std::chrono::steady_clock::now();
     const auto flush_checkpoint = [&] {
-        if (!checkpoint.empty() && store.begin()) {
-            (void)store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint);
-            (void)store.commit();
+        if (!checkpoint.empty() && store.write_transaction([&] {
+                return store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint);
+            })) {
+            checkpoint.clear();
         }
-        checkpoint.clear();
+        hashed_since_checkpoint = 0;
         last_checkpoint = std::chrono::steady_clock::now();
     };
     HashPipelineOptions hash_options;
     hash_options.readers = default_reader_count(rotational_of(*volume, request.rotational));
     bool device_removed = false;
-    const auto hashed = hash_files(services.archive_files, jobs, hash_options, cancel, progress,
+    const auto hashed = hash_files(services.archive_files, jobs, hash_options, cancel, heartbeat,
         [&](HashResult&& result) {
             auto& entry = scanned->entries[result.id].entry;
             if (result.error) {
@@ -362,7 +406,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             entry.sha256 = std::move(result.sha256);
             entry.size = result.size;
             checkpoint.push_back(entry); // R-104: every 1000 files or 60 seconds
-            if (checkpoint.size() >= 1000 ||
+            if (++hashed_since_checkpoint >= 1000 ||
                 std::chrono::steady_clock::now() - last_checkpoint > std::chrono::seconds(60)) {
                 flush_checkpoint();
             }
@@ -373,6 +417,9 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         return interrupted(device_removed ? "the device disappeared during registration"
                                           : "registration was cancelled");
     }
+    // Writing the manifest and the index of a large archive takes a while
+    // without progress reports: it starts from a fresh "updated".
+    heartbeat.beat();
 
     // Manifest first: it is the truth. The database index follows.
     RegisterOutcome outcome;
