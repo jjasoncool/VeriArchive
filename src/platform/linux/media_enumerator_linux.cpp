@@ -16,7 +16,7 @@
 #include "core/identity/filesystem_id.h"
 
 #include <algorithm>
-#include <compare>
+#include <compare> // IWYU pragma: keep (std::strong_ordering of the defaulted operator<=>)
 #include <cstdint>
 #include <fstream>
 #include <iterator>

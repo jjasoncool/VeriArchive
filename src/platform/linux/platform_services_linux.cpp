@@ -2,8 +2,6 @@
 #include "platform/linux/mountinfo.h"
 #include <cstdlib>
 #include <ctime>
-#include <fstream>
-#include <stdexcept>
 #include <sys/statfs.h>
 #include <unistd.h>
 #include <vector>
