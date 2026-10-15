@@ -97,7 +97,7 @@ void stopping_and_cancelling()
     auto status = va::hash_files(files, jobs, small_buffers(2), running, progress,
         [&](va::HashResult&&) { return ++delivered < 5; });
     CHECK(!status && status.error().kind == va::IoErrorKind::Cancelled);
-    CHECK(delivered >= 5 && delivered < jobs.size());
+    CHECK(delivered == 5); // nothing after the consumer said stop, however fast the readers were
 
     va::CancelToken cancelled;
     cancelled.cancel();

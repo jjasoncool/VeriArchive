@@ -279,12 +279,17 @@ std::expected<void, IoError> hash_files(
 
     std::uint64_t items_done = 0;
     auto last_report = std::chrono::steady_clock::now();
+    // Once on_result has said stop, it gets no further results: files already
+    // hashed and waiting in the queue are drained, not delivered. (After a
+    // cancel they are still delivered: they are valid and resume can use them.)
+    bool consumer_stopped = false;
     while (auto result = pipeline.results().pop()) {
         const bool cancelled_file =
             result->error && result->error->kind == IoErrorKind::Cancelled;
-        if (!cancelled_file) {
+        if (!cancelled_file && !consumer_stopped) {
             ++items_done;
             if (!on_result(std::move(*result))) {
+                consumer_stopped = true;
                 pipeline.stop();
             }
         }
