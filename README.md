@@ -56,6 +56,35 @@ cd build/windows-ucrt64-release && cpack   # VeriArchive-<version>-windows-x86_6
 the same tree into a folder. The `veriarchive_package` test checks that the installed tree runs
 with only Windows on `PATH` and never imports `msys-2.0.dll` (R-121).
 
+### Editor (clangd)
+
+`.clangd` reads the compile database in `build/dev-clangd`. Make it on each machine (it is not
+committed):
+
+```sh
+cmake -S . -B build/dev-clangd -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+```
+
+On Windows, also put this in the clangd user config (`%LOCALAPPDATA%\clangd\config.yaml`), with
+the project path adjusted. It names the MSYS2 target, so clangd finds libstdc++ even when
+`C:\msys64\ucrt64\bin` is not on the editor's `PATH`, and hides the Linux-only sources, which
+cannot be parsed with Windows headers:
+
+```yaml
+If:
+  PathMatch: D:/Projects/VeriArchive/.*
+CompileFlags:
+  Add: ["--target=x86_64-w64-windows-gnu", "--sysroot=C:/msys64/ucrt64"]
+---
+If:
+  PathMatch: D:/Projects/VeriArchive/src/platform/linux/.*
+  PathExclude: D:/Projects/VeriArchive/src/platform/linux/(mountinfo|vpd)\..*
+CompileFlags:
+  Add: ["-ferror-limit=0"]
+Diagnostics:
+  Suppress: "*"
+```
+
 ## Command line
 
 ```sh
