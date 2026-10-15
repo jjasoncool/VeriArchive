@@ -2,8 +2,6 @@
 
 #include "app/session.h"
 #include "common/utf8.h"
-#include "platform/file_writer.h"
-#include "platform/platform_services.h"
 
 #include <algorithm>
 #include <cstdlib>

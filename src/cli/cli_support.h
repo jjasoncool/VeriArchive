@@ -7,7 +7,6 @@
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
 #include "core/repository/archive_store.h"
-#include "core/repository/repository.h"
 
 #include <chrono>
 #include <initializer_list>

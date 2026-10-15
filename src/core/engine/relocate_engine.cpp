@@ -8,8 +8,6 @@
 #include "core/identity/volume_json.h"
 #include "core/manifest/manifest_writer.h"
 
-#include <algorithm>
-
 namespace va {
 namespace {
 
