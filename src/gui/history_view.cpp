@@ -113,23 +113,23 @@ GtkWidget* build_history_view(GuiState& state)
     gtk_box_append(GTK_BOX(row), make_row_label(text("Archive:")));
     const char* initial[] = {nullptr};
     view.archive = gtk_drop_down_new_from_strings(initial);
-    GtkWidget* show = gtk_button_new_with_label(text("Show runs").c_str());
-    g_signal_connect(show, "clicked",
+    view.show = gtk_button_new_with_label(text("Show runs").c_str());
+    g_signal_connect(view.show, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) {
             auto& state = *static_cast<GuiState*>(data);
             guarded([&] { show_runs(state); }, [&](Report error) { show_chain_result(state, std::move(error)); });
         }),
         &state);
-    GtkWidget* chain = gtk_button_new_with_label(text("Check history chain").c_str());
-    g_signal_connect(chain, "clicked",
+    view.check = gtk_button_new_with_label(text("Check history chain").c_str());
+    g_signal_connect(view.check, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) {
             auto& state = *static_cast<GuiState*>(data);
             guarded([&] { check_chain(state); }, [&](Report error) { show_chain_result(state, std::move(error)); });
         }),
         &state);
     gtk_box_append(GTK_BOX(row), view.archive);
-    gtk_box_append(GTK_BOX(row), show);
-    gtk_box_append(GTK_BOX(row), chain);
+    gtk_box_append(GTK_BOX(row), view.show);
+    gtk_box_append(GTK_BOX(row), view.check);
     gtk_box_append(GTK_BOX(box), row);
 
     view.chain = make_label("");

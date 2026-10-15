@@ -5,6 +5,7 @@
 #include "app/session.h"
 #include "gui/gui_support.h"
 
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -19,7 +20,10 @@ struct GuiState {
     std::optional<app::Session> session;   // empty until a repository is open
     Report session_error;                  // why no repository is open
     Job job;                               // the one long operation running, if any
-    int exit_status = 0;                   // 1 when an unexpected error cut the smoke test or the start short
+    int exit_status = 0;                   // 1 when an unexpected error cut the smoke test, the start or the screenshots short
+    // Set from VERIARCHIVE_GUI_SCREENSHOTS: take the documentation screenshots
+    // into this folder, then quit (screenshots.cpp).
+    std::optional<std::filesystem::path> screenshot_folder;
 
     // The widgets below belong to the current window; a language change
     // replaces them. The Reports are what a view shows, kept so the new window
@@ -72,6 +76,8 @@ struct GuiState {
 
     struct {
         GtkWidget* archive = nullptr;
+        GtkWidget* show = nullptr;         // "Show runs"
+        GtkWidget* check = nullptr;        // "Check history chain"
         GtkWidget* grid = nullptr;
         GtkWidget* chain = nullptr;
         Report chain_result;               // shown in `chain`
@@ -112,8 +118,14 @@ void open_repository_session(GuiState& state, bool initialise);
 
 // Builds the window and shows it. With `smoke_test` nothing is shown: the
 // window is built, rebuilt in the other language and back (as a language
-// change does), and the program quits.
+// change does), and the program quits. With state.screenshot_folder set, the
+// screenshot tour runs once the window is shown.
 void activate(GuiState& state, bool smoke_test);
+
+// The documentation screenshots (screenshots.cpp): walks through the views,
+// saves each one as a PNG in state.screenshot_folder and quits; exit status 1
+// and a message on stderr when something fails.
+void start_screenshot_tour(GuiState& state);
 
 // Makes GTK's own texts (dialog buttons, ...) follow the interface language.
 void use_gtk_language(app::Language language);

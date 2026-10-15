@@ -155,6 +155,7 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/gui_support.cpp
         src/gui/history_view.cpp
         src/gui/main.cpp
+        src/gui/screenshots.cpp
         src/gui/register_view.cpp
         src/gui/settings_view.cpp
         src/gui/verify_view.cpp)

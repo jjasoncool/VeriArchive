@@ -269,6 +269,9 @@ void activate(GuiState& state, bool smoke_test)
         return;
     }
     gtk_window_present(state.window);
+    if (state.screenshot_folder) {
+        start_screenshot_tour(state);
+    }
 }
 
 void use_gtk_language(app::Language language)
