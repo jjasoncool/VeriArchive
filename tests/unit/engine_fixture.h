@@ -9,6 +9,15 @@
 
 namespace test {
 
+// How a registration attempt stops when it finds the revision it creates
+// recorded, by another attempt or another operation (decision 0023).
+inline std::string already_recorded_message(const va::Uuid& archive_uuid, std::uint32_t revision)
+{
+    return "revision " + std::to_string(revision) + " of archive " + archive_uuid +
+           " is already recorded (by another attempt of this registration or by another operation, such as a "
+           "relocation); this attempt recorded nothing";
+}
+
 inline va::VolumeInfo fake_volume(const std::filesystem::path& mount_point)
 {
     va::VolumeInfo volume;

@@ -17,6 +17,11 @@
 //
 // An attempt that ends without finishing can say so with stop(), so that its
 // record reads as stopped at once ("stopped").
+//
+// A registration's plan is written only while the revision it creates is not
+// recorded (only_while_unrecorded): another attempt of the same registration
+// may record it first, and then the key may hold the plan of the archive's
+// next registration (decision 0023).
 #include "common/time.h"
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
@@ -25,6 +30,7 @@
 
 #include <chrono>
 #include <exception>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -56,6 +62,16 @@ public:
     // Sets a member of the record (such as a total), to be written with the next beat.
     void set(const char* name, nlohmann::json value) { record_[name] = std::move(value); }
 
+    // For a registration's plan: from now on every write changes the record
+    // only while this revision of the archive is not recorded. Once it is,
+    // by this attempt or by another attempt of the same registration, the
+    // plan is done with (recording removes it), and the key may hold the plan
+    // of the archive's next registration, which this record must not replace.
+    void only_while_unrecorded(Uuid archive_uuid, std::uint32_t revision)
+    {
+        unrecorded_ = UnrecordedRevision{std::move(archive_uuid), revision};
+    }
+
     // Writes the record now, with the current time.
     void beat() noexcept
     {
@@ -65,7 +81,12 @@ public:
         // worth failing the operation for.
         try {
             record_["updated"] = current_timestamp();
-            (void)store_.update_setting(key_, record_.dump());
+            if (unrecorded_) {
+                (void)store_.update_setting_unless_recorded(
+                    key_, record_.dump(), unrecorded_->archive_uuid, unrecorded_->revision);
+            } else {
+                (void)store_.update_setting(key_, record_.dump());
+            }
         } catch (const std::exception&) {
         }
     }
@@ -78,7 +99,8 @@ public:
     // is its archive's, and once its record is removed the key may hold the
     // plan of the archive's next registration, which this record would
     // replace (update_setting only changes a record that exists, so with the
-    // key empty it writes nothing).
+    // key empty it writes nothing; only_while_unrecorded keeps a plan's
+    // record from it once the revision is recorded, by any attempt).
     void stop() noexcept
     {
         try {
@@ -90,12 +112,18 @@ public:
     }
 
 private:
+    struct UnrecordedRevision {
+        Uuid archive_uuid;
+        std::uint32_t revision = 0;
+    };
+
     ArchiveStore& store_;
     std::string key_;
     nlohmann::json record_;
     IProgressSink& forward_;
     Clock::duration interval_;
     Clock::time_point last_;
+    std::optional<UnrecordedRevision> unrecorded_;
 };
 
 } // namespace va

@@ -1,5 +1,7 @@
 #include "core/manifest/manifest_writer.h"
 
+#include "common/uuid.h"
+
 #include <format>
 
 namespace va {
@@ -22,8 +24,10 @@ ManifestWriter::ManifestWriter(
     IFileWriter& writer, IFileSystemAccess& reader, std::filesystem::path destination)
     : writer_(writer), reader_(reader), destination_(std::move(destination))
 {
+    // A name of this writer's own: attempts that write the same revision at
+    // once never read each other's body (decision 0023).
     body_path_ = destination_;
-    body_path_ += ".body";
+    body_path_ += ".body-" + generate_uuid();
 }
 
 std::expected<void, IoError> ManifestWriter::open_body()
@@ -81,12 +85,17 @@ std::expected<WrittenManifest, IoError> ManifestWriter::finish(ManifestHeader he
     if (auto opened = open_body(); !opened) {
         return std::unexpected(opened.error());
     }
-    // The body file is committed (made durable) so it can be read back and
-    // copied after the header; it is removed once the manifest exists.
+    // The body file is committed so it can be read back and copied after the
+    // header; it is removed when finish() returns, also after a failure.
     if (auto committed = body_->commit(); !committed) {
         return std::unexpected(committed.error());
     }
     body_.reset();
+    struct RemoveBody {
+        IFileWriter& writer;
+        const std::filesystem::path& path;
+        ~RemoveBody() { (void)writer.remove(path); }
+    } remove_body{writer_, body_path_};
 
     header.counts = counts_;
     header.body_blake3 = body_hash_.finish_hex();
@@ -129,10 +138,12 @@ std::expected<WrittenManifest, IoError> ManifestWriter::finish(ManifestHeader he
     if (offset != body_length_) {
         return std::unexpected(IoError{IoErrorKind::Other, 0, "manifest body changed while writing"});
     }
-    if (auto committed = (*output)->commit(); !committed) {
-        return std::unexpected(committed.error());
+    // Durable, and not at the destination yet: the caller commits it in the
+    // transaction that records the revision (decision 0023).
+    if (auto flushed = (*output)->flush(); !flushed) {
+        return std::unexpected(flushed.error());
     }
-    (void)writer_.remove(body_path_);
+    written.file = std::move(*output);
     return written;
 }
 

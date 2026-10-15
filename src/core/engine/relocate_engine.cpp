@@ -139,14 +139,60 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             return fail(Kind::Repository, "cannot write the manifest: " + added.error().message);
         }
     }
-    const auto written = writer.finish(header);
+    // Written and flushed without a lock; not at its name yet.
+    auto written = writer.finish(header);
     if (!written) {
         return fail(Kind::Repository, "cannot write the manifest: " + written.error().message);
     }
 
+    // As in registration (decision 0023): another operation, such as another
+    // relocation of the archive or a registration of its next revision, may
+    // record the same revision first. In one write transaction the revision is
+    // found not recorded, the record is written, and the manifest is renamed
+    // to its name last, so a recorded manifest is never replaced.
+    bool lost = false;
+    bool cancelled_waiting = false;         // cancelled while it waited for the write lock
+    std::optional<std::string> registering; // the root of a registration that has saved files of the revision
     const auto recorded = [&]() -> std::expected<void, IoError> {
-        if (auto begun = store.begin(); !begun) {
+        // The record of a large archive holds the write lock for seconds:
+        // this one waits for it rather than fail.
+        if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
+            // Locked for longer still, or cancelled while it waited. Whoever
+            // held the lock may have recorded the revision, and another
+            // operation taken it since.
+            if (const auto known = store.revision_recorded(archive.archive_uuid, outcome.revision); known && *known) {
+                lost = true;
+            }
+            cancelled_waiting = cancel.cancelled();
             return begun;
+        }
+        const auto known = store.revision_recorded(archive.archive_uuid, outcome.revision);
+        if (!known) {
+            return std::unexpected(known.error());
+        }
+        if (*known) {
+            lost = true;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the revision is recorded"});
+        }
+        // An unfinished registration creating the same revision (`register
+        // --new-revision`) checkpoints the files it has hashed under it
+        // (R-104). Recorded over them, they would join this revision's index,
+        // or fail its insert on their keys: the relocation leaves them to the
+        // registration, and stops.
+        const auto checkpointed = store.has_file_rows(archive.archive_uuid, outcome.revision);
+        if (!checkpointed) {
+            return std::unexpected(checkpointed.error());
+        }
+        if (*checkpointed) {
+            const auto plan = store.registration_plan(archive.archive_uuid, outcome.revision);
+            registering = plan && *plan ? **plan : std::string{};
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "a registration creates the revision"});
+        }
+        // One that has hashed nothing yet can never finish once this revision
+        // is recorded: its plan goes with the record, and it stops when it
+        // finds the revision recorded.
+        if (auto removed = store.remove_registration_plan(archive.archive_uuid, outcome.revision); !removed) {
+            return removed;
         }
         archive.current_revision = outcome.revision;
         archive.root_subpath = *root_subpath;
@@ -187,10 +233,28 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         if (auto items = store.insert_verify_items(outcome.items); !items) {
             return items;
         }
+        if (auto named = written->file->commit(); !named) {
+            return named;
+        }
         return store.commit();
     }();
     if (!recorded) {
         store.rollback();
+        if (lost) {
+            return fail(Kind::Refused, "revision " + std::to_string(outcome.revision) + " of archive " +
+                                           archive.archive_uuid +
+                                           " was recorded by another operation while this relocation ran; "
+                                           "nothing was changed");
+        }
+        if (registering) {
+            return fail(Kind::Refused, "an unfinished registration of archive " + archive.archive_uuid +
+                                           " (root \"" + *registering + "\") is creating revision " +
+                                           std::to_string(outcome.revision) +
+                                           "; nothing was changed (finish it with `register --resume` first)");
+        }
+        if (cancelled_waiting) {
+            return fail(Kind::Incomplete, "relocation was interrupted; nothing was changed");
+        }
         return fail(Kind::Repository, "cannot record the relocation: " + recorded.error().message);
     }
     return outcome;

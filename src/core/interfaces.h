@@ -59,11 +59,17 @@ public:
 // become visible only when commit() has flushed them to stable storage and
 // atomically replaced the destination (R-61). Destroying an uncommitted file
 // deletes the temporary file, so a crash never leaves a half-written destination.
+//
+// flush() makes the bytes written so far durable without making them visible.
+// A commit() with nothing written since then has only the rename left to do,
+// short enough to make while the repository database is locked: a manifest
+// gets its name in the transaction that records its revision (decision 0023).
 class IOutputFile {
 public:
     virtual ~IOutputFile() = default;
 
     virtual std::expected<void, IoError> write(std::span<const std::byte> data) = 0;
+    virtual std::expected<void, IoError> flush() = 0;
     virtual std::expected<void, IoError> commit() = 0;
 };
 

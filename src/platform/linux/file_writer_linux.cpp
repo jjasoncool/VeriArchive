@@ -1,5 +1,7 @@
 // Linux durable writer: O_EXCL temporary file, write, fsync, rename over the
-// destination, then fsync the directory so the rename itself is durable.
+// destination, then fsync the directory so the rename itself is durable. A
+// flush() ahead of the commit makes the data durable, and leaves the commit
+// only the rename (decision 0023).
 #include "platform/file_writer.h"
 #include "platform/linux/posix_util.h"
 
@@ -36,6 +38,9 @@ public:
 
     std::expected<void, IoError> write(std::span<const std::byte> data) override
     {
+        if (!data.empty()) {
+            flushed_ = false;
+        }
         while (!data.empty()) {
             const auto written = ::write(descriptor_.get(), data.data(), data.size());
             if (written < 0) {
@@ -49,10 +54,21 @@ public:
         return {};
     }
 
-    std::expected<void, IoError> commit() override
+    std::expected<void, IoError> flush() override
     {
         if (::fsync(descriptor_.get()) != 0) {
             return std::unexpected(error_from_errno(errno, "fsync"));
+        }
+        flushed_ = true;
+        return {};
+    }
+
+    std::expected<void, IoError> commit() override
+    {
+        if (!flushed_) {
+            if (auto flushed = flush(); !flushed) {
+                return flushed;
+            }
         }
         descriptor_.reset();
         if (::rename(temporary_.c_str(), destination_.c_str()) != 0) {
@@ -75,6 +91,7 @@ private:
     UniqueFd descriptor_;
     std::filesystem::path temporary_;
     std::filesystem::path destination_;
+    bool flushed_ = false;   // flush() made every byte written durable
     bool committed_ = false;
 };
 

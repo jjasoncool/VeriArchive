@@ -6,6 +6,7 @@
 #include "common/error.h"
 #include "common/repository_layout.h"
 #include "common/types.h"
+#include "core/interfaces.h"
 #include "core/manifest/entry.h"
 #include "core/repository/sqlite_raii.h"
 
@@ -137,9 +138,22 @@ struct CheckpointCount {
     std::uint64_t bytes = 0;
 };
 
+// How long a statement waits for the write lock that another connection holds
+// (busy_timeout) before it fails with "database is locked".
+inline constexpr std::chrono::milliseconds statement_lock_wait{5000};
+// How long the record of a registration or a relocation waits for the write
+// lock (ArchiveStore::begin_waiting). Another operation's record of a large
+// archive holds it for seconds, about three per million entries (its index),
+// longer than a statement waits; the record of an operation that has done
+// hours of work waits for it rather than fail (decision 0023).
+inline constexpr std::chrono::minutes record_lock_wait{2};
+
 class ArchiveStore {
 public:
-    static std::expected<ArchiveStore, IoError> open(const RepositoryLayout& layout);
+    // `lock_wait`: how long each statement waits for the write lock; shorter
+    // only in tests.
+    static std::expected<ArchiveStore, IoError> open(
+        const RepositoryLayout& layout, std::chrono::milliseconds lock_wait = statement_lock_wait);
     // Opens the existing database for reading only, for a process that only
     // watches (the GUI's Archive List): a missing database is an error, never
     // created, and closing never writes to it.
@@ -147,6 +161,12 @@ public:
 
     // Groups many writes in one transaction (R-91: never one commit per file).
     std::expected<void, IoError> begin();
+    // As begin(), for the record of an operation that has done its work: while
+    // another connection holds the write lock, it tries again until `patience`
+    // has passed or `cancel` is cancelled, where begin() fails once a
+    // statement's wait is over.
+    std::expected<void, IoError> begin_waiting(
+        std::chrono::steady_clock::duration patience, const CancelToken& cancel);
     std::expected<void, IoError> commit();
     void rollback();
     // Runs `writes` in one transaction. When they or the commit fail, the
@@ -171,6 +191,10 @@ public:
     std::expected<std::vector<ArchiveRecord>, IoError> archives();
 
     std::expected<void, IoError> insert_revision(const RevisionRecord& revision);
+    // True when this revision of the archive is recorded. Inside a write
+    // transaction the answer holds until it ends: no other connection can
+    // record a revision meanwhile (decision 0023).
+    std::expected<bool, IoError> revision_recorded(const Uuid& archive_uuid, std::uint32_t revision);
     std::expected<std::vector<RevisionRecord>, IoError> revisions(const Uuid& archive_uuid);
     std::expected<std::optional<RevisionRecord>, IoError> revision(
         const Uuid& archive_uuid, std::uint32_t revision);
@@ -189,6 +213,10 @@ public:
     std::expected<void, IoError> delete_file_rows(
         const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
     std::expected<std::vector<Entry>, IoError> file_rows(const Uuid& archive_uuid, std::uint32_t revision);
+    // True when the files table holds a row under this revision of the
+    // archive: its index once the revision is recorded, before that the
+    // checkpoints of a registration creating it (R-104).
+    std::expected<bool, IoError> has_file_rows(const Uuid& archive_uuid, std::uint32_t revision);
     // Empties the rebuildable index tables (archive_revisions, files) for rebuild-index.
     std::expected<void, IoError> clear_index();
 
@@ -240,7 +268,24 @@ public:
     std::expected<void, IoError> set_setting(const std::string& key, const std::string& value);
     // Changes the value of a setting that exists; does nothing when it does not.
     std::expected<void, IoError> update_setting(const std::string& key, const std::string& value);
+    // As update_setting, for the plan of a registration: also does nothing
+    // once the revision the registration creates is recorded, in one
+    // statement. By then the plan is done with, and the key may hold the plan
+    // of the archive's next registration (decision 0023).
+    std::expected<void, IoError> update_setting_unless_recorded(const std::string& key, const std::string& value,
+        const Uuid& archive_uuid, std::uint32_t revision);
     std::expected<void, IoError> remove_setting(const std::string& key);
+    // The plan of an unfinished registration of the archive (the setting
+    // "registration:<archive_uuid>", decision 0022) when it creates
+    // `revision`: the root it registers (UTF-8). Nothing when there is no
+    // plan, or it is the plan of another revision.
+    std::expected<std::optional<std::string>, IoError> registration_plan(
+        const Uuid& archive_uuid, std::uint32_t revision);
+    // Removes that plan, and leaves alone a plan of another revision, such as
+    // the one of the archive's next registration. Once the revision is
+    // recorded the plan can never be finished (decision 0023). Inside a write
+    // transaction, so that the plan read is the plan removed.
+    std::expected<void, IoError> remove_registration_plan(const Uuid& archive_uuid, std::uint32_t revision);
     std::expected<std::vector<std::pair<std::string, std::string>>, IoError> settings_with_prefix(
         const std::string& prefix);
 

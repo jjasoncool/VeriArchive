@@ -16,6 +16,7 @@
 #include <chrono>
 #include <map>
 #include <regex>
+#include <thread>
 
 namespace va {
 namespace {
@@ -66,6 +67,69 @@ struct Plan {
     Timestamp created;
     bool new_archive = true;
 };
+
+// Two attempts of one registration can run at once (`register --resume` while
+// an attempt still runs, or two resumes), and another operation can record the
+// revision a registration creates (a relocation of the archive while
+// `register --new-revision` of it is unfinished). The first to record the
+// revision wins. An attempt that finds it recorded stops, and touches nothing
+// of it; it cannot tell who recorded it (decision 0023).
+std::unexpected<RegisterFailure> already_recorded(const Plan& plan)
+{
+    return fail(RegisterFailure::Kind::Refused,
+        "revision " + std::to_string(plan.revision) + " of archive " + plan.archive_uuid +
+            " is already recorded (by another attempt of this registration or by another operation, such as a "
+            "relocation); this attempt recorded nothing");
+}
+
+// A plan whose revision is recorded can never be finished. An attempt of the
+// registration that records it removes it, and so does a relocation; another
+// operation (an import, an older version) leaves it, and then each resume
+// would stop at its start and the root would take no other registration. So
+// the attempt that finds the revision recorded removes the plan, if the key
+// still holds the plan of that revision: by then it may hold the plan of the
+// archive's next registration, which stays (decision 0023). Best effort: a
+// plan left behind goes with the next attempt that finds its revision recorded.
+void remove_dead_plan(ArchiveStore& store, const Plan& plan)
+{
+    (void)store.write_transaction([&]() -> std::expected<void, IoError> {
+        const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
+        if (!recorded) {
+            return std::unexpected(recorded.error());
+        }
+        return *recorded ? store.remove_registration_plan(plan.archive_uuid, plan.revision)
+                         : std::expected<void, IoError>{};
+    });
+}
+
+// R-89: identity.json goes on the media before the scan. The attempts of one
+// registration write the same bytes, and may run at once (decision 0023); two
+// that replace the file at the same moment fail on Windows (MoveFileExW,
+// access denied). So an attempt writes it only while the media does not hold
+// these bytes, and after a failed write looks again a moment later: by then
+// the other attempt's write is done.
+std::expected<void, IoError> write_identity_file(RegisterServices& services,
+    const std::filesystem::path& media_directory, const std::string& identity)
+{
+    const auto path = media_directory / "identity.json";
+    std::expected<void, IoError> written;
+    for (int tries = 0;; ++tries) {
+        if (const auto on_media = read_whole_file(services.archive_files, path); on_media && *on_media == identity) {
+            return {};
+        }
+        if (tries == 3) {
+            return written;
+        }
+        written = services.media_writer.create_directories(media_directory);
+        if (written) {
+            written = write_file_atomically(services.media_writer, path, identity);
+        }
+        if (written) {
+            return written;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
 
 nlohmann::json plan_json(const Plan& plan, const std::filesystem::path& root)
 {
@@ -205,6 +269,17 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             return fail(Kind::Refused, "there is no interrupted registration of this root to resume");
         }
         plan = **pending;
+        // A plan found with its revision recorded was read just before
+        // another attempt recorded it, or another operation recorded the
+        // revision and left the plan, which goes now.
+        const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
+        if (!recorded) {
+            return fail(Kind::Repository, recorded.error().message);
+        }
+        if (*recorded) {
+            remove_dead_plan(store, plan);
+            return already_recorded(plan);
+        }
         if (!plan.new_archive) {
             const auto found = store.find_archive(plan.archive_uuid);
             if (!found || !*found) {
@@ -304,6 +379,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
     }
     Heartbeat heartbeat(store, pending_key(plan.archive_uuid), std::move(plan_record), progress);
+    heartbeat.only_while_unrecorded(plan.archive_uuid, plan.revision);
     heartbeat.beat();
     // However this attempt returns without finishing (cancelled, the device
     // removed, a failure), the plan says last that it stopped ("stopped"), so
@@ -324,6 +400,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             }
         }
     } stop_mark{heartbeat};
+    // This attempt found the revision recorded: it stops, recording nothing.
+    const auto lost_to_another = [&] {
+        remove_dead_plan(store, plan);
+        return already_recorded(plan);
+    };
 
     // R-89: identity.json goes on the media before the scan, so the scan excludes
     // it (.veriarchive/) and it is never reported as New.
@@ -331,11 +412,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     if (request.write_media_copy) {
         const auto identity = identity_file_json(plan.archive_uuid, plan.label, plan.revision,
             *root_subpath, plan.created);
-        const auto created_directory = services.media_writer.create_directories(media_directory);
-        const auto written_identity = created_directory
-            ? write_file_atomically(services.media_writer, media_directory / "identity.json", identity)
-            : created_directory;
-        if (!written_identity) {
+        if (const auto written_identity = write_identity_file(services, media_directory, identity);
+            !written_identity) {
             return fail(Kind::Media, "cannot write the media copy: " + written_identity.error().message);
         }
     }
@@ -393,12 +471,27 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // the final record; its files are tried again with the next checkpoint,
     // and so are the stale checkpoints to delete. The registration goes on:
     // checkpoints only spare re-reading after an interruption (R-104).
+    //
+    // Once another attempt of this registration, or another operation, has
+    // recorded the revision, the rows under it are the index of the recorded
+    // manifest, which no checkpoint may change: each checkpoint looks first,
+    // in its own transaction, and this attempt stops when it finds the
+    // revision recorded (decision 0023). flush_checkpoint() then returns false.
     std::vector<Entry> checkpoint;
     std::size_t hashed_since_checkpoint = 0;
     auto last_checkpoint = std::chrono::steady_clock::now();
+    bool lost = false; // the revision was recorded by another attempt or operation first
     const auto flush_checkpoint = [&] {
         if ((!checkpoint.empty() || !stale.empty()) &&
             store.write_transaction([&]() -> std::expected<void, IoError> {
+                const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
+                if (!recorded) {
+                    return std::unexpected(recorded.error());
+                }
+                if (*recorded) {
+                    lost = true;
+                    return {};
+                }
                 // Deleted first: a changed file hashed again has the same key.
                 if (auto deleted = store.delete_file_rows(plan.archive_uuid, plan.revision, stale); !deleted) {
                     return deleted;
@@ -410,10 +503,13 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         hashed_since_checkpoint = 0;
         last_checkpoint = std::chrono::steady_clock::now();
+        return !lost;
     };
     // The stale checkpoints go before the plan has the totals, so a reader
     // never sees more done than there is.
-    flush_checkpoint();
+    if (!flush_checkpoint()) {
+        return lost_to_another();
+    }
     heartbeat.set("files_total", files_total);
     heartbeat.set("bytes_total", bytes_total);
     heartbeat.beat();
@@ -437,11 +533,14 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             checkpoint.push_back(entry); // R-104: every 1000 files or 60 seconds
             if (++hashed_since_checkpoint >= 1000 ||
                 std::chrono::steady_clock::now() - last_checkpoint > std::chrono::seconds(60)) {
-                flush_checkpoint();
+                return flush_checkpoint(); // false stops hashing: the revision is recorded
             }
             return true;
         });
     flush_checkpoint();
+    if (lost) {
+        return lost_to_another();
+    }
     if (!hashed || device_removed) {
         return interrupted(device_removed ? "the device disappeared during registration"
                                           : "registration was cancelled");
@@ -450,7 +549,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // without progress reports: it starts from a fresh "updated".
     heartbeat.beat();
 
-    // Manifest first: it is the truth. The database index follows.
+    // Manifest first: it is the truth. The database index follows, in the
+    // transaction that gives the manifest its name.
     RegisterOutcome outcome;
     outcome.archive_uuid = plan.archive_uuid;
     outcome.label = plan.label;
@@ -489,16 +589,46 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         entries.push_back(std::move(scanned_entry.entry));
     }
-    const auto written = manifest.finish(header);
+    // Written and flushed without a lock, which takes seconds or minutes for a
+    // large archive; not at its name yet.
+    auto written = manifest.finish(header);
     if (!written) {
         return fail(Kind::Repository, "cannot write the manifest: " + written.error().message);
     }
     outcome.counts = written->header.counts;
     outcome.skipped_mount_points = scanned->skipped_mount_points;
 
+    // One step for every attempt of this registration (decision 0023): in one
+    // write transaction the revision is found not recorded, the record is
+    // written, and the manifest is renamed to its name last. No other attempt
+    // can record the revision or rename a manifest there meanwhile, so a
+    // recorded manifest is never replaced, and the revision is recorded with
+    // the bytes this attempt wrote under its name. A crash between the rename
+    // and the commit leaves a manifest that is not recorded, which the next
+    // attempt replaces.
+    bool cancelled_waiting = false; // cancelled while it waited for the write lock
     const auto record = [&]() -> std::expected<void, IoError> {
-        if (auto begun = store.begin(); !begun) {
+        // The record of a large archive, another attempt's among them, holds
+        // the write lock for seconds: this one waits for it, and then finds
+        // the revision recorded rather than the database locked.
+        if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
+            // Locked for longer still, or cancelled while it waited. Whoever
+            // held the lock may have recorded the revision, and another
+            // operation taken it since.
+            if (const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
+                recorded && *recorded) {
+                lost = true;
+            }
+            cancelled_waiting = cancel.cancelled();
             return begun;
+        }
+        const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
+        if (!recorded) {
+            return std::unexpected(recorded.error());
+        }
+        if (*recorded) {
+            lost = true;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the revision is recorded"});
         }
         ArchiveRecord archive;
         if (existing) {
@@ -533,10 +663,19 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (auto removed = store.remove_setting(pending_key(plan.archive_uuid)); !removed) {
             return removed;
         }
+        if (auto named = written->file->commit(); !named) {
+            return named;
+        }
         return store.commit();
     }();
     if (!record) {
         store.rollback();
+        if (lost) {
+            return lost_to_another(); // this attempt's manifest goes with `written`
+        }
+        if (cancelled_waiting) {
+            return interrupted("registration was cancelled");
+        }
         return fail(Kind::Repository, "cannot record the archive: " + record.error().message);
     }
     stop_mark.recorded = true;

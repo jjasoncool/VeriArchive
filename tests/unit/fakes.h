@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -269,6 +271,7 @@ private:
             content_.append(reinterpret_cast<const char*>(data.data()), data.size());
             return {};
         }
+        std::expected<void, va::IoError> flush() override { return {}; }
         std::expected<void, va::IoError> commit() override
         {
             files_.put(destination_, content_);
@@ -282,6 +285,114 @@ private:
     };
 
     FakeFileSystem& files_;
+};
+
+// Writes the repository through `inner` (the platform writer) and lets a test
+// step in where two attempts that write the same revision meet (decision
+// 0023): `on_staged` runs, on the engine's thread, each time a manifest
+// (".vam") has been written and flushed, before the engine records its
+// revision and gives the manifest its name; `on_naming` runs when the engine
+// gives it its name, inside the transaction that records the revision.
+class StagingHookWriter final : public va::IFileWriter {
+public:
+    StagingHookWriter(va::IFileWriter& inner, std::function<void()> on_staged,
+        std::function<void()> on_naming = {})
+        : inner_(inner), on_staged_(std::move(on_staged)), on_naming_(std::move(on_naming))
+    {
+    }
+
+    std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
+        const std::filesystem::path& destination) override
+    {
+        auto file = inner_.create(destination);
+        if (!file || destination.extension() != ".vam") {
+            return file;
+        }
+        return std::make_unique<Staged>(std::move(*file), on_staged_, on_naming_);
+    }
+    std::expected<void, va::IoError> remove(const std::filesystem::path& file) override
+    {
+        return inner_.remove(file);
+    }
+    std::expected<void, va::IoError> create_directories(const std::filesystem::path& directory) override
+    {
+        return inner_.create_directories(directory);
+    }
+
+private:
+    class Staged final : public va::IOutputFile {
+    public:
+        Staged(std::unique_ptr<va::IOutputFile> inner, const std::function<void()>& on_staged,
+            const std::function<void()>& on_naming)
+            : inner_(std::move(inner)), on_staged_(on_staged), on_naming_(on_naming)
+        {
+        }
+        std::expected<void, va::IoError> write(std::span<const std::byte> data) override
+        {
+            return inner_->write(data);
+        }
+        std::expected<void, va::IoError> flush() override
+        {
+            auto flushed = inner_->flush();
+            if (on_staged_) {
+                on_staged_();
+            }
+            return flushed;
+        }
+        std::expected<void, va::IoError> commit() override
+        {
+            if (on_naming_) {
+                on_naming_();
+            }
+            return inner_->commit();
+        }
+
+    private:
+        std::unique_ptr<va::IOutputFile> inner_;
+        const std::function<void()>& on_staged_;
+        const std::function<void()>& on_naming_;
+    };
+
+    va::IFileWriter& inner_;
+    std::function<void()> on_staged_;
+    std::function<void()> on_naming_;
+};
+
+// Passes everything to a view of the media, and runs `hook` once, when the
+// file named `name` is opened: in the middle of hashing.
+class HookedFiles final : public va::IFileSystemAccess {
+public:
+    HookedFiles(va::IFileSystemAccess& inner, std::string name, std::function<void()> hook)
+        : inner_(inner), name_(std::move(name)), hook_(std::move(hook))
+    {
+    }
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        if (hook_ && va::path_to_utf8(file.filename()) == name_) {
+            const auto hook = std::move(hook_);
+            hook_ = nullptr;
+            hook();
+        }
+        return inner_.open(file, options);
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    va::IFileSystemAccess& inner_;
+    std::string name_;
+    std::function<void()> hook_;
 };
 
 } // namespace test

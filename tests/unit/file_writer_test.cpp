@@ -54,6 +54,32 @@ void file_writer_tests()
     CHECK(read_all(target) == "three");
     CHECK(count_entries(root) == 1);
 
+    // Decision 0023: flush() makes the bytes durable without giving them the
+    // destination's name; the commit after it renames, also with bytes
+    // written after the flush.
+    const auto bytes = [](std::string_view text) { return std::as_bytes(std::span(text.data(), text.size())); };
+    {
+        auto file = writer->create(target);
+        CHECK(file.has_value());
+        if (file) {
+            CHECK((*file)->write(bytes("fou")));
+            CHECK((*file)->flush());
+            CHECK(read_all(target) == "three");
+            CHECK(count_entries(root) == 2); // the temporary file beside it
+            CHECK((*file)->write(bytes("r")));
+            CHECK((*file)->commit());
+        }
+    }
+    CHECK(read_all(target) == "four");
+    CHECK(count_entries(root) == 1);
+    // A flushed file that is never committed leaves nothing behind.
+    {
+        auto file = writer->create(target);
+        CHECK(file && (*file)->write(bytes("five")) && (*file)->flush());
+    }
+    CHECK(read_all(target) == "four");
+    CHECK(count_entries(root) == 1);
+
     CHECK(writer->remove(target));
     CHECK(!std::filesystem::exists(target));
     const auto missing = writer->remove(target);

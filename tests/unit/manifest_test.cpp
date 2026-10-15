@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "common/json_error.h"
+#include "common/utf8.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
@@ -10,7 +11,10 @@
 
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <memory>
+#include <utility>
 
 namespace {
 
@@ -115,8 +119,17 @@ void golden_manifest_bytes()
     }
     const auto written = manifest.finish(golden_header());
     CHECK(written.has_value());
+    // Decision 0023: written and flushed, but the destination appears only
+    // with the commit, which the engines make in the transaction that records
+    // the revision. The body file is gone already.
+    CHECK(!std::filesystem::exists(destination));
+    CHECK(written && written->file && written->file->commit());
     CHECK(std::filesystem::exists(destination));
-    CHECK(!std::filesystem::exists(destination.string() + ".body"));
+    std::size_t files_left = 0;
+    for ([[maybe_unused]] const auto& left : std::filesystem::directory_iterator(destination.parent_path())) {
+        ++files_left;
+    }
+    CHECK(files_left == 1);
 
     // CLAUDE.md rule 10: any change to these bytes needs a decision record.
     const auto golden_path = std::filesystem::path(VERIARCHIVE_TEST_DATA_DIR) / "golden_r0002.vam";
@@ -170,6 +183,99 @@ void golden_manifest_bytes()
     std::filesystem::remove_all(root, error);
 }
 
+// Passes everything to the platform writer, and runs `after_body` once, right
+// after a body file (".body...") is committed.
+class BodyHookWriter final : public va::IFileWriter {
+public:
+    BodyHookWriter(va::IFileWriter& inner, std::function<void()> after_body)
+        : inner_(inner), after_body_(std::move(after_body))
+    {
+    }
+    std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
+        const std::filesystem::path& destination) override
+    {
+        auto file = inner_.create(destination);
+        if (!file || !va::path_to_utf8(destination.filename()).contains(".body")) {
+            return file;
+        }
+        return std::make_unique<Body>(std::move(*file), after_body_);
+    }
+    std::expected<void, va::IoError> remove(const std::filesystem::path& file) override
+    {
+        return inner_.remove(file);
+    }
+    std::expected<void, va::IoError> create_directories(const std::filesystem::path& directory) override
+    {
+        return inner_.create_directories(directory);
+    }
+
+private:
+    class Body final : public va::IOutputFile {
+    public:
+        Body(std::unique_ptr<va::IOutputFile> inner, std::function<void()>& after) : inner_(std::move(inner)), after_(after)
+        {
+        }
+        std::expected<void, va::IoError> write(std::span<const std::byte> data) override
+        {
+            return inner_->write(data);
+        }
+        std::expected<void, va::IoError> flush() override { return inner_->flush(); }
+        std::expected<void, va::IoError> commit() override
+        {
+            auto committed = inner_->commit();
+            if (const auto after = std::exchange(after_, nullptr)) {
+                after();
+            }
+            return committed;
+        }
+
+    private:
+        std::unique_ptr<va::IOutputFile> inner_;
+        std::function<void()>& after_;
+    };
+
+    va::IFileWriter& inner_;
+    std::function<void()> after_body_;
+};
+
+// Decision 0023: two writers of the same revision at once (two attempts of one
+// registration) each read back the body they wrote. Here the second writer
+// finishes, and gives its manifest the name, while the first is between its
+// body and its manifest.
+void writers_of_one_revision_keep_their_own_body()
+{
+    const auto root = temporary_directory("va-manifest-two-");
+    const auto writer = va::platform::make_file_writer();
+    const auto files = va::platform::make_file_system_access();
+    const auto destination = root / "r0001.vam";
+    va::ManifestWriter second(*writer, *files, destination);
+    CHECK(second.add(file("a.txt", "two")));
+    bool second_named = false;
+    BodyHookWriter hooked(*writer, [&] {
+        auto written = second.finish(golden_header());
+        second_named = written && written->file->commit();
+    });
+    va::ManifestWriter first(hooked, *files, destination);
+    CHECK(first.add(file("a.txt", "one")));
+    auto written = first.finish(golden_header());
+    CHECK(second_named);
+    CHECK(written && written->file->commit());
+
+    auto reader = va::ManifestReader::open(*files, destination); // the body matches the header
+    CHECK(reader.has_value());
+    if (reader) {
+        const auto entry = reader->next();
+        CHECK(entry && *entry && (**entry).b3 == va::blake3_hex("one"));
+    }
+    std::size_t names = 0;
+    for ([[maybe_unused]] const auto& left : std::filesystem::directory_iterator(root)) {
+        ++names;
+    }
+    CHECK(names == 1);
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 void out_of_order_entries_are_rejected()
 {
     const auto root = temporary_directory("va-manifest-order-");
@@ -217,6 +323,7 @@ void malformed_manifests_say_why()
 void manifest_tests()
 {
     golden_manifest_bytes();
+    writers_of_one_revision_keep_their_own_body();
     out_of_order_entries_are_rejected();
     malformed_manifests_say_why();
 }

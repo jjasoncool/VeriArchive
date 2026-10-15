@@ -5,10 +5,12 @@
 #include "core/hash/hashers.h"
 
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <thread>
 #include <tuple>
 #include <utility>
 
@@ -220,13 +222,15 @@ std::string verify_run_hash_input(const VerifyRunRecord& run)
 
 ArchiveStore::ArchiveStore(SqliteDatabase database) : database_(std::move(database)) {}
 
-std::expected<ArchiveStore, IoError> ArchiveStore::open(const RepositoryLayout& layout)
+std::expected<ArchiveStore, IoError> ArchiveStore::open(
+    const RepositoryLayout& layout, std::chrono::milliseconds lock_wait)
 {
     auto database = SqliteDatabase::open(layout.database());
     if (!database) {
         return std::unexpected(database.error());
     }
-    if (auto configured = database->execute("PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;");
+    if (auto configured = database->execute(
+            "PRAGMA busy_timeout=" + std::to_string(lock_wait.count()) + "; PRAGMA synchronous=NORMAL;");
         !configured) {
         return std::unexpected(configured.error());
     }
@@ -252,6 +256,23 @@ std::expected<ArchiveStore, IoError> ArchiveStore::open_read_only(const Reposito
 std::expected<void, IoError> ArchiveStore::begin()
 {
     return database_.execute("BEGIN IMMEDIATE;");
+}
+
+std::expected<void, IoError> ArchiveStore::begin_waiting(
+    std::chrono::steady_clock::duration patience, const CancelToken& cancel)
+{
+    const auto until = std::chrono::steady_clock::now() + patience;
+    for (;;) {
+        auto begun = begin();
+        // SQLITE_BUSY: another connection still held the write lock when the
+        // wait of this try (busy_timeout) was over.
+        if (begun || (begun.error().native_code & 0xff) != SQLITE_BUSY ||
+            std::chrono::steady_clock::now() >= until || cancel.cancelled()) {
+            return begun;
+        }
+        // A pause, in case a try ever fails without waiting.
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 }
 
 std::expected<void, IoError> ArchiveStore::commit()
@@ -321,6 +342,22 @@ std::expected<void, IoError> ArchiveStore::update_setting(const std::string& key
     return statement->bind(1, value).bind(2, key).run();
 }
 
+std::expected<void, IoError> ArchiveStore::update_setting_unless_recorded(const std::string& key,
+    const std::string& value, const Uuid& archive_uuid, std::uint32_t revision)
+{
+    auto statement = database_.prepare(
+        "UPDATE settings SET value = ? WHERE key = ? AND NOT EXISTS "
+        "(SELECT 1 FROM archive_revisions WHERE archive_uuid = ? AND revision = ?)");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    return statement->bind(1, value)
+        .bind(2, key)
+        .bind(3, archive_uuid)
+        .bind(4, static_cast<std::int64_t>(revision))
+        .run();
+}
+
 std::expected<void, IoError> ArchiveStore::remove_setting(const std::string& key)
 {
     auto statement = database_.prepare("DELETE FROM settings WHERE key = ?");
@@ -328,6 +365,32 @@ std::expected<void, IoError> ArchiveStore::remove_setting(const std::string& key
         return std::unexpected(statement.error());
     }
     return statement->bind(1, key).run();
+}
+
+std::expected<std::optional<std::string>, IoError> ArchiveStore::registration_plan(
+    const Uuid& archive_uuid, std::uint32_t revision)
+{
+    const auto value = setting("registration:" + archive_uuid);
+    if (!value) {
+        return std::unexpected(value.error());
+    }
+    const auto plan = nlohmann::json::parse(*value, nullptr, false);
+    if (!plan.is_object() || json_unsigned(plan, "revision") != std::optional<std::uint64_t>(revision)) {
+        return std::optional<std::string>{};
+    }
+    return std::optional<std::string>(json_text(plan, "root"));
+}
+
+std::expected<void, IoError> ArchiveStore::remove_registration_plan(const Uuid& archive_uuid, std::uint32_t revision)
+{
+    const auto plan = registration_plan(archive_uuid, revision);
+    if (!plan) {
+        return std::unexpected(plan.error());
+    }
+    if (!*plan) {
+        return {};
+    }
+    return remove_setting("registration:" + archive_uuid);
 }
 
 std::expected<std::vector<std::pair<std::string, std::string>>, IoError> ArchiveStore::settings_with_prefix(
@@ -466,6 +529,16 @@ std::expected<void, IoError> ArchiveStore::insert_revision(const RevisionRecord&
     return statement->run();
 }
 
+std::expected<bool, IoError> ArchiveStore::revision_recorded(const Uuid& archive_uuid, std::uint32_t revision)
+{
+    auto statement = database_.prepare("SELECT 1 FROM archive_revisions WHERE archive_uuid = ? AND revision = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision));
+    return statement->step();
+}
+
 std::expected<std::vector<RevisionRecord>, IoError> ArchiveStore::revisions(const Uuid& archive_uuid)
 {
     auto statement = database_.prepare(
@@ -566,6 +639,16 @@ std::expected<std::vector<Entry>, IoError> ArchiveStore::file_rows(
         entry.sha256 = statement->text(7);
         entries.push_back(std::move(entry));
     }
+}
+
+std::expected<bool, IoError> ArchiveStore::has_file_rows(const Uuid& archive_uuid, std::uint32_t revision)
+{
+    auto statement = database_.prepare("SELECT 1 FROM files WHERE archive_uuid = ? AND revision = ? LIMIT 1");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision));
+    return statement->step();
 }
 
 std::expected<void, IoError> ArchiveStore::write_file_rows(const char* verb,

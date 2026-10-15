@@ -1,5 +1,7 @@
 // Windows durable writer: CREATE_NEW temporary file, WriteFile, FlushFileBuffers,
-// then MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH) over the destination.
+// then MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH) over the destination. A
+// flush() ahead of the commit makes the data durable, and leaves the commit
+// only the rename (decision 0023).
 #include "platform/file_writer.h"
 #include "platform/windows/win_util.h"
 
@@ -33,6 +35,9 @@ public:
 
     std::expected<void, IoError> write(std::span<const std::byte> data) override
     {
+        if (!data.empty()) {
+            flushed_ = false;
+        }
         while (!data.empty()) {
             const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(data.size(), 1u << 30));
             DWORD written = 0;
@@ -44,10 +49,21 @@ public:
         return {};
     }
 
-    std::expected<void, IoError> commit() override
+    std::expected<void, IoError> flush() override
     {
         if (!FlushFileBuffers(handle_.get())) {
             return std::unexpected(error_from_win32(GetLastError(), "FlushFileBuffers"));
+        }
+        flushed_ = true;
+        return {};
+    }
+
+    std::expected<void, IoError> commit() override
+    {
+        if (!flushed_) {
+            if (auto flushed = flush(); !flushed) {
+                return flushed;
+            }
         }
         handle_.reset();
         if (!MoveFileExW(temporary_.c_str(), destination_.c_str(),
@@ -62,6 +78,7 @@ private:
     UniqueHandle handle_;
     std::wstring temporary_;
     std::wstring destination_;
+    bool flushed_ = false;   // flush() made every byte written durable
     bool committed_ = false;
 };
 

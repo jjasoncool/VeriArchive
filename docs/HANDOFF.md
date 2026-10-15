@@ -280,6 +280,8 @@ lost+found/
 
 ### B4.1 Container
 
+> Amended by `docs/decisions/0023-manifest-named-in-the-record-transaction.md`: R-61's writer streams the body to a file of its own (`rNNNN.vam.body-<uuid>`) and writes header + body to a temporary file that it fsyncs without holding the database lock; the rename to `rNNNN.vam` happens inside the write transaction that records the revision, after it found the revision not recorded, so a recorded manifest is never replaced.
+
 One UTF-8 file, `\n` line endings, no BOM.
 
 ```text
@@ -526,6 +528,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 > Amended by `docs/decisions/0011-durable-writes-through-ifilewriter.md`: adds `IOutputFile` / `IFileWriter` for durable atomic writes.
 > Amended by `docs/decisions/0014-special-files.md`: `EntryType::Special` for FIFOs, sockets and device nodes.
 > `IFileWriter` also creates directories (`create_directories`), used for the optional media copy (R-89).
+> Amended by `docs/decisions/0023-manifest-named-in-the-record-transaction.md`: `IOutputFile::flush()` makes the bytes written so far durable without giving them the destination's name; a `commit()` with nothing written since only renames.
 
 ```cpp
 namespace va {
@@ -642,6 +645,8 @@ Evidence at verify time (`MediaEvidence`) is compared against every registered a
 - R-103 Coverage policy: DEEP prefers chunks with the oldest `last_verified_at`, so "every chunk verified at least once per `policy.max_chunk_age_days`" is achievable and auditable.
 
 ### B11.4 Resume
+
+> Amended by `docs/decisions/0023-manifest-named-in-the-record-transaction.md`: attempts of one registration may run at once (`register --resume` while an attempt still runs), and a relocation may record the revision that an unfinished registration creates; the first to record the revision wins, and another stops with exit 12 when it finds the revision recorded (at a checkpoint, at the record, whose transaction waits up to 2 minutes for the write lock, or at the start of a resume), changing nothing of it (manifest, index, archive record) nor the plan of the archive's next registration. A plan whose revision is recorded is removed, by whatever records the revision or by the attempt that finds it recorded. A relocation leaves the revision to a registration that has checkpointed files for it (exit 12). Open: D10, D11.
 
 - R-104 FULL and DEEP checkpoint verified paths into `verify_progress` every 1 000 items or 60 s. `verify --resume <run_id>` continues an `INCOMPLETE` run without re-hashing verified items, provided identity still matches and the revision is unchanged. Registration checkpoints likewise (`REGISTRATION_INCOMPLETE`, `register --resume`).
 
@@ -836,6 +841,8 @@ Whole-disk fingerprint (§B14) · btrfs change tracking · hardware-token / serv
 | D7 | ~~Retention of `verify_items` detail (storage growth on large archives)~~ | **Resolved** (2026-10-08): non-Verified items only, kept forever |
 | D8 | ~~Registering a *directory* (not a volume root) as an archive: allowed in V1, or volume roots only?~~ | **Resolved** by `docs/decisions/0001-archive-matching-includes-root-subpath.md`: allowed; overlapping roots refused; matching keyed by volume evidence + `root_subpath` |
 | D9 | ~~Linux without the udev database (containers, minimal systems; seen on the GitLab runners, 2026-10-14): neither the filesystem UUID nor the SATA/SCSI drive serial can be read, so every volume is `UNKNOWN` — registration is never refused (R-97) and verification never finds the archive. Proposed (a decision record to be written): (a) fall back to the kernel filesystem id (`statvfs` `f_fsid`, recorded as `fsid-…`) for ext2/3/4 and btrfs, where the kernel derives it from the filesystem UUID (not xfs, where it follows the device number); an `fsid-…` id compared with a real UUID counts as unavailable, so decision 0018 applies; (b) read the drive serial from SCSI VPD page 0x80 (`/sys/block/<disk>/device/vpd_pg80`) when udev is missing.~~ | **Resolved** by `docs/decisions/0021-linux-without-udev.md`: the kernel filesystem id (`fsid-…`) for ext2/3/4 and btrfs, compared only with another `fsid-…` id (against a UUID, decision 0018 applies); for a SATA device behind libata that udev does not know, the device serial from SCSI VPD page 0x80 |
+| D10 | `register --resume` while another attempt of the same registration may still run (decision 0023): refuse it? An attempt whose process was killed cannot be told from one that works (decision 0022 sees only that its plan went quiet), so a refusal needs a record of the running process, or an operator override. | allowed; the first attempt to record the revision wins, and the others stop (exit 12) and record nothing |
+| D11 | `archive relocate` while a `register --new-revision` of the same archive is unfinished: both create the archive's next revision. Which should win? (a) The relocation refuses while the registration is unfinished; but nothing removes an unfinished registration whose root is gone, so the relocation, which exists for carriers that go away, could be blocked for good. (b) The relocation discards the registration's plan and checkpoints, which can hold hours of hashing. | first to record wins (decision 0023), except that the relocation refuses (exit 12) once the registration has checkpointed files for the revision; when the relocation records, the registration's plan goes with its record, and the registration stops (exit 12) when it finds the revision recorded |
 
 ---
 

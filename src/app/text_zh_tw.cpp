@@ -510,6 +510,10 @@ constexpr CatalogEntry entries[] = {
     {"cannot scan the root: {}", "無法掃描根目錄：{}", Match::Cause},
     {"cannot write the manifest: {}", "無法寫入清單檔：{}", Match::Cause},
     {"cannot record the archive: {}", "無法記錄封存：{}", Match::Cause},
+    {"revision {} of archive {} is already recorded (by another attempt of this registration or by "
+        "another operation, such as a relocation); this attempt recorded nothing",
+        "封存 {1} 的版次 {0} 已有紀錄（由同一個註冊的另一次執行，或由其他作業，例如搬移）；"
+        "這次執行未記錄任何內容"},
     {"the manifest copy on the media could not be written: {}", "無法寫入清單檔的媒體副本：{}",
         Match::Cause},
     {"{} entries carry portability warnings", "{} 個項目帶有可攜性警告"},
@@ -624,6 +628,13 @@ constexpr CatalogEntry entries[] = {
         "新載體上的內容與記錄不符；未做任何變更（若內容已變更，"
         "請使用 `register --new-revision` 重新建立基準）"},
     {"cannot record the relocation: {}", "無法記錄搬移：{}", Match::Cause},
+    {"revision {} of archive {} was recorded by another operation while this relocation ran; "
+        "nothing was changed",
+        "封存 {1} 的版次 {0} 已在這次搬移期間由其他作業記錄；未做任何變更"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; "
+        "nothing was changed (finish it with `register --resume` first)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更"
+        "（請先以 `register --resume` 完成該註冊）"},
     // src/core/engine/transfer.cpp
     {"cannot compare with the stored manifest", "無法與已儲存的清單檔比較"},
     {"revision {} is already known with different bytes", "版次 {} 已存在，但位元組內容不同"},

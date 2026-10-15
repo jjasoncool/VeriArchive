@@ -6,12 +6,20 @@
 #include "core/engine/heartbeat.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
+#include "core/manifest/manifest_writer.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <fstream>
 #include <functional>
+#include <iterator>
+#include <map>
 #include <memory>
+#include <semaphore>
+#include <set>
+#include <thread>
 
 namespace {
 
@@ -509,6 +517,561 @@ void heartbeat_updates_only_its_record()
     CHECK(store.setting("run:y") == std::string("{}"));
 }
 
+// Decision 0023: a registration's plan is written only while the revision it
+// creates is not recorded. Once another attempt of the registration recorded
+// it, the key may hold the plan of the archive's next registration, which
+// neither a beat nor the stop mark of this attempt may replace.
+void heartbeat_of_a_plan_stops_once_its_revision_is_recorded()
+{
+    test::TestRepository repository;
+    auto store = repository.store();
+    test::NullProgress forward;
+    const std::string key = "registration:u";
+    CHECK(store.set_setting(key, R"({"archive_uuid":"u","revision":1})"));
+    va::Heartbeat heartbeat(store, key, nlohmann::json{{"archive_uuid", "u"}, {"revision", 1}}, forward,
+        std::chrono::seconds(0));
+    heartbeat.only_while_unrecorded("u", 1);
+    heartbeat.beat();
+    const auto beaten = nlohmann::json::parse(store.setting(key).value_or(""), nullptr, false);
+    CHECK(va::parse_timestamp(beaten.value("updated", std::string{})).has_value());
+
+    // Another attempt records revision 1, and the next registration writes its plan.
+    CHECK(store.insert_revision({"u", 1, "manifests/u/r0001.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z"}));
+    const std::string next_plan = R"({"archive_uuid":"u","revision":2})";
+    CHECK(store.set_setting(key, next_plan));
+    heartbeat.on_progress({});
+    heartbeat.beat();
+    heartbeat.stop();
+    CHECK(store.setting(key) == next_plan);
+
+    // The plan of another revision of another archive is not held back by it.
+    CHECK(store.set_setting("registration:w", "{}"));
+    va::Heartbeat other(store, "registration:w", nlohmann::json::object(), forward, std::chrono::seconds(0));
+    other.only_while_unrecorded("w", 1);
+    other.beat();
+    CHECK(store.setting("registration:w") != std::string("{}"));
+}
+
+// Sample data for the tests of attempts that run at once: 40 files in two
+// folders of a fake volume.
+void fill_sample(test::FakeFileSystem& files)
+{
+    for (int index = 0; index < 40; ++index) {
+        files.add_file((index < 20 ? "photos/p" : "videos/v") + std::to_string(100 + index) + ".bin",
+            std::string(500 + index, static_cast<char>('a' + index % 26)));
+    }
+}
+
+std::string read_bytes(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+std::set<std::string> names_in(const std::filesystem::path& directory)
+{
+    std::set<std::string> names;
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
+        names.insert(va::path_to_utf8(entry.path().filename()));
+    }
+    return names;
+}
+
+// An interrupted registration of the sample at /vol (its plan and the
+// checkpoints of the files before the one that went away); its archive uuid.
+va::Uuid interrupted_sample_registration(Fixture& fixture)
+{
+    fill_sample(fixture.archive);
+    fixture.archive.node("videos/v130.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.run(at("/vol"));
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("videos/v130.bin").open_error.reset();
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->size() == 1);
+    return archives && archives->size() == 1 ? archives->front().archive_uuid : va::Uuid{};
+}
+
+// The host named in the manifest that revision 1 is recorded with, after
+// checking that the record is that file's bytes (R-14): its header line, the
+// header's BLAKE3 and the body's.
+std::string recorded_host(Fixture& fixture, const va::Uuid& archive_uuid)
+{
+    const auto recorded = fixture.store.revision(archive_uuid, 1);
+    if (!recorded || !*recorded) {
+        CHECK(false);
+        return {};
+    }
+    const auto bytes =
+        read_bytes(fixture.repository.context.repo.root / va::path_from_utf8((*recorded)->manifest_relpath));
+    const auto newline = bytes.find('\n');
+    const auto header_line = bytes.substr(0, newline);
+    CHECK(newline != std::string::npos);
+    CHECK((*recorded)->header_json == header_line);
+    CHECK((*recorded)->header_blake3 == va::blake3_hex(header_line));
+    CHECK(newline != std::string::npos && (*recorded)->body_blake3 == va::blake3_hex(bytes.substr(newline + 1)));
+    const auto header = nlohmann::json::parse(header_line, nullptr, false);
+    return header.is_object() && header.contains("created_by") ? header["created_by"].value("host", std::string{})
+                                                               : std::string{};
+}
+
+// The index rows of revision 1 are its manifest's entries (R-80), hashes included.
+void check_index_is_the_manifest(Fixture& fixture, const va::Uuid& archive_uuid)
+{
+    const auto manifest = va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 1);
+    auto reader = va::ManifestReader::open(*fixture.repository.files, manifest);
+    CHECK(reader.has_value());
+    std::map<std::string, std::string> recorded;
+    while (reader) {
+        auto next = reader->next();
+        if (!next || !*next) {
+            CHECK(next.has_value());
+            break;
+        }
+        recorded[(**next).path.p] = (**next).b3;
+    }
+    std::map<std::string, std::string> indexed;
+    if (const auto rows = fixture.store.file_rows(archive_uuid, 1)) {
+        for (const auto& row : *rows) {
+            indexed[row.path.p] = row.b3;
+        }
+    }
+    CHECK(!recorded.empty() && indexed == recorded);
+}
+
+// One attempt of a registration in a thread of its own, as in a process of
+// its own: its own database connection and view of the media, and a host name
+// of its own, so that two attempts write different manifests. Once its
+// manifest is written and flushed, it says so (`staged`) and waits (`go`);
+// `on_naming` runs when it gives its manifest its name, inside the
+// transaction that records the revision. `lock_wait`: how long its
+// statements wait for another connection's write lock.
+struct Attempt {
+    Attempt(Fixture& fixture, std::string host_name,
+        std::chrono::milliseconds lock_wait = va::statement_lock_wait)
+        : store(fixture.repository.store(lock_wait)),
+          writer(
+              *fixture.repository.writer,
+              [this] {
+                  staged.release();
+                  (void)go.try_acquire_for(std::chrono::seconds(60));
+              },
+              [this] {
+                  if (on_naming) {
+                      on_naming();
+                  }
+              })
+    {
+        fill_sample(files);
+        host = fixture.host;
+        host.host = std::move(host_name);
+    }
+
+    void start(Fixture& fixture, va::RegisterRequest request)
+    {
+        thread = std::thread([this, &fixture, request] {
+            va::RegisterServices services{files, *fixture.repository.files, writer, media_writer, fixture.media,
+                store, fixture.repository.context.repo, host};
+            outcome = va::register_archive(services, request, cancel, progress);
+        });
+    }
+
+    test::FakeFileSystem files{"/vol"};
+    test::FakeMediaWriter media_writer{files};
+    va::ArchiveStore store;
+    std::binary_semaphore staged{0};
+    std::binary_semaphore go{0};
+    test::StagingHookWriter writer;
+    std::function<void()> on_naming;
+    va::HostInfo host;
+    va::CancelToken cancel;
+    test::NullProgress progress;
+    std::expected<va::RegisterOutcome, va::RegisterFailure> outcome = std::unexpected(va::RegisterFailure{});
+    std::thread thread;
+};
+
+// Decision 0023: two attempts of one registration at once (`register --resume`
+// while an attempt still runs, or two resumes), interleaved at the manifest:
+// both have written and flushed theirs when one is let through to record the
+// revision, then the other. The second finds the revision recorded and stops:
+// the recorded manifest keeps the first one's bytes and verifies, the media
+// copy is the first one's only, neither leaves a file behind, and the
+// attempts after them are not blocked.
+void attempts_of_one_registration_record_it_once(bool first_started_records)
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    auto request = at("/vol");
+    request.resume = true;
+    request.write_media_copy = true;
+    Attempt first(fixture, "host-first");
+    Attempt second(fixture, "host-second");
+    first.start(fixture, request);
+    second.start(fixture, request);
+    const bool first_staged = first.staged.try_acquire_for(std::chrono::seconds(60));
+    const bool second_staged = second.staged.try_acquire_for(std::chrono::seconds(60));
+    CHECK(first_staged && second_staged);
+    auto& winner = first_started_records ? first : second;
+    auto& loser = first_started_records ? second : first;
+    winner.go.release();
+    winner.thread.join();
+    loser.go.release();
+    loser.thread.join();
+
+    CHECK(winner.outcome && winner.outcome->archive_uuid == archive_uuid && winner.outcome->revision == 1);
+    CHECK(!loser.outcome && loser.outcome.error().kind == va::RegisterFailure::Kind::Refused &&
+          loser.outcome.error().message == test::already_recorded_message(archive_uuid, 1));
+    CHECK(recorded_host(fixture, archive_uuid) == winner.host.host);
+    check_index_is_the_manifest(fixture, archive_uuid);
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+    const auto directory = fixture.repository.context.repo.manifests() / archive_uuid;
+    CHECK(names_in(directory) == std::set<std::string>{"r0001.vam"});
+    const auto bytes = read_bytes(directory / "r0001.vam");
+    CHECK(winner.files.content_at("/vol/.veriarchive/r0001.vam") == bytes);
+    CHECK(!loser.files.contains(".veriarchive/r0001.vam"));
+    const auto plans = fixture.store.settings_with_prefix("registration:");
+    CHECK(plans && plans->empty());
+
+    // A third attempt after both finds nothing to resume and changes nothing.
+    const auto third = fixture.run(request);
+    CHECK(!third && third.error().kind == va::RegisterFailure::Kind::Refused);
+    CHECK(read_bytes(directory / "r0001.vam") == bytes);
+    // Nothing either attempt left blocks the archive's next registration.
+    auto next = at("/vol");
+    next.new_revision = true;
+    const auto rebaselined = fixture.run(next);
+    CHECK(rebaselined && rebaselined->revision == 2);
+    CHECK(names_in(directory) == (std::set<std::string>{"r0001.vam", "r0002.vam"}));
+    const auto again = fixture.verify(fixture.archive.root());
+    CHECK(again && again->result == "PASSED" && again->revision == 2);
+}
+
+// Decision 0023: the record of a large archive holds the write lock for
+// seconds, longer than a statement waits for it. An attempt that reaches its
+// record meanwhile waits for the lock and then finds the revision recorded
+// (exit 12), rather than failing because the database is locked (exit 11).
+// Scaled down: the loser's statements wait 100 ms for the lock, and the
+// winner holds it 400 ms, in its record.
+void an_attempt_waits_for_the_record_of_another()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    auto request = at("/vol");
+    request.resume = true;
+    Attempt winner(fixture, "host-winner");
+    Attempt loser(fixture, "host-loser", std::chrono::milliseconds(100));
+    std::binary_semaphore recording{0};
+    winner.on_naming = [&] {
+        recording.release();
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    };
+    winner.start(fixture, request);
+    loser.start(fixture, request);
+    const bool winner_staged = winner.staged.try_acquire_for(std::chrono::seconds(60));
+    const bool loser_staged = loser.staged.try_acquire_for(std::chrono::seconds(60));
+    CHECK(winner_staged && loser_staged);
+    winner.go.release();
+    // The winner holds the write lock now, until it has slept.
+    CHECK(recording.try_acquire_for(std::chrono::seconds(60)));
+    loser.go.release();
+    winner.thread.join();
+    loser.thread.join();
+
+    CHECK(winner.outcome && winner.outcome->revision == 1);
+    const bool lost = !loser.outcome && loser.outcome.error().kind == va::RegisterFailure::Kind::Refused &&
+                      loser.outcome.error().message == test::already_recorded_message(archive_uuid, 1);
+    CHECK(lost);
+    if (!lost && !loser.outcome) {
+        std::cerr << "  loser: " << loser.outcome.error().message << '\n';
+    }
+    CHECK(recorded_host(fixture, archive_uuid) == winner.host.host);
+    check_index_is_the_manifest(fixture, archive_uuid);
+    CHECK(names_in(fixture.repository.context.repo.manifests() / archive_uuid) ==
+          std::set<std::string>{"r0001.vam"});
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+}
+
+// Decision 0023: an attempt whose record waits for the write lock stops
+// waiting when it is cancelled (Ctrl+C): it ends as interrupted (exit 4) and
+// records nothing, and a resume records later. Scaled down as above.
+void a_record_waiting_for_the_lock_can_be_cancelled()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    auto request = at("/vol");
+    request.resume = true;
+    std::thread holder;
+    std::binary_semaphore held{0};
+    va::CancelToken cancel;
+    // Once its manifest is written, another process takes the lock, and the
+    // operator cancels.
+    test::StagingHookWriter hooked(*fixture.repository.writer, [&] {
+        holder = std::thread([&] {
+            auto store = fixture.repository.store();
+            CHECK(store.begin());
+            held.release();
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            CHECK(store.commit());
+        });
+        CHECK(held.try_acquire_for(std::chrono::seconds(60)));
+        cancel.cancel();
+    });
+    auto store = fixture.repository.store(std::chrono::milliseconds(100));
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, hooked, fixture.media_writer,
+        fixture.media, store, fixture.repository.context.repo, fixture.host};
+    const auto cancelled = va::register_archive(services, request, cancel, fixture.progress);
+    if (holder.joinable()) {
+        holder.join();
+    }
+    CHECK(!cancelled && cancelled.error().kind == va::RegisterFailure::Kind::Incomplete &&
+          cancelled.error().message == "registration was cancelled; continue with `register <root_path> --resume`");
+    const auto revision = fixture.store.revision(archive_uuid, 1);
+    CHECK(revision && !*revision);
+    CHECK(names_in(fixture.repository.context.repo.manifests() / archive_uuid).empty());
+    const auto resumed = fixture.run(request);
+    CHECK(resumed && resumed->revision == 1);
+}
+
+// Decision 0023: an attempt still hashing when another attempt records the
+// revision stops at its next checkpoint. It changes nothing of the recorded
+// revision, not even the index row of a file it read differently, and leaves
+// alone the plan of the archive's next registration, started meanwhile.
+void an_attempt_that_loses_while_hashing_changes_nothing()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    auto request = at("/vol");
+    request.resume = true;
+
+    // This attempt's view of the media: one file it has yet to hash reads
+    // otherwise than the other attempt's (sample data).
+    test::FakeFileSystem view{"/vol"};
+    fill_sample(view);
+    view.node("videos/v135.bin").content = std::string(535, 'X');
+    std::expected<va::RegisterOutcome, va::RegisterFailure> other = std::unexpected(va::RegisterFailure{});
+    std::string next_plan;
+    test::HookedFiles hooked(view, "v133.bin", [&] {
+        // The other attempt runs to its end, as another process would...
+        auto store = fixture.repository.store();
+        va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+            fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host};
+        test::NullProgress quiet;
+        va::CancelToken cancel;
+        other = va::register_archive(services, request, cancel, quiet);
+        // ...and a third process starts the archive's next registration.
+        next_plan = R"({"archive_uuid":")" + archive_uuid +
+                    R"(","revision":2,"label":"ARCH-0001","created":"2026-10-15T01:00:00Z","new_archive":false,)"
+                    R"("root":"/vol"})";
+        CHECK(store.set_setting("registration:" + archive_uuid, next_plan));
+    });
+    auto store = fixture.repository.store();
+    va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host};
+    const auto late = va::register_archive(services, request, fixture.cancel, fixture.progress);
+
+    CHECK(other && other->revision == 1);
+    CHECK(!late && late.error().kind == va::RegisterFailure::Kind::Refused &&
+          late.error().message == test::already_recorded_message(archive_uuid, 1));
+    CHECK(recorded_host(fixture, archive_uuid) == fixture.host.host);
+    check_index_is_the_manifest(fixture, archive_uuid);
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+    CHECK(names_in(fixture.repository.context.repo.manifests() / archive_uuid) ==
+          std::set<std::string>{"r0001.vam"});
+    CHECK(fixture.store.setting("registration:" + archive_uuid) == next_plan);
+}
+
+// Decision 0023: a resume that finds the revision of its plan recorded stops
+// before it reads the media, and records nothing. Here the plan is still
+// there: another operation recorded the revision and left it (an import, an
+// older version; the other attempt of a registration removes it when it
+// records). Such a plan can never be finished, so the resume removes it,
+// and the root takes another registration.
+void a_resume_of_a_recorded_revision_reads_nothing()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    // Recorded by another operation, which left the plan (sample data).
+    CHECK(fixture.store.insert_revision(
+        {archive_uuid, 1, "manifests/" + archive_uuid + "/r0001.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z"}));
+    CHECK(!fixture.store.setting("registration:" + archive_uuid).value_or("").empty());
+    fixture.archive.bytes_read = 0;
+    auto request = at("/vol");
+    request.resume = true;
+    const auto resumed = fixture.run(request);
+    CHECK(!resumed && resumed.error().kind == va::RegisterFailure::Kind::Refused &&
+          resumed.error().message == test::already_recorded_message(archive_uuid, 1));
+    CHECK(fixture.archive.bytes_read == 0);
+    CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+    const auto again = fixture.run(request);
+    CHECK(!again && again.error().message == "there is no interrupted registration of this root to resume");
+}
+
+// Decision 0023: what crashed attempts leave in the archive's manifest folder
+// (a manifest never recorded, temporary and body files, also the body file of
+// an older version) never blocks `register --resume`. The resume records its
+// own manifest in place of the one never recorded and leaves the rest alone:
+// an attempt in another process may still be writing it.
+void crashed_attempts_leave_nothing_that_blocks_a_resume()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    const auto directory = fixture.repository.context.repo.manifests() / archive_uuid;
+    std::filesystem::create_directories(directory);
+    const std::set<std::string> leftovers{"r0001.vam.tmp-99999-0",
+        "r0001.vam.body-00000000-0000-4000-8000-000000000000",
+        "r0001.vam.body-00000000-0000-4000-8000-000000000000.tmp-99999-1", "r0001.vam.body"};
+    for (const auto& name : leftovers) {
+        std::ofstream(directory / name, std::ios::binary) << "left by a crashed attempt (sample data)\n";
+    }
+    std::ofstream(directory / "r0001.vam", std::ios::binary)
+        << R"({"format":"vam","version":1})" << "\nleft by a crashed attempt (sample data)\n";
+
+    auto request = at("/vol");
+    request.resume = true;
+    const auto resumed = fixture.run(request);
+    CHECK(resumed && resumed->revision == 1);
+    CHECK(recorded_host(fixture, archive_uuid) == fixture.host.host);
+    check_index_is_the_manifest(fixture, archive_uuid);
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+    auto expected = leftovers;
+    expected.insert("r0001.vam");
+    CHECK(names_in(directory) == expected);
+}
+
+// Writes on the archive media like FakeMediaWriter, and lets commits of
+// identity.json fail as on Windows when another attempt replaces the file at
+// the same moment (MoveFileExW, access denied): the first `failing` of them
+// fail, each with the other attempt's bytes on the media when
+// `other_attempt_wrote` (attempts of one registration write the same bytes).
+class RacingMediaWriter final : public va::IFileWriter {
+public:
+    RacingMediaWriter(test::FakeFileSystem& files, int failing, bool other_attempt_wrote)
+        : files_(files), failing_(failing), other_attempt_wrote_(other_attempt_wrote)
+    {
+    }
+
+    std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
+        const std::filesystem::path& destination) override
+    {
+        return std::make_unique<Output>(*this, destination);
+    }
+    std::expected<void, va::IoError> remove(const std::filesystem::path&) override { return {}; }
+    std::expected<void, va::IoError> create_directories(const std::filesystem::path&) override { return {}; }
+
+    int identity_commits = 0;   // tried, failed or not
+    int identity_failures = 0;
+
+private:
+    class Output final : public va::IOutputFile {
+    public:
+        Output(RacingMediaWriter& writer, std::filesystem::path destination)
+            : writer_(writer), destination_(std::move(destination))
+        {
+        }
+        std::expected<void, va::IoError> write(std::span<const std::byte> data) override
+        {
+            content_.append(reinterpret_cast<const char*>(data.data()), data.size());
+            return {};
+        }
+        std::expected<void, va::IoError> flush() override { return {}; }
+        std::expected<void, va::IoError> commit() override
+        {
+            if (destination_.filename() == "identity.json") {
+                ++writer_.identity_commits;
+                if (writer_.failing_ > 0) {
+                    --writer_.failing_;
+                    ++writer_.identity_failures;
+                    if (writer_.other_attempt_wrote_) {
+                        writer_.files_.put(destination_, content_);
+                    }
+                    return std::unexpected(
+                        va::IoError{va::IoErrorKind::PermissionDenied, 5, "MoveFileExW failed (Win32 error 5)"});
+                }
+            }
+            writer_.files_.put(destination_, content_);
+            return {};
+        }
+
+    private:
+        RacingMediaWriter& writer_;
+        std::filesystem::path destination_;
+        std::string content_;
+    };
+
+    test::FakeFileSystem& files_;
+    int failing_;
+    bool other_attempt_wrote_;
+};
+
+// Decision 0023: the attempts of one registration write the same
+// identity.json before their scan (R-89). A resume that finds those bytes on
+// the media leaves the file as it is, so attempts that start at once do not
+// replace it at the same moment, which fails on Windows.
+void a_resume_leaves_the_identity_file_it_finds()
+{
+    Fixture fixture;
+    fill_sample(fixture.archive);
+    fixture.archive.node("videos/v130.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    auto request = at("/vol");
+    request.write_media_copy = true;
+    const auto interrupted = fixture.run(request);
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("videos/v130.bin").open_error.reset();
+    const auto identity = fixture.archive.content_at("/vol/.veriarchive/identity.json");
+    CHECK(!identity.empty());
+
+    RacingMediaWriter media(fixture.archive, 0, false);
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+    request.resume = true;
+    const auto resumed = va::register_archive(services, request, fixture.cancel, fixture.progress);
+    CHECK(resumed && resumed->revision == 1 && !resumed->media_copy.empty());
+    CHECK(media.identity_commits == 0);
+    CHECK(fixture.archive.content_at("/vol/.veriarchive/identity.json") == identity);
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+}
+
+// Decision 0023: a write of identity.json that fails because another attempt
+// replaced the file at the same moment counts when, a moment later, the media
+// holds the bytes this attempt wrote: the registration goes on. A write that
+// keeps failing without them stops it, after three tries (exit 11).
+void an_identity_file_another_attempt_wrote_counts()
+{
+    {
+        Fixture fixture;
+        fixture.archive.add_file("a.txt", "a");
+        RacingMediaWriter media(fixture.archive, 1, true);
+        va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
+            fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        auto request = at("/vol");
+        request.write_media_copy = true;
+        const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+        CHECK(registered && !registered->media_copy.empty());
+        CHECK(media.identity_commits == 1 && media.identity_failures == 1);
+        const auto identity = fixture.archive.content_at("/vol/.veriarchive/identity.json");
+        CHECK(registered && identity.find(registered->archive_uuid) != std::string::npos);
+    }
+    {
+        Fixture fixture;
+        fixture.archive.add_file("a.txt", "a");
+        RacingMediaWriter media(fixture.archive, 100, false);
+        va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
+            fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        auto request = at("/vol");
+        request.write_media_copy = true;
+        const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+        CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Media &&
+              registered.error().message == "cannot write the media copy: MoveFileExW failed (Win32 error 5)");
+        CHECK(media.identity_failures == 3);
+        CHECK(!fixture.archive.contains(".veriarchive/identity.json"));
+    }
+}
+
 } // namespace
 
 void register_engine_tests()
@@ -528,4 +1091,14 @@ void register_engine_tests()
     a_resumed_registration_counts_what_it_reuses();
     a_recorded_registration_leaves_the_next_plan_alone();
     heartbeat_updates_only_its_record();
+    heartbeat_of_a_plan_stops_once_its_revision_is_recorded();
+    attempts_of_one_registration_record_it_once(true);
+    attempts_of_one_registration_record_it_once(false);
+    an_attempt_waits_for_the_record_of_another();
+    a_record_waiting_for_the_lock_can_be_cancelled();
+    an_attempt_that_loses_while_hashing_changes_nothing();
+    a_resume_of_a_recorded_revision_reads_nothing();
+    crashed_attempts_leave_nothing_that_blocks_a_resume();
+    a_resume_leaves_the_identity_file_it_finds();
+    an_identity_file_another_attempt_wrote_counts();
 }

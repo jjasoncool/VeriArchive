@@ -1,8 +1,11 @@
 #pragma once
-// Writes rNNNN.vam (R-61): entries are streamed to a temporary body file while
-// its BLAKE3 and length are computed; finish() then writes header + body to the
-// destination atomically and durably. Nothing appears at the destination until
-// finish() succeeds.
+// Writes rNNNN.vam (R-61): entries are streamed to a temporary body file of
+// this writer's own while its BLAKE3 and length are computed; finish() then
+// writes header + body to a temporary file next to the destination and makes
+// it durable. Nothing appears at the destination until the caller commits that
+// file, which only renames it: in the transaction that records the revision,
+// once it has found the revision not recorded, so that a recorded manifest is
+// never replaced (decision 0023).
 #include "core/hash/hashers.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
@@ -15,6 +18,9 @@ struct WrittenManifest {
     ManifestHeader header;      // with counts and body fields filled in
     std::string header_line;    // line 1 without '\n' (what V1.1 signs, R-60)
     std::string header_blake3;  // BLAKE3 of header_line
+    // The manifest, durable but not at the destination yet: commit() renames
+    // it there. Destroyed without a commit, its temporary file is deleted.
+    std::unique_ptr<IOutputFile> file;
 };
 
 class ManifestWriter {
@@ -23,6 +29,7 @@ public:
 
     // Entries must arrive in canonical order (R-43).
     std::expected<void, IoError> add(const Entry& entry);
+    // The body file is gone when it returns, whether it succeeded or not.
     std::expected<WrittenManifest, IoError> finish(ManifestHeader header);
 
 private:

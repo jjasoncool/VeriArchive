@@ -36,9 +36,11 @@ struct TestRepository {
     TestRepository(const TestRepository&) = delete;
     TestRepository& operator=(const TestRepository&) = delete;
 
-    va::ArchiveStore store() const
+    // A connection of its own, as another process would have; `lock_wait`:
+    // how long its statements wait for another connection's write lock.
+    va::ArchiveStore store(std::chrono::milliseconds lock_wait = va::statement_lock_wait) const
     {
-        auto opened = va::ArchiveStore::open(context.repo);
+        auto opened = va::ArchiveStore::open(context.repo, lock_wait);
         if (!opened) {
             std::cerr << "cannot open test repository: " << opened.error().message << '\n';
             std::abort();
