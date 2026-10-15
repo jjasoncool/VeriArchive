@@ -174,24 +174,27 @@ void CliProgress::on_progress(const Progress& progress)
         return;
     }
     const auto now = std::chrono::steady_clock::now();
-    if (shown_ && now - last_ < std::chrono::milliseconds(200)) {
+    // Every report feeds the estimate, also those not shown.
+    estimate_.update(progress, now);
+    // The report that completes the count is always shown, so the line does
+    // not keep the last time left while the results are written.
+    const bool complete = progress.items_total > 0 && progress.items_done == progress.items_total;
+    if (line_.shown() && !complete && now - last_ < std::chrono::milliseconds(200)) {
         return;
     }
     last_ = now;
-    shown_ = true;
     if (unit_ == ProgressUnit::entries) {
-        std::cerr << '\r'
-                  << text_.format("comparing: {}/{} entries", progress.items_done, progress.items_total)
-                  << std::string(20, ' ');
+        write(text_.format("comparing: {}/{} entries", progress.items_done, progress.items_total));
     } else if (progress.items_total == 0) {
-        std::cerr << '\r' << text_.format("scanning: {} entries", progress.items_done)
-                  << std::string(20, ' ');
+        write(text_.format("scanning: {} entries", progress.items_done));
     } else {
-        std::cerr << '\r'
-                  << text_.format("hashing: {}/{} files, {} MiB", progress.items_done,
-                         progress.items_total, progress.bytes_done / (1024 * 1024))
-                  << std::string(10, ' ');
+        write(text_.format("hashing: {}", app::describe_progress(text_, estimate_)));
     }
+}
+
+void CliProgress::write(const std::string& line)
+{
+    std::cerr << line_.replace(line);
     std::cerr.flush();
 }
 
@@ -200,19 +203,16 @@ void CliProgress::show(const std::string& message)
     if (quiet_) {
         return;
     }
-    std::cerr << '\r' << message << std::string(20, ' ');
-    std::cerr.flush();
-    shown_ = true;
+    write(message);
     last_ = {}; // long ago: the next report is shown at once, not held back by the rate limit
 }
 
 void CliProgress::finish()
 {
-    if (shown_ && !quiet_) {
-        std::cerr << '\r' << std::string(70, ' ') << '\r';
+    if (line_.shown()) {
+        std::cerr << line_.clear();
         std::cerr.flush();
     }
-    shown_ = false;
 }
 
 } // namespace va::cli

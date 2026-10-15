@@ -58,7 +58,7 @@ GUI, Register Archive view:
 
 1. Choose a folder with "Choose...", or type a volume root such as `E:\`.
 2. Optionally give a label (for example `ARCH-0012`).
-3. Press "Register". The progress bar shows the files hashed so far; "Cancel" stops at any time.
+3. Press "Register". The progress bar shows the share done, the speed and the time left (see "Reading the progress" below); "Cancel" stops at any time.
 
 CLI:
 
@@ -79,6 +79,20 @@ Options:
 Registering an already registered folder again stops with exit code 12 and asks you to choose `--new-revision` or `--force-new-archive`.
 
 Files that cannot be read at registration (permission, media errors) are recorded without hashes and are never reported as verified.
+
+### Reading the progress
+
+While files are hashed (registering, verifying, relocating), the GUI's progress bar and the CLI show one line, for example:
+
+```text
+hashing: 2.16 TiB of 9.44 TiB (23%) · 240 MiB/s · about 8-9 hours left
+```
+
+The CLI writes it to stderr, and not at all with `--json`.
+
+- **The share done is exact**: it counts bytes, so a folder of large videos and a folder of small photos move it alike. It shows 100% only once the last file is done. Scanning comes first and shows only the entries found, as the total is not known yet.
+- **The speed** is the average of the last three minutes.
+- **The time left is an estimate**, shown as a range. The low end of the range picks the unit: minutes while it is under an hour, hours while it is under two days, then days ("about 55-175 minutes left", "about 47-96 hours left"). It counts each file's fixed cost (opening it; on an HDD, moving the head) as well as its bytes, so a stretch of small files does not make it jump. It reads "estimating time left" during the first minute and after minutes without progress, and the range widens when the speed varies or keeps dropping (an HDD reads its inner tracks more slowly). A pause, such as the computer sleeping, does not count as slow reading. Once every file is hashed, the line shows no time left while the results are written.
 
 ## Verifying an archive
 

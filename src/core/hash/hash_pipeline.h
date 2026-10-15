@@ -16,6 +16,7 @@ namespace va {
 struct HashJob {
     std::size_t id = 0;                 // caller's identifier, returned in the result
     std::filesystem::path native;       // file to read
+    std::uint64_t size = 0;             // expected size (from the scan), for progress by bytes
 };
 
 struct HashResult {
@@ -41,6 +42,17 @@ std::size_t default_reader_count(std::optional<bool> rotational);
 // Hashes every job. `on_result` runs on the calling thread once per finished
 // file; returning false stops the pipeline (e.g. the device disappeared).
 // Returns Cancelled when stopped by `cancel` or by `on_result`.
+//
+// Progress is reported on the calling thread about five times a second, also
+// while one large file is being read: bytes_done counts the bytes hashed so far,
+// items_done the files finished. bytes_total is the sum of the jobs' sizes, so
+// the share done can be shown by bytes; it follows the sizes actually read (a
+// file that turned out shorter, or could not be read to its end, leaves only
+// what was read), so it equals bytes_done when every file is done. After a
+// cancel, a file stopped halfway and the files not started keep their
+// expected sizes, as their bytes were not reached, so bytes_total stays above
+// bytes_done unless every file was done. It is 0 (unknown) when no job
+// carries a size.
 std::expected<void, IoError> hash_files(
     IFileSystemAccess& files,
     std::span<const HashJob> jobs,

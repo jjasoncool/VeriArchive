@@ -1,5 +1,6 @@
 #include "gui/gui_support.h"
 
+#include "app/progress_estimate.h"
 #include "common/utf8.h"
 #include "platform/platform_services.h"
 
@@ -272,6 +273,8 @@ void guarded(const std::function<void()>& work, const std::function<void(Report)
 // Throttled progress: at most five updates a second are posted to the main loop.
 // The update that completes the count always is, so a finished operation's bar
 // ends full rather than where the last update before it happened to leave it.
+// Hashing fills the bar by bytes and shows the speed and the time left
+// (app::ProgressEstimate), worded as on the command line.
 class Job::BarProgress final : public IProgressSink {
 public:
     BarProgress(const app::Text& text, GtkWidget* bar, Counting counting)
@@ -281,55 +284,73 @@ public:
 
     void on_progress(const Progress& progress) override
     {
+        // The engine reporting progress must not see an exception: it would
+        // leave the hash pipeline's threads running. Showing progress is not
+        // worth that; the reason goes to the failure log.
+        try {
+            show(progress);
+        } catch (const std::exception& error) {
+            log_failure(std::string("exception while showing progress: ") + error.what());
+        }
+    }
+
+private:
+    void show(const Progress& progress)
+    {
         const auto now = std::chrono::steady_clock::now();
+        // Every report feeds the estimate, also those not shown.
+        estimate_.update(progress, now);
         const bool complete = progress.items_total > 0 && progress.items_done == progress.items_total;
         if (!complete && now - last_ < std::chrono::milliseconds(200)) {
             return;
         }
         last_ = now;
+        // The text is worded here, on the worker thread: the estimate lives here.
         // Each update holds its own reference to the bar: it may arrive after
         // the window was closed. (The job's reference keeps the bar alive
         // until then, so taking one here on the worker thread is safe.)
-        auto* update = new Update{text_, GTK_WIDGET(g_object_ref(bar_)), progress, counting_};
+        auto update = std::make_unique<Update>(GTK_WIDGET(g_object_ref(bar_)));
+        if (progress.items_total == 0) {
+            update->pulse = true;
+            update->text = text_.format("Scanning: {} entries", progress.items_done);
+        } else if (counting_ == Counting::Entries) {
+            update->fraction = static_cast<double>(progress.items_done) / static_cast<double>(progress.items_total);
+            update->text = text_.format("Comparing: {} / {} entries", progress.items_done, progress.items_total);
+        } else {
+            update->fraction = estimate_.fraction().value_or(0);
+            update->text = text_.format("Hashing: {}", app::describe_progress(text_, estimate_));
+        }
         g_idle_add(
             +[](gpointer data) -> gboolean {
                 std::unique_ptr<Update> update(static_cast<Update*>(data));
-                const auto& p = update->progress;
-                try {
-                    if (p.items_total == 0) {
-                        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(update->bar));
-                        const auto text = update->text.format("Scanning: {} entries", p.items_done);
-                        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
-                    } else {
-                        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(update->bar),
-                            static_cast<double>(p.items_done) / static_cast<double>(p.items_total));
-                        // Two calls: the compiler checks each literal template against its values.
-                        const auto text = update->counting == Counting::Entries
-                                              ? update->text.format("Comparing: {} / {} entries", p.items_done,
-                                                    p.items_total)
-                                              : update->text.format("Hashing: {} / {} files, {}", p.items_done,
-                                                    p.items_total, format_bytes(p.bytes_done));
-                        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
-                    }
-                } catch (const std::exception& error) {
-                    log_failure(std::string("exception while showing progress: ") + error.what());
+                auto* bar = GTK_PROGRESS_BAR(update->bar);
+                if (update->pulse) {
+                    gtk_progress_bar_pulse(bar);
+                } else {
+                    gtk_progress_bar_set_fraction(bar, update->fraction);
                 }
+                gtk_progress_bar_set_text(bar, update->text.c_str());
                 return G_SOURCE_REMOVE;
             },
-            update);
+            update.release());
     }
 
-private:
     struct Update {
-        app::Text text;
-        GtkWidget* bar;  // a reference of its own, given back on the main thread
-        Progress progress;
-        Counting counting;
+        explicit Update(GtkWidget* widget) : bar(widget) {}
         ~Update() { g_object_unref(bar); }
+        Update(const Update&) = delete;
+        Update& operator=(const Update&) = delete;
+        GtkWidget* bar;  // a reference of its own, given back on the main thread
+        bool pulse = false;
+        double fraction = 0;
+        std::string text;
     };
     app::Text text_;
     GtkWidget* bar_;
     Counting counting_;
+    // The engines report regularly (hashing five times a second), so a long
+    // silence is a pause, such as the computer sleeping.
+    app::ProgressEstimate estimate_{app::ProgressEstimate::Reports::regular};
     std::chrono::steady_clock::time_point last_{};
 };
 

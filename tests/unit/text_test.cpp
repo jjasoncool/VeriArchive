@@ -168,7 +168,7 @@ void translation_tests()
     const Text english;
     CHECK(english("PASSED") == "PASSED");
     CHECK(english("cannot read: anything") == "cannot read: anything");
-    CHECK(english.format("hashing: {}/{} files, {} MiB", 1, 2, 3) == "hashing: 1/2 files, 3 MiB");
+    CHECK(english.format("hashing: {}", "1.00 GiB of 2.00 GiB (50%)") == "hashing: 1.00 GiB of 2.00 GiB (50%)");
 
     const Text chinese(Language::TraditionalChinese);
     CHECK(chinese("PASSED") == "通過");
@@ -228,6 +228,18 @@ void translation_tests()
     CHECK(chinese.format("{} archives", 3) == "3 個封存");
     CHECK(chinese("3 archives") == "3 archives");
     CHECK(chinese("cannot open the archive") == "cannot open the archive");
+
+    // The progress of hashing (app::describe_progress), whose pieces are
+    // FormatOnly: "{} · {}" or "{}/s" must not take over engine sentences.
+    CHECK(chinese.format("hashing: {}", chinese.format("{} · {}", chinese.format("{} of {} ({}%)", "2.16 TiB",
+              "9.44 TiB", 23), chinese.format("about {}-{} hours left", 8, 9))) ==
+          "計算雜湊中：2.16 TiB / 9.44 TiB（23%）・約剩 8～9 小時");
+    CHECK(chinese.format("{}/s", "240 MiB") == "每秒 240 MiB");
+    CHECK(chinese.format("{} of {} files ({}%)", 12, 345, 3) == "12 / 345 個檔案（3%）");
+    CHECK(chinese("estimating time left") == "剩餘時間估算中");
+    CHECK(chinese("PASSED · FAILED") == "PASSED · FAILED");
+    CHECK(chinese("files/s") == "files/s");
+    CHECK(chinese("about 8-9 hours left") == "about 8-9 hours left");
 
     // Library and system causes (findings 8, 22, 23).
     CHECK(chinese("cannot run SQL: database is locked") == "無法執行 SQL 陳述式：資料庫已被鎖定");

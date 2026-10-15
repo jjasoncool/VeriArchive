@@ -2,6 +2,7 @@
 // Shared pieces of the command-line interface: argument parsing, exit codes
 // (HANDOFF §B16), repository opening, and text/JSON output.
 #include "app/app_context.h"
+#include "app/progress_estimate.h"
 #include "app/text.h"
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
@@ -95,7 +96,9 @@ HostInfo host_info();
 // file content and so reports no bytes).
 enum class ProgressUnit { files, entries };
 
-// Progress on stderr, at most five updates a second; silent in --json mode.
+// Progress on stderr, one line rewritten in place, at most five updates a
+// second besides the one that completes the count; silent in --json mode. Hashing shows the share done by bytes, the
+// speed and an estimate of the time left (app::ProgressEstimate).
 class CliProgress final : public IProgressSink {
 public:
     explicit CliProgress(const Arguments& arguments, ProgressUnit unit = ProgressUnit::files)
@@ -110,10 +113,16 @@ public:
     void finish();
 
 private:
+    // Replaces the line shown with `line`, blanking what is left of a longer one.
+    void write(const std::string& line);
+
     bool quiet_;
     app::Text text_;
     ProgressUnit unit_;
-    bool shown_ = false;
+    // The engines report regularly (hashing five times a second), so a long
+    // silence is a pause, such as the computer sleeping.
+    app::ProgressEstimate estimate_{app::ProgressEstimate::Reports::regular};
+    app::StatusLine line_;  // nothing is written to it in --json mode
     std::chrono::steady_clock::time_point last_{};
 };
 

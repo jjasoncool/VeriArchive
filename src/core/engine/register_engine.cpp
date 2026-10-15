@@ -330,7 +330,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             entry.sha256 = hit->second.sha256;
             continue;
         }
-        jobs.push_back({index, scanned->entries[index].native});
+        // The scanned size lets progress count bytes (share done, time left).
+        jobs.push_back({index, scanned->entries[index].native, entry.size.value_or(0)});
     }
 
     std::vector<Entry> checkpoint;

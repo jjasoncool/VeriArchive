@@ -35,8 +35,23 @@ public:
 
     std::optional<T> pop()
     {
+        bool timed_out = false;
+        return pop_for(std::chrono::milliseconds::max(), timed_out);
+    }
+
+    // Like pop(), but waits at most `timeout`: when nothing arrived by then,
+    // `timed_out` is set and nothing is returned. (Without it, nothing returned
+    // means the queue is closed and empty.)
+    std::optional<T> pop_for(std::chrono::milliseconds timeout, bool& timed_out)
+    {
         std::unique_lock lock(mutex_);
-        not_empty_.wait(lock, [&] { return !items_.empty() || closed_; });
+        const auto ready = [&] { return !items_.empty() || closed_; };
+        if (timeout == std::chrono::milliseconds::max()) {
+            not_empty_.wait(lock, ready);
+            timed_out = false;
+        } else {
+            timed_out = !not_empty_.wait_for(lock, timeout, ready);
+        }
         if (items_.empty()) {
             return std::nullopt;
         }
@@ -105,6 +120,8 @@ public:
     }
 
     std::uint64_t bytes_hashed() const { return bytes_hashed_.load(); }
+    // Bytes actually read minus the sizes expected, over the files finished.
+    std::int64_t size_difference() const { return size_difference_.load(); }
     void stop() { stopping_.store(true); }
     bool stopping() const { return stopping_.load() || cancel_.cancelled(); }
     BoundedQueue<HashResult>& results() { return results_; }
@@ -233,6 +250,14 @@ private:
             } else {
                 result.error = chunk->error;
             }
+            // The file is done (read to its end, or as far as it could be read):
+            // the total to hash now counts what was read instead of what the
+            // scan expected. A file stopped by a cancel keeps its expected size,
+            // as the bytes it did not reach are not done.
+            if (!result.error || result.error->kind != IoErrorKind::Cancelled) {
+                size_difference_.fetch_add(static_cast<std::int64_t>(size) -
+                                           static_cast<std::int64_t>(jobs_[chunk->job].size));
+            }
             blake3.reset();
             sha256.reset();
             results_.push(std::move(result));
@@ -252,6 +277,7 @@ private:
     std::atomic<std::size_t> next_job_{0};
     std::atomic<std::size_t> active_hashers_{0};
     std::atomic<std::uint64_t> bytes_hashed_{0};
+    std::atomic<std::int64_t> size_difference_{0};
     std::atomic<bool> stopping_{false};
 };
 
@@ -274,33 +300,61 @@ std::expected<void, IoError> hash_files(
     IProgressSink& progress,
     const std::function<bool(HashResult&&)>& on_result)
 {
+    // The total to hash, by bytes; 0 (unknown) when the caller gave no sizes.
+    std::uint64_t expected_bytes = 0;
+    for (const auto& job : jobs) {
+        expected_bytes += job.size;
+    }
+
     Pipeline pipeline(files, jobs, options, cancel);
     pipeline.start();
 
     std::uint64_t items_done = 0;
+    const auto report = [&] {
+        const auto done = pipeline.bytes_hashed();
+        std::uint64_t total = 0;
+        if (expected_bytes > 0) {
+            // The expected sizes corrected by the files already finished; never
+            // below what was hashed (a file may have grown since the scan).
+            const auto corrected = static_cast<std::int64_t>(expected_bytes) + pipeline.size_difference();
+            total = std::max<std::uint64_t>(done, static_cast<std::uint64_t>(std::max<std::int64_t>(0, corrected)));
+        }
+        progress.on_progress({done, total, items_done, jobs.size(), ""});
+    };
+
+    constexpr auto report_interval = std::chrono::milliseconds(200);
     auto last_report = std::chrono::steady_clock::now();
     // Once on_result has said stop, it gets no further results: files already
     // hashed and waiting in the queue are drained, not delivered. (After a
     // cancel they are still delivered: they are valid and resume can use them.)
     bool consumer_stopped = false;
-    while (auto result = pipeline.results().pop()) {
-        const bool cancelled_file =
-            result->error && result->error->kind == IoErrorKind::Cancelled;
-        if (!cancelled_file && !consumer_stopped) {
-            ++items_done;
-            if (!on_result(std::move(*result))) {
-                consumer_stopped = true;
-                pipeline.stop();
+    for (;;) {
+        // Waits for the next finished file, but not longer than a report
+        // interval: a large file takes minutes, and its bytes should show.
+        bool timed_out = false;
+        auto result = pipeline.results().pop_for(report_interval, timed_out);
+        if (!result && !timed_out) {
+            break; // every hash thread has finished and the queue is empty
+        }
+        if (result) {
+            const bool cancelled_file =
+                result->error && result->error->kind == IoErrorKind::Cancelled;
+            if (!cancelled_file && !consumer_stopped) {
+                ++items_done;
+                if (!on_result(std::move(*result))) {
+                    consumer_stopped = true;
+                    pipeline.stop();
+                }
             }
         }
         const auto now = std::chrono::steady_clock::now();
-        if (now - last_report > std::chrono::milliseconds(200)) {
-            progress.on_progress({pipeline.bytes_hashed(), 0, items_done, jobs.size(), ""});
+        if (now - last_report >= report_interval) {
+            report();
             last_report = now;
         }
     }
     pipeline.join();
-    progress.on_progress({pipeline.bytes_hashed(), 0, items_done, jobs.size(), ""});
+    report();
 
     if (pipeline.stopping()) {
         return std::unexpected(IoError{IoErrorKind::Cancelled, 0, "hashing stopped"});

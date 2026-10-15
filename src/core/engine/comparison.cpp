@@ -253,7 +253,10 @@ ComparisonResult compare_with_manifest(
     std::vector<HashJob> jobs;
     jobs.reserve(to_hash.size());
     for (std::size_t index = 0; index < to_hash.size(); ++index) {
-        jobs.push_back({index, to_hash[index].second->native});
+        // The size just scanned, of the file about to be read, lets progress
+        // count bytes (share done, time left), as registration does.
+        const auto& scanned_file = *to_hash[index].second;
+        jobs.push_back({index, scanned_file.native, scanned_file.entry.size.value_or(0)});
     }
     HashPipelineOptions hash_options;
     hash_options.readers = default_reader_count(input.rotational);

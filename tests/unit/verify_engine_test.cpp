@@ -51,6 +51,37 @@ struct Registered : EngineFixture {
     }
 };
 
+class RecordingProgress final : public va::IProgressSink {
+public:
+    void on_progress(const va::Progress& progress) override { reports.push_back(progress); }
+    std::vector<va::Progress> reports;
+};
+
+// Verification counts bytes, as registration does: hashing reports the bytes
+// to read (the sizes just scanned), and the last report has read them all.
+void progress_counts_bytes()
+{
+    Registered fixture;
+    RecordingProgress progress;
+    va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    const auto outcome = va::verify_full(services, request, fixture.cancel, progress);
+    CHECK(outcome && outcome->result == "PASSED");
+    CHECK(!progress.reports.empty());
+    if (progress.reports.empty()) {
+        return;
+    }
+    const auto& last = progress.reports.back();
+    CHECK(last.items_total == 3 && last.items_done == 3);
+    CHECK(last.bytes_total == 12 + 20000 + 5);
+    CHECK(last.bytes_done == last.bytes_total);
+    for (const auto& report : progress.reports) {
+        CHECK(report.bytes_done <= report.bytes_total);
+    }
+}
+
 void unchanged_archive_passes()
 {
     Registered fixture;
@@ -351,6 +382,7 @@ void unreadable_filesystem_id_warns()
 void verify_engine_tests()
 {
     unchanged_archive_passes();
+    progress_counts_bytes();
     content_changes_fail();
     items_are_in_canonical_order();
     unreadable_files_fail_with_their_reason();

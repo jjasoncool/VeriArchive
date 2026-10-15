@@ -27,5 +27,6 @@ int main()
     local_time_tests();
     compare_archives_tests();
     vpd_tests();
+    progress_estimate_tests();
     return test_failures == 0 ? 0 : 1;
 }

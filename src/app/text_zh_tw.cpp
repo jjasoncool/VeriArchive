@@ -97,7 +97,7 @@ constexpr CatalogEntry entries[] = {
     {"unknown option {}", "未知的選項 {}"},
     {"option {} is not used by this command", "此指令不使用選項 {}"},
     {"scanning: {} entries", "掃描中：{} 個項目"},
-    {"hashing: {}/{} files, {} MiB", "計算雜湊中：{}/{} 個檔案，{} MiB"},
+    {"hashing: {}", "計算雜湊中：{}", Match::FormatOnly},
     {"comparing: {}/{} entries", "比較中：{}/{} 個項目"},
     // src/cli/repo_commands.cpp
     {"RepositoryRoot: {}", "儲存庫根目錄：{}"},
@@ -233,6 +233,24 @@ constexpr CatalogEntry entries[] = {
     {"Imported {} ({}) revision {} as a new archive.",
         "已匯入 {}（{}）版次 {}，並建立為新的封存。"},
     {"Imported {} ({}) revision {}.", "已匯入 {}（{}）版次 {}。"},
+    // src/app/progress_estimate.cpp: the progress of hashing, after "hashing: "
+    // (CLI) or "Hashing: " (GUI), e.g.
+    // "計算雜湊中：2.16 TiB / 9.44 TiB（23%）・每秒 240 MiB・約剩 8～9 小時".
+    {"{} of {} ({}%)", "{} / {}（{}%）", Match::FormatOnly},
+    {"{} of {} files ({}%)", "{} / {} 個檔案（{}%）", Match::FormatOnly},
+    {"{}/s", "每秒 {}", Match::FormatOnly},
+    {"{} · {}", "{}・{}", Match::FormatOnly},
+    {"estimating time left", "剩餘時間估算中"},
+    {"less than a minute left", "剩不到 1 分鐘"},
+    {"less than {} minutes left", "剩不到 {} 分鐘", Match::FormatOnly},
+    {"about 1 minute left", "約剩 1 分鐘"},
+    {"about {} minutes left", "約剩 {} 分鐘", Match::FormatOnly},
+    {"about {}-{} minutes left", "約剩 {}～{} 分鐘", Match::FormatOnly},
+    {"about 1 hour left", "約剩 1 小時"},
+    {"about {} hours left", "約剩 {} 小時", Match::FormatOnly},
+    {"about {}-{} hours left", "約剩 {}～{} 小時", Match::FormatOnly},
+    {"about {} days left", "約剩 {} 天", Match::FormatOnly},
+    {"about {}-{} days left", "約剩 {}～{} 天", Match::FormatOnly},
 
     // Graphical interface
     // src/gui/gui_app.cpp
@@ -244,7 +262,7 @@ constexpr CatalogEntry entries[] = {
     {"Settings", "設定"},
     // src/gui/gui_support.cpp
     {"Scanning: {} entries", "掃描中：{} 個項目"},
-    {"Hashing: {} / {} files, {}", "計算雜湊中：{} / {} 個檔案，{}"},
+    {"Hashing: {}", "計算雜湊中：{}", Match::FormatOnly},
     {"Comparing: {} / {} entries", "比較中：{} / {} 個項目"},
     {"Starting...", "正在啟動……"},
     {"Unexpected error: {}", "未預期的錯誤：{}"},
