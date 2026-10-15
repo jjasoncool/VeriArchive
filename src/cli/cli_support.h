@@ -90,17 +90,29 @@ std::expected<Uuid, Failure> find_archive_uuid(ArchiveStore& store, const std::s
 // Operating system, host name and version for manifests and history.
 HostInfo host_info();
 
+// What a progress line counts: files read and hashed (register, verify,
+// relocate), or manifest entries compared (archive compare, which reads no
+// file content and so reports no bytes).
+enum class ProgressUnit { files, entries };
+
 // Progress on stderr, at most five updates a second; silent in --json mode.
 class CliProgress final : public IProgressSink {
 public:
-    explicit CliProgress(const Arguments& arguments) : quiet_(arguments.json), text_(arguments.text) {}
+    explicit CliProgress(const Arguments& arguments, ProgressUnit unit = ProgressUnit::files)
+        : quiet_(arguments.json), text_(arguments.text), unit_(unit)
+    {
+    }
     ~CliProgress() override { finish(); }
     void on_progress(const Progress& progress) override;
+    // Shows a message for a step that reports no progress of its own, such as
+    // loading manifests; the next report replaces it.
+    void show(const std::string& message);
     void finish();
 
 private:
     bool quiet_;
     app::Text text_;
+    ProgressUnit unit_;
     bool shown_ = false;
     std::chrono::steady_clock::time_point last_{};
 };

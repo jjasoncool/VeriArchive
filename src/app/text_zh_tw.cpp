@@ -24,6 +24,11 @@ constexpr CatalogEntry entries[] = {
     {"OVERDUE", "逾期"},
     {"REGISTERED", "已註冊"},
     {"RETIRED", "已停用"},
+    // Comparison results (CLI and GUI); the result line keeps the mode word:
+    // "比較結果：不同", as verification's "完整驗證 通過".
+    {"IDENTICAL", "相同"},
+    {"IDENTICAL_WITH_WARNINGS", "相同（有警告）"},
+    {"DIFFERENT", "不同"},
 
     // Item statuses (HANDOFF §A6).
     {"Verified", "已驗證"},
@@ -67,6 +72,7 @@ constexpr CatalogEntry entries[] = {
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
+        "  archive compare <uuid> <uuid>\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n",
@@ -79,6 +85,7 @@ constexpr CatalogEntry entries[] = {
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
+        "  archive compare <uuid> <uuid>\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n"},
@@ -91,6 +98,7 @@ constexpr CatalogEntry entries[] = {
     {"option {} is not used by this command", "此指令不使用選項 {}"},
     {"scanning: {} entries", "掃描中：{} 個項目"},
     {"hashing: {}/{} files, {} MiB", "計算雜湊中：{}/{} 個檔案，{} MiB"},
+    {"comparing: {}/{} entries", "比較中：{}/{} 個項目"},
     // src/cli/repo_commands.cpp
     {"RepositoryRoot: {}", "儲存庫根目錄：{}"},
     {"repository_uuid: {}", "repository_uuid：{}"},
@@ -195,9 +203,18 @@ constexpr CatalogEntry entries[] = {
     {"several archives start with {}", "有多個封存以 {} 開頭"},
     {"no archive {}", "找不到封存 {}"},
     {"usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
-        "[--io hdd|ssd]",
+        "[--io hdd|ssd] | compare <uuid> <uuid>",
         "用法：archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
-        "[--io hdd|ssd]"},
+        "[--io hdd|ssd] | compare <uuid> <uuid>"},
+    // archive compare: A is the reference archive, B the copy compared with it.
+    {"COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", "比較結果：{}  {}（{}）r{}  與  {}（{}）r{}"},
+    {"A: {}, registered {}, {} entries", "A：{}，註冊於 {}，共 {} 個項目"},
+    {"B: {}, registered {}, {} entries", "B：{}，註冊於 {}，共 {} 個項目"},
+    {"same: {}", "相同：{}"},
+    {"This compares what each registration read. A FULL verify of each archive proves that its "
+        "carrier still holds that content.",
+        "此比較依據各封存註冊時讀取的內容。對各封存進行完整驗證，才能證明其載體仍保有這些內容。"},
+    {"comparing: reading the manifests", "比較中：正在讀取清單檔"},
     {"usage: history <uuid>", "用法：history <uuid>"},
     // src/cli/export_commands.cpp
     {"usage: export-sha256sums <uuid> --out FILE", "用法：export-sha256sums <uuid> --out FILE"},
@@ -222,11 +239,13 @@ constexpr CatalogEntry entries[] = {
     {"Archive List", "封存列表"},
     {"Register Archive", "註冊封存"},
     {"Verify Archive", "驗證封存"},
+    {"Compare Archives", "比較封存"},
     {"Verification History", "驗證歷程"},
     {"Settings", "設定"},
     // src/gui/gui_support.cpp
     {"Scanning: {} entries", "掃描中：{} 個項目"},
     {"Hashing: {} / {} files, {}", "計算雜湊中：{} / {} 個檔案，{}"},
+    {"Comparing: {} / {} entries", "比較中：{} / {} 個項目"},
     {"Starting...", "正在啟動……"},
     {"Unexpected error: {}", "未預期的錯誤：{}"},
     // src/gui/archive_list_view.cpp
@@ -356,6 +375,33 @@ constexpr CatalogEntry entries[] = {
         "嚴格中繼資料（時間戳記與屬性差異會使執行失敗）"},
     {"Verify (FULL)", "完整驗證"},
     {"Resume interrupted run", "繼續中斷的執行"},
+    // src/gui/compare_view.cpp
+    {"ARCHIVES {}", "比較結果：{}"},
+    {"Every entry of A is in B with the same type and content, and B has no other entries.",
+        "A 的每個項目都以相同的類型與內容存在於 B，且 B 沒有其他項目。"},
+    {"No entry differs, but the entries listed below are not proven the same.",
+        "沒有項目不同，但下列項目無法證明相同。"},
+    {"A (reference): {} ({}) revision {}, registered {}", "A（參考）：{}（{}）版次 {}，註冊於 {}"},
+    {"B (copy): {} ({}) revision {}, registered {}", "B（副本）：{}（{}）版次 {}，註冊於 {}"},
+    {"Entries: {} in A, {} in B, {} the same", "項目：A 有 {} 個，B 有 {} 個，其中 {} 個相同"},
+    {"Differences: {}", "差異：{}"},
+    {"... and {} more differences, not listed here", "……另有 {} 個差異未列於此"},
+    {"This compares what each registration read. FULL verification of each archive proves that "
+        "its media still holds it.",
+        "此比較依據各封存註冊時讀取的內容。對各封存進行完整驗證，才能證明其媒體仍保有這些內容。"},
+    {"Not compared: {}", "未能比較：{}"},
+    {"Choose the two archives to compare.", "請選擇要比較的兩個封存。"},
+    {"A and B are the same archive; choose the copy to check as B.",
+        "A 與 B 是同一個封存；請將要檢查的副本選為 B。"},
+    {"Comparing the manifests of A and B ...", "正在比較 A 與 B 的清單檔……"},
+    {"Comparison checks that two registered archives hold the same entries with the same "
+        "content, using their manifests in the repository; no media is read. Choose the reference "
+        "archive as A and the copy to check as B.",
+        "比較會使用儲存庫中的清單檔，檢查兩個已註冊的封存是否有相同的項目與內容；不會讀取媒體。"
+        "請將參考封存選為 A，要檢查的副本選為 B。"},
+    {"Reference archive (A):", "參考封存（A）："},
+    {"Copy to check (B):", "要檢查的副本（B）："},
+    {"Compare", "比較"},
 
     // Engine and repository messages
     // src/core/engine/register_engine.cpp
@@ -499,6 +545,24 @@ constexpr CatalogEntry entries[] = {
     {"readable now, unreadable at registration", "現在可讀取，註冊時無法讀取"},
     {"size differs", "大小不同"},
     {"content differs", "內容不同"},
+    // src/core/engine/compare_archives.cpp: its failures, and the item details
+    // that verification does not use (it shares the others above). Each
+    // "unreadable in A (<reason>)" is an entry of its own: a template would
+    // carry the reason over in English.
+    {"archive {} has no revision yet", "封存 {} 尚無版次"},
+    {"cannot read the manifest of {} revision {}: {}", "無法讀取 {} 版次 {} 的清單檔：{}",
+        Match::Cause},
+    {"the comparison was cancelled", "比較已取消"},
+    {"size {} -> {}", "大小 {} → {}"},
+    {"unreadable in A (permission)", "A 註冊時無法讀取（權限不足）"},
+    {"unreadable in A (media)", "A 註冊時無法讀取（媒體錯誤）"},
+    {"unreadable in A (other)", "A 註冊時無法讀取（其他錯誤）"},
+    {"unreadable in B (permission)", "B 註冊時無法讀取（權限不足）"},
+    {"unreadable in B (media)", "B 註冊時無法讀取（媒體錯誤）"},
+    {"unreadable in B (other)", "B 註冊時無法讀取（其他錯誤）"},
+    {"unreadable in both archives", "兩個封存註冊時都無法讀取"},
+    {"inside a directory unreadable in A", "位於 A 註冊時無法讀取的資料夾內"},
+    {"inside a directory unreadable in B", "位於 B 註冊時無法讀取的資料夾內"},
     // src/core/engine/relocate_engine.cpp
     {"a retired archive takes no new revisions (decision 0003)",
         "已停用的封存不再接受新的版次（決策紀錄 0003）"},

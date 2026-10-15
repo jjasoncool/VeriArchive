@@ -179,7 +179,11 @@ void CliProgress::on_progress(const Progress& progress)
     }
     last_ = now;
     shown_ = true;
-    if (progress.items_total == 0) {
+    if (unit_ == ProgressUnit::entries) {
+        std::cerr << '\r'
+                  << text_.format("comparing: {}/{} entries", progress.items_done, progress.items_total)
+                  << std::string(20, ' ');
+    } else if (progress.items_total == 0) {
         std::cerr << '\r' << text_.format("scanning: {} entries", progress.items_done)
                   << std::string(20, ' ');
     } else {
@@ -189,6 +193,17 @@ void CliProgress::on_progress(const Progress& progress)
                   << std::string(10, ' ');
     }
     std::cerr.flush();
+}
+
+void CliProgress::show(const std::string& message)
+{
+    if (quiet_) {
+        return;
+    }
+    std::cerr << '\r' << message << std::string(20, ' ');
+    std::cerr.flush();
+    shown_ = true;
+    last_ = {}; // long ago: the next report is shown at once, not held back by the rate limit
 }
 
 void CliProgress::finish()

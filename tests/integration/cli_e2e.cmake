@@ -100,6 +100,54 @@ if(NOT sum_lines EQUAL 4)
     message(FATAL_ERROR "expected 4 sha256sum lines, got ${sum_lines}")
 endif()
 
+# A backup: a copy of the tree registered as an archive of its own. Another
+# root on the same volume is allowed while the roots do not overlap (decision
+# 0001). Comparing the two archives reads only their manifests (decision 0020).
+set(COPY "${WORK}/copy")
+file(COPY "${ROOT}/" DESTINATION "${COPY}")
+run_cli("0" register "${COPY}" --json)
+string(JSON copy_uuid GET "${last_output}" archive_uuid)
+string(SUBSTRING "${copy_uuid}" 0 8 copy_prefix)
+run_cli("0" --lang en archive compare "${archive_uuid}" "${copy_uuid}")
+if(NOT last_output MATCHES "^COMPARE IDENTICAL  [^\n]*\\(${archive_uuid}\\) r1  vs  [^\n]*\\(${copy_uuid}\\) r1\n")
+    message(FATAL_ERROR "compare of a copy is not IDENTICAL:\n${last_output}")
+endif()
+run_cli("0" archive compare "${archive_uuid}" "${copy_uuid}" --json)
+string(JSON result GET "${last_output}" result)
+string(JSON same GET "${last_output}" same)
+string(JSON difference_count LENGTH "${last_output}" differences)
+if(NOT result STREQUAL "IDENTICAL" OR NOT same EQUAL 5 OR NOT difference_count EQUAL 0)
+    message(FATAL_ERROR "compare --json of a copy:\n${last_output}")
+endif()
+
+# One file changed, one deleted, one added in the copy and registered again:
+# the comparison lists each, and DIFFERENT exits with 3.
+file(WRITE "${COPY}/readme.txt" "hello, world\n")
+file(REMOVE "${COPY}/中文/資料.txt")
+file(WRITE "${COPY}/extra.txt" "extra\n")
+run_cli("0" register "${COPY}" --new-revision)
+# Both archives named by their first 8 characters, like `archive show`.
+run_cli("3" archive compare "${archive_prefix}" "${copy_prefix}" --json)
+string(JSON result GET "${last_output}" result)
+string(JSON revision_b GET "${last_output}" archive_b revision)
+string(JSON modified GET "${last_output}" counts Modified)
+string(JSON missing GET "${last_output}" counts Missing)
+string(JSON added GET "${last_output}" counts New)
+string(JSON difference_count LENGTH "${last_output}" differences)
+if(NOT result STREQUAL "DIFFERENT" OR NOT revision_b EQUAL 2 OR NOT modified EQUAL 1 OR NOT missing EQUAL 1
+        OR NOT added EQUAL 1 OR NOT difference_count EQUAL 3)
+    message(FATAL_ERROR "compare --json after changes in the copy:\n${last_output}")
+endif()
+run_cli("3" --lang en archive compare "${archive_prefix}" "${copy_prefix}")
+if(NOT last_output MATCHES "^COMPARE DIFFERENT  "
+        OR NOT last_output MATCHES "\n  Modified  readme\\.txt  \\(size [0-9]+ -> [0-9]+\\)\n"
+        OR NOT last_output MATCHES "\n  Missing  中文/資料\\.txt\n"
+        OR NOT last_output MATCHES "\n  New  extra\\.txt\n")
+    message(FATAL_ERROR "compare text after changes in the copy:\n${last_output}")
+endif()
+# Two archives are needed.
+run_cli("10" archive compare "${archive_uuid}")
+
 # Damage: one changed byte, one deleted file, one new file -> FAILED (exit 3).
 file(WRITE "${ROOT}/readme.txt" "hellp\n")
 file(REMOVE "${ROOT}/日本語/ファイル.txt")

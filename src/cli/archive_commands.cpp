@@ -1,5 +1,5 @@
-// `archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>`
-// and `history <uuid>`.
+// `archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>
+// | compare <uuid> <uuid>` and `history <uuid>`.
 // Archives are always shown with their last FULL verify and last verify of any
 // mode, with dates and OVERDUE flags, never a bare "integrity status" (R-21).
 #include "cli/commands.h"
@@ -8,6 +8,7 @@
 
 #include "common/utf8.h"
 #include "core/engine/archive_status.h"
+#include "core/engine/compare_archives.h"
 #include "core/engine/relocate_engine.h"
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
@@ -250,6 +251,129 @@ int retire(const Arguments& arguments, Opened& opened)
     return exit_code::passed;
 }
 
+// Shown under every comparison in text output; translated there.
+constexpr const char* compare_scope =
+    "This compares what each registration read. A FULL verify of each archive proves that its carrier "
+    "still holds that content.";
+
+int comparison_code(const std::string& result)
+{
+    if (result == "IDENTICAL") {
+        return exit_code::passed;
+    }
+    if (result == "IDENTICAL_WITH_WARNINGS") {
+        return exit_code::passed_with_warnings;
+    }
+    return exit_code::failed; // DIFFERENT
+}
+
+nlohmann::json compared_archive_json(const Uuid& uuid, const std::string& label, std::uint32_t revision,
+    const std::string& registered)
+{
+    return {{"uuid", uuid}, {"label", label}, {"revision", revision}, {"registered", registered}};
+}
+
+nlohmann::json comparison_json(const ArchiveComparison& comparison)
+{
+    auto differences = nlohmann::json::array();
+    for (const auto& difference : comparison.differences) {
+        differences.push_back({{"p", difference.path}, {"stream", difference.stream},
+            {"status", difference.status}, {"detail", difference.detail}});
+    }
+    return {
+        {"archive_a", compared_archive_json(comparison.archive_a, comparison.label_a, comparison.revision_a,
+                          comparison.registered_a)},
+        {"archive_b", compared_archive_json(comparison.archive_b, comparison.label_b, comparison.revision_b,
+                          comparison.registered_b)},
+        {"result", comparison.result},
+        {"same", comparison.same},
+        {"entries_a", comparison.entries_a},
+        {"entries_b", comparison.entries_b},
+        {"counts", comparison.counts},
+        {"differences", std::move(differences)},
+    };
+}
+
+void print_comparison(const app::Text& text, const ArchiveComparison& comparison)
+{
+    // Like verification's result line (R-21), the first line says what was done
+    // and its result in every language.
+    std::cout << text.format("COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", text(comparison.result),
+                     comparison.label_a, comparison.archive_a, comparison.revision_a, comparison.label_b,
+                     comparison.archive_b, comparison.revision_b)
+              // Details such as "unreadable in A" name the archives A and B.
+              << "\n  "
+              << text.format("A: {}, registered {}, {} entries", comparison.label_a,
+                     app::local_time(comparison.registered_a, text), comparison.entries_a)
+              << "\n  "
+              << text.format("B: {}, registered {}, {} entries", comparison.label_b,
+                     app::local_time(comparison.registered_b, text), comparison.entries_b)
+              << "\n  " << text.format("same: {}", comparison.same);
+    for (const auto& [status, count] : comparison.counts) {
+        std::cout << "  " << text(status) << " " << count;
+    }
+    std::cout << '\n';
+    for (const auto& difference : comparison.differences) {
+        // An alternate data stream (V1.1) is written "file:stream", as Windows writes it.
+        std::cout << "  " << text(difference.status) << "  " << difference.path
+                  << (difference.stream.empty() ? "" : ":" + difference.stream)
+                  << (difference.detail.empty() ? "" : "  " + text.parenthesized(text(difference.detail)))
+                  << '\n';
+    }
+    std::cout << "  " << text(compare_scope) << '\n';
+}
+
+// `archive compare <uuid> <uuid>`: whether two archives hold the same entries,
+// from their manifests in the repository; no media is read (decision 0020).
+// Each archive is named like in `archive show`: a full uuid or a unique prefix
+// of at least 8 characters.
+int compare(const Arguments& arguments)
+{
+    auto session = open_session(arguments, false);
+    if (!session) {
+        return report_failure(arguments, session.error());
+    }
+    auto store = ArchiveStore::open(session->context.repo);
+    if (!store) {
+        return report_failure(arguments, {exit_code::repository, store.error().message});
+    }
+    const auto archive_a = find_archive_uuid(*store, arguments.words[2]);
+    if (!archive_a) {
+        return report_failure(arguments, archive_a.error());
+    }
+    const auto archive_b = find_archive_uuid(*store, arguments.words[3]);
+    if (!archive_b) {
+        return report_failure(arguments, archive_b.error());
+    }
+
+    const auto repository_files = platform::make_file_system_access();
+    CancelToken cancel;
+    platform::cancel_on_interrupt(cancel);
+    CliProgress progress(arguments, ProgressUnit::entries);
+    // Loading the manifests comes first and reports no progress; for large
+    // archives it takes seconds, so say what is happening.
+    progress.show(arguments.text("comparing: reading the manifests"));
+    const auto comparison = compare_archives(*store, *repository_files, session->context.repo, *archive_a,
+        *archive_b, cancel, progress);
+    progress.finish();
+    if (!comparison) {
+        const auto& failure = comparison.error();
+        if (failure.failure_class == "Cancelled") {
+            return report_failure(arguments, {exit_code::incomplete, failure.message});
+        }
+        // Every other failure means a manifest could not be used (bytes that
+        // are not the recorded ones, no revision yet). As in `export`, the
+        // failure class leads the message so the reader sees which check failed.
+        return report_failure(arguments, {exit_code::failed, failure.failure_class + ": " + failure.message});
+    }
+    if (arguments.json) {
+        print_json(comparison_json(*comparison));
+    } else {
+        print_comparison(arguments.text, *comparison);
+    }
+    return comparison_code(comparison->result);
+}
+
 } // namespace
 
 // Decision 0004: accept a copy (or a new enclosure) as the archive's carrier
@@ -324,9 +448,15 @@ int archive_command(const Arguments& arguments)
     const bool list_command = arguments.words.size() == 2 && arguments.words[1] == "list";
     const bool uuid_command = arguments.words.size() == 3 &&
                               (arguments.words[1] == "show" || arguments.words[1] == "retire");
-    if (!list_command && !uuid_command && !relocate_command) {
+    const bool compare_command = arguments.words.size() == 4 && arguments.words[1] == "compare";
+    if (!list_command && !uuid_command && !relocate_command && !compare_command) {
         return report_failure(arguments, {exit_code::usage,
-            "usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--io hdd|ssd]"});
+            "usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--io hdd|ssd] "
+            "| compare <uuid> <uuid>"});
+    }
+    // Compare needs no verification status of every archive, only the two manifests.
+    if (compare_command) {
+        return compare(arguments);
     }
     auto opened = open_statuses(arguments);
     if (!opened) {

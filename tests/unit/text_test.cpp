@@ -277,6 +277,43 @@ void translation_tests()
           "無法列出封存 " + uuid + " 的清單檔：FindFirstFileExW 失敗（Win32 錯誤 5）");
     CHECK(chinese.format("skipped: {}", chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest")) ==
           "已略過：無法讀取清單檔 " + uuid + "/r0001.vam：清單檔是空的");
+
+    // Comparing archives (CLI `archive compare`, GUI Compare Archives). The
+    // result line keeps its mode word in every language, as verification's does.
+    const std::string uuid_b = "94bbff52-39fa-458a-8831-9b30fb0cadf1";
+    CHECK(chinese.format("COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", chinese("DIFFERENT"), "ARCH-0001", uuid, 1,
+              "ARCH-0002", uuid_b, 2) ==
+          "比較結果：不同  ARCH-0001（" + uuid + "）r1  與  ARCH-0002（" + uuid_b + "）r2");
+    CHECK(english.format("COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", english("IDENTICAL"), "ARCH-0001", uuid, 1,
+              "ARCH-0002", uuid_b, 1) ==
+          "COMPARE IDENTICAL  ARCH-0001 (" + uuid + ") r1  vs  ARCH-0002 (" + uuid_b + ") r1");
+    CHECK(chinese.format("ARCHIVES {}", chinese("IDENTICAL")) == "比較結果：相同");
+    CHECK(chinese.format("ARCHIVES {}", chinese("IDENTICAL_WITH_WARNINGS")) == "比較結果：相同（有警告）");
+    CHECK(chinese.format("same: {}", 4) + "  " + chinese("Missing") + " 1" == "相同：4  遺失 1");
+    // Item details: sizes are values; the reason an entry was unreadable is
+    // translated, for every reason the scanner records.
+    CHECK(chinese("size 7 -> 14") == "大小 7 → 14");
+    CHECK(chinese.parenthesized(chinese("size 7 -> 14")) == "（大小 7 → 14）");
+    for (const std::string reason : {"permission", "media", "other"}) {
+        for (const std::string side : {"A", "B"}) {
+            CHECK(chinese("unreadable in " + side + " (" + reason + ")") ==
+                  side + " 註冊時無法讀取（" + chinese(reason) + "）");
+        }
+    }
+    CHECK(chinese("inside a directory unreadable in B") == "位於 B 註冊時無法讀取的資料夾內");
+    CHECK(chinese("unreadable in both archives") == "兩個封存註冊時都無法讀取");
+    // Failures: the CLI puts the failure class first, the GUI shows the message.
+    CHECK(chinese("error: ManifestHashMismatch: cannot read the manifest of ARCH-0002 revision 2: "
+                  "manifest body does not match its header (ManifestHashMismatch)") ==
+          "錯誤：清單檔雜湊不符：無法讀取 ARCH-0002 版次 2 的清單檔：清單檔主體與其標頭不符（清單檔雜湊不符）");
+    CHECK(chinese("error: RepositoryError: archive " + uuid + " has no revision yet") ==
+          "錯誤：儲存庫錯誤：封存 " + uuid + " 尚無版次");
+    CHECK(chinese("error: the comparison was cancelled") == "錯誤：比較已取消");
+    CHECK(chinese.format("Not compared: {}",
+              chinese("cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded")) ==
+          "未能比較：無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 沒有紀錄");
+    CHECK(english("cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded") ==
+          "cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded");
     // Wording fixes (findings 27, 29, 30, 31, 32).
     CHECK(chinese("warning: identity: retired") == "警告：媒體身分：封存已停用");
     CHECK(chinese("RETIRED") == "已停用");
