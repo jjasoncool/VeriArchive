@@ -411,8 +411,11 @@ struct AppContext {                 // built once in the composition root, passe
 - Keys: `repository` (path), `trusted_keys`, `policy` (`full_verify_max_age_days`, `any_verify_max_age_days`, `strict_metadata`), `io` (`rotational_override` by serial), `allow_network_repository` (bool).
 
 > Amended by `docs/decisions/0017-interface-language.md`: adds `language` (`"en"`, `"zh-TW"`; absent = follow the system).
+> Amended by `docs/decisions/0019-relative-repository-pin.md`: a relative `repository` is relative to the folder of the config file that holds it.
 
 ### B7.4 RepositoryRoot resolution (authoritative, R-83)
+
+> Amended by `docs/decisions/0019-relative-repository-pin.md`: step 2 resolves a relative pin against the folder of the config file that holds it; step 3 chooses the config file first and writes a RepositoryRoot inside that file's folder relative to it, with forward slashes (a portable first run pins `"data"`), any other RepositoryRoot absolute as before; pins already written are never rewritten. R-84 is unchanged for `--repository` and `VERIARCHIVE_REPOSITORY`.
 
 ```text
 1. if --repository <path> or VERIARCHIVE_REPOSITORY is set:
@@ -765,7 +768,7 @@ V1 = M1–M5. A milestone is done only when its acceptance tests pass on **both*
 
 Build: all targets compile under both presets; `repo init` / `repo info` work.
 Acceptance:
-- Repository-resolution matrix (R-83) as parameterised tests: explicit path; pinned path; pinned-but-unavailable → exit 11, no fallback; first run with writable exe dir → `<exe>/data`; unwritable exe dir → `<home>/VeriArchive`; launched from a different cwd; network-filesystem refusal (filesystem-type probe injected).
+- Repository-resolution matrix (R-83) as parameterised tests: explicit path; pinned path; pinned-but-unavailable → exit 11, no fallback; first run with writable exe dir → `<exe>/data`; unwritable exe dir → `<home>/VeriArchive`; launched from a different cwd; network-filesystem refusal (filesystem-type probe injected); relative pins (decision 0019): a portable first run pins `"data"`, a copied program folder opens its own repository, a relative pin in the user config file follows that file, an absolute pin still works and is not rewritten.
 - `repository.json` created; `schema_version` = 1; every §B8 table exists.
 - Canonical JSON writer golden tests (escaping, key order, integers, omitted optionals).
 - `ArchivePath` round-trip tests for R-40/R-41 on both platforms.

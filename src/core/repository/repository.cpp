@@ -155,6 +155,32 @@ std::expected<void, IoError> initialise_database(const RepositoryLayout& layout)
     return database->execute("COMMIT;");
 }
 
+// The value written to config.repository when a repository is pinned. A
+// repository inside the config file's folder is stored relative to that
+// folder ("data"), so a portable folder that is moved or copied keeps finding
+// its own repository (decision 0019). Anything else stays absolute.
+// The check is lexical: a path spelled differently (another letter case on
+// Windows, a symbolic link) counts as outside, which keeps the old, absolute
+// pin rather than guessing.
+std::filesystem::path pin_value(const std::filesystem::path& root,
+    const std::filesystem::path& config_folder)
+{
+    const auto normal_root = root.lexically_normal();
+    const auto relative = normal_root.lexically_relative(config_folder.lexically_normal());
+    // Empty: nothing in common (another drive letter). ".": the folder itself.
+    if (relative.empty() || relative == ".") {
+        return normal_root;
+    }
+    for (const auto& part : relative) {
+        if (part == "..") {
+            return normal_root; // outside the folder
+        }
+    }
+    // Forward slashes ("repositories/main"), which Windows and Linux both read,
+    // so one portable folder can serve the builds for both.
+    return std::filesystem::path(relative.generic_u8string());
+}
+
 std::expected<bool, IoError> table_exists(
     const repository_detail::SqliteDatabase& database,
     const char* table)
@@ -204,7 +230,12 @@ std::expected<AppContext, IoError> resolve_repository(
         context.repo.root = *options.environment_repository;
         context.repo_selected_by = "explicit";
     } else if (context.config.repository && !context.config.repository->empty()) {
-        context.repo.root = *context.config.repository;
+        // A relative pin belongs to the config file that holds it: it is
+        // resolved against that file's folder (decision 0019), never against
+        // the current directory (R-84). context.config keeps the stored value,
+        // so later writes of the config do not turn it into an absolute path.
+        const auto& pin = *context.config.repository;
+        context.repo.root = pin.is_relative() ? context.config_file.parent_path() / pin : pin;
         context.repo_selected_by = "pinned";
     } else {
         if (!options.initialise) {
@@ -224,6 +255,8 @@ std::expected<AppContext, IoError> resolve_repository(
         }
     }
 
+    // A relative --repository or VERIARCHIVE_REPOSITORY is taken from the
+    // executable's folder, never from the current directory (R-84).
     if (context.repo.root.is_relative()) {
         context.repo.root = options.executable_dir / context.repo.root;
     }
@@ -251,11 +284,12 @@ std::expected<AppContext, IoError> resolve_repository(
     }
 
     // Pin the new repository, unless an explicit init would replace an existing pin.
+    // The config file is chosen first: the pin is written relative to its folder.
     if (first_run || (explicit_init && !context.config.repository)) {
-        context.config.repository = context.repo.root;
         if (!options.explicit_config && probes.writable(options.executable_dir)) {
             context.config_file = options.executable_dir / "config.json";
         }
+        context.config.repository = pin_value(context.repo.root, context.config_file.parent_path());
     }
     return context;
 }

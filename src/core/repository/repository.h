@@ -27,6 +27,13 @@ struct RepositoryProbes {
 // it exists (portable install), else the user config directory's config.json.
 std::filesystem::path config_file_path(const RepositoryOptions& options);
 
+// R-83 with decision 0019. A relative --repository or VERIARCHIVE_REPOSITORY is
+// taken from executable_dir; a relative config.repository from the folder of
+// the config file that holds it; neither ever from the current directory (R-84).
+// context.repo.root is always the resolved path, while context.config.repository
+// keeps the value as stored. A new pin inside the config file's folder is
+// stored relative to it ("data" in a portable install), so the program folder
+// can be moved or copied; any other pin is stored as an absolute path.
 std::expected<AppContext, IoError> resolve_repository(
     const RepositoryOptions& options,
     const RepositoryProbes& probes);

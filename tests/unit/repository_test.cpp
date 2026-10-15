@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "core/repository/repository.h"
+#include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/write_file.h"
 #include "platform/file_writer.h"
@@ -53,6 +54,27 @@ void write_repository_metadata(const std::filesystem::path& root)
     std::ofstream output(root / "repository.json");
     output << "{\"format\":\"veriarchive-repo\",\"version\":1,"
               "\"repository_uuid\":\"3f2b8c1e-0d4a-4c6e-9b7a-1e2d3c4b5a69\",\"created\":\"now\"}\n";
+}
+
+// config.repository exactly as it is stored in the file ("" when absent).
+std::string stored_pin(const std::filesystem::path& config_file)
+{
+    std::ifstream input(config_file, std::ios::binary);
+    const auto document = nlohmann::json::parse(input, nullptr, false);
+    if (!document.is_object() || !document.contains("repository") ||
+        !document["repository"].is_string()) {
+        return {};
+    }
+    return document["repository"].get<std::string>();
+}
+
+void write_config_pin(const std::filesystem::path& config_file, const std::filesystem::path& pin)
+{
+    va::Config config;
+    config.repository = pin;
+    std::filesystem::create_directories(config_file.parent_path());
+    CHECK(va::write_file_atomically(
+        *va::platform::make_file_writer(), config_file, va::config_to_json(config)));
 }
 
 void first_run_uses_executable_directory()
@@ -187,6 +209,9 @@ void explicit_init_creates_and_pins_repository()
     }
     CHECK(va::initialise_repository(*context, *va::platform::make_file_writer()));
     CHECK(std::filesystem::exists(temporary.path() / "new-repository" / "repository.json"));
+    // Outside the folder of the config file (<exe>/config.json): stored absolute.
+    CHECK(stored_pin(context->config_file) ==
+          va::path_to_utf8((temporary.path() / "new-repository").lexically_normal()));
 
     options.explicit_repository.reset();
     options.initialise = false;
@@ -287,6 +312,153 @@ void unwritable_executable_directory_falls_back_to_home()
     if (!context) { return; }
     CHECK(context->repo.root == expected);
     CHECK(context->repo_selected_by == "first-run:home");
+    // The home folder is not inside the user config folder: the pin is absolute.
+    CHECK(context->config_file == options.user_config_dir / "config.json");
+    CHECK(context->config.repository == expected.lexically_normal());
+}
+
+// Decision 0019: the first run of a portable install pins "data", relative to
+// <exe>/config.json, and later writes of the config keep it relative.
+void portable_first_run_pins_a_relative_path()
+{
+    TemporaryDirectory temporary("portable-pin");
+    auto options = make_options(temporary.path());
+    const auto writer = va::platform::make_file_writer();
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *writer));
+    if (!context) {
+        return;
+    }
+    CHECK(context->config_file == options.executable_dir / "config.json");
+    CHECK(stored_pin(context->config_file) == "data");
+
+    options.initialise = false;
+    auto reopened = va::resolve_repository(options, always_writable_local);
+    CHECK(reopened && va::open_repository(*reopened));
+    if (!reopened) {
+        return;
+    }
+    CHECK(reopened->repo_selected_by == "pinned");
+    // Settings and repo info show the resolved RepositoryRoot, not "data".
+    CHECK(reopened->repo.root == (options.executable_dir / "data").lexically_normal());
+    reopened->config.last_repository_uuid.clear(); // makes record_repository_uuid write
+    CHECK(va::record_repository_uuid(*reopened, *writer));
+    CHECK(stored_pin(reopened->config_file) == "data");
+}
+
+// Decision 0019: the whole program folder (program, config.json and data)
+// copied elsewhere uses the copied repository, even with the original gone.
+void copied_program_folder_uses_its_own_repository()
+{
+    TemporaryDirectory temporary("portable-copy");
+    auto options = make_options(temporary.path());
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    if (!context) {
+        return;
+    }
+    const auto copied = temporary.path() / "usb" / "VeriArchive";
+    std::filesystem::create_directories(copied.parent_path());
+    std::filesystem::copy(options.executable_dir, copied, std::filesystem::copy_options::recursive);
+    std::filesystem::remove_all(options.executable_dir); // as after a move
+
+    options.initialise = false;
+    options.executable_dir = copied;
+    auto moved = va::resolve_repository(options, always_writable_local);
+    CHECK(moved && va::open_repository(*moved));
+    if (!moved) {
+        return;
+    }
+    CHECK(moved->config_file == copied / "config.json");
+    CHECK(moved->repo.root == (copied / "data").lexically_normal());
+    CHECK(moved->repo_selected_by == "pinned");
+    CHECK(moved->repository_uuid == context->repository_uuid);
+}
+
+// Decision 0019: a relative pin in the user config file is taken from that
+// file's folder, not from the program folder and not from the current
+// directory (R-84). Both of those hold a decoy repository.
+void relative_pin_follows_its_config_file()
+{
+    TemporaryDirectory temporary("user-config-pin");
+    auto options = make_options(temporary.path());
+    options.initialise = false;
+    write_config_pin(options.user_config_dir / "config.json", "repo");
+    write_repository_metadata(options.user_config_dir / "repo");
+    write_repository_metadata(options.executable_dir / "repo");
+    write_repository_metadata(temporary.path() / "elsewhere" / "repo");
+
+    const auto original_directory = std::filesystem::current_path();
+    std::filesystem::current_path(temporary.path() / "elsewhere");
+    auto context = va::resolve_repository(options, always_writable_local);
+    std::filesystem::current_path(original_directory);
+
+    CHECK(context.has_value());
+    if (!context) {
+        return;
+    }
+    CHECK(context->config_file == options.user_config_dir / "config.json");
+    CHECK(context->repo.root == (options.user_config_dir / "repo").lexically_normal());
+    CHECK(context->repo_selected_by == "pinned");
+    CHECK(context->config.repository == std::filesystem::path("repo"));
+}
+
+// An absolute pin, written before decision 0019 or pointing outside the
+// config file's folder, works as before and is never rewritten.
+void absolute_pin_still_works()
+{
+    TemporaryDirectory temporary("absolute-pin");
+    auto options = make_options(temporary.path());
+    options.initialise = false;
+    const auto repository = (temporary.path() / "repositories" / "main").lexically_normal();
+    write_repository_metadata(repository);
+    // A portable config.json pinning a repository outside the program folder.
+    write_config_pin(options.executable_dir / "config.json", repository);
+
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context.has_value());
+    if (!context) {
+        return;
+    }
+    CHECK(context->repo.root == repository);
+    CHECK(context->repo_selected_by == "pinned");
+    // The uuid open_repository would read; differing from the config's (none),
+    // it makes record_repository_uuid write the config again.
+    context->repository_uuid = "3f2b8c1e-0d4a-4c6e-9b7a-1e2d3c4b5a69";
+    CHECK(va::record_repository_uuid(*context, *va::platform::make_file_writer()));
+    CHECK(stored_pin(context->config_file) == va::path_to_utf8(repository));
+}
+
+// `repo init --repository P` with P inside the --config file's folder pins P
+// relative to it, written with forward slashes on every system. The folder
+// itself does not count as inside: that pin stays absolute.
+void explicit_init_inside_config_folder_pins_a_relative_path()
+{
+    TemporaryDirectory temporary("explicit-relative");
+    auto options = make_options(temporary.path());
+    const auto settings = temporary.path() / "settings";
+    std::filesystem::create_directories(settings);
+    std::ofstream(settings / "config.json") << "{}\n";
+    options.explicit_config = settings / "config.json";
+    options.explicit_repository = settings / "repositories" / "main";
+
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    if (!context) {
+        return;
+    }
+    CHECK(stored_pin(settings / "config.json") == "repositories/main");
+
+    options.explicit_repository.reset();
+    options.initialise = false;
+    const auto pinned = va::resolve_repository(options, always_writable_local);
+    CHECK(pinned && pinned->repo.root == (settings / "repositories" / "main").lexically_normal());
+
+    std::ofstream(settings / "config.json") << "{}\n";
+    options.initialise = true;
+    options.explicit_repository = settings;
+    const auto at_folder = va::resolve_repository(options, always_writable_local);
+    CHECK(at_folder && at_folder->config.repository == settings.lexically_normal());
 }
 
 } // namespace
@@ -304,4 +476,9 @@ void repository_tests()
     relative_paths_ignore_working_directory();
     network_repository_is_rejected_by_default();
     unwritable_executable_directory_falls_back_to_home();
+    portable_first_run_pins_a_relative_path();
+    copied_program_folder_uses_its_own_repository();
+    relative_pin_follows_its_config_file();
+    absolute_pin_still_works();
+    explicit_init_inside_config_folder_pins_a_relative_path();
 }
