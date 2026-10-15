@@ -437,6 +437,49 @@ void a_pause_is_not_slow_work()
     CHECK(worst < 0.1);
 }
 
+// Reports on steps that come irregularly: a file far larger than the others
+// between them (decision 0022: the estimate counts at least the last three
+// steps however far apart they come). A step far later than the usual spacing
+// leaves no fewer than three steps to estimate from: the time left stays, and
+// stays right. Two kinds: two minute steps then one of six minutes, repeated;
+// and minute steps with one of nine minutes among them.
+void irregular_steps_keep_a_time_left()
+{
+    constexpr double speed = 150 * mb;
+    const auto total = static_cast<std::uint64_t>(speed * 40000);
+    std::vector<double> mixed;
+    for (int index = 0; index < 45; ++index) {
+        mixed.push_back(index % 3 == 2 ? 360.0 : 60.0);
+    }
+    std::vector<double> one_long(30, 60.0);
+    one_long.push_back(540);
+    one_long.insert(one_long.end(), 5, 60.0);
+    for (const auto& gaps : {mixed, one_long}) {
+        ProgressEstimate estimate;  // on steps
+        estimate.update({0, total, 0, 0, ""}, at(0));
+        double time = 0;
+        int missing = 0;
+        double worst = 0;
+        for (std::size_t index = 0; index < gaps.size(); ++index) {
+            time += gaps[index];
+            const auto done = static_cast<std::uint64_t>(speed * time);
+            estimate.update({done, total, 0, 0, ""}, at(time));
+            if (index < 3) {
+                continue;  // the first estimate waits for three steps
+            }
+            const auto left = estimate.time_left();
+            if (!left) {
+                ++missing;
+                continue;
+            }
+            const double truth = static_cast<double>(total - done) / speed;
+            worst = std::max(worst, std::abs(seconds_of(left->likely) / truth - 1));
+        }
+        CHECK(missing == 0);
+        CHECK(worst < 0.05);
+    }
+}
+
 // 100 % means done. Every byte can be counted while files remain (empty files
 // last): the share stops at 99 % until the last file. Once every file is done
 // the line shows no time left, as an estimate made a moment before would stay
@@ -591,6 +634,7 @@ void progress_estimate_tests()
     items_only_progress();
     new_operations_and_stalls();
     a_pause_is_not_slow_work();
+    irregular_steps_keep_a_time_left();
     hundred_percent_means_done();
     sizes_are_formatted();
     time_left_is_formatted();

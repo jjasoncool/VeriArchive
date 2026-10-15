@@ -100,6 +100,7 @@ struct PendingRegistration {
     Timestamp started;                          // when the plan was made (the first attempt)
     std::uint64_t files_done = 0;               // files hashed and checkpointed so far
     std::uint64_t bytes_done = 0;               // their bytes
+    bool done_counted = true;                   // false: the two above were not counted (not in WAL mode)
     std::optional<std::uint64_t> files_total;   // from the plan, once the scan has counted them
     std::optional<std::uint64_t> bytes_total;
     Timestamp updated;                          // the plan's "updated": when it last said it was working
@@ -122,6 +123,7 @@ struct UnfinishedVerification {
     bool resumable = true;                      // false when the archive has another revision now (R-104)
     std::uint64_t files_done = 0;               // files (and streams) read and matched so far
     std::uint64_t bytes_done = 0;               // their registered bytes
+    bool done_counted = true;                   // false: the two above were not counted (not in WAL mode)
     std::uint64_t files_total = 0;              // the files (and streams) with content to read: from the
                                                 // setting, or for older runs the manifest header's counts
                                                 // (which include those unreadable at registration)
@@ -152,6 +154,13 @@ public:
     // stay, and the next transaction can begin. (A transaction left open
     // after a failed COMMIT would take every later write into it.)
     std::expected<void, IoError> write_transaction(const std::function<std::expected<void, IoError>()>& writes);
+    // Runs `reads` in one read transaction, so that they all see the database
+    // as it was when the first query ran, also while another process commits
+    // (the reads below that take their own include). It takes no write lock,
+    // so the process doing the work never waits. Only in WAL mode (R-91): in
+    // the rollback-journal mode a reader's lock keeps writers from committing
+    // for as long as it is held, so there each query reads on its own.
+    std::expected<void, IoError> read_transaction(const std::function<std::expected<void, IoError>()>& reads);
 
     // Labels: "ARCH-" + zero-padded sequence, assigned by this repository (R-33).
     std::expected<std::string, IoError> next_label();
@@ -175,6 +184,10 @@ public:
     // Registration checkpoints (R-104): hashed entries of an unfinished revision.
     std::expected<void, IoError> upsert_file_rows(
         const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
+    // Deletes the rows of these entries only (path, raw and stream), such as
+    // checkpoints a resumed registration does not reuse.
+    std::expected<void, IoError> delete_file_rows(
+        const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
     std::expected<std::vector<Entry>, IoError> file_rows(const Uuid& archive_uuid, std::uint32_t revision);
     // Empties the rebuildable index tables (archive_revisions, files) for rebuild-index.
     std::expected<void, IoError> clear_index();
@@ -197,19 +210,31 @@ public:
     // may be running them. Read only. Each operation costs one pass over its
     // own checkpoint rows through the primary keys (files: archive_uuid,
     // revision; verify_progress: run_id), never a scan of the whole table.
+    // Not in WAL mode, the checkpoints are not counted at all (done_counted is
+    // false): one count holds the reader's lock for its whole length, and a
+    // writer waits for it at most 5 seconds, so counting a large operation's
+    // checkpoints would make its own checkpoints and its final record fail.
     std::expected<std::vector<PendingRegistration>, IoError> pending_registrations();
-    // Verifications that nothing can finish any more are left out (decision
-    // 0022): one whose archive has another revision now (R-104 refuses its
-    // resume) and that was recorded INCOMPLETE, or never recorded and silent
-    // for minutes at `now` (its process was killed); and one that a later
-    // verification of the same archive supersedes: for a run recorded
-    // INCOMPLETE, one recorded after it or started after it stopped; for a run
-    // never recorded, one that started, worked or finished when it had been
-    // silent for minutes. `counted`: the checkpoints of runs recorded
-    // INCOMPLETE, counted by an earlier read; such a run never changes, so it
-    // is not counted again.
+    // Verifications that cannot be resumed or that a later verification of the
+    // same archive supersedes are left out (decision 0022): one whose archive
+    // has another revision now (R-104 refuses its resume) and that was
+    // recorded INCOMPLETE, or never recorded and silent for minutes at `now`
+    // (its process was killed); and one that a later verification of the same
+    // archive supersedes: for a run recorded INCOMPLETE, one recorded after it
+    // or started after it stopped; for a run never recorded, one that started,
+    // worked or finished when it had been silent for minutes, or, once it has
+    // been silent for minutes at `now`, one started after it last said
+    // anything that PASSED (with warnings or not). `counted`: the checkpoints
+    // of runs recorded INCOMPLETE, counted by an earlier read; such a run
+    // never changes, so it is not counted again.
     std::expected<std::vector<UnfinishedVerification>, IoError> unfinished_verifications(
         std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted = {});
+    // A mark of what the Archive List shows of the archives (archive_statuses):
+    // it changes whenever an archive is added or changes its label, revision,
+    // root or status, a revision is recorded, or a verification is recorded.
+    // Cheap: one row per archive, and a count and the newest row of the
+    // revisions and the verifications.
+    std::expected<std::string, IoError> archive_list_mark();
 
     std::expected<std::string, IoError> setting(const std::string& key);
     std::expected<void, IoError> set_setting(const std::string& key, const std::string& value);

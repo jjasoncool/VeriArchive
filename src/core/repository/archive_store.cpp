@@ -56,21 +56,38 @@ std::expected<std::pair<std::uint64_t, std::uint64_t>, IoError> count_and_bytes(
     return result;
 }
 
+// True when the database is in WAL mode, which the repository sets up (R-91).
+// The older rollback-journal mode stays where WAL could not be turned on, such
+// as on a network share. There a reader's lock keeps a writer from committing
+// for as long as it is held, and a writer waits for it at most 5 seconds
+// (busy_timeout): a long read would make the operations' checkpoints fail.
+bool write_ahead_log(const SqliteDatabase& database)
+{
+    auto mode = database.prepare("PRAGMA journal_mode;");
+    if (!mode) {
+        return false;
+    }
+    const auto row = mode->step();
+    return row && *row && mode->text(0) == "wal";
+}
+
 // A read transaction: every query inside it sees the database as it was when
 // the first one ran, even while another process commits checkpoints. Without
 // it a run that finishes between two queries could show as half cleared up.
 // DEFERRED takes no write lock, so the process doing the work never waits.
+// Inside a transaction already open (read_transaction) it does nothing: the
+// outer one holds.
 //
-// Only in WAL mode, which the repository sets up (R-91). In the older
-// rollback-journal mode (a database where WAL could not be turned on, such as
-// one on a network share) a reader's lock keeps a writer from committing, and
-// one read across every run could outlast the writer's 5-second wait: its
-// checkpoints would fail. Without the snapshot each query holds the lock only
-// while it runs, and a run that finishes meanwhile shows for one read at most.
+// Only in WAL mode. In the rollback-journal mode one read across every run
+// could outlast the writer's 5-second wait (write_ahead_log). Without the
+// snapshot each query holds the lock only while it runs, and a run that
+// finishes meanwhile shows for one read at most.
 class ReadSnapshot {
 public:
     explicit ReadSnapshot(const SqliteDatabase& database)
-        : database_(database), open_(write_ahead_log(database) && database.execute("BEGIN DEFERRED;").has_value())
+        : database_(database),
+          open_(!database.in_transaction() && write_ahead_log(database) &&
+                database.execute("BEGIN DEFERRED;").has_value())
     {
     }
     ~ReadSnapshot()
@@ -83,16 +100,6 @@ public:
     ReadSnapshot& operator=(const ReadSnapshot&) = delete;
 
 private:
-    static bool write_ahead_log(const SqliteDatabase& database)
-    {
-        auto mode = database.prepare("PRAGMA journal_mode;");
-        if (!mode) {
-            return false;
-        }
-        const auto row = mode->step();
-        return row && *row && mode->text(0) == "wal";
-    }
-
     const SqliteDatabase& database_;
     bool open_;
 };
@@ -271,6 +278,13 @@ std::expected<void, IoError> ArchiveStore::write_transaction(
         rollback();
     }
     return written;
+}
+
+std::expected<void, IoError> ArchiveStore::read_transaction(
+    const std::function<std::expected<void, IoError>()>& reads)
+{
+    const ReadSnapshot snapshot(database_);
+    return reads();
 }
 
 std::expected<std::string, IoError> ArchiveStore::setting(const std::string& key)
@@ -599,6 +613,28 @@ std::expected<void, IoError> ArchiveStore::delete_file_rows(const Uuid& archive_
     return statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision)).run();
 }
 
+std::expected<void, IoError> ArchiveStore::delete_file_rows(
+    const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
+{
+    // By the primary key, one row each.
+    auto statement = database_.prepare(
+        "DELETE FROM files WHERE archive_uuid = ? AND revision = ? AND path = ? AND raw_hex = ? AND stream = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    for (const auto& entry : entries) {
+        statement->bind(1, archive_uuid)
+            .bind(2, static_cast<std::int64_t>(revision))
+            .bind(3, entry.path.p)
+            .bind(4, entry.path.raw)
+            .bind(5, entry.stream);
+        if (auto deleted = statement->run(); !deleted) {
+            return deleted;
+        }
+    }
+    return {};
+}
+
 std::expected<void, IoError> ArchiveStore::clear_index()
 {
     return database_.execute("DELETE FROM files; DELETE FROM archive_revisions;");
@@ -821,6 +857,8 @@ std::expected<void, IoError> ArchiveStore::clear_progress(const std::string& run
 std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_registrations()
 {
     const ReadSnapshot snapshot(database_);
+    // Counting is the one long statement of a read (write_ahead_log).
+    const bool count = write_ahead_log(database_);
     const auto plans = settings_with_prefix("registration:");
     if (!plans) {
         return std::unexpected(plans.error());
@@ -864,12 +902,15 @@ std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_r
         registration.volume_root = *found && archive->text(0).empty();
         archive->reset();
 
-        hashed->bind(1, registration.archive_uuid).bind(2, static_cast<std::int64_t>(registration.revision));
-        const auto done = count_and_bytes(*hashed);
-        if (!done) {
-            return std::unexpected(done.error());
+        registration.done_counted = count;
+        if (count) {
+            hashed->bind(1, registration.archive_uuid).bind(2, static_cast<std::int64_t>(registration.revision));
+            const auto done = count_and_bytes(*hashed);
+            if (!done) {
+                return std::unexpected(done.error());
+            }
+            std::tie(registration.files_done, registration.bytes_done) = *done;
         }
-        std::tie(registration.files_done, registration.bytes_done) = *done;
         result.push_back(std::move(registration));
     }
     std::ranges::sort(result, {}, [](const PendingRegistration& registration) {
@@ -882,6 +923,8 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
     std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted)
 {
     const ReadSnapshot snapshot(database_);
+    // Counting is the one long statement of a read (write_ahead_log).
+    const bool count = write_ahead_log(database_);
     const auto runs = settings_with_prefix("run:");
     if (!runs) {
         return std::unexpected(runs.error());
@@ -890,7 +933,8 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
     auto archive = database_.prepare("SELECT label, current_revision FROM archives WHERE archive_uuid = ?");
     // Every run of an archive ever recorded, in the order recorded (rowid).
     // verify_runs holds one row per verification, so this stays small.
-    auto history = database_.prepare("SELECT rowid, started, finished FROM verify_runs WHERE archive_uuid = ?");
+    auto history =
+        database_.prepare("SELECT rowid, started, finished, result FROM verify_runs WHERE archive_uuid = ?");
     auto header = database_.prepare(
         "SELECT header_json FROM archive_revisions WHERE archive_uuid = ? AND revision = ?");
     // Each checkpointed entry's size comes from the files index of the revision,
@@ -981,6 +1025,7 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         std::int64_t row;   // rowid: rows are numbered in the order recorded
         Timestamp started;
         Timestamp finished;
+        std::string result;
     };
     std::map<Uuid, std::vector<Recorded>> histories;
     for (const auto& candidate : candidates) {
@@ -998,7 +1043,7 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
             if (!*row) {
                 break;
             }
-            rows.push_back({history->integer(0), history->text(1), history->text(2)});
+            rows.push_back({history->integer(0), history->text(1), history->text(2), history->text(3)});
         }
         history->reset();
     }
@@ -1031,11 +1076,23 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         // than it and it is never left out.
         if (!run.updated.empty()) {
             const auto silent_since = parse_timestamp(run.updated);
+            // Silent for minutes now, so it was killed: a verification started
+            // after it last said anything that PASSED (a small archive's,
+            // within minutes of the kill) has done its work. One that FAILED
+            // at once (the wrong media) has not, nor has one that ran beside
+            // it.
+            const bool killed = silent_between(silent_since, now);
+            const auto passed_after = [&](const Recorded& row) {
+                const auto started = parse_timestamp(row.started);
+                return (row.result == "PASSED" || row.result == "PASSED_WITH_WARNINGS") && silent_since &&
+                       started && *started > *silent_since;
+            };
             return std::ranges::any_of(rows,
                        [&](const Recorded& row) {
                            // Recorded when it ended, never before it started.
                            return silent_between(silent_since,
-                               parse_timestamp(row.finished.empty() ? row.started : row.finished));
+                                      parse_timestamp(row.finished.empty() ? row.started : row.finished)) ||
+                                  (killed && passed_after(row));
                        }) ||
                    std::ranges::any_of(candidates, [&](const Candidate& other) {
                        return same_archive(other) &&
@@ -1090,11 +1147,14 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
             header->reset();
         }
 
-        // A run recorded INCOMPLETE never changes again: an earlier count holds.
-        if (const auto known = counted.find(run.run_id); run.recorded_incomplete && known != counted.end()) {
+        // Not in WAL mode, not counted at all (write_ahead_log). A run
+        // recorded INCOMPLETE never changes again: an earlier count holds.
+        run.done_counted = count;
+        const auto known = counted.find(run.run_id);
+        if (count && run.recorded_incomplete && known != counted.end()) {
             run.files_done = known->second.files;
             run.bytes_done = known->second.bytes;
-        } else {
+        } else if (count) {
             matched->bind(1, run.archive_uuid)
                 .bind(2, static_cast<std::int64_t>(run.revision))
                 .bind(3, run.run_id);
@@ -1110,6 +1170,54 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         return std::tie(run.started, run.label, run.run_id);
     });
     return result;
+}
+
+std::expected<std::string, IoError> ArchiveStore::archive_list_mark()
+{
+    const ReadSnapshot snapshot(database_);
+    // Revisions and runs are only ever added (R-18): their count and newest
+    // row change when one is.
+    auto added = database_.prepare(
+        "SELECT (SELECT COUNT(*) FROM archive_revisions), (SELECT COALESCE(MAX(rowid), 0) FROM archive_revisions), "
+        "(SELECT COUNT(*) FROM verify_runs), (SELECT COALESCE(MAX(rowid), 0) FROM verify_runs)");
+    // Every column the list shows or works out from (archive_statuses): the
+    // label (shared or not), the revision whose header it shows, the status,
+    // the root, and when a never verified archive is overdue from.
+    auto archives = database_.prepare(
+        "SELECT archive_uuid, label, created, current_revision, status, root_subpath FROM archives "
+        "ORDER BY archive_uuid");
+    if (!added || !archives) {
+        return std::unexpected(!added ? added.error() : archives.error());
+    }
+    std::string mark;
+    // Each value with its length in front, so no two lists of values read alike.
+    const auto add = [&](std::string_view value) {
+        mark += std::to_string(value.size());
+        mark += ':';
+        mark += value;
+    };
+    const auto counts = added->step();
+    if (!counts) {
+        return std::unexpected(counts.error());
+    }
+    for (int column = 0; *counts && column < 4; ++column) {
+        add(std::to_string(added->integer(column)));
+    }
+    // Done with it: without a read transaction (not in WAL mode) a statement
+    // left running would keep its lock.
+    added->reset();
+    for (;;) {
+        const auto row = archives->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            return mark;
+        }
+        for (int column = 0; column < 6; ++column) {
+            add(archives->text(column));
+        }
+    }
 }
 
 } // namespace va

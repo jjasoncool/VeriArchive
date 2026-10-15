@@ -10,6 +10,8 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <functional>
+#include <memory>
 
 namespace {
 
@@ -336,6 +338,142 @@ void plan_records_totals_and_updated()
     CHECK(left && left->empty());
 }
 
+// Reads the counts of the registration being created whenever hashing reports
+// progress, as the GUI's Archive List would from another process.
+class CountWatcher final : public va::IProgressSink {
+public:
+    explicit CountWatcher(va::ArchiveStore& store) : store_(store) {}
+    void on_progress(const va::Progress& progress) override
+    {
+        if (progress.items_total == 0) {
+            return; // scanning
+        }
+        if (const auto pending = store_.pending_registrations(); pending && pending->size() == 1) {
+            seen.push_back(pending->front());
+        }
+    }
+    std::vector<va::PendingRegistration> seen;
+
+private:
+    va::ArchiveStore& store_;
+};
+
+// Decision 0022: a resumed registration counts as done only the checkpoints
+// it reuses. Those of files gone (a folder moved) or changed since the
+// interrupted attempt hashed them go after the scan: counted, they made the
+// done figures pass the totals, and the list show 100 % with files left.
+void a_resumed_registration_counts_what_it_reuses()
+{
+    Fixture fixture;
+    for (const char* name : {"edit/e1", "keep/k1", "keep/k2", "move/m1", "move/m2", "move/m3"}) {
+        fixture.archive.add_file(name, std::string(1000, name[5]));
+    }
+    fixture.archive.add_file("stop/s", std::string(1000, 's')).open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    fixture.archive.add_file("tail/t", std::string(1000, 't'));
+    const auto interrupted = fixture.run(at("/vol"));
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    const auto before = fixture.store.pending_registrations();
+    CHECK(before && before->size() == 1 && before->front().files_done == 6);
+
+    // While the device was away: the folder move/ became moved/, and edit/e1 grew.
+    fixture.archive.remove("move");
+    for (const char* name : {"moved/m1", "moved/m2", "moved/m3"}) {
+        fixture.archive.add_file(name, std::string(1000, name[6]));
+    }
+    fixture.archive.node("edit/e1").content = std::string(2500, 'E');
+    fixture.archive.node("stop/s").open_error.reset();
+
+    CountWatcher watcher(fixture.store);
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+    auto request = at("/vol");
+    request.resume = true;
+    fixture.archive.bytes_read = 0;
+    const auto resumed = va::register_archive(services, request, fixture.cancel, watcher);
+    CHECK(resumed && resumed->counts.files == 8);
+    // Only keep/k1 and keep/k2 were reused: everything else was read.
+    CHECK(fixture.archive.bytes_read == 2500 + 3000 + 1000 + 1000);
+    CHECK(!watcher.seen.empty());
+    for (const auto& seen : watcher.seen) {
+        CHECK(seen.files_total == std::optional<std::uint64_t>(8) &&
+              seen.bytes_total == std::optional<std::uint64_t>(9500));
+        CHECK(seen.files_done <= 8 && seen.bytes_done <= 9500);
+    }
+    if (!watcher.seen.empty()) {
+        // Hashing reports before its first checkpoint: the two reused files.
+        CHECK(watcher.seen.front().files_done == 2 && watcher.seen.front().bytes_done == 2000);
+    }
+    if (resumed) {
+        const auto verified = fixture.verify(fixture.archive.root());
+        CHECK(verified && verified->result == "PASSED");
+    }
+}
+
+// Writes on the archive media like FakeMediaWriter, and runs `before_manifest`
+// when the manifest copy is about to be written there (R-89): after the
+// registration was recorded, before it returns.
+class HookedMediaWriter final : public va::IFileWriter {
+public:
+    HookedMediaWriter(va::IFileWriter& inner, std::function<void()> before_manifest)
+        : inner_(inner), before_manifest_(std::move(before_manifest))
+    {
+    }
+    std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
+        const std::filesystem::path& destination) override
+    {
+        if (destination.extension() == ".vam" && before_manifest_) {
+            before_manifest_();
+        }
+        return inner_.create(destination);
+    }
+    std::expected<void, va::IoError> remove(const std::filesystem::path& path) override { return inner_.remove(path); }
+    std::expected<void, va::IoError> create_directories(const std::filesystem::path& path) override
+    {
+        return inner_.create_directories(path);
+    }
+
+private:
+    va::IFileWriter& inner_;
+    std::function<void()> before_manifest_;
+};
+
+// The plan's key is the archive's ("registration:<uuid>"). Once a
+// registration is recorded, its plan is gone and the stop mark is off: the
+// plan of the archive's next registration, which another process may have
+// written by the time this one returns, keeps what that process wrote.
+void a_recorded_registration_leaves_the_next_plan_alone()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a");
+    std::string next_plan;
+    HookedMediaWriter media(fixture.media_writer, [&] {
+        const auto plans = fixture.store.settings_with_prefix("registration:");
+        CHECK(plans && plans->empty());  // recorded: the plan is gone
+        const auto archives = fixture.store.archives();
+        if (!archives || archives->size() != 1) {
+            CHECK(false);
+            return;
+        }
+        // Another process starts `register --new-revision` of the archive.
+        const auto& archive_uuid = archives->front().archive_uuid;
+        next_plan = R"({"archive_uuid":")" + archive_uuid +
+                    R"(","revision":2,"label":"ARCH-0001","created":"2026-10-15T01:00:00Z","new_archive":false,)"
+                    R"("root":"/vol"})";
+        auto other = fixture.repository.store();
+        CHECK(other.set_setting("registration:" + archive_uuid, next_plan));
+    });
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+    auto request = at("/vol");
+    request.write_media_copy = true;
+    const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+    CHECK(registered && !registered->media_copy.empty());
+    CHECK(!next_plan.empty());
+    const auto plans = fixture.store.settings_with_prefix("registration:");
+    CHECK(plans && plans->size() == 1 && plans->front().second == next_plan);
+}
+
 // The heartbeat repeats the record with the time, at most once per interval,
 // and never brings back a record that its operation removed on finishing.
 void heartbeat_updates_only_its_record()
@@ -387,5 +525,7 @@ void register_engine_tests()
     copied_identity_file_fails();
     unidentifiable_volume_fails();
     plan_records_totals_and_updated();
+    a_resumed_registration_counts_what_it_reuses();
+    a_recorded_registration_leaves_the_next_plan_alone();
     heartbeat_updates_only_its_record();
 }

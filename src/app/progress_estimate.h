@@ -38,8 +38,9 @@
 //
 // When reports come only on steps (another process's checkpoints, which can
 // be many minutes apart while it reads large files), "the last few minutes"
-// grow to hold the last few steps, so their spacing never keeps the time left
-// from being estimated.
+// grow with the usual spacing of the steps and always hold at least the last
+// three, also after one step much later than the others, so their spacing
+// never keeps the time left from being estimated.
 #include "app/text.h"
 #include "core/interfaces.h"
 
@@ -67,7 +68,8 @@ public:
     // How the reports arrive, which decides what a long gap between two means.
     enum class Reports {
         on_steps,  // only when the numbers moved (a poll of another process's
-                   // checkpoints): a long gap is work, such as one large file
+                   // checkpoints): a long gap is work, such as one large file,
+                   // and every interval is a step
         regular,   // at a steady pace, also while nothing moves (the hash
                    // pipeline): a long silence is a pause, not work
     };

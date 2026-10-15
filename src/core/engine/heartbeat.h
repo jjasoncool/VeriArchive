@@ -74,8 +74,11 @@ public:
     // ("stopped"), for an attempt that ends without finishing (cancelled,
     // its device removed, a failure): readers then see at once that it
     // stopped, instead of taking it for working until its "updated" is
-    // minutes old. After a finished operation removed its record, this
-    // writes nothing (update_setting).
+    // minutes old. Not for an operation that finished: a registration's key
+    // is its archive's, and once its record is removed the key may hold the
+    // plan of the archive's next registration, which this record would
+    // replace (update_setting only changes a record that exists, so with the
+    // key empty it writes nothing).
     void stop() noexcept
     {
         try {

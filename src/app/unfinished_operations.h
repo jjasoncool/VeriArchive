@@ -51,6 +51,19 @@ struct UnfinishedOperation {
                                        // a registration whose plan says "stopped"
     bool resumable = true;             // false: a verification whose archive has a newer revision (R-104)
     std::optional<std::chrono::sys_seconds> updated;  // when the operation last said it was working, if it does
+    bool done_counted = true;          // false: files_done and bytes_done are not known, as the checkpoints
+                                       // are not counted where that would hold up the operation (a database
+                                       // not in WAL mode, decision 0022); only the record's state is shown
+};
+
+// What one read of the repository found.
+struct OperationsRead {
+    std::vector<UnfinishedOperation> operations;  // newest first
+    // Changes whenever what the Archive List shows of the archives may have
+    // changed: an archive added, a revision or a status recorded, a
+    // verification recorded (ArchiveStore::archive_list_mark). Read in the
+    // same read transaction as the operations, so the two agree.
+    std::string archives_mark;
 };
 
 // The space in use on the volume whose root is `root` (capacity less free
@@ -58,16 +71,17 @@ struct UnfinishedOperation {
 std::optional<std::uint64_t> volume_used_bytes(const std::filesystem::path& root);
 
 // Reads the unfinished operations of the repository, newest first, without
-// the verifications that nothing can finish any more (judged at the time now,
-// ArchiveStore::unfinished_verifications). A registration whose plan has no
-// totals yet, and whose root is a whole volume, gets that volume's used space
-// (`used_bytes`) as its approximate total: every file on it is registered, so
-// the files to hash fill about that much. `previous`: the operations of the
-// read before; a verification recorded INCOMPLETE never changes, so its
-// counts are taken from there. Opens the database read only, so watching
-// never creates or changes it; meant to run on a thread of its own, as a read
-// can take a moment on large repositories.
-std::expected<std::vector<UnfinishedOperation>, IoError> read_unfinished_operations(const RepositoryLayout& layout,
+// the verifications that cannot be resumed or that a later verification of the
+// same archive supersedes (judged at the time now,
+// ArchiveStore::unfinished_verifications), and the mark of its archives. A
+// registration whose plan has no totals yet, and whose root is a whole volume,
+// gets that volume's used space (`used_bytes`) as its approximate total: every
+// file on it is registered, so the files to hash fill about that much.
+// `previous`: the operations of the read before; a verification recorded
+// INCOMPLETE never changes, so its counts are taken from there. Opens the
+// database read only, so watching never creates or changes it; meant to run
+// on a thread of its own, as a read can take a moment on large repositories.
+std::expected<OperationsRead, IoError> read_unfinished_operations(const RepositoryLayout& layout,
     const std::vector<UnfinishedOperation>& previous = {},
     const std::function<std::optional<std::uint64_t>(const std::filesystem::path&)>& used_bytes =
         volume_used_bytes);
@@ -77,6 +91,7 @@ enum class OperationState {
     Running,   // moved in the last few minutes, or its record says it works
     Quiet,     // no progress seen for a few minutes: stopped, or busy with a large file or the scan
     Stopped,   // certainly stopped (its record says so, or has been silent for minutes)
+    Unknown,   // its progress is not counted and its record says nothing of its state (an older version)
 };
 
 // After this long without progress an operation is no longer called running,
@@ -93,6 +108,19 @@ public:
     // clock, for the operation's own "updated" time.
     void update(UnfinishedOperation operation, Clock::time_point now, std::chrono::sys_seconds wall_now);
 
+    // The polls were held up for a while, as when the computer slept: where
+    // the clock goes on while it sleeps (Windows), the operation's next step
+    // spans the sleep, in which nothing was done, though no poll saw the
+    // operation stopped. That step is taken as one after a stop: the
+    // estimate starts afresh, and its gap says nothing of the pace.
+    void polls_held_up() { stopped_since_step_ = true; }
+
+    // The operation as the latest poll saw it. A registration whose plan says
+    // it stopped, but whose checkpoints moved since a poll first saw that, has
+    // been taken up again by an attempt that does not write the plan (an
+    // older version's `register --resume`): its plan's "stopped" and
+    // "updated" belong to the attempt before, so they are left out here, and
+    // it is judged by its counts.
     const UnfinishedOperation& operation() const { return operation_; }
     OperationState state(Clock::time_point now, std::chrono::sys_seconds wall_now) const;
     // How long no progress was seen: since the last step, or since the first
@@ -101,16 +129,38 @@ public:
     const ProgressEstimate& estimate() const { return estimate_; }
 
 private:
-    // A gap between two steps longer than this means the operation stopped
-    // in between, or the computer slept.
+    // A gap between two steps longer than this, which brought little work for
+    // its length (idle: `brought` bytes), means the operation stopped in
+    // between, or the computer slept.
     Clock::duration long_gap() const;
+    bool idle(Clock::duration gap, std::uint64_t brought) const;
+    // Leaves out a plan's stop mark once another attempt has taken the
+    // registration up again (see operation()).
+    void follow_stop_mark(UnfinishedOperation& operation);
+
+    // One gap between two steps, and the bytes the later step brought.
+    struct Step {
+        Clock::duration gap{};
+        std::uint64_t bytes = 0;
+    };
+    // A registration's stop mark as a poll first saw it: the plan's "updated"
+    // written with it (a later attempt that stops writes its own), and the
+    // counts then.
+    struct StopMark {
+        std::optional<std::chrono::sys_seconds> updated;
+        std::uint64_t files_done = 0;
+        std::uint64_t bytes_done = 0;
+        bool taken_up = false;  // the counts moved since: another attempt works on it
+    };
 
     UnfinishedOperation operation_;
     std::size_t polls_ = 0;
     Clock::time_point first_seen_{};
     std::optional<Clock::time_point> last_step_;
-    std::deque<Clock::duration> step_gaps_;  // the last few gaps between steps: this operation's pace
-    bool stopped_since_step_ = false;        // a poll since the last step saw it Stopped
+    std::deque<Step> steps_;                 // the last few steps: this operation's pace and speed
+    bool stopped_since_step_ = false;        // a poll since the last step saw it Stopped, or the
+                                             // polls were held up (polls_held_up)
+    std::optional<StopMark> stop_mark_;
     ProgressEstimate estimate_;
 };
 
@@ -121,9 +171,10 @@ void follow(std::vector<OperationWatch>& watches, std::vector<UnfinishedOperatio
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
 
 // The share done, from 0 to 1: by bytes when their total is known, else by
-// files; nothing when neither is known, or when the done bytes already passed
-// an approximate total. It stays below 1 (at most 0.99) until every file is
-// done, so 100 % means done, as in ProgressEstimate.
+// files; nothing when neither is known, when the done bytes already passed an
+// approximate total, or when what is done was not counted. It stays below 1
+// (at most 0.99) until every file is done, so 100 % means done, as in
+// ProgressEstimate.
 std::optional<double> share_done(const UnfinishedOperation& operation);
 
 // One row of the Archive List's unfinished operations, worded in `text`'s language.
@@ -131,7 +182,7 @@ struct OperationRow {
     std::string label;
     std::string root;
     std::string kind;                // "Registration", "Verification"
-    std::string progress;            // "3.45 TiB of about 8.55 TiB (40%)"
+    std::string progress;            // "3.45 TiB of about 8.55 TiB (40%)", "not counted"
     std::string details;             // "78895 files · 120 MiB/s · about 11-13 hours left"
     std::string state;               // "running", "no progress seen for 5 minutes; it may have stopped"
     OperationState state_kind = OperationState::Waiting;

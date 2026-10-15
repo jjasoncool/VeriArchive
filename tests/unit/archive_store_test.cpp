@@ -166,7 +166,7 @@ void pending_registrations_with_checkpoints()
     const auto& first = pending->front();  // the older plan first
     CHECK(first.archive_uuid == whole && first.label == "ARCH-0001" && first.root == "Z:\\");
     CHECK(first.volume_root && first.revision == 1 && first.started == "2026-10-15T01:00:00Z");
-    CHECK(first.files_done == 2 && first.bytes_done == 3500);
+    CHECK(first.done_counted && first.files_done == 2 && first.bytes_done == 3500);
     CHECK(!first.files_total && !first.bytes_total && first.updated.empty() && first.stopped.empty());
     const auto& second = pending->back();
     CHECK(second.archive_uuid == folder && !second.volume_root && second.revision == 3);
@@ -275,7 +275,7 @@ void unfinished_verifications_with_checkpoints()
     CHECK(running.run_id == "running-1" && !running.recorded_incomplete && running.revision == 1);
     CHECK(running.resumable);
     CHECK(running.root == "Z:\\範例");  // the setting has no root: where it was registered
-    CHECK(running.files_done == 2 && running.bytes_done == 150);
+    CHECK(running.done_counted && running.files_done == 2 && running.bytes_done == 150);
     // No totals in the setting (a run of an older version): the header's counts.
     CHECK(running.files_total == 4 && running.bytes_total == 650);
 
@@ -409,6 +409,131 @@ void superseded_verifications_are_left_out()
         record_run(store, repository, "brief", "FAILED", "2026-10-10T00:31:00Z", "2026-10-10T00:34:00Z");
         CHECK(unfinished_run_ids(store) == std::vector<std::string>{"killed"});
     }
+    {
+        // Killed at 00:30 and started again two minutes later; the restart, of
+        // a small archive, PASSED at 00:34, before the killed run had been
+        // silent for 5 minutes. Once it has, the restart that passed
+        // supersedes it, a month and a year later too.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "killed", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T00:30:00Z")");
+        record_run(store, repository, "again", "PASSED", "2026-10-10T00:32:00Z", "2026-10-10T00:34:00Z");
+        CHECK(unfinished_run_ids(store, at("2026-10-10T00:34:59Z")) == std::vector<std::string>{"killed"});
+        CHECK(unfinished_run_ids(store, at("2026-10-10T00:35:00Z")).empty());
+        CHECK(unfinished_run_ids(store, at("2026-11-10T00:35:00Z")).empty());
+        CHECK(unfinished_run_ids(store, at("2027-10-10T00:35:00Z")).empty());
+    }
+    {
+        // One that passed but started before the killed run last said
+        // anything ran beside it, and did not take it up: it stays. One that
+        // passed with warnings after the kill supersedes it.
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "killed", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T00:30:00Z")");
+        record_run(store, repository, "beside", "PASSED", "2026-10-10T00:29:00Z", "2026-10-10T00:33:00Z");
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"killed"});
+        record_run(store, repository, "warned", "PASSED_WITH_WARNINGS", "2026-10-10T00:31:00Z",
+            "2026-10-10T00:33:30Z");
+        CHECK(unfinished_run_ids(store).empty());
+    }
+}
+
+// The mark of what the Archive List shows changes with everything the list
+// shows of the archives, and not with the operations' own records and
+// checkpoints, which the section of unfinished operations shows. Sample data
+// only.
+void archive_list_mark_follows_the_archives()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    std::string last;
+    const auto changed = [&] {
+        const auto mark = store.archive_list_mark();
+        CHECK(mark && !mark->empty());
+        const bool different = mark && *mark != last;
+        last = mark.value_or("");
+        return different;
+    };
+    CHECK(changed());
+    const std::string archive_uuid = "c0ffee00-0000-4000-8000-000000000001";
+    va::ArchiveRecord archive{archive_uuid, "ARCH-0001", "2026-10-15T01:00:00Z", 0, "REGISTRATION_INCOMPLETE",
+        "範例", ""};
+    CHECK(store.insert_archive(archive));
+    CHECK(changed());
+    CHECK(!changed());
+
+    CHECK(store.set_setting("registration:" + archive_uuid, R"({"archive_uuid":")" + archive_uuid + R"("})"));
+    CHECK(store.upsert_file_rows(archive_uuid, 1, {file_entry("a.txt", 1)}));
+    CHECK(store.set_setting("run:run-1", "{}"));
+    CHECK(store.add_progress("run-1", {va::entry_key(file_entry("a.txt", 1))}));
+    CHECK(!changed());
+
+    // Recorded: the revision, then the archive at it.
+    CHECK(store.insert_revision({archive_uuid, 1, "manifests/x/r0001.vam", "{}", "h", "b", "", "2026-10-15T02:00:00Z"}));
+    CHECK(changed());
+    archive.current_revision = 1;
+    archive.status = "REGISTERED";
+    CHECK(store.update_archive(archive));
+    CHECK(changed());
+    // A verification recorded, whatever its result.
+    auto recorded = run("run-1", "INCOMPLETE");
+    recorded.archive_uuid = archive_uuid;
+    CHECK(store.append_verify_run(recorded, repository.context.repository_uuid));
+    CHECK(changed());
+    auto passed = run("run-2", "PASSED");
+    passed.archive_uuid = archive_uuid;
+    CHECK(store.append_verify_run(passed, repository.context.repository_uuid));
+    CHECK(changed());
+    // Retired; another label.
+    archive.status = "RETIRED";
+    CHECK(store.update_archive(archive));
+    CHECK(changed());
+    archive.label = "ARCH-0009";
+    CHECK(store.update_archive(archive));
+    CHECK(changed());
+    // Another root.
+    archive.root_subpath = "範例/Photos";
+    CHECK(store.update_archive(archive));
+    CHECK(changed());
+}
+
+// One read transaction for several reads: they all see the database as it was
+// at the first, also when one of them takes its own (pending_registrations
+// here), while another connection commits in between. In the rollback-journal
+// mode, the reads hold no lock between queries: the writer commits at once,
+// and the reads see it. Sample data only.
+void reads_in_one_transaction()
+{
+    for (const bool write_ahead : {true, false}) {
+        TestRepository repository;
+        if (!write_ahead) {
+            repository.execute("PRAGMA journal_mode=DELETE;");
+        }
+        auto writer = repository.store();
+        auto reader = va::ArchiveStore::open_read_only(repository.context.repo);
+        CHECK(reader.has_value());
+        if (!reader) {
+            continue;
+        }
+        std::string before;
+        std::string after;
+        bool written = false;
+        const auto read = reader->read_transaction([&]() -> std::expected<void, va::IoError> {
+            before = reader->archive_list_mark().value_or("");
+            CHECK(reader->pending_registrations().has_value());
+            written = writer
+                          .insert_archive({"c0ffee00-0000-4000-8000-000000000002", "ARCH-0002",
+                              "2026-10-15T01:00:00Z", 1, "REGISTERED", "", ""})
+                          .has_value();
+            after = reader->archive_list_mark().value_or("");
+            return {};
+        });
+        CHECK(read.has_value() && written);
+        CHECK((before == after) == write_ahead);
+        CHECK(reader->archive_list_mark().value_or("") != before);
+    }
 }
 
 // Watching opens the database read only: one that is missing reads as an
@@ -435,7 +560,9 @@ void read_only_open_creates_nothing()
 }
 
 // In the rollback-journal mode (a database where WAL could not be turned on)
-// the reads go without a snapshot, query by query, and still read it all.
+// the reads go without a snapshot, query by query, and still read it all but
+// the checkpoints: counting them would hold the reader's lock for as long as
+// it takes, and keep the operations from committing (decision 0022).
 void reads_without_write_ahead_log()
 {
     TestRepository repository;
@@ -443,15 +570,26 @@ void reads_without_write_ahead_log()
     auto store = repository.store();
     add_verified_archive(store);
     add_run_setting(store, "run-1", "2026-10-15T03:00:00Z");
+    CHECK(store.add_progress("run-1", {va::entry_key(file_entry("a.txt", 0))}));
     CHECK(store.set_setting("registration:" + verified_archive,
         R"({"archive_uuid":")" + verified_archive + R"(","revision":2,"created":"2026-10-15T01:00:00Z"})"));
+    CHECK(store.upsert_file_rows(verified_archive, 2, {file_entry("new.txt", 40)}));
     auto watching = va::ArchiveStore::open_read_only(repository.context.repo);
     CHECK(watching.has_value());
     if (watching) {
         const auto registrations = watching->pending_registrations();
         CHECK(registrations && registrations->size() == 1);
+        if (registrations && registrations->size() == 1) {
+            const auto& registration = registrations->front();
+            CHECK(!registration.done_counted && registration.files_done == 0 && registration.bytes_done == 0);
+        }
         const auto runs = watching->unfinished_verifications(read_at);
         CHECK(runs && runs->size() == 1);
+        if (runs && runs->size() == 1) {
+            const auto& run = runs->front();
+            CHECK(!run.done_counted && run.files_done == 0 && run.bytes_done == 0);
+            CHECK(run.files_total == 4 && run.bytes_total == 650);  // the totals still show
+        }
     }
     // Nothing is left open: the writer commits at once.
     CHECK(store.write_transaction([&] { return store.set_setting("after", "1"); }).has_value());
@@ -502,6 +640,8 @@ void archive_store_tests()
     unfinished_verifications_with_checkpoints();
     unfinished_verification_totals_from_its_record();
     superseded_verifications_are_left_out();
+    archive_list_mark_follows_the_archives();
+    reads_in_one_transaction();
     read_only_open_creates_nothing();
     reads_without_write_ahead_log();
     failed_write_transaction_is_rolled_back();

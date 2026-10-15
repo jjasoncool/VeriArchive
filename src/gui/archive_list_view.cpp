@@ -9,7 +9,6 @@
 #include "app/local_time.h"
 #include "core/engine/archive_status.h"
 
-#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <memory>
@@ -22,6 +21,15 @@ namespace {
 // operations checkpoint every 1000 files or minute, so a shorter interval
 // would show nothing new.
 constexpr guint poll_seconds = 5;
+
+// A tick of that timer this much later than the one before means that
+// nothing in this window ran meanwhile: the computer slept, and the
+// operations on it slept too. Where the clock goes on while the computer
+// sleeps (Windows), each operation's next step spans the sleep, which is no
+// slow work (OperationWatch::polls_held_up). Where it stops (Linux), a sleep
+// is not seen, and need not be: the steps' gaps leave it out as well. Far
+// longer than a busy moment ever holds the timer up.
+constexpr auto held_up_after = std::chrono::minutes(1);
 
 // The most height the operations take before they scroll, so that a long list
 // of them never pushes the archives out of the window: about three rows.
@@ -73,7 +81,7 @@ void use_session_repository(GuiState& state)
     if (poll.repository != root) {
         poll.watches.clear();
         poll.error = nullptr;
-        poll.has_read = false;
+        poll.archives_shown.clear();
         poll.repository = root;
     }
 }
@@ -162,22 +170,10 @@ struct PollResult {
     RepositoryLayout layout;
     std::vector<app::UnfinishedOperation> previous;  // the read before, for the counts that cannot change
     std::vector<app::UnfinishedOperation> operations;
+    std::string archives_mark;                       // ArchiveStore::archive_list_mark, read with them
     Report error;
     std::chrono::steady_clock::duration took{};
 };
-
-// Which operations the watches follow, and which of them were recorded as
-// stopped: when this changes, an operation ended (or began), and the archives
-// below show something new as well.
-std::vector<std::pair<std::string, bool>> followed(const std::vector<app::OperationWatch>& watches)
-{
-    std::vector<std::pair<std::string, bool>> keys;
-    for (const auto& watch : watches) {
-        keys.emplace_back(watch.operation().key, watch.operation().recorded_stopped);
-    }
-    std::ranges::sort(keys);
-    return keys;
-}
 
 // On the main thread: takes a read's result into the watches and shows them.
 void apply_poll(GuiState& state, PollResult& result)
@@ -194,15 +190,13 @@ void apply_poll(GuiState& state, PollResult& result)
         show_operations(state);
         return;
     }
-    const auto before = followed(poll.watches);
     app::follow(poll.watches, std::move(result.operations), std::chrono::steady_clock::now(),
         std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
-    // An operation that finished (or was recorded as stopped) may have
-    // changed its archive's row: the revision, the status, the last verify.
-    // The first read of a repository has nothing to compare with.
-    const bool changed = poll.has_read && followed(poll.watches) != before;
-    poll.has_read = true;
-    if (changed) {
+    // The archives changed since the table was drawn: an operation ended, or
+    // began, also one that did both between two reads (a small folder
+    // registered from the command line, a verification of seconds). The
+    // table shows its new revision, status or last verify.
+    if (result.archives_mark != poll.archives_shown) {
         refresh_archive_list(state);  // draws the operations too
     } else {
         show_operations(state);
@@ -231,7 +225,8 @@ void start_poll(GuiState& state, bool when_due = false)
     if (poll.thread.joinable()) {
         poll.thread.join();  // the last read; its result has arrived already
     }
-    auto result = std::make_unique<PollResult>(PollResult{&state, state.session->context.repo, {}, {}, nullptr, {}});
+    auto result =
+        std::make_unique<PollResult>(PollResult{&state, state.session->context.repo, {}, {}, {}, nullptr, {}});
     for (const auto& watch : poll.watches) {
         result->previous.push_back(watch.operation());
     }
@@ -243,7 +238,8 @@ void start_poll(GuiState& state, bool when_due = false)
                 auto read = app::read_unfinished_operations(result->layout, result->previous);
                 result->took = std::chrono::steady_clock::now() - now;
                 if (read) {
-                    result->operations = std::move(*read);
+                    result->operations = std::move(read->operations);
+                    result->archives_mark = std::move(read->archives_mark);
                 } else {
                     result->error = [message = read.error().message](const app::Text& text) {
                         return text.format("Cannot read the unfinished operations: {}", text(message));
@@ -280,6 +276,16 @@ gboolean poll_tick(gpointer data)
         state.operations.served = nullptr;
         return G_SOURCE_REMOVE;
     }
+    // Held up (the computer slept): told before the read this tick starts, so
+    // the step that read sees is taken as one after a stop.
+    auto& poll = state.operations;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - poll.ticked > held_up_after) {
+        for (auto& watch : poll.watches) {
+            watch.polls_held_up();
+        }
+    }
+    poll.ticked = now;
     guarded([&] { start_poll(state, true); }, [&](const Report& report) { show_poll_error(state, report); });
     return G_SOURCE_CONTINUE;
 }
@@ -294,6 +300,8 @@ void watch_operations(GuiState& state, GtkWidget* list)
     }
     if (poll.timer == 0) {
         poll.timer = g_timeout_add_seconds(poll_seconds, poll_tick, &state);
+        // While the list was not shown it was not read: no hold-up.
+        poll.ticked = std::chrono::steady_clock::now();
         poll.served = list;
     }
     start_poll(state);
@@ -351,6 +359,9 @@ void refresh_archive_list(GuiState& state)
     }
     show_operations(state);
     clear_grid(view.grid);
+    // Nothing shown yet: a read of the operations that comes back draws the
+    // table again (apply_poll), so one that could not be drawn now is retried.
+    state.operations.archives_shown.clear();
     if (!state.session) {
         gtk_label_set_text(GTK_LABEL(view.status), text("No repository is open; see Settings.").c_str());
         return;
@@ -362,11 +373,18 @@ void refresh_archive_list(GuiState& state)
         gtk_label_set_text(GTK_LABEL(view.status), text(store.error().message).c_str());
         return;
     }
+    // The mark before the archives: a change in between is drawn already and
+    // only makes the next read draw the table once more, never the other way
+    // round.
+    const auto mark = store->archive_list_mark();
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     const auto statuses = archive_statuses(*store, state.session->context.config.policy, now);
     if (!statuses) {
         gtk_label_set_text(GTK_LABEL(view.status), text(statuses.error().message).c_str());
         return;
+    }
+    if (mark) {
+        state.operations.archives_shown = *mark;
     }
     // Two calls: the compiler checks each literal template against its value.
     const auto count = statuses->size() == 1 ? text.format("{} archive", statuses->size())

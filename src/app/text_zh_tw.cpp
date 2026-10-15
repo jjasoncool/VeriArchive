@@ -310,6 +310,8 @@ constexpr CatalogEntry entries[] = {
     {"no progress seen for {} hours; it may have stopped", "已 {} 小時未見進度，可能已停止", Match::FormatOnly},
     {"stopped; it can be resumed", "已停止；可以繼續"},
     {"stopped; it cannot be resumed (the archive has a newer revision)", "已停止；無法繼續（封存已有較新的版次）"},
+    {"not counted", "未計算"},
+    {"not known", "不明"},
     {"Cannot read the unfinished operations: {}", "無法讀取未完成的作業：{}", Match::FormatOnly},
     // src/gui/history_view.cpp
     {"Finished", "完成時間"},

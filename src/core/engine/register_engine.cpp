@@ -308,12 +308,21 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // However this attempt returns without finishing (cancelled, the device
     // removed, a failure), the plan says last that it stopped ("stopped"), so
     // the Archive List shows it stopped at once and not working for minutes.
-    // A finished registration has removed its plan by then: the write
-    // changes nothing. The write is in a destructor, which runs on every way
-    // out of this function, so no return below can forget it.
+    // The write is in a destructor, which runs on every way out of this
+    // function, so no return below can forget it. Once the registration is
+    // recorded the mark is off: the record removed the plan, and the key is
+    // the archive's, so a plan there by then belongs to the archive's next
+    // registration (`register --new-revision` in another process), which this
+    // attempt's record must not replace.
     struct StopMark {
         Heartbeat& heartbeat;
-        ~StopMark() { heartbeat.stop(); }
+        bool recorded = false;
+        ~StopMark()
+        {
+            if (!recorded) {
+                heartbeat.stop();
+            }
+        }
     } stop_mark{heartbeat};
 
     // R-89: identity.json goes on the media before the scan, so the scan excludes
@@ -362,32 +371,52 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             hit->second.mtime_ns == entry.mtime_ns) {
             entry.b3 = hit->second.b3; // unchanged since the interrupted attempt hashed it
             entry.sha256 = hit->second.sha256;
+            cached.erase(hit);
             continue;
         }
         // The scanned size lets progress count bytes (share done, time left).
         jobs.push_back({index, scanned->entries[index].native, entry.size.value_or(0)});
     }
-    heartbeat.set("files_total", files_total);
-    heartbeat.set("bytes_total", bytes_total);
-    heartbeat.beat();
+    // The checkpoints left over are not reused: their files are gone, changed
+    // or unreadable since the interrupted attempt hashed them. Counted as done
+    // they would show work that is never done or done again (decision 0022),
+    // so they go, with the first checkpoint below; only a re-read is lost.
+    std::vector<Entry> stale;
+    stale.reserve(cached.size());
+    for (auto& [key, row] : cached) {
+        stale.push_back(std::move(row));
+    }
+    cached.clear();
 
     // Hashed files not yet saved. A checkpoint that cannot be saved is rolled
     // back, so its open transaction cannot swallow the next checkpoints and
-    // the final record; its files are tried again with the next checkpoint.
-    // The registration goes on: checkpoints only spare re-reading after an
-    // interruption (R-104).
+    // the final record; its files are tried again with the next checkpoint,
+    // and so are the stale checkpoints to delete. The registration goes on:
+    // checkpoints only spare re-reading after an interruption (R-104).
     std::vector<Entry> checkpoint;
     std::size_t hashed_since_checkpoint = 0;
     auto last_checkpoint = std::chrono::steady_clock::now();
     const auto flush_checkpoint = [&] {
-        if (!checkpoint.empty() && store.write_transaction([&] {
+        if ((!checkpoint.empty() || !stale.empty()) &&
+            store.write_transaction([&]() -> std::expected<void, IoError> {
+                // Deleted first: a changed file hashed again has the same key.
+                if (auto deleted = store.delete_file_rows(plan.archive_uuid, plan.revision, stale); !deleted) {
+                    return deleted;
+                }
                 return store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint);
             })) {
             checkpoint.clear();
+            stale.clear();
         }
         hashed_since_checkpoint = 0;
         last_checkpoint = std::chrono::steady_clock::now();
     };
+    // The stale checkpoints go before the plan has the totals, so a reader
+    // never sees more done than there is.
+    flush_checkpoint();
+    heartbeat.set("files_total", files_total);
+    heartbeat.set("bytes_total", bytes_total);
+    heartbeat.beat();
     HashPipelineOptions hash_options;
     hash_options.readers = default_reader_count(rotational_of(*volume, request.rotational));
     bool device_removed = false;
@@ -510,6 +539,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         store.rollback();
         return fail(Kind::Repository, "cannot record the archive: " + record.error().message);
     }
+    stop_mark.recorded = true;
 
     if (request.write_media_copy) {
         const auto copy = media_directory / outcome.manifest.filename();

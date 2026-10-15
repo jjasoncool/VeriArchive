@@ -6,6 +6,8 @@
 #include "engine_fixture.h"
 #include "test_repository.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -62,25 +64,27 @@ void reads_operations_with_approximate_totals()
         R"("updated":"2026-10-15T03:30:00Z","stopped":"2026-10-15T03:30:00Z"})"));
 
     std::vector<std::string> asked;
-    const auto operations = va::app::read_unfinished_operations(repository.context.repo, {},
+    const auto read = va::app::read_unfinished_operations(repository.context.repo, {},
         [&](const std::filesystem::path& root) -> std::optional<std::uint64_t> {
             asked.push_back(va::path_to_utf8(root));
             return 9 * gib;
         });
-    CHECK(operations && operations->size() == 3);
-    if (!operations || operations->size() != 3) {
+    CHECK(read && read->operations.size() == 3);
+    if (!read || read->operations.size() != 3) {
         return;
     }
+    const auto& operations = read->operations;
     // Newest first.
-    const auto& planned = (*operations)[0];
+    const auto& planned = operations[0];
     CHECK(planned.label == "ARCH-0003");
     CHECK(planned.bytes_total == 700 && planned.files_total == 7 && !planned.total_is_estimate);
     CHECK(planned.updated == va::parse_timestamp("2026-10-15T03:30:00Z"));
     CHECK(planned.recorded_stopped);  // its plan says the attempt stopped
-    const auto& folder = (*operations)[1];
+    CHECK(planned.done_counted);
+    const auto& folder = operations[1];
     CHECK(folder.bytes_total == 0 && !folder.total_is_estimate);  // not a whole volume: no total
     CHECK(!folder.recorded_stopped);
-    const auto& whole = (*operations)[2];
+    const auto& whole = operations[2];
     CHECK(whole.kind == va::app::OperationKind::Registration && whole.label == "ARCH-0001");
     CHECK(whole.bytes_total == 9 * gib && whole.total_is_estimate && whole.files_total == 0);
     // Only the whole volume without totals asked for its used space.
@@ -125,18 +129,19 @@ void keeps_the_counts_of_a_stopped_verification()
     CHECK(store.append_verify_run(run, repository.context.repository_uuid));
 
     const auto first = va::app::read_unfinished_operations(repository.context.repo);
-    CHECK(first && first->size() == 1 && first->front().files_done == 1 && first->front().recorded_stopped);
-    if (!first || first->size() != 1) {
+    CHECK(first && first->operations.size() == 1 && first->operations.front().files_done == 1 &&
+          first->operations.front().recorded_stopped);
+    if (!first || first->operations.size() != 1) {
         return;
     }
     // Rows the read before did not see (they cannot appear for a stopped run;
     // here they show that nothing was counted again).
     entry.path.p = "b.txt";
     CHECK(store.add_progress("stopped", {va::entry_key(entry)}));
-    const auto second = va::app::read_unfinished_operations(repository.context.repo, *first);
-    CHECK(second && second->size() == 1 && second->front().files_done == 1);
+    const auto second = va::app::read_unfinished_operations(repository.context.repo, first->operations);
+    CHECK(second && second->operations.size() == 1 && second->operations.front().files_done == 1);
     const auto fresh = va::app::read_unfinished_operations(repository.context.repo);
-    CHECK(fresh && fresh->size() == 1 && fresh->front().files_done == 2);
+    CHECK(fresh && fresh->operations.size() == 1 && fresh->operations.front().files_done == 2);
 }
 
 void tells_running_from_stopped()
@@ -223,21 +228,183 @@ void a_cancelled_registration_reads_stopped()
     const auto outcome = va::register_archive(services, request, fixture.cancel, cancelling);
     CHECK(!outcome && outcome.error().kind == va::RegisterFailure::Kind::Incomplete);
 
-    const auto operations = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+    const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
         [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; });
-    CHECK(operations && operations->size() == 1);
-    if (!operations || operations->size() != 1) {
+    CHECK(read && read->operations.size() == 1);
+    if (!read || read->operations.size() != 1) {
         return;
     }
-    CHECK(operations->front().recorded_stopped);
+    const auto& operation = read->operations.front();
+    CHECK(operation.recorded_stopped);
     const va::app::Text english;
     const Clock::time_point start{};
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     OperationWatch watch;
-    watch.update(operations->front(), start, now);
-    watch.update(operations->front(), start + 5s, now + 5s);
+    watch.update(operation, start, now);
+    watch.update(operation, start + 5s, now + 5s);
     CHECK(watch.state(start + 5s, now + 5s) == OperationState::Stopped);
     CHECK(describe_operation(english, watch, start + 5s, now + 5s).state == "stopped; it can be resumed");
+}
+
+// A registration this version stopped, then resumed by an older version: an
+// older `register --resume` checkpoints but never writes the plan, which keeps
+// this version's "stopped" and the "updated" written with it. Once the
+// checkpoints move after the first read that saw the mark, the registration
+// runs again, judged by its counts as an operation of an older version.
+void a_registration_resumed_by_an_older_version_runs()
+{
+    test::EngineFixture fixture;
+    for (int index = 0; index < 20; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, 'x'));
+    }
+    CancelWhileHashing cancelling(fixture.cancel);
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+    va::RegisterRequest request;
+    request.root = fixture.archive.root();
+    const auto outcome = va::register_archive(services, request, fixture.cancel, cancelling);
+    CHECK(!outcome && outcome.error().kind == va::RegisterFailure::Kind::Incomplete);
+
+    const va::app::Text english;
+    const auto no_volume = [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; };
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const Clock::time_point start{};
+    std::vector<OperationWatch> watches;
+    const auto poll = [&](std::chrono::seconds after) {
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {}, no_volume);
+        CHECK(read && read->operations.size() == 1);
+        if (read) {
+            va::app::follow(watches, read->operations, start + after, now + after);
+        }
+        return watches.size() == 1 ? watches.front().state(start + after, now + after) : OperationState::Waiting;
+    };
+    CHECK(poll(0s) == OperationState::Stopped);
+    CHECK(poll(5s) == OperationState::Stopped);
+
+    // The older version's checkpoint, the plan untouched.
+    const auto plans = fixture.store.settings_with_prefix("registration:");
+    CHECK(plans && plans->size() == 1);
+    if (!plans || plans->size() != 1) {
+        return;
+    }
+    const auto plan = nlohmann::json::parse(plans->front().second, nullptr, false);
+    const auto archive_uuid = plan.value("archive_uuid", std::string{});
+    va::Entry entry;
+    entry.path.p = "older-version";
+    entry.size = 5000;
+    entry.b3 = "b3";
+    CHECK(fixture.store.upsert_file_rows(archive_uuid, 1, {entry}));
+    CHECK(poll(65s) == OperationState::Running);
+    CHECK(describe_operation(english, watches.front(), start + 65s, now + 65s).state == "running");
+    CHECK(!watches.front().operation().recorded_stopped && !watches.front().operation().updated);
+    // Then quiet minutes say only that it may have stopped, as for any
+    // operation of an older version.
+    CHECK(poll(65s + 3min) == OperationState::Quiet);
+
+    // This version stops it again: a new mark, with its own "updated".
+    auto stopped = watches.front().operation();
+    stopped.recorded_stopped = true;
+    stopped.updated = now + 10min;
+    stopped.files_done += 1;
+    watches.front().update(stopped, start + 10min, now + 10min);
+    CHECK(watches.front().state(start + 10min, now + 10min) == OperationState::Stopped);
+    watches.front().update(stopped, start + 10min + 5s, now + 10min + 5s);
+    CHECK(watches.front().state(start + 10min + 5s, now + 10min + 5s) == OperationState::Stopped);
+
+    // A verification recorded INCOMPLETE is not taken up this way: a resume
+    // is another run.
+    OperationWatch run;
+    auto incomplete = registration(1, 1);
+    incomplete.kind = va::app::OperationKind::Verification;
+    incomplete.recorded_stopped = true;
+    run.update(incomplete, start, now);
+    incomplete.files_done = 2;
+    run.update(incomplete, start + 5s, now + 5s);
+    CHECK(run.state(start + 5s, now + 5s) == OperationState::Stopped);
+}
+
+// Not in WAL mode the checkpoints are not counted (decision 0022): a row shows
+// only the state its record gives, and says that the progress is not counted.
+void shows_only_the_record_state_when_not_counted()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const Clock::time_point start{};
+    auto operation = registration(0, 0);
+    operation.done_counted = false;
+    operation.files_total = 5000;
+    operation.bytes_total = 8 * gib;
+
+    // It says it works.
+    OperationWatch working;
+    operation.updated = wall_now;
+    working.update(operation, start, wall_now);
+    working.update(operation, start + 5min, wall_now + 1min);
+    auto row = describe_operation(english, working, start + 5min, wall_now + 1min);
+    CHECK(row.state == "running" && row.progress == "not counted" && row.details.empty() && !row.fraction);
+    CHECK(describe_operation(chinese, working, start + 5min, wall_now + 1min).progress == "未計算");
+
+    // Its plan says it stopped.
+    OperationWatch stopped;
+    operation.recorded_stopped = true;
+    stopped.update(operation, start, wall_now);
+    CHECK(describe_operation(english, stopped, start, wall_now).state == "stopped; it can be resumed");
+
+    // An older version's record says nothing of its state: not known, also
+    // after minutes (no counts to see moving or quiet).
+    OperationWatch older;
+    operation.recorded_stopped = false;
+    operation.updated.reset();
+    older.update(operation, start, wall_now);
+    older.update(operation, start + 10min, wall_now + 10min);
+    row = describe_operation(english, older, start + 10min, wall_now + 10min);
+    CHECK(row.state_kind == OperationState::Unknown && row.state == "not known");
+    CHECK(describe_operation(chinese, older, start + 10min, wall_now + 10min).state == "不明");
+    CHECK(!va::app::share_done(operation));
+
+    // A repository in the rollback-journal mode reads that way (sample data,
+    // a sample root).
+    test::TestRepository repository;
+    repository.execute("PRAGMA journal_mode=DELETE;");
+    auto store = repository.store();
+    const std::string archive_uuid = "c0ffee00-0000-4000-8000-000000000001";
+    CHECK(store.insert_archive({archive_uuid, "ARCH-0001", "2026-10-15T01:00:00Z", 0, "REGISTRATION_INCOMPLETE",
+        "範例", ""}));
+    CHECK(store.set_setting("registration:" + archive_uuid, R"({"archive_uuid":")" + archive_uuid +
+                                                                 R"(","revision":1,"created":"2026-10-15T01:00:00Z",)"
+                                                                 R"("root":"Z:\\範例","updated":"2026-10-15T01:00:00Z"})"));
+    va::Entry hashed;
+    hashed.path.p = "a.txt";
+    hashed.size = 100;
+    hashed.b3 = "b3";
+    CHECK(store.upsert_file_rows(archive_uuid, 1, {hashed}));
+    const auto read = va::app::read_unfinished_operations(repository.context.repo);
+    CHECK(read && read->operations.size() == 1 && !read->archives_mark.empty());
+    if (read && read->operations.size() == 1) {
+        CHECK(!read->operations.front().done_counted && read->operations.front().files_done == 0);
+    }
+}
+
+// A read carries a mark of the archives (ArchiveStore::archive_list_mark), read
+// with the operations: an operation that started and finished between two
+// reads, never listed, still changes it, and the Archive List draws its table
+// again. Sample data only.
+void a_read_marks_the_archives()
+{
+    test::TestRepository repository;
+    const auto first = va::app::read_unfinished_operations(repository.context.repo);
+    CHECK(first && first->operations.empty() && !first->archives_mark.empty());
+    const auto again = va::app::read_unfinished_operations(repository.context.repo);
+    CHECK(again && first && again->archives_mark == first->archives_mark);
+
+    // A small folder registered between two reads.
+    auto store = repository.store();
+    CHECK(store.insert_archive({"c0ffee00-0000-4000-8000-000000000003", "ARCH-0003", "2026-10-15T01:00:00Z", 1,
+        "REGISTERED", "範例/Quick", ""}));
+    const auto registered = va::app::read_unfinished_operations(repository.context.repo);
+    CHECK(registered && registered->operations.empty() && first && registered->archives_mark != first->archives_mark);
+    const auto mark = store.archive_list_mark();
+    CHECK(mark && registered && *mark == registered->archives_mark);
 }
 
 // Checkpoints arrive once a minute while the polls come every 5 seconds. The
@@ -320,6 +487,123 @@ void estimates_from_steps_minutes_apart()
         }
         CHECK(rows > 0 && with_speed == rows && with_left == rows);
         CHECK(worst < 0.05);
+    }
+}
+
+// Photos, checkpointed every 1000 files 40 seconds apart, between videos of
+// 100 GiB that take over 11 minutes each, at 150 MiB/s. The pace learned from
+// the photos makes every video step "long" (over 10 minutes), but a video
+// brings its bytes: it is work, not a stop, and the estimate goes on. Polled
+// every 5 seconds, with the operation saying it works ("updated", every 30
+// seconds) and without (an older version). Then a stop of two hours: the
+// first step after it brings little for its length and starts the estimate
+// afresh.
+void estimates_between_small_and_large_files()
+{
+    const va::app::Text english;
+    constexpr double speed = 150;  // MiB per second
+    struct Step {
+        double time;
+        std::uint64_t files;
+        std::uint64_t mib;
+    };
+    // One cycle: two checkpoints of 1000 photos of 6 MiB, then the last 400
+    // photos and a video of 100 GiB in the checkpoint when the video finishes.
+    constexpr int cycles = 12;
+    constexpr double photos = 2400 * 6 / speed;
+    constexpr double cycle = photos + 102400 / speed;
+    std::vector<Step> steps;
+    for (int index = 0; index < cycles; ++index) {
+        const double begin = index * cycle;
+        const auto files = static_cast<std::uint64_t>(index) * 2401;
+        const auto done = static_cast<std::uint64_t>(index) * (2400 * 6 + 102400);
+        steps.push_back({begin + 40, files + 1000, done + 6000});
+        steps.push_back({begin + 80, files + 2000, done + 12000});
+        steps.push_back({begin + cycle, files + 2401, done + 2400 * 6 + 102400});
+    }
+    const auto& last = steps.back();
+    for (const bool says_it_works : {true, false}) {
+        auto operation = registration(0, 0);
+        operation.files_total = last.files;
+        operation.bytes_total = last.mib * mib;
+        OperationWatch watch;
+        std::size_t seen = 0;
+        int rows = 0;
+        int with_left = 0;
+        double worst = 0;
+        for (int second = 0; second <= static_cast<int>(last.time) - 30; second += 5) {
+            while (seen < steps.size() && steps[seen].time <= second) {
+                operation.files_done = steps[seen].files;
+                operation.bytes_done = steps[seen].mib * mib;
+                ++seen;
+            }
+            if (says_it_works) {
+                operation.updated = wall_now + std::chrono::seconds(second - second % 30);
+            }
+            const auto now = Clock::time_point{} + std::chrono::seconds(second);
+            const auto wall = wall_now + std::chrono::seconds(second);
+            watch.update(operation, now, wall);
+            // 20 seconds after each step seen, from the third cycle on.
+            if (seen <= 6 || second != static_cast<int>(std::ceil(steps[seen - 1].time / 5)) * 5 + 20) {
+                continue;
+            }
+            ++rows;
+            const auto row = describe_operation(english, watch, now, wall);
+            CHECK(row.state == "running");
+            with_left += row.details.find("minutes left") != std::string::npos ||
+                         row.details.find("hours left") != std::string::npos;
+            if (const auto left = watch.estimate().time_left()) {
+                // Made at the step, from what was done then.
+                const double truth = static_cast<double>(last.mib - steps[seen - 1].mib) / speed;
+                worst = std::max(worst, std::abs(static_cast<double>(left->likely.count()) / truth - 1));
+            }
+        }
+        CHECK(rows == 3 * (cycles - 2) - 1);  // every step from the third cycle on but the last
+        CHECK(with_left == rows);
+        CHECK(worst < 0.15);
+        const OperationWatch learned = watch;
+        const auto at = [&](int second) {
+            return std::pair{Clock::time_point{} + std::chrono::seconds(second), wall_now + std::chrono::seconds(second)};
+        };
+
+        // Stopped for two hours, then a checkpoint of photos: a stop, not slow
+        // work. The estimate starts afresh from that step.
+        CHECK(watch.estimate().bytes_per_second().has_value());
+        auto resumed = operation;
+        resumed.files_done += 1000;
+        resumed.bytes_done += 6000 * mib;
+        const int back = static_cast<int>(last.time) + 2 * 3600;
+        if (says_it_works) {
+            resumed.updated = wall_now + std::chrono::seconds(back);
+        }
+        watch.update(resumed, at(back).first, at(back).second);
+        CHECK(!watch.estimate().bytes_per_second().has_value());  // one sample: a new estimate
+
+        if (says_it_works) {
+            continue;
+        }
+        // An older version cancelled while reading a video: its last
+        // checkpoint, written as it stopped, holds only the photos before it
+        // (little work for its 6 minutes), and the video is read again from
+        // its start when it is resumed two hours later, after a scan of 10
+        // minutes. That first step brings the video's many bytes, but over
+        // the whole stop: still a stop, though the cancel's slow checkpoint
+        // pulled the estimate's speed down.
+        OperationWatch cancelled = learned;
+        auto stopping = operation;
+        const int last_seen = static_cast<int>(std::ceil(steps[steps.size() - 2].time / 5)) * 5;
+        const int cancel = last_seen + 360;
+        stopping.files_done += 400;
+        stopping.bytes_done += 2400 * mib;
+        for (int second = last_seen + 5; second <= cancel + 2 * 3600 + 600 + 685; second += 5) {
+            auto seen_now = second < cancel ? operation : stopping;
+            if (second >= cancel + 2 * 3600 + 600 + 685) {
+                seen_now.files_done += 1;
+                seen_now.bytes_done += 102400 * mib;
+            }
+            cancelled.update(seen_now, at(second).first, at(second).second);
+        }
+        CHECK(!cancelled.estimate().bytes_per_second().has_value());  // one sample: a new estimate
     }
 }
 
@@ -408,6 +692,100 @@ void restarts_the_estimate_after_a_stop()
     poll(120 + 7200, 3);
     poll(120 + 7200 + 3600, 4);
     CHECK(!quiet.estimate().bytes_per_second().has_value());  // one sample: a new estimate
+}
+
+// The photos and videos of estimates_between_small_and_large_files, and the
+// computer sleeps for 20 minutes, five minutes into a video, with the list on
+// screen. Its clock goes on while it sleeps (Windows), so the video's step
+// spans the sleep, and it brought the video's bytes: more than a quarter of
+// what the fastest step reads in that time, so on its own it passes for work.
+// An operation that says it works said so again on waking, before the list
+// read again, so no poll saw it stopped either. The window's timer was held
+// up, though (archive_list_view.cpp): told so, the watch starts the estimate
+// afresh at that step instead of taking the sleep for slow work, and the next
+// video's step gives a time left about right.
+void restarts_the_estimate_after_a_sleep()
+{
+    const va::app::Text english;
+    constexpr double speed = 150;  // MiB per second
+    struct Step {
+        double time;  // working time: the sleep left out
+        std::uint64_t files;
+        std::uint64_t mib;
+    };
+    constexpr int cycles = 8;
+    constexpr double photos = 2400 * 6 / speed;
+    constexpr double cycle = photos + 102400 / speed;
+    std::vector<Step> steps;
+    for (int index = 0; index < cycles; ++index) {
+        const double begin = index * cycle;
+        const auto files = static_cast<std::uint64_t>(index) * 2401;
+        const auto done = static_cast<std::uint64_t>(index) * (2400 * 6 + 102400);
+        steps.push_back({begin + 40, files + 1000, done + 6000});
+        steps.push_back({begin + 80, files + 2000, done + 12000});
+        steps.push_back({begin + cycle, files + 2401, done + 2400 * 6 + 102400});
+    }
+    const auto& last = steps.back();
+    // Asleep from five minutes into the video of the fifth cycle.
+    constexpr int asleep = static_cast<int>(4 * cycle + photos) + 300;
+    constexpr int awake = asleep + 20 * 60;
+    const auto wall_time = [&](double work) { return work > asleep ? work + (awake - asleep) : work; };
+    constexpr std::size_t spanning = 4 * 3 + 2;  // that video's step
+    constexpr std::size_t next_video = spanning + 3;
+    const int checked = static_cast<int>(std::ceil(wall_time(steps[next_video].time) / 5)) * 5 + 20;
+    for (const bool says_it_works : {true, false}) {
+        for (const bool held_up : {true, false}) {
+            auto operation = registration(0, 0);
+            operation.files_total = last.files;
+            operation.bytes_total = last.mib * mib;
+            OperationWatch watch;
+            std::size_t seen = 0;
+            int polled = 0;
+            for (int second = 5; second <= checked; second += 5) {
+                if (second > asleep && second < awake) {
+                    continue;  // nothing runs, nothing reads
+                }
+                const std::size_t before = seen;
+                while (seen < steps.size() && wall_time(steps[seen].time) <= second) {
+                    operation.files_done = steps[seen].files;
+                    operation.bytes_done = steps[seen].mib * mib;
+                    ++seen;
+                }
+                if (says_it_works) {
+                    // Every 30 seconds while awake, the first time on waking.
+                    const int beat = second >= awake ? awake + (second - awake) / 30 * 30 : second / 30 * 30;
+                    operation.updated = wall_now + std::chrono::seconds(beat);
+                }
+                // The window's timer ticks every 5 seconds; this tick came 20 minutes late.
+                if (held_up && second - polled > 60) {
+                    watch.polls_held_up();
+                }
+                polled = second;
+                const auto now = Clock::time_point{} + std::chrono::seconds(second);
+                const auto wall = wall_now + std::chrono::seconds(second);
+                watch.update(operation, now, wall);
+                if (before <= spanning && seen > spanning) {
+                    // No poll saw it stopped.
+                    CHECK(watch.state(now, wall) == OperationState::Running);
+                    // Told: a new estimate, of one sample. Not told: work.
+                    CHECK(watch.estimate().bytes_per_second().has_value() == !held_up);
+                }
+                if (second != checked || !held_up) {
+                    continue;
+                }
+                const auto row = describe_operation(english, watch, now, wall);
+                CHECK(row.details.find(" left") != std::string::npos &&
+                      row.details.find("estimating") == std::string::npos);
+                const auto left = watch.estimate().time_left();
+                CHECK(left.has_value());
+                if (left) {
+                    // Made at the step, from what was done then.
+                    const double truth = static_cast<double>(last.mib - steps[next_video].mib) / speed;
+                    CHECK(std::abs(static_cast<double>(left->likely.count()) / truth - 1) < 0.15);
+                }
+            }
+        }
+    }
 }
 
 // An operation that says it works but has not moved for a while: its speed
@@ -614,9 +992,14 @@ void unfinished_operations_tests()
     keeps_the_counts_of_a_stopped_verification();
     tells_running_from_stopped();
     a_cancelled_registration_reads_stopped();
+    a_registration_resumed_by_an_older_version_runs();
+    shows_only_the_record_state_when_not_counted();
+    a_read_marks_the_archives();
     estimates_from_checkpoint_steps();
     estimates_from_steps_minutes_apart();
+    estimates_between_small_and_large_files();
     restarts_the_estimate_after_a_stop();
+    restarts_the_estimate_after_a_sleep();
     leaves_out_a_stale_speed();
     shows_100_percent_only_when_done();
     follows_operations_between_polls();

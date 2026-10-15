@@ -14,8 +14,10 @@ namespace {
 constexpr double window = 180;              // "recent": speed and full-weight intervals
 // Reports on steps: steps can come minutes apart (one large file between two
 // checkpoints). The window then grows to this many times their usual spacing,
-// the median of the last few, so that it holds three of them and they can give
-// a time left (min_moving_intervals).
+// the median of the last few, so that it usually holds three of them and they
+// can give a time left (min_moving_intervals). A step far later than the usual
+// spacing (one larger file) would still leave fewer in it: on steps the window
+// never gives up its last min_moving_intervals intervals, however old.
 constexpr double steps_in_window = 3.5;
 constexpr std::size_t spacings_kept = 8;
 constexpr double sample_spacing = 2;        // reports closer than this share one sample
@@ -126,8 +128,11 @@ void ProgressEstimate::update(const Progress& progress, Clock::time_point now)
         size_window(now_ - previous.time);
     }
     // Intervals that ended before the window move into the history, and the
-    // sample each one started at goes with it.
-    while (!intervals_.empty() && intervals_.front().end <= now_ - window_) {
+    // sample each one started at goes with it. On steps every interval is a
+    // step, and the last few stay however long ago they ended: after one step
+    // much later than the usual spacing they are all the window has.
+    while (!intervals_.empty() && intervals_.front().end <= now_ - window_ &&
+           (reports_ == Reports::regular || intervals_.size() > min_moving_intervals)) {
         add_to_history(intervals_.front());
         intervals_.pop_front();
         samples_.pop_front();

@@ -102,6 +102,11 @@ std::expected<SqliteStatement, IoError> SqliteDatabase::prepare(std::string_view
     return std::expected<SqliteStatement, IoError>(std::in_place, statement);
 }
 
+bool SqliteDatabase::in_transaction() const
+{
+    return sqlite3_get_autocommit(database_) == 0;
+}
+
 } // namespace va::repository_detail
 namespace va::repository_detail {
 

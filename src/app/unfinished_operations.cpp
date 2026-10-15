@@ -14,12 +14,19 @@ namespace va::app {
 
 namespace {
 
-// A gap between two steps longer than this starts the estimate afresh; for an
-// operation that steps slowly (a volume of large videos checkpoints only when a
-// file finishes, minutes apart), four times its usual gap, which it learns
-// from the gaps seen so far.
+// A gap between two steps longer than this starts the estimate afresh when it
+// brought little work for its length (idle_share); for an operation that steps
+// slowly (a volume of large videos checkpoints only when a file finishes,
+// minutes apart), four times its usual gap, which it learns from the gaps
+// seen so far.
 constexpr auto long_gap_floor = std::chrono::minutes(10);
-constexpr std::size_t step_gaps_kept = 8;
+constexpr std::size_t steps_kept = 8;
+// A long gap that brought less than this share of the bytes the operation
+// reads in that time when it works (the fastest of its last few steps) was a
+// stop, a sleep or a resumed scan, which bring almost nothing. A large file
+// brings its bytes: between photos checkpointed 40 seconds apart, a video of
+// 100 GB read in 11 minutes is work, not a stop.
+constexpr double idle_share = 0.25;
 
 // The bytes total the share is counted against: an approximate total that the
 // done bytes already passed says nothing any more (a volume's used space can be
@@ -55,7 +62,7 @@ std::optional<std::uint64_t> volume_used_bytes(const std::filesystem::path& root
     return space.capacity - space.free;
 }
 
-std::expected<std::vector<UnfinishedOperation>, IoError> read_unfinished_operations(const RepositoryLayout& layout,
+std::expected<OperationsRead, IoError> read_unfinished_operations(const RepositoryLayout& layout,
     const std::vector<UnfinishedOperation>& previous,
     const std::function<std::optional<std::uint64_t>(const std::filesystem::path&)>& used_bytes)
 {
@@ -65,28 +72,48 @@ std::expected<std::vector<UnfinishedOperation>, IoError> read_unfinished_operati
     if (!store) {
         return std::unexpected(store.error());
     }
-    const auto registrations = store->pending_registrations();
-    if (!registrations) {
-        return std::unexpected(registrations.error());
-    }
     // A verification recorded INCOMPLETE never changes: its counts of the
     // read before hold, and counting its checkpoints again would only cost.
     std::map<std::string, CheckpointCount> counted;
     for (const auto& operation : previous) {
-        if (operation.kind == OperationKind::Verification && operation.recorded_stopped) {
+        if (operation.kind == OperationKind::Verification && operation.recorded_stopped &&
+            operation.done_counted) {
             counted[operation.run_id] = {operation.files_done, operation.bytes_done};
         }
     }
-    // The time now decides which runs never recorded have been silent long
-    // enough to have stopped, so that nothing can finish them any more.
-    const auto verifications = store->unfinished_verifications(
-        std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()), counted);
-    if (!verifications) {
-        return std::unexpected(verifications.error());
+    // One read transaction: an operation that finishes meanwhile is either
+    // still listed with the archives as they were, or gone with its result
+    // in the mark.
+    OperationsRead read;
+    std::vector<PendingRegistration> registrations;
+    std::vector<UnfinishedVerification> verifications;
+    const auto done = store->read_transaction([&]() -> std::expected<void, IoError> {
+        auto mark = store->archive_list_mark();
+        if (!mark) {
+            return std::unexpected(mark.error());
+        }
+        read.archives_mark = std::move(*mark);
+        auto pending = store->pending_registrations();
+        if (!pending) {
+            return std::unexpected(pending.error());
+        }
+        registrations = std::move(*pending);
+        // The time now decides which runs never recorded have been silent
+        // long enough to have stopped, and so may be superseded.
+        auto unfinished = store->unfinished_verifications(
+            std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()), counted);
+        if (!unfinished) {
+            return std::unexpected(unfinished.error());
+        }
+        verifications = std::move(*unfinished);
+        return {};
+    });
+    if (!done) {
+        return std::unexpected(done.error());
     }
 
-    std::vector<UnfinishedOperation> operations;
-    for (const auto& registration : *registrations) {
+    auto& operations = read.operations;
+    for (const auto& registration : registrations) {
         UnfinishedOperation operation;
         operation.kind = OperationKind::Registration;
         operation.key = "registration:" + registration.archive_uuid;
@@ -107,9 +134,10 @@ std::expected<std::vector<UnfinishedOperation>, IoError> read_unfinished_operati
         operation.updated = parse_timestamp(registration.updated);
         // An attempt that ended without finishing says so in its plan.
         operation.recorded_stopped = !registration.stopped.empty();
+        operation.done_counted = registration.done_counted;
         operations.push_back(std::move(operation));
     }
-    for (const auto& verification : *verifications) {
+    for (const auto& verification : verifications) {
         UnfinishedOperation operation;
         operation.kind = OperationKind::Verification;
         operation.key = "run:" + verification.run_id;
@@ -125,12 +153,13 @@ std::expected<std::vector<UnfinishedOperation>, IoError> read_unfinished_operati
         operation.recorded_stopped = verification.recorded_incomplete;
         operation.resumable = verification.resumable;
         operation.updated = parse_timestamp(verification.updated);
+        operation.done_counted = verification.done_counted;
         operations.push_back(std::move(operation));
     }
     // Newest first. Timestamps sort as text; a stable sort keeps registrations
     // before verifications that started in the same second.
     std::ranges::stable_sort(operations, std::ranges::greater{}, &UnfinishedOperation::started);
-    return operations;
+    return read;
 }
 
 void OperationWatch::update(UnfinishedOperation operation, Clock::time_point now, std::chrono::sys_seconds wall_now)
@@ -140,27 +169,36 @@ void OperationWatch::update(UnfinishedOperation operation, Clock::time_point now
     if (polls_ == 0) {
         first_seen_ = now;
     }
+    follow_stop_mark(operation);
     if (stepped) {
         // After a stop (`register --resume`, a computer that slept) the first
         // step would count the whole stop, and a resumed registration's scan,
         // as one stretch of very slow work: the time left would read days for
-        // many minutes. So the estimate starts afresh after a long gap, or
-        // when a poll saw the operation stopped since the last step. That
-        // costs a few minutes of "estimating time left". A large file also
-        // holds a step back for minutes, so "long" goes by this operation's
-        // own pace, not by a fixed time.
+        // many minutes. So the estimate starts afresh when a poll saw the
+        // operation stopped since the last step, or the polls were held up
+        // meanwhile (polls_held_up), or after a long gap that brought little
+        // work. That costs a few minutes of "estimating time left". A large
+        // file also holds a step back for minutes, but it brings its bytes;
+        // and "long" goes by this operation's own pace, not by a fixed time.
+        // A stop in the middle of a large file that no poll saw, and no
+        // hold-up told, brings that file's bytes as well: one shorter than
+        // about three times the file's read passes for work (idle).
         bool afresh = stopped_since_step_;
         if (last_step_) {
             const auto gap = now - *last_step_;
-            afresh = afresh || gap > long_gap();
+            // operation_ is still the poll before this one: the counts of the last step.
+            const std::uint64_t brought =
+                operation.bytes_done > operation_.bytes_done ? operation.bytes_done - operation_.bytes_done : 0;
+            afresh = afresh || (gap > long_gap() && idle(gap, brought));
             // Every gap teaches the pace, a long one too: steps evenly 12
             // minutes apart (a large file each) would otherwise start the
             // estimate afresh at every step. Only a gap in which a poll saw
-            // the operation stopped says nothing about its pace.
+            // the operation stopped, or the polls were held up, says nothing
+            // about its pace.
             if (!stopped_since_step_) {
-                step_gaps_.push_back(gap);
-                if (step_gaps_.size() > step_gaps_kept) {
-                    step_gaps_.pop_front();
+                steps_.push_back({gap, brought});
+                if (steps_.size() > steps_kept) {
+                    steps_.pop_front();
                 }
             }
         }
@@ -191,16 +229,63 @@ void OperationWatch::update(UnfinishedOperation operation, Clock::time_point now
 OperationWatch::Clock::duration OperationWatch::long_gap() const
 {
     Clock::duration gap = long_gap_floor;
-    if (!step_gaps_.empty()) {
+    if (!steps_.empty()) {
         // The lower median: of two gaps, the shorter one. A stop among the
         // first few gaps (of an operation that does not say when it works)
         // then cannot stretch "long" to hours.
-        std::vector<Clock::duration> gaps(step_gaps_.begin(), step_gaps_.end());
+        std::vector<Clock::duration> gaps;
+        gaps.reserve(steps_.size());
+        for (const auto& step : steps_) {
+            gaps.push_back(step.gap);
+        }
         const auto middle = gaps.begin() + static_cast<std::ptrdiff_t>((gaps.size() - 1) / 2);
         std::ranges::nth_element(gaps, middle);
         gap = std::max(gap, 4 * *middle);
     }
     return gap;
+}
+
+bool OperationWatch::idle(Clock::duration gap, std::uint64_t brought) const
+{
+    // What the operation reads when it works: the fastest of its last few
+    // steps. A stop, a sleep, or the last checkpoint of a cancelled attempt
+    // (written early, without the large file it was reading) only ever make a
+    // step slower, so they cannot lower it, as they would lower the speed of
+    // the estimate, which spans them. Without a step yet, nothing tells a
+    // long gap of work from a stop, and it counts as a stop.
+    double fastest = 0;
+    for (const auto& step : steps_) {
+        if (const double seconds = std::chrono::duration<double>(step.gap).count(); seconds > 0) {
+            fastest = std::max(fastest, static_cast<double>(step.bytes) / seconds);
+        }
+    }
+    if (fastest <= 0) {
+        return true;
+    }
+    return static_cast<double>(brought) < idle_share * fastest * std::chrono::duration<double>(gap).count();
+}
+
+void OperationWatch::follow_stop_mark(UnfinishedOperation& operation)
+{
+    if (operation.kind != OperationKind::Registration || !operation.recorded_stopped) {
+        stop_mark_.reset();
+        return;
+    }
+    if (!stop_mark_ || stop_mark_->updated != operation.updated) {
+        // A mark this watch has not seen: the attempt that wrote it flushed
+        // its last checkpoint first, so these counts are its last.
+        stop_mark_ = StopMark{operation.updated, operation.files_done, operation.bytes_done};
+    } else if (operation.files_done != stop_mark_->files_done || operation.bytes_done != stop_mark_->bytes_done) {
+        // The counts moved under the same mark: an attempt that does not
+        // write the plan works on it (an older version's resume, decision
+        // 0022). This version's resume writes the plan without the mark.
+        stop_mark_->taken_up = true;
+    }
+    if (stop_mark_->taken_up) {
+        // The mark and the "updated" with it are the attempt's before.
+        operation.recorded_stopped = false;
+        operation.updated.reset();
+    }
 }
 
 OperationState OperationWatch::state(Clock::time_point now, std::chrono::sys_seconds wall_now) const
@@ -211,6 +296,11 @@ OperationState OperationWatch::state(Clock::time_point now, std::chrono::sys_sec
     if (operation_.updated) {
         // The operation says itself when it last worked.
         return wall_now - *operation_.updated > quiet_after ? OperationState::Stopped : OperationState::Running;
+    }
+    if (!operation_.done_counted) {
+        // An older version's record says nothing of its state, and its counts
+        // are not read: nothing tells whether it works.
+        return OperationState::Unknown;
     }
     if (polls_ <= 1) {
         return OperationState::Waiting;
@@ -244,6 +334,9 @@ void follow(std::vector<OperationWatch>& watches, std::vector<UnfinishedOperatio
 std::optional<double> share_done(const UnfinishedOperation& operation)
 {
     std::optional<double> share;
+    if (!operation.done_counted) {
+        return share;
+    }
     if (const auto total = usable_bytes_total(operation); total > 0) {
         share = std::min(1.0, static_cast<double>(operation.bytes_done) / static_cast<double>(total));
     } else if (operation.files_total > 0) {
@@ -273,7 +366,10 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;
     const bool by_files = !by_bytes && operation.files_total > 0;
-    if (row.fraction && by_bytes) {
+    if (!operation.done_counted) {
+        // Only the state, from the record (decision 0022).
+        row.progress = text("not counted");
+    } else if (row.fraction && by_bytes) {
         const auto done = format_size(operation.bytes_done);
         const auto total = format_size(operation.bytes_total);
         const auto percent = percent_of(operation, *row.fraction);
@@ -292,7 +388,7 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     // a step (a large file): its speed and time left would then be those of
     // minutes ago, so they are left out until it moves again.
     std::string details;
-    if (!by_files) {
+    if (operation.done_counted && !by_files) {
         details = operation.files_total > 0
                       ? text.format("{} of {} files", operation.files_done, operation.files_total)
                       : text.format("{} files", operation.files_done);
@@ -315,6 +411,9 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     switch (row.state_kind) {
     case OperationState::Waiting:
         row.state = text("waiting for progress...");
+        break;
+    case OperationState::Unknown:
+        row.state = text("not known");
         break;
     case OperationState::Running:
         row.state = text("running");

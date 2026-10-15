@@ -26,9 +26,12 @@ struct OperationsPoll {
     std::chrono::steady_clock::time_point started{};  // when the last read began
     std::chrono::steady_clock::duration took{};       // how long the last read took
     guint timer = 0;                            // the GLib timeout; 0 while the list is hidden
+    std::chrono::steady_clock::time_point ticked{};   // its last tick, or its start: a tick far later
+                                                      // than this one tells that the window was held up
     GtkWidget* served = nullptr;                // the Archive List the timer refreshes
     std::filesystem::path repository;           // the RepositoryRoot the watches belong to
-    bool has_read = false;                      // a read of it was applied: the next one can tell what ended
+    std::string archives_shown;                 // the mark of the archives the table shows (empty: none),
+                                                // to tell when a read finds them changed
     std::vector<app::OperationWatch> watches;   // the operations of the latest read
     Report error;                               // why the latest read failed
 

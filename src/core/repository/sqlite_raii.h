@@ -57,6 +57,9 @@ public:
 
     std::expected<void, IoError> execute(std::string_view sql) const;
     std::expected<SqliteStatement, IoError> prepare(std::string_view sql) const;
+    // True while a transaction is open on this connection (BEGIN without its
+    // COMMIT or ROLLBACK yet).
+    bool in_transaction() const;
 
 private:
     explicit SqliteDatabase(sqlite3* database) noexcept;
