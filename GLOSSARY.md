@@ -88,3 +88,7 @@ _Avoid_: backup, import
 **Verification**:
 Re-reading an archive and comparing it against a revision's manifest; its outcome is a run result qualified by its mode.
 _Avoid_: check, integrity status
+
+**Comparison**:
+Confirming from their manifests alone that two archives' current revisions hold the same entries with the same content, such as a copy against its original; no media is read, so it says nothing about what the media hold now.
+_Avoid_: diff, verification

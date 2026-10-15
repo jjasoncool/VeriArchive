@@ -18,6 +18,8 @@ in V1.1.
 
 - [`docs/user-guide.md`](docs/user-guide.md) / [`docs/user-guide.zh-TW.md`](docs/user-guide.zh-TW.md):
   how to use VeriArchive (English / 繁體中文).
+- [圖解使用說明](docs/gui-guide.zh-TW.md) (Traditional Chinese): the graphical interface step by
+  step, with screenshots.
 - [`docs/HANDOFF.md`](docs/HANDOFF.md): the specification (principles, contracts, milestones).
 - [`docs/decisions/`](docs/decisions/): decisions that amend the specification.
 - [`GLOSSARY.md`](GLOSSARY.md): the words used in code, documents and output.
@@ -64,26 +66,36 @@ veriarchive-cli register E:\Backups\2026        # baseline a folder or volume ro
 veriarchive-cli verify --full E:\Backups\2026   # re-read and compare everything
 veriarchive-cli verify --full <archive_uuid>    # find the archive on attached disks
 veriarchive-cli archive list                    # last FULL verify, last verify, OVERDUE
+veriarchive-cli archive compare <uuid_a> <uuid_b>   # does copy B hold what archive A holds?
 veriarchive-cli history <uuid>
 veriarchive-cli repo verify-history             # check the history hash chain
 veriarchive-cli export-sha256sums <uuid> --out sums.txt   # check later with sha256sum -c
 ```
 
-More: `register --new-revision | --force-new-archive | --write-media-copy | --resume`,
-`verify --full ... --resume RUN_ID`, `archive show | retire | relocate`, `export`, `import`,
-`repo rebuild-index`. Every command accepts `--json`. Exit codes: 0 passed, 2 passed with
+More: `register --new-revision | --force-new-archive | --copy-of UUID | --write-media-copy |
+--resume`, `verify --full ... --resume RUN_ID`, `archive show | retire | relocate`, `export`,
+`import`, `repo rebuild-index`. Every command accepts `--json`. Exit codes: 0 passed, 2 passed with
 warnings, 3 failed, 4 incomplete, 10 usage, 11 repository, 12 needs an operator decision.
+
+`archive compare` compares the manifests of two registered archives, typically an archive and its
+copy on other media, entry by entry: presence, type and content (BLAKE3 and SHA-256), not metadata.
+It reads no media and records nothing; the result is IDENTICAL (exit 0), IDENTICAL_WITH_WARNINGS
+(2) or DIFFERENT (3). It compares what each registration read; a FULL verify of each archive
+proves that its disk still holds it (decision 0020).
 
 The repository location is resolved explicitly (`--repository`, `VERIARCHIVE_REPOSITORY`), then
 from the pinned config, and only on first initialisation falls back to `<program>/data` or
-`~/VeriArchive`. A configured location that is unavailable is an error, never a fallback. Back up
-the repository: losing it loses the verification history.
+`~/VeriArchive`. A configured location that is unavailable is an error, never a fallback. A
+repository inside the config file's folder is pinned relative to it, so a portable program
+folder with its `data` can be moved as a whole (decision 0019). Back up the repository: losing it
+loses the verification history.
 
 ## Graphical interface
 
-`veriarchive-gui` offers the same operations in five views: Archive List, Register Archive,
-Verify Archive, Verification History and Settings. Long operations show progress and can be
-cancelled and resumed. The GUI runs unprivileged.
+`veriarchive-gui` offers the same operations in six views: Archive List, Register Archive,
+Verify Archive, Compare Archives, Verification History and Settings. Long operations show progress
+and can be cancelled; interrupted registrations and verifications can be resumed. The GUI runs
+unprivileged.
 
 ## Interface language
 

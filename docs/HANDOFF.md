@@ -698,6 +698,8 @@ presets: linux-debug  linux-release  windows-ucrt64-debug  windows-ucrt64-releas
 
 ### Repository structure
 
+> Amended by `docs/decisions/0020-archive-comparison.md`: `src/core/engine/compare_archives.*`; `tools/screenshots/` makes the user guide's pictures of the GUI.
+
 ```text
 VeriArchive/
 ├── CMakeLists.txt  CMakePresets.json  README.md  CLAUDE.md
@@ -711,7 +713,7 @@ VeriArchive/
 │   │   ├── merkle/      (V1.1)
 │   │   ├── identity/    matcher.*  (§B10)
 │   │   ├── scan/        scanner.*  exclusions.*
-│   │   ├── engine/      register_engine.*  verify_engine.*  sampling.* (V1.1)
+│   │   ├── engine/      register_engine.*  verify_engine.*  compare_archives.*  sampling.* (V1.1)
 │   │   ├── repository/  repository.*  schema.sql  history_chain.*
 │   │   └── signing/     signature_file.*  file_signer.* (V1.1)
 │   ├── platform/
@@ -723,15 +725,18 @@ VeriArchive/
 │   ├── cli/
 │   ├── gui/
 │   └── helper/          (V1.1) veriarchive-helper
-└── tests/
-    ├── unit/
-    ├── golden/          fixture trees + expected .vam
-    └── integration/
+├── tests/
+│   ├── unit/
+│   ├── golden/          fixture trees + expected .vam
+│   └── integration/
+└── tools/
+    └── screenshots/     make_screenshots.cmake: sample archives + GUI screenshot tour (decision 0020)
 ```
 
 ## B16. CLI
 
 > Amended by `docs/decisions/0017-interface-language.md`: global option `--lang en|zh-TW` (also `VERIARCHIVE_LANG`); text output in English or Traditional Chinese, `--json` always English.
+> Amended by `docs/decisions/0020-archive-comparison.md`: `archive compare <uuid> <uuid> [--json]` compares the manifests of two archives' current revisions, no media read; exit `0` IDENTICAL · `2` IDENTICAL_WITH_WARNINGS · `3` DIFFERENT or a manifest that cannot be used · `4` cancelled.
 
 ```text
 veriarchive-cli repo init [--repository P] | info | rebuild-index | verify-history
@@ -752,6 +757,7 @@ Exit codes: `0` PASSED · `2` PASSED_WITH_WARNINGS · `3` FAILED · `4` INCOMPLE
 
 > Amended by `docs/decisions/0016-gtk4-c-api-for-the-gui.md`: the GUI uses the GTK4 C API (no gtkmm).
 > Amended by `docs/decisions/0017-interface-language.md`: Settings has a language drop-down (English, 繁體中文).
+> Amended by `docs/decisions/0020-archive-comparison.md`: a sixth view, Compare Archives, after Verify Archive; it reads no media, shows progress in entries and allows cancel, and has no resume (it writes nothing). A screenshot mode (`VERIARCHIVE_GUI_SCREENSHOTS`) makes the user guide's pictures.
 
 Views: Register Archive, Verify Archive, Archive List, Verification History, Settings.
 Archive List columns: label, short uuid, volume label, model, capacity, last FULL (result/date), last verify (mode/result/date), OVERDUE, revision.
@@ -796,7 +802,7 @@ Kill `verify --full` at ~50 % → `INCOMPLETE`; `--resume` finishes without re-h
 
 ## M5 — GTK4 GUI
 
-All five views; results per §A6 / R-21; progress + cancel + resume; Settings per §B17; Windows package passes R-121; runs unprivileged under Wayland.
+All views of §B17 (six, with decision 0020's Compare Archives); results per §A6 / R-21; progress + cancel + resume; Settings per §B17; Windows package passes R-121; runs unprivileged under Wayland.
 
 ## V1.1 (after V1 acceptance)
 
@@ -821,7 +827,7 @@ Whole-disk fingerprint (§B14) · btrfs change tracking · hardware-token / serv
 | D6 | Windows helper authorisation: Windows service, or UAC-elevated helper launched on demand? | on-demand elevated helper, exits when idle |
 | D7 | ~~Retention of `verify_items` detail (storage growth on large archives)~~ | **Resolved** (2026-10-08): non-Verified items only, kept forever |
 | D8 | ~~Registering a *directory* (not a volume root) as an archive: allowed in V1, or volume roots only?~~ | **Resolved** by `docs/decisions/0001-archive-matching-includes-root-subpath.md`: allowed; overlapping roots refused; matching keyed by volume evidence + `root_subpath` |
-| D9 | Linux without the udev database (containers, minimal systems; seen on the GitLab runners, 2026-10-14): neither the filesystem UUID nor the SATA/SCSI drive serial can be read, so every volume is `UNKNOWN` — registration is never refused (R-97) and verification never finds the archive. Proposed (decision 0019 to be written): (a) fall back to the kernel filesystem id (`statvfs` `f_fsid`, recorded as `fsid-…`) for ext2/3/4 and btrfs, where the kernel derives it from the filesystem UUID (not xfs, where it follows the device number); an `fsid-…` id compared with a real UUID counts as unavailable, so decision 0018 applies; (b) read the drive serial from SCSI VPD page 0x80 (`/sys/block/<disk>/device/vpd_pg80`) when udev is missing. | Not decided: Linux CI end-to-end test fails at the second registration until this is settled |
+| D9 | Linux without the udev database (containers, minimal systems; seen on the GitLab runners, 2026-10-14): neither the filesystem UUID nor the SATA/SCSI drive serial can be read, so every volume is `UNKNOWN` — registration is never refused (R-97) and verification never finds the archive. Proposed (a decision record to be written): (a) fall back to the kernel filesystem id (`statvfs` `f_fsid`, recorded as `fsid-…`) for ext2/3/4 and btrfs, where the kernel derives it from the filesystem UUID (not xfs, where it follows the device number); an `fsid-…` id compared with a real UUID counts as unavailable, so decision 0018 applies; (b) read the drive serial from SCSI VPD page 0x80 (`/sys/block/<disk>/device/vpd_pg80`) when udev is missing. | Not decided. The Linux CI end-to-end test passes only on runners whose disk reports a serial (an NVMe disk, 2026-10-15, through decision 0018); on a SCSI virtual disk without one it fails at the second registration |
 
 ---
 

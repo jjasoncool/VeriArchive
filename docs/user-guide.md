@@ -27,7 +27,7 @@ The interface is available in English and Traditional Chinese. The first setting
 4. the Windows display language
 5. English
 
-In the GUI, the Settings view has a language drop-down (English / 繁體中文). The choice is saved in the config file and the window is rebuilt in the new language at once; typed folders, chosen options, the window size and the reports shown are kept, and the reports are shown in the new language. It cannot be changed while a registration or verification runs.
+In the GUI, the Settings view has a language drop-down (English / 繁體中文). The choice is saved in the config file and the window is rebuilt in the new language at once; typed folders, chosen options, the window size and the reports shown are kept, and the reports are shown in the new language. It cannot be changed while a registration, verification or comparison runs.
 
 `--json` output, exit codes and the codes inside JSON (`PASSED`, `Modified`, ...) are **always English**, so scripts behave the same in every language.
 
@@ -43,6 +43,14 @@ By default the repository is created in `data` next to the program, or in `VeriA
 > **Back up the repository.** Losing it loses all verification history; manifests can be recovered only from media copies, if they were written.
 
 If a configured repository is unavailable later (for example an external disk is not attached), VeriArchive stops with an error; it never falls back to another location.
+
+### Moving the program folder
+
+On first use, the repository (`data`) and the config file that remembers it (`config.json`) are created in the program's folder (`bin` in the zip), and the config file records the repository relative to that folder: `"repository": "data"`. Program, configuration and repository are therefore one folder. You can move or copy the whole unzipped folder, to another drive, to another computer, or onto a USB disk that gets another drive letter, and it keeps using its own repository. Backing up that folder also backs up the repository.
+
+- Copying the folder copies the repository; from then on each copy records its own verification history. Keep one of them as the folder you work with.
+- A repository outside the program folder (`VeriArchive` in your home folder, or a place chosen with `--repository`) is remembered by its full path and does not move with the folder.
+- A folder set up with an earlier version remembers the full path. To make it movable, open `bin\config.json` in a text editor and change the value of `"repository"` to `"data"`.
 
 ## Registering an archive
 
@@ -137,6 +145,80 @@ Files already verified are not read again.
 | AMBIGUOUS | several archives match (cloned disks) | choose one with `verify --full <archive_uuid>` |
 | PREVIOUS_CARRIER | this is the old disk of a relocated archive | the old disk is no longer verified; verify the new carrier |
 
+## Comparing an archive with its copy
+
+Say you copied disk F to disk G with your own tools (VeriArchive never makes backups) and want proof that G holds exactly what F holds. Verifying G alone does not show that: it compares G with G's own baseline. Instead, register each disk as an archive of its own and **compare** the two archives. The comparison takes every entry (file, folder, link) of both manifests and confirms that it is in both, with the same type and the same content (BLAKE3 and SHA-256). It reads no disk, only the manifests in the repository, so it takes seconds. Modification times and attributes are not compared, because copy tools do not always keep them.
+
+### 1. Register both disks
+
+Register them once the copy is complete; each registration reads its whole disk.
+
+```text
+veriarchive-cli register F:\
+veriarchive-cli register G:\ --copy-of <uuid of F's archive>
+```
+
+- `--copy-of` is optional: it records that G is a copy of F, for display only. It needs the full uuid, which `archive list` shows.
+- Register the folder that corresponds to F's root, so the paths line up: if the copy of F sits in `G:\Backup\F`, register `G:\Backup\F`. Anything else in the folder registered on G shows up as New.
+- A sector-by-sector clone of F has F's filesystem id, so registering it stops with exit code 12 (MIGRATED). Add `--force-new-archive` (GUI: "Register as a separate archive even though this folder is registered") to register it as an archive of its own.
+
+### 2. Compare
+
+GUI, Compare Archives view:
+
+1. In "Reference archive (A):" choose F's archive, the original.
+2. In "Copy to check (B):" choose G's archive.
+3. Press "Compare". The progress bar counts the entries compared; "Cancel" stops at any time.
+
+The report begins with "ARCHIVES IDENTICAL" or "ARCHIVES DIFFERENT" and lists every difference. Choosing the same archive twice is refused.
+
+CLI, archive A (the reference) first, then archive B (the copy). The first 8 or more characters of each uuid are enough:
+
+```text
+veriarchive-cli archive compare 0d0ce48d a82ebd4e
+```
+
+```text
+COMPARE DIFFERENT  ARCH-0001 (0d0ce48d-9445-4e7a-ae49-8fb42ef05201) r1  vs  ARCH-0002 (a82ebd4e-7766-4291-9795-d1a8d29efadd) r1
+  A: ARCH-0001, registered 2026-10-15 10:18:09 (UTC+8), 6 entries
+  B: ARCH-0002, registered 2026-10-15 10:18:09 (UTC+8), 6 entries
+  same: 4  Missing 1  Modified 1  New 1
+  Modified  專案/budget 預算.csv  (size 26 -> 41)
+  New  新增的檔案.txt
+  Missing  會議紀錄.txt
+  This compares what each registration read. A FULL verify of each archive proves that its carrier still holds that content.
+```
+
+### Reading the comparison
+
+| Result | Meaning | Exit code |
+|---|---|---|
+| IDENTICAL | every entry of A is in B with the same type and content, and B has no other entries | 0 |
+| IDENTICAL_WITH_WARNINGS | nothing differs, but the entries listed could not be compared (see Unbaselined and MetadataMismatch below) | 2 |
+| DIFFERENT | at least one entry is missing, new, modified or of another type | 3 |
+
+Each listed entry is B seen from A:
+
+| Status | Meaning |
+|---|---|
+| Missing | in A, not in B: the copy lacks it |
+| New | in B, not in A: the copy has it in addition |
+| Modified | different content; `size 26 -> 41` gives the size in A and in B (bytes) |
+| TypeChanged | for example a file in A is a folder in B |
+| Unbaselined | no hash to compare: it was unreadable when A or B was registered (the detail says which and why), or it lies in a folder one of them could not read |
+| MetadataMismatch | a link whose absolute target differs between an archive registered on Windows and one registered on Linux; a warning only |
+
+If the comparison cannot run, for example because a manifest in the repository was changed or damaged or an archive's first registration never finished, it reports the reason and exits 3; a cancelled comparison exits 4. `--json` gives the result and every difference, always in English.
+
+### What the comparison proves
+
+It compares what each registration read, not what the disks hold today. For proof that G holds F's content now:
+
+1. The comparison says IDENTICAL: the two baselines hold the same entries with the same content.
+2. A FULL verify of each archive (`verify --full F:\`, `verify --full G:\`) says PASSED: each disk still holds its baseline.
+
+If F changed between its registration and the copy, the comparison shows the change. Register F again with `--new-revision` and compare again. A comparison writes nothing: it is not part of the verification history and does not change "Last FULL verify" or OVERDUE, so you can run it as often as you like.
+
 ## Archive list and OVERDUE
 
 The Archive List view, or `veriarchive-cli archive list`, shows for each archive:
@@ -153,9 +235,10 @@ More archive commands:
 veriarchive-cli archive show <uuid>               # details and every revision
 veriarchive-cli archive retire <uuid>             # no longer expected to be verified; history is kept
 veriarchive-cli archive relocate <uuid> <root>    # after moving an archive to a new disk: confirm and verify it
+veriarchive-cli archive compare <uuid> <uuid>     # do two archives hold the same content? (see above)
 ```
 
-`archive show`, `retire`, `relocate`, `history`, `export` and `export-sha256sums` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
+`archive show`, `retire`, `relocate`, `compare`, `history`, `export` and `export-sha256sums` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
 
 ## Verification history
 

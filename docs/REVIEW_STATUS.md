@@ -9,17 +9,18 @@ pushed to GitLab.
 
 | Milestone | Implemented |
 |---|---|
-| M1 | Repository resolution matrix (explicit, pinned, first run, unavailable, other working directory, network refusal), atomic and durable config and repository files, crash-safe schema creation, repository UUID validation and change warning, lossless non-Unicode names, canonical JSON, `repo init/info`, `--json` everywhere |
+| M1 | Repository resolution matrix (explicit, pinned, first run, unavailable, other working directory, network refusal), relative pin for a repository inside the config file's folder so a portable program folder can be moved or copied (decision 0019), atomic and durable config and repository files, crash-safe schema creation, repository UUID validation and change warning, lossless non-Unicode names, canonical JSON, `repo init/info`, `--json` everywhere |
 | M2 | Unprivileged volume and device enumeration on Windows (64-bit NTFS serial, disk extents, model, serial, bus, HDD/SSD, NVMe EUI) and Linux (mountinfo, udev database, sysfs through partitions, dm and md), filesystem id normalisation, identity matcher for every §B10 row and decisions 0001, 0003, 0004, `media list` |
 | M3 | Scanner (exclusions, mount points, collisions, unreadable entries, links), uncached threaded hash pipeline (BLAKE3 + SHA-256), `.vam` writer/reader with golden test, registration, FULL verification with every §A6 item status, `export-sha256sums` |
 | M4 | Ctrl-C cancellation, resumable verification and registration with checkpoints, hash-chained history and `repo verify-history`, `repo rebuild-index`, export/import with rollback protection, `archive relocate`, optional media copy |
-| M5 | GTK4 GUI with Archive List, Register, Verify, History and Settings views, progress, cancel and resume |
+| M5 | GTK4 GUI with Archive List, Register, Verify, Compare, History and Settings views, progress, cancel and resume; a screenshot mode and `tools/screenshots/` for the user guide's pictures |
+| Comparison | `archive compare` and the GUI's Compare Archives view: two archives' current manifests compared by path, type and content (BLAKE3 + SHA-256) without reading media, results IDENTICAL / IDENTICAL_WITH_WARNINGS / DIFFERENT, typically an archive against its copy on other media (decision 0020) |
 | Language | CLI and GUI in English and Traditional Chinese with a language setting; `--json` stays English (decision 0017) |
 
 Automated tests: unit tests for every module (fake file system and media enumerator per R-93)
 and the translation catalog, a CLI end-to-end test (CJK and emoji names, damage detection,
-export/import, interface language), a windowless GUI smoke test, and a check that the Windows
-package runs without MSYS2 in both languages.
+comparison of an archive with a copy, export/import, interface language), a windowless GUI smoke
+test, and a check that the Windows package runs without MSYS2 in both languages.
 
 Measured locally (Release build, Windows 11, WD SN850X NVMe, uncached reads, four 512 MiB
 files): FULL verify at about 4.5 GB/s with eight readers and about 1.47 GB/s with one reader
@@ -39,8 +40,14 @@ agreed with every file of the 4.3 GB archive, and an archive given by uuid was f
 
 ## Still required before acceptance
 
-- **Linux compilation and tests.** The Linux platform files have not been compiled yet (no Linux
-  environment was available); the GitLab pipeline is the first place they build.
+- **subst drive letters.** A folder reached through a drive letter made with `subst` cannot be
+  registered: Windows reports no volume for it (`GetVolumeNameForVolumeMountPointW`, Win32 error
+  4390), and the message does not say why. Register the folder by its real path; resolving the
+  letter to its target is still to do.
+- **Linux without udev (HANDOFF D9).** The Linux build compiles and passes the unit and
+  end-to-end tests in GitLab CI (Ubuntu 24.04, Fedora 41, 2026-10-15), but only on runners whose
+  disk reports a serial: in containers neither the filesystem UUID nor a SCSI disk's serial is
+  readable without udev, and D9 is not decided yet.
 - **Hardware acceptance (M2, M3).** Done on Windows for an internal SATA HDD (model, serial,
   NTFS serial, identity MATCH, throughput above). Still open: USB bridges with and without
   serials, exFAT and NTFS external disks; the NTFS serial relationship on one medium seen from both
