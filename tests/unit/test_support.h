@@ -1,5 +1,5 @@
 #pragma once
-#include <iostream>
+#include <iostream> // IWYU pragma: keep (std::cerr in CHECK, expanded in every test file)
 
 inline int test_failures = 0;
 

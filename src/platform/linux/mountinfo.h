@@ -1,7 +1,6 @@
 #pragma once
 // Parser for /proc/self/mountinfo. Mount boundaries come from here rather than
 // from st_dev, because btrfs subvolumes have distinct st_dev on one volume (R-30).
-#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>

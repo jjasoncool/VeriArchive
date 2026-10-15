@@ -1,8 +1,8 @@
 #include "platform/linux/mountinfo.h"
 
+#include <exception>
 #include <fstream>
 #include <iterator>
-#include <stdexcept>
 
 namespace va::platform::linux_mounts {
 namespace {

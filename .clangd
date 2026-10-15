@@ -4,6 +4,13 @@ CompileFlags:
     - "-fmodules-ts"
     - "-fmodule-mapper=*"
     - "-fdeps-format=*"
+Diagnostics:
+  ClangTidy:
+    CheckOptions:
+      # A (void) cast marks a result discarded on purpose (best-effort cleanup,
+      # or a result superseded by an error already returned); the check still
+      # reports results dropped without one.
+      bugprone-unused-return-value.AllowCastToVoid: true
 # Machine-specific settings (a Windows host's MSYS2 target and sysroot, hiding
 # Linux-only sources there) belong in the clangd user config, not here; see
 # "Editor (clangd)" in README.md.

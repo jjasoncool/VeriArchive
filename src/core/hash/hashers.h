@@ -5,7 +5,6 @@
 //  - BLAKE3: fast primary hash, also used for manifest bodies and history rows.
 //  - SHA-256: second, widely available hash so archives can be checked with
 //    standard tools (`sha256sum -c`, R-67).
-#include <array>
 #include <cstddef>
 #include <memory>
 #include <span>

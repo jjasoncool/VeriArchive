@@ -2,6 +2,7 @@
 
 #include "common/hex.h"
 
+#include <array>
 #include <blake3.h>
 #include <cstdint>
 #include <openssl/evp.h>
