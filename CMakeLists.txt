@@ -150,6 +150,7 @@ option(VERIARCHIVE_BUILD_GUI "Build the GTK4 GUI" ${GTK4_FOUND})
 if(VERIARCHIVE_BUILD_GUI)
     add_executable(veriarchive_gui
         src/gui/archive_list_view.cpp
+        src/gui/compare_view.cpp
         src/gui/gui_app.cpp
         src/gui/gui_support.cpp
         src/gui/history_view.cpp

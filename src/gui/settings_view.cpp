@@ -97,7 +97,7 @@ GtkWidget* build_settings_view(GuiState& state)
 
     // Each language is named in itself, so it can be found in any language.
     GtkWidget* language_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(language_row), make_label("Language / 語言:"));
+    gtk_box_append(GTK_BOX(language_row), make_row_label("Language / 語言:"));
     std::vector<std::string> names;
     for (const auto language : languages) {
         names.emplace_back(app::language_name(language));

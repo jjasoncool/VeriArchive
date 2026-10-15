@@ -204,6 +204,24 @@ void refresh_archive_choices(GuiState& state)
 
     set_choices(state.history_view.archive, labels);
     state.history_view.archive_uuids = uuids;
+
+    // The comparison keeps the two archives chosen when the list is reloaded
+    // (after a registration, say). Otherwise B suggests the second archive, so
+    // A and B start out different.
+    auto& compare = state.compare_view;
+    const auto reference = compare.reference ? chosen_archive(compare.reference, compare.archive_uuids, 0)
+                                             : std::nullopt;
+    const auto copy = compare.copy ? chosen_archive(compare.copy, compare.archive_uuids, 0) : std::nullopt;
+    set_choices(compare.reference, labels);
+    set_choices(compare.copy, labels);
+    compare.archive_uuids = uuids;
+    if (compare.copy && uuids.size() > 1) {
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(compare.copy), 1);
+    }
+    if (compare.reference) {
+        choose_archive(compare.reference, uuids, 0, reference);
+        choose_archive(compare.copy, uuids, 0, copy);
+    }
 }
 
 GtkWidget* build_verify_view(GuiState& state)
@@ -234,7 +252,7 @@ GtkWidget* build_verify_view(GuiState& state)
     gtk_box_append(GTK_BOX(box), folder_row);
 
     GtkWidget* archive_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(archive_row), make_label(state.text("Verify:")));
+    gtk_box_append(GTK_BOX(archive_row), make_row_label(state.text("Verify:")));
     const auto folder_above = state.text("The folder above");
     const char* initial[] = {folder_above.c_str(), nullptr};
     view.archive = gtk_drop_down_new_from_strings(initial);

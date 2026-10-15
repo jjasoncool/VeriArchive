@@ -1,6 +1,7 @@
 #pragma once
-// The GUI's state and the five views of HANDOFF §B17: Archive List, Register
-// Archive, Verify Archive, Verification History and Settings.
+// The GUI's state and its six views: the five of HANDOFF §B17 (Archive List,
+// Register Archive, Verify Archive, Verification History, Settings) and
+// Compare Archives (decision 0020).
 #include "app/session.h"
 #include "gui/gui_support.h"
 
@@ -12,7 +13,7 @@ namespace va::gui {
 struct GuiState {
     GtkApplication* application = nullptr;
     GtkWindow* window = nullptr;
-    GtkWidget* stack = nullptr;            // the five views
+    GtkWidget* stack = nullptr;            // the six views
     app::Text text;                        // interface language (decision 0017)
     HostInfo host;
     std::optional<app::Session> session;   // empty until a repository is open
@@ -59,6 +60,17 @@ struct GuiState {
     } verify_view;
 
     struct {
+        GtkWidget* reference = nullptr;    // drop-down: archive A, the reference
+        GtkWidget* copy = nullptr;         // drop-down: archive B, the copy to check
+        GtkWidget* start = nullptr;
+        GtkWidget* cancel = nullptr;
+        GtkWidget* progress = nullptr;
+        GtkWidget* report = nullptr;
+        Report shown_report;
+        std::vector<Uuid> archive_uuids;   // index i of both drop-downs
+    } compare_view;
+
+    struct {
         GtkWidget* archive = nullptr;
         GtkWidget* grid = nullptr;
         GtkWidget* chain = nullptr;
@@ -77,6 +89,7 @@ struct GuiState {
 GtkWidget* build_archive_list_view(GuiState& state);
 GtkWidget* build_register_view(GuiState& state);
 GtkWidget* build_verify_view(GuiState& state);
+GtkWidget* build_compare_view(GuiState& state);
 GtkWidget* build_history_view(GuiState& state);
 GtkWidget* build_settings_view(GuiState& state);
 

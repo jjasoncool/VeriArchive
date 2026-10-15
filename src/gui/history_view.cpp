@@ -110,7 +110,7 @@ GtkWidget* build_history_view(GuiState& state)
     gtk_box_append(GTK_BOX(box), make_heading(text("Verification History")));
 
     GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_append(GTK_BOX(row), make_label(text("Archive:")));
+    gtk_box_append(GTK_BOX(row), make_row_label(text("Archive:")));
     const char* initial[] = {nullptr};
     view.archive = gtk_drop_down_new_from_strings(initial);
     GtkWidget* show = gtk_button_new_with_label(text("Show runs").c_str());

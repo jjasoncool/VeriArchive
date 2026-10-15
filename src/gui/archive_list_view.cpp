@@ -122,6 +122,9 @@ GtkWidget* build_archive_list_view(GuiState& state)
         }),
         &state);
     view.status = make_label("");
+    // The free width of the row, so the count stays on one line; a long
+    // message (an error) still wraps.
+    gtk_widget_set_hexpand(view.status, TRUE);
     gtk_box_append(GTK_BOX(toolbar), refresh);
     gtk_box_append(GTK_BOX(toolbar), view.status);
     gtk_box_append(GTK_BOX(box), toolbar);

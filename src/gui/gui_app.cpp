@@ -1,8 +1,7 @@
-// Window layout: a sidebar to switch between the five views, and the session
+// Window layout: a sidebar to switch between the six views, and the session
 // (repository) shared by all of them.
 #include "gui/gui_app.h"
 
-#include <algorithm>
 #include <exception>
 #include <string_view>
 
@@ -37,7 +36,7 @@ void open_repository_session(GuiState& state, bool initialise)
 
 namespace {
 
-// Creates the window with the sidebar and the five views, in state.text's language.
+// Creates the window with the sidebar and the six views, in state.text's language.
 void build_window(GuiState& state)
 {
     const auto& text = state.text;
@@ -56,6 +55,8 @@ void build_window(GuiState& state)
         text("Register Archive").c_str());
     gtk_stack_add_titled(GTK_STACK(stack), build_verify_view(state), "verify",
         text("Verify Archive").c_str());
+    gtk_stack_add_titled(GTK_STACK(stack), build_compare_view(state), "compare",
+        text("Compare Archives").c_str());
     gtk_stack_add_titled(GTK_STACK(stack), build_history_view(state), "history",
         text("Verification History").c_str());
     gtk_stack_add_titled(GTK_STACK(stack), build_settings_view(state), "settings",
@@ -107,6 +108,10 @@ struct Kept {
     std::optional<Uuid> verify_archive;  // empty: "The folder above"
     double verify_fraction = 0.0;
     bool verify_finished = false;
+    std::optional<Uuid> compare_reference;
+    std::optional<Uuid> compare_copy;
+    double compare_fraction = 0.0;
+    bool compare_finished = false;
     std::optional<Uuid> history_archive;
     bool runs_shown = false;
 };
@@ -119,28 +124,6 @@ std::string entry_text(GtkWidget* entry)
 bool checked(GtkWidget* check_button)
 {
     return gtk_check_button_get_active(GTK_CHECK_BUTTON(check_button)) != FALSE;
-}
-
-// The archive chosen in a drop-down whose item `offset + i` is uuids[i].
-std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset)
-{
-    const auto selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop_down));
-    if (selected == GTK_INVALID_LIST_POSITION || selected < offset || selected - offset >= uuids.size()) {
-        return std::nullopt;
-    }
-    return uuids[selected - offset];
-}
-
-// Chooses `archive` again, if the drop-down still lists it.
-void choose_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset,
-    const std::optional<Uuid>& archive)
-{
-    if (!archive) {
-        return;
-    }
-    if (const auto found = std::ranges::find(uuids, *archive); found != uuids.end()) {
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(drop_down), offset + static_cast<guint>(found - uuids.begin()));
-    }
 }
 
 // A finished operation leaves "Done" on its progress bar; before the first
@@ -175,6 +158,12 @@ Kept keep(const GuiState& state)
     kept.verify_archive = chosen_archive(verifying.archive, verifying.archive_uuids, 1);
     kept.verify_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(verifying.progress));
     kept.verify_finished = finished(verifying.progress);
+
+    const auto& comparing = state.compare_view;
+    kept.compare_reference = chosen_archive(comparing.reference, comparing.archive_uuids, 0);
+    kept.compare_copy = chosen_archive(comparing.copy, comparing.archive_uuids, 0);
+    kept.compare_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(comparing.progress));
+    kept.compare_finished = finished(comparing.progress);
 
     const auto& history = state.history_view;
     kept.history_archive = chosen_archive(history.archive, history.archive_uuids, 0);
@@ -218,6 +207,17 @@ void restore(GuiState& state, const Kept& kept)
     }
     if (verifying.shown_report) {
         set_text(verifying.report, verifying.shown_report(text));
+    }
+
+    auto& comparing = state.compare_view;
+    choose_archive(comparing.reference, comparing.archive_uuids, 0, kept.compare_reference);
+    choose_archive(comparing.copy, comparing.archive_uuids, 0, kept.compare_copy);
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(comparing.progress), kept.compare_fraction);
+    if (kept.compare_finished) {
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(comparing.progress), text("Done").c_str());
+    }
+    if (comparing.shown_report) {
+        set_text(comparing.report, comparing.shown_report(text));
     }
 
     auto& history = state.history_view;

@@ -50,6 +50,13 @@ GtkWidget* make_label(const std::string& text, bool selectable)
     return label;
 }
 
+GtkWidget* make_row_label(const std::string& text)
+{
+    GtkWidget* label = gtk_label_new(text.c_str());
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    return label;
+}
+
 GtkWidget* make_heading(const std::string& text)
 {
     GtkWidget* label = gtk_label_new(nullptr);
@@ -93,6 +100,26 @@ void clear_grid(GtkWidget* grid)
 std::filesystem::path entry_path(GtkWidget* entry)
 {
     return path_from_utf8(gtk_editable_get_text(GTK_EDITABLE(entry)));
+}
+
+std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset)
+{
+    const auto selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop_down));
+    if (selected == GTK_INVALID_LIST_POSITION || selected < offset || selected - offset >= uuids.size()) {
+        return std::nullopt;
+    }
+    return uuids[selected - offset];
+}
+
+void choose_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset,
+    const std::optional<Uuid>& archive)
+{
+    if (!archive) {
+        return;
+    }
+    if (const auto found = std::ranges::find(uuids, *archive); found != uuids.end()) {
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(drop_down), offset + static_cast<guint>(found - uuids.begin()));
+    }
 }
 
 void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title)
@@ -243,21 +270,27 @@ void guarded(const std::function<void()>& work, const std::function<void(Report)
 // ---- Job ------------------------------------------------------------------
 
 // Throttled progress: at most five updates a second are posted to the main loop.
+// The update that completes the count always is, so a finished operation's bar
+// ends full rather than where the last update before it happened to leave it.
 class Job::BarProgress final : public IProgressSink {
 public:
-    BarProgress(const app::Text& text, GtkWidget* bar) : text_(text), bar_(bar) {}
+    BarProgress(const app::Text& text, GtkWidget* bar, Counting counting)
+        : text_(text), bar_(bar), counting_(counting)
+    {
+    }
 
     void on_progress(const Progress& progress) override
     {
         const auto now = std::chrono::steady_clock::now();
-        if (now - last_ < std::chrono::milliseconds(200)) {
+        const bool complete = progress.items_total > 0 && progress.items_done == progress.items_total;
+        if (!complete && now - last_ < std::chrono::milliseconds(200)) {
             return;
         }
         last_ = now;
         // Each update holds its own reference to the bar: it may arrive after
         // the window was closed. (The job's reference keeps the bar alive
         // until then, so taking one here on the worker thread is safe.)
-        auto* update = new Update{text_, GTK_WIDGET(g_object_ref(bar_)), progress};
+        auto* update = new Update{text_, GTK_WIDGET(g_object_ref(bar_)), progress, counting_};
         g_idle_add(
             +[](gpointer data) -> gboolean {
                 std::unique_ptr<Update> update(static_cast<Update*>(data));
@@ -270,8 +303,12 @@ public:
                     } else {
                         gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(update->bar),
                             static_cast<double>(p.items_done) / static_cast<double>(p.items_total));
-                        const auto text = update->text.format("Hashing: {} / {} files, {}", p.items_done,
-                            p.items_total, format_bytes(p.bytes_done));
+                        // Two calls: the compiler checks each literal template against its values.
+                        const auto text = update->counting == Counting::Entries
+                                              ? update->text.format("Comparing: {} / {} entries", p.items_done,
+                                                    p.items_total)
+                                              : update->text.format("Hashing: {} / {} files, {}", p.items_done,
+                                                    p.items_total, format_bytes(p.bytes_done));
                         gtk_progress_bar_set_text(GTK_PROGRESS_BAR(update->bar), text.c_str());
                     }
                 } catch (const std::exception& error) {
@@ -287,10 +324,12 @@ private:
         app::Text text;
         GtkWidget* bar;  // a reference of its own, given back on the main thread
         Progress progress;
+        Counting counting;
         ~Update() { g_object_unref(bar); }
     };
     app::Text text_;
     GtkWidget* bar_;
+    Counting counting_;
     std::chrono::steady_clock::time_point last_{};
 };
 
@@ -314,7 +353,7 @@ void Job::abandon()
     wait();
 }
 
-void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done done)
+void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done done, Counting counting)
 {
     wait();
     cancel_.reset();
@@ -332,8 +371,9 @@ void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done 
     g_object_ref(progress_bar);
     running_.store(true);
     try {
-        thread_ = std::thread([this, text, progress_bar, work = std::move(work), done = std::move(done)]() mutable {
-            BarProgress progress(text, progress_bar);
+        thread_ = std::thread([this, text, progress_bar, counting, work = std::move(work),
+                                  done = std::move(done)]() mutable {
+            BarProgress progress(text, progress_bar, counting);
             Report report;
             try {
                 report = work(cancel_, progress);

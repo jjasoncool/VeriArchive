@@ -11,9 +11,11 @@
 #include <atomic>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace va::gui {
 
@@ -31,6 +33,10 @@ Report unexpected_error(std::string what);
 std::string format_bytes(std::uint64_t bytes);
 
 GtkWidget* make_label(const std::string& text, bool selectable = false);
+// A short caption beside other widgets in a row ("Archive:"). It stays on one
+// line: a wrapping label there is given its narrowest width and would show as
+// a column of single words or characters.
+GtkWidget* make_row_label(const std::string& text);
 GtkWidget* make_heading(const std::string& text);
 GtkWidget* make_text_view();
 void set_text(GtkWidget* text_view, const std::string& text);
@@ -39,6 +45,14 @@ void clear_grid(GtkWidget* grid);
 
 // Path typed in (or chosen into) an entry.
 std::filesystem::path entry_path(GtkWidget* entry);
+
+// The archive chosen in a drop-down whose item `offset + i` is uuids[i], or
+// nothing when another item (such as "The folder above") is chosen.
+std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset);
+
+// Chooses `archive` again, if the drop-down still lists it.
+void choose_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset,
+    const std::optional<Uuid>& archive);
 
 // Opens a folder chooser titled `title`; the chosen folder is written into `entry`.
 void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title);
@@ -57,6 +71,10 @@ void guarded(const std::function<void()>& work, const std::function<void(Report)
 void install_failure_log();
 void log_failure(std::string_view what) noexcept;
 
+// What the items of a progress update are: files read and hashed (register,
+// verify), or manifest entries compared, with no bytes read.
+enum class Counting { Files, Entries };
+
 // One long operation at a time. `work` runs on a worker thread and returns the
 // report; `done` then runs on the main thread. Progress goes to `bar`, worded in
 // the language of `text`.
@@ -67,7 +85,8 @@ public:
 
     ~Job();
     bool running() const { return running_.load(); }
-    void start(const app::Text& text, GtkWidget* progress_bar, Work work, Done done);
+    void start(const app::Text& text, GtkWidget* progress_bar, Work work, Done done,
+        Counting counting = Counting::Files);
     void cancel() { cancel_.cancel(); }
     void wait();
     // Cancels the operation and waits for it; its `done` is then never called,
