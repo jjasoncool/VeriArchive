@@ -82,6 +82,8 @@ veriarchive_cli / veriarchive_gui / veriarchive_helper   composition roots
 
 ## A4. Privilege model
 
+> Amended by `docs/decisions/0021-linux-without-udev.md`: R-09 on Linux also uses `statfs` on the mount point (the kernel call behind `statvfs`) for the kernel filesystem id.
+
 - R-08 V1 runs entirely unprivileged. The GUI MUST never require Administrator/root (GTK under Wayland refuses to run as root; elevated GUIs are an anti-pattern).
 - R-09 V1 media identity uses unprivileged APIs only.
   Windows: device/volume handles opened with `dwDesiredAccess = 0` for `IOCTL_STORAGE_QUERY_PROPERTY`, `IOCTL_STORAGE_GET_DEVICE_NUMBER`, `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`; `GetVolumeInformationW`, `GetVolumeNameForVolumeMountPointW`; SetupAPI enumeration.
@@ -204,6 +206,8 @@ struct MediaEvidence {                   // observed at register / verify time
 - R-33 `archive_uuid` is the identity used for all keys, filenames and IPC. `label` is a human alias assigned by the registering repository (`settings.next_label_seq`, `ARCH-` + zero-padded ≥ 4 digits), stored in the manifest, and MUST NOT be unique-constrained in the database.
 
 ### B1.3 Filesystem UUID normalisation (known cross-platform pitfall)
+
+> Amended by `docs/decisions/0021-linux-without-udev.md`: on Linux, when neither udev nor `/dev/disk/by-uuid` gives the UUID of an ext2/3/4 or btrfs volume, `filesystem_uuid` holds the kernel filesystem id (`statfs` `f_fsid`, both 32-bit words, first word low; never zero) as `fsid-` + 16 lowercase hex, the form volumes without a block device already use; an `fsid-…` id is compared only with another `fsid-…` id (§B10).
 
 - ext4/XFS/btrfs: lowercase RFC 4122 string, identical on both OSes.
 - exFAT/FAT32: 32-bit volume serial; store as 8 lowercase hex (`a1b2c3d4`), no dash; identical on both OSes.
@@ -604,6 +608,7 @@ class IEntropySource { public: virtual ~IEntropySource() = default;
 > Amended by `docs/decisions/0004-relocation-writes-a-new-revision.md`: `MIGRATED` acceptance and relocation are `archive relocate`, which writes a new revision; media matching only an older revision's identity is `PREVIOUS_CARRIER`.
 > Amended by `docs/decisions/0003-retired-archives.md`: retired archives remain match candidates.
 > Amended by `docs/decisions/0018-unreadable-filesystem-id.md`: a `filesystem_uuid` unavailable on either side with a matching device is `MATCH_WEAK` when the volume capacity agrees within 1 %, otherwise `MISMATCH`.
+> Amended by `docs/decisions/0021-linux-without-udev.md`: a kernel filesystem id (`fsid-…`, §B1.3) compared with a UUID or volume serial counts as unavailable, so decision 0018 applies; two `fsid-…` ids compare like UUIDs.
 
 Evidence at verify time (`MediaEvidence`) is compared against every registered archive's latest `identity` snapshot. Primary evidence: `filesystem_uuid` (per §B1.3) and device `serial`/`wwn` (either matching counts as a device match).
 
@@ -827,7 +832,7 @@ Whole-disk fingerprint (§B14) · btrfs change tracking · hardware-token / serv
 | D6 | Windows helper authorisation: Windows service, or UAC-elevated helper launched on demand? | on-demand elevated helper, exits when idle |
 | D7 | ~~Retention of `verify_items` detail (storage growth on large archives)~~ | **Resolved** (2026-10-08): non-Verified items only, kept forever |
 | D8 | ~~Registering a *directory* (not a volume root) as an archive: allowed in V1, or volume roots only?~~ | **Resolved** by `docs/decisions/0001-archive-matching-includes-root-subpath.md`: allowed; overlapping roots refused; matching keyed by volume evidence + `root_subpath` |
-| D9 | Linux without the udev database (containers, minimal systems; seen on the GitLab runners, 2026-10-14): neither the filesystem UUID nor the SATA/SCSI drive serial can be read, so every volume is `UNKNOWN` — registration is never refused (R-97) and verification never finds the archive. Proposed (a decision record to be written): (a) fall back to the kernel filesystem id (`statvfs` `f_fsid`, recorded as `fsid-…`) for ext2/3/4 and btrfs, where the kernel derives it from the filesystem UUID (not xfs, where it follows the device number); an `fsid-…` id compared with a real UUID counts as unavailable, so decision 0018 applies; (b) read the drive serial from SCSI VPD page 0x80 (`/sys/block/<disk>/device/vpd_pg80`) when udev is missing. | Not decided. The Linux CI end-to-end test passes only on runners whose disk reports a serial (an NVMe disk, 2026-10-15, through decision 0018); on a SCSI virtual disk without one it fails at the second registration |
+| D9 | ~~Linux without the udev database (containers, minimal systems; seen on the GitLab runners, 2026-10-14): neither the filesystem UUID nor the SATA/SCSI drive serial can be read, so every volume is `UNKNOWN` — registration is never refused (R-97) and verification never finds the archive. Proposed (a decision record to be written): (a) fall back to the kernel filesystem id (`statvfs` `f_fsid`, recorded as `fsid-…`) for ext2/3/4 and btrfs, where the kernel derives it from the filesystem UUID (not xfs, where it follows the device number); an `fsid-…` id compared with a real UUID counts as unavailable, so decision 0018 applies; (b) read the drive serial from SCSI VPD page 0x80 (`/sys/block/<disk>/device/vpd_pg80`) when udev is missing.~~ | **Resolved** by `docs/decisions/0021-linux-without-udev.md`: the kernel filesystem id (`fsid-…`) for ext2/3/4 and btrfs, compared only with another `fsid-…` id (against a UUID, decision 0018 applies); for a SATA device behind libata that udev does not know, the device serial from SCSI VPD page 0x80 |
 
 ---
 

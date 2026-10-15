@@ -190,8 +190,6 @@ void filesystem_identifiers()
     CHECK(id.uuid == "3f2b8c1e-0d4a-4c6e-9b7a-1e2d3c4b5a69" && id.uuid_short.empty());
 }
 
-} // namespace
-
 // Decision 0018: a filesystem id that cannot be read (Linux without the udev
 // database) on a matching device is a weak match when the volume size agrees,
 // and another filesystem on that device (a second partition) when it does not.
@@ -221,6 +219,98 @@ void unreadable_filesystem_id()
     CHECK(outcome.result == va::MatchResult::Unknown);
 }
 
+// Decision 0021: Linux without udev records the kernel filesystem id of an
+// ext2/3/4 or btrfs volume ("fsid-" + 16 hex digits) where the UUID is missing.
+void kernel_filesystem_id_format()
+{
+    CHECK(va::kernel_filesystem_id(0x1a2b3c4d5e6f7081) == "fsid-1a2b3c4d5e6f7081");
+    CHECK(va::kernel_filesystem_id(0x2a) == "fsid-000000000000002a");
+    CHECK(va::is_kernel_filesystem_id("fsid-000000000000002a"));
+    CHECK(!va::is_kernel_filesystem_id("3f2b8c1e-0d4a-4c6e-9b7a-1e2d3c4b5a69"));
+    CHECK(!va::is_kernel_filesystem_id(""));
+
+    // The two 32-bit words of f_fsid, first word low, as 64-bit glibc's
+    // statvfs() combines them. A negative word must not spill into the other.
+    CHECK(va::combine_kernel_filesystem_id(0x5e6f7081, 0x1a2b3c4d) == 0x1a2b3c4d5e6f7081);
+    CHECK(va::combine_kernel_filesystem_id(-1, 0) == 0x00000000ffffffff);
+    CHECK(va::combine_kernel_filesystem_id(0x12345678, -2) == 0xfffffffe12345678);
+    CHECK(va::combine_kernel_filesystem_id(0, 0) == 0);
+
+    // Only filesystems whose kernel id is computed from the UUID stand in for it.
+    const std::uint64_t fsid = 0x1a2b3c4d5e6f7081;
+    const std::optional<std::string> expected{"fsid-1a2b3c4d5e6f7081"};
+    CHECK(va::kernel_filesystem_id_for("ext2", fsid) == expected);
+    CHECK(va::kernel_filesystem_id_for("ext3", fsid) == expected);
+    CHECK(va::kernel_filesystem_id_for("ext4", fsid) == expected);
+    CHECK(va::kernel_filesystem_id_for("btrfs", fsid) == expected);
+    CHECK(!va::kernel_filesystem_id_for("xfs", fsid)); // follows the device number
+    CHECK(!va::kernel_filesystem_id_for("ntfs", fsid));
+    CHECK(!va::kernel_filesystem_id_for("zfs", fsid));
+    CHECK(!va::kernel_filesystem_id_for("", fsid));
+
+    // ext4 with a UUID of all zeros reports zero; every such volume would read
+    // the same, so zero is no id.
+    CHECK(!va::kernel_filesystem_id_for("ext4", 0));
+    CHECK(!va::kernel_filesystem_id_for("btrfs", 0));
+}
+
+va::VolumeInfo ext4_volume(std::string filesystem_uuid, std::string serial)
+{
+    auto info = volume(std::move(filesystem_uuid), std::move(serial));
+    info.filesystem_type = "ext4";
+    return info;
+}
+
+// Decision 0021: a kernel filesystem id is compared only with another one.
+// Against a UUID it counts as unavailable, so decision 0018 applies.
+void kernel_filesystem_id_matching()
+{
+    const std::string uuid = "3f2b8c1e-0d4a-4c6e-9b7a-1e2d3c4b5a69";
+    const std::string fsid = "fsid-1a2b3c4d5e6f7081";
+    const std::string other_fsid = "fsid-0000000011112222";
+
+    // Registered with udev, seen without it (and the reverse): the same device
+    // and volume size are a weak match.
+    const std::vector with_uuid{candidate("A", ext4_volume(uuid, "SERIAL-1"))};
+    auto outcome = va::match_identity(evidence(ext4_volume(fsid, "SERIAL-1")), "", with_uuid);
+    CHECK(outcome.result == va::MatchResult::MatchWeak);
+    CHECK(outcome.archives == std::vector<va::Uuid>{"A"});
+    CHECK(has_detail(outcome, "filesystem-id-unavailable"));
+    const std::vector with_fsid{candidate("A", ext4_volume(fsid, "SERIAL-1"))};
+    outcome = va::match_identity(evidence(ext4_volume(uuid, "SERIAL-1")), "", with_fsid);
+    CHECK(outcome.result == va::MatchResult::MatchWeak);
+    CHECK(has_detail(outcome, "filesystem-id-unavailable"));
+
+    // Another volume size on that device is another filesystem.
+    auto other_partition = ext4_volume(fsid, "SERIAL-1");
+    other_partition.capacity_bytes = 500000;
+    outcome = va::match_identity(evidence(other_partition), "", with_uuid);
+    CHECK(outcome.result == va::MatchResult::Mismatch);
+    CHECK(has_detail(outcome, "capacity-differs"));
+
+    // No device evidence to fall back on: not recognised.
+    outcome = va::match_identity(evidence(ext4_volume(fsid, "SERIAL-2")), "", with_uuid);
+    CHECK(outcome.result == va::MatchResult::Unknown);
+    outcome = va::match_identity(evidence(ext4_volume(fsid, "")), "", with_uuid);
+    CHECK(outcome.result == va::MatchResult::Unknown);
+
+    // Two kernel ids compare like UUIDs: the §B10 rows apply unchanged.
+    outcome = va::match_identity(evidence(ext4_volume(fsid, "SERIAL-1")), "", with_fsid);
+    CHECK(outcome.result == va::MatchResult::Match);
+    CHECK(!has_detail(outcome, "filesystem-id-unavailable"));
+    outcome = va::match_identity(evidence(ext4_volume(fsid, "")), "", with_fsid);
+    CHECK(outcome.result == va::MatchResult::MatchWeak);
+    CHECK(!has_detail(outcome, "filesystem-id-unavailable"));
+    outcome = va::match_identity(evidence(ext4_volume(fsid, "SERIAL-2")), "", with_fsid);
+    CHECK(outcome.result == va::MatchResult::Migrated);
+    outcome = va::match_identity(evidence(ext4_volume(other_fsid, "SERIAL-1")), "", with_fsid);
+    CHECK(outcome.result == va::MatchResult::Mismatch);
+    outcome = va::match_identity(evidence(ext4_volume(other_fsid, "")), "", with_fsid);
+    CHECK(outcome.result == va::MatchResult::Unknown);
+}
+
+} // namespace
+
 void identity_tests()
 {
     decision_table_rows();
@@ -232,4 +322,6 @@ void identity_tests()
     serial_comparison();
     filesystem_identifiers();
     unreadable_filesystem_id();
+    kernel_filesystem_id_format();
+    kernel_filesystem_id_matching();
 }

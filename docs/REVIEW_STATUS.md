@@ -10,7 +10,7 @@ pushed to GitLab.
 | Milestone | Implemented |
 |---|---|
 | M1 | Repository resolution matrix (explicit, pinned, first run, unavailable, other working directory, network refusal), relative pin for a repository inside the config file's folder so a portable program folder can be moved or copied (decision 0019), atomic and durable config and repository files, crash-safe schema creation, repository UUID validation and change warning, lossless non-Unicode names, canonical JSON, `repo init/info`, `--json` everywhere |
-| M2 | Unprivileged volume and device enumeration on Windows (64-bit NTFS serial, disk extents, model, serial, bus, HDD/SSD, NVMe EUI) and Linux (mountinfo, udev database, sysfs through partitions, dm and md), filesystem id normalisation, identity matcher for every §B10 row and decisions 0001, 0003, 0004, `media list` |
+| M2 | Unprivileged volume and device enumeration on Windows (64-bit NTFS serial, disk extents, model, serial, bus, HDD/SSD, NVMe EUI) and Linux (mountinfo, udev database, sysfs through partitions, dm and md; without udev the kernel filesystem id and the SATA serial page, decision 0021), filesystem id normalisation, identity matcher for every §B10 row and decisions 0001, 0003, 0004, 0018, 0021, `media list` |
 | M3 | Scanner (exclusions, mount points, collisions, unreadable entries, links), uncached threaded hash pipeline (BLAKE3 + SHA-256), `.vam` writer/reader with golden test, registration, FULL verification with every §A6 item status, `export-sha256sums` |
 | M4 | Ctrl-C cancellation, resumable verification and registration with checkpoints, hash-chained history and `repo verify-history`, `repo rebuild-index`, export/import with rollback protection, `archive relocate`, optional media copy |
 | M5 | GTK4 GUI with Archive List, Register, Verify, Compare, History and Settings views, progress, cancel and resume; a screenshot mode and `tools/screenshots/` for the user guide's pictures |
@@ -44,10 +44,13 @@ agreed with every file of the 4.3 GB archive, and an archive given by uuid was f
   registered: Windows reports no volume for it (`GetVolumeNameForVolumeMountPointW`, Win32 error
   4390), and the message does not say why. Register the folder by its real path; resolving the
   letter to its target is still to do.
-- **Linux without udev (HANDOFF D9).** The Linux build compiles and passes the unit and
-  end-to-end tests in GitLab CI (Ubuntu 24.04, Fedora 41, 2026-10-15), but only on runners whose
-  disk reports a serial: in containers neither the filesystem UUID nor a SCSI disk's serial is
-  readable without udev, and D9 is not decided yet.
+- **Linux without udev (HANDOFF D9, decision 0021).** The Linux build compiles and passes the
+  unit and end-to-end tests in GitLab CI (Ubuntu 24.04, Fedora 41, 2026-10-15), but so far only on
+  a runner whose device reports a serial. Decision 0021 now takes the kernel filesystem id
+  (`fsid-…`, read with `statfs`, never zero) of ext2/3/4 and btrfs volumes and, for SATA devices
+  behind libata, the SCSI serial page (VPD 0x80) when udev is missing, with unit tests for both;
+  it still has to pass in CI on a runner with a virtual SCSI device, where the kernel id alone
+  gives `MATCH_WEAK` and the second registration of the same root must be refused (exit 12).
 - **Hardware acceptance (M2, M3).** Done on Windows for an internal SATA HDD (model, serial,
   NTFS serial, identity MATCH, throughput above). Still open: USB bridges with and without
   serials, exFAT and NTFS external disks; the NTFS serial relationship on one medium seen from both

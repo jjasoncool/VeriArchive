@@ -5,23 +5,27 @@
 //  - sysfs (/sys/dev/block/...) to walk from a volume to its physical disks,
 //    through partitions, device-mapper (LUKS, LVM) and md RAID.
 // The udev database files are read directly (the same data libudev returns).
+// Containers and minimal systems have no udev database; decision 0021 then
+// takes the kernel filesystem id (statfs) and, for SATA devices, the SCSI
+// serial page (sysfs).
 #include "platform/media_enumerator.h"
 #include "platform/linux/mountinfo.h"
 #include "platform/linux/posix_util.h"
+#include "platform/linux/vpd.h"
 
 #include "core/identity/filesystem_id.h"
 
 #include <algorithm>
 #include <compare>
-#include <cstdio>
+#include <cstdint>
 #include <fstream>
 #include <iterator>
 #include <map>
 #include <optional>
 #include <set>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <sys/sysmacros.h>
+#include <sys/vfs.h>
 #include <utility>
 
 namespace va::platform {
@@ -45,13 +49,19 @@ std::string trim(std::string text)
     return text.substr(first, last - first + 1);
 }
 
-std::string read_text_file(const std::filesystem::path& path)
+// The bytes of a file, unchanged; empty when it cannot be read.
+std::string read_binary_file(const std::filesystem::path& path)
 {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
         return {};
     }
-    return trim(std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()));
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+std::string read_text_file(const std::filesystem::path& path)
+{
+    return trim(read_binary_file(path));
 }
 
 // udev "_ENC" values escape bytes as \xHH (e.g. a space is \x20).
@@ -197,7 +207,17 @@ PhysicalDeviceInfo describe_disk(const std::filesystem::path& disk)
     }
     device.serial = property(properties, "ID_SERIAL_SHORT");
     if (device.serial.empty()) {
-        device.serial = read_text_file(disk / "device" / "serial");
+        device.serial = read_text_file(disk / "device" / "serial"); // e.g. NVMe
+    }
+    // Decision 0021: without the udev database, a SATA device behind the Linux
+    // ATA layer still reports its serial in the SCSI Unit Serial Number page,
+    // which sysfs shows raw; it is the serial udev reports for that device.
+    // Other SCSI devices (SAS, virtio-scsi, USB bridges) are left without one:
+    // udev takes theirs from another source (page 0x83, the USB serial), so a
+    // page 0x80 serial would not match the one recorded where udev runs.
+    if (device.serial.empty() && properties.empty() &&
+        linux_vpd::is_ata_vendor(read_text_file(disk / "device" / "vendor"))) {
+        device.serial = linux_vpd::unit_serial(read_binary_file(disk / "device" / "vpd_pg80"));
     }
     // NVMe namespaces expose their EUI-64/NGUID as "wwid" ("eui.<hex>"); Windows
     // reports the same identifier (see nvme_wwn_from_windows_serial).
@@ -255,6 +275,34 @@ bool has_option(const std::string& options, std::string_view wanted)
     return false;
 }
 
+struct FilesystemStatus {
+    std::uint64_t capacity_bytes = 0;
+    std::uint64_t kernel_id = 0; // f_fsid, see combine_kernel_filesystem_id
+};
+
+// The volume size and the kernel filesystem id of the filesystem mounted at
+// `mount_point`. statfs() rather than statvfs(): statvfs() has the C library
+// narrow f_fsid to one unsigned long, and only 64-bit glibc keeps both of its
+// words; musl (Alpine containers) and 32-bit glibc keep the first one only.
+std::optional<FilesystemStatus> filesystem_status(const std::filesystem::path& mount_point)
+{
+    // `struct statfs` names the type: a function of the same name exists.
+    struct statfs information {};
+    if (::statfs(mount_point.c_str(), &information) != 0) {
+        return std::nullopt;
+    }
+    // The size the way statvfs() gives it: blocks of f_frsize bytes, or of
+    // f_bsize bytes where the kernel leaves f_frsize zero.
+    const auto block_size = information.f_frsize != 0 ? information.f_frsize : information.f_bsize;
+    FilesystemStatus status;
+    status.capacity_bytes =
+        static_cast<std::uint64_t>(information.f_blocks) * static_cast<std::uint64_t>(block_size);
+    // glibc and musl both name the two words of f_fsid __val.
+    status.kernel_id =
+        combine_kernel_filesystem_id(information.f_fsid.__val[0], information.f_fsid.__val[1]);
+    return status;
+}
+
 VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
 {
     const auto properties = udev_properties(number);
@@ -281,10 +329,17 @@ VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
     }
     volume.read_only = has_option(mount.options, "ro");
 
-    struct statvfs information {};
-    if (::statvfs(mount.mount_point.c_str(), &information) == 0) {
-        volume.capacity_bytes =
-            static_cast<std::uint64_t>(information.f_blocks) * information.f_frsize;
+    if (const auto status = filesystem_status(mount.mount_point)) {
+        volume.capacity_bytes = status->capacity_bytes;
+        // Decision 0021: neither udev nor /dev/disk/by-uuid gave the UUID (a
+        // container, a minimal system). For ext2/3/4 and btrfs the kernel's
+        // filesystem id is computed from the UUID, so it names the same
+        // filesystem on every machine and stands in for it (unless it is zero).
+        if (raw_uuid.empty()) {
+            if (auto kernel_id = kernel_filesystem_id_for(volume.filesystem_type, status->kernel_id)) {
+                volume.filesystem_uuid = std::move(*kernel_id);
+            }
+        }
     }
 
     std::vector<std::filesystem::path> disks;
@@ -296,21 +351,20 @@ VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
 }
 
 // Filesystems without a block device (ZFS datasets, overlayfs, tmpfs): the
-// kernel's filesystem id (statvfs f_fsid) is the only identifier. No devices
-// are reported, so matching is at best MATCH_WEAK.
+// kernel's filesystem id (statfs f_fsid) is the only identifier. No devices
+// are reported, so matching is at best MATCH_WEAK. A container that does not
+// show a volume's device node also lands here, whatever the filesystem; for
+// xfs and others the id then follows the device number (decision 0021).
+// FUSE and NFS report zero, so all of them read as one id.
 VolumeInfo describe_virtual_mount(const linux_mounts::Mount& mount)
 {
     VolumeInfo volume;
     volume.mount_point = mount.mount_point;
     volume.filesystem_type = normalise_filesystem_type(mount.filesystem_type);
     volume.read_only = has_option(mount.options, "ro");
-    struct statvfs information {};
-    if (::statvfs(mount.mount_point.c_str(), &information) == 0) {
-        volume.capacity_bytes = static_cast<std::uint64_t>(information.f_blocks) * information.f_frsize;
-        char text[32];
-        std::snprintf(text, sizeof(text), "fsid-%016llx",
-            static_cast<unsigned long long>(information.f_fsid));
-        volume.filesystem_uuid = text;
+    if (const auto status = filesystem_status(mount.mount_point)) {
+        volume.capacity_bytes = status->capacity_bytes;
+        volume.filesystem_uuid = kernel_filesystem_id(status->kernel_id);
     }
     return volume;
 }

@@ -1,6 +1,6 @@
 #pragma once
 // Identity matching: "which registered archive is this media?" (HANDOFF §B10,
-// amended by decisions 0001, 0003 and 0004). Pure logic, no I/O.
+// amended by decisions 0001, 0003, 0004, 0018 and 0021). Pure logic, no I/O.
 #include "common/types.h"
 
 #include <span>

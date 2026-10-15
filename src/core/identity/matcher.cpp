@@ -1,6 +1,7 @@
 #include "core/identity/matcher.h"
 
 #include "common/unicode.h"
+#include "core/identity/filesystem_id.h"
 
 #include <algorithm>
 #include <optional>
@@ -15,6 +16,14 @@ enum class Comparison { Same, Different, Unavailable };
 Comparison compare_filesystem(const VolumeInfo& seen, const VolumeInfo& recorded)
 {
     if (!seen.filesystem_uuid.empty() && !recorded.filesystem_uuid.empty()) {
+        // Decision 0021: a kernel filesystem id ("fsid-…", read where the UUID
+        // could not be) is computed from the UUID but is not equal to it, so
+        // against a UUID it says nothing either way: the id is unavailable, and
+        // decision 0018 decides from the device and the volume size.
+        if (is_kernel_filesystem_id(seen.filesystem_uuid) !=
+            is_kernel_filesystem_id(recorded.filesystem_uuid)) {
+            return Comparison::Unavailable;
+        }
         return seen.filesystem_uuid == recorded.filesystem_uuid ? Comparison::Same
                                                                 : Comparison::Different;
     }
@@ -116,7 +125,8 @@ MatchResult classify(const VolumeInfo& seen, const VolumeInfo& recorded)
         return devices == Comparison::Unavailable ? MatchResult::MatchWeak : MatchResult::Migrated;
     }
     // Decision 0018: the filesystem id cannot be read on one side (e.g. Linux
-    // without the udev database) but the device matches. The volume's size is
+    // without the udev database), or one side has only the kernel filesystem id
+    // (decision 0021), but the device matches. The volume's size is
     // then the only evidence about the filesystem: the same size is the same
     // volume, recognised weakly; another size is another filesystem on that
     // device, such as a second partition.

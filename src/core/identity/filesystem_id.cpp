@@ -1,5 +1,7 @@
 #include "core/identity/filesystem_id.h"
 
+#include <format>
+
 namespace va {
 namespace {
 
@@ -63,6 +65,35 @@ FilesystemId normalise_filesystem_id(std::string_view filesystem_type, std::stri
         return {hex, ""};
     }
     return {lowercase(raw), ""};
+}
+
+std::string kernel_filesystem_id(std::uint64_t fsid)
+{
+    return std::format("fsid-{:016x}", fsid);
+}
+
+bool is_kernel_filesystem_id(std::string_view filesystem_uuid)
+{
+    return filesystem_uuid.starts_with("fsid-");
+}
+
+std::uint64_t combine_kernel_filesystem_id(std::int32_t first, std::int32_t second)
+{
+    // Each word goes through uint32_t first: a negative int converted straight
+    // to a 64-bit unsigned value would fill the high half with ones.
+    return std::uint64_t{static_cast<std::uint32_t>(first)} |
+           (std::uint64_t{static_cast<std::uint32_t>(second)} << 32);
+}
+
+std::optional<std::string> kernel_filesystem_id_for(std::string_view filesystem_type,
+    std::uint64_t fsid)
+{
+    const bool follows_uuid = filesystem_type == "ext2" || filesystem_type == "ext3" ||
+                              filesystem_type == "ext4" || filesystem_type == "btrfs";
+    if (!follows_uuid || fsid == 0) {
+        return std::nullopt;
+    }
+    return kernel_filesystem_id(fsid);
 }
 
 std::optional<std::string> nvme_wwn_from_windows_serial(std::string_view serial)

@@ -36,3 +36,4 @@ void relocate_tests();
 void text_tests();
 void local_time_tests();
 void compare_archives_tests();
+void vpd_tests();

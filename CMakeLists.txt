@@ -108,6 +108,7 @@ elseif(UNIX AND NOT APPLE)
         src/platform/linux/mountinfo.cpp
         src/platform/linux/platform_services_linux.cpp
         src/platform/linux/posix_util.cpp
+        src/platform/linux/vpd.cpp
     )
 else()
     message(FATAL_ERROR "VeriArchive currently supports Windows and Linux only")
@@ -227,6 +228,7 @@ if(BUILD_TESTING)
         tests/unit/manifest_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
+        tests/unit/vpd_test.cpp
         tests/unit/verify_engine_test.cpp
         tests/unit/rebuild_index_test.cpp
         tests/unit/register_engine_test.cpp
@@ -242,7 +244,7 @@ if(BUILD_TESTING)
         VERIARCHIVE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
     if(NOT (UNIX AND NOT APPLE))
         # Pure C++ parser; tested on every OS although only Linux uses it.
-        target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp)
+        target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp src/platform/linux/vpd.cpp)
     endif()
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
