@@ -51,6 +51,7 @@ target_link_libraries(veriarchive_common
 
 add_library(veriarchive_core
     src/core/engine/archive_status.cpp
+    src/core/engine/compare_archives.cpp
     src/core/engine/candidates.cpp
     src/core/engine/comparison.cpp
     src/core/engine/item_rules.cpp
@@ -211,6 +212,7 @@ if(BUILD_TESTING)
         tests/unit/test_main.cpp
         tests/unit/archive_path_test.cpp
         tests/unit/archive_status_test.cpp
+        tests/unit/compare_archives_test.cpp
         tests/unit/archive_store_test.cpp
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp

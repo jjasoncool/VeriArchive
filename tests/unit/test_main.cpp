@@ -25,5 +25,6 @@ int main()
     relocate_tests();
     text_tests();
     local_time_tests();
+    compare_archives_tests();
     return test_failures == 0 ? 0 : 1;
 }
