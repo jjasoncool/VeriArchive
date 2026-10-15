@@ -10,17 +10,26 @@
       "cacheVariables": { "CMAKE_CXX_STANDARD": "23", "BUILD_TESTING": "ON" }
     },
     {
-      "name": "windows-ucrt64-debug",
+      "name": "windows-ucrt64",
+      "hidden": true,
       "inherits": "base",
-      "displayName": "Windows UCRT64 Debug",
+      "description": "MSYS2 UCRT64 GCC named by its target (the same programs as gcc and g++), so the compile database tells clangd the target",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "x86_64-w64-mingw32-gcc",
+        "CMAKE_CXX_COMPILER": "x86_64-w64-mingw32-g++"
+      }
+    },
+    {
+      "name": "windows-ucrt64-debug",
+      "inherits": "windows-ucrt64",
+      "displayName": "Windows UCRT64 Debug",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
     {
       "name": "windows-ucrt64-release",
-      "inherits": "base",
+      "inherits": "windows-ucrt64",
       "displayName": "Windows UCRT64 Release",
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {

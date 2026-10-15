@@ -11,6 +11,5 @@ Diagnostics:
       # or a result superseded by an error already returned); the check still
       # reports results dropped without one.
       bugprone-unused-return-value.AllowCastToVoid: true
-# Machine-specific settings (a Windows host's MSYS2 target and sysroot, hiding
-# Linux-only sources there) belong in the clangd user config, not here; see
-# "Editor (clangd)" in README.md.
+# On Windows the compile database names the compiler by its target (the
+# windows-ucrt64 presets), which is how clangd knows the MinGW headers.
