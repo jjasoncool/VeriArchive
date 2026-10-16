@@ -756,15 +756,27 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         // --new-revision`) checkpoints the files it has hashed under it
         // (R-104). Recorded over them, they would join this revision's index,
         // or fail its insert on their keys: the relocation leaves them to the
-        // registration, and stops.
+        // registration, and stops. Rows under the revision that no plan names
+        // are no registration's saved progress (decision 0026, point 8): left
+        // by a crash, or by a registration of an older version abandoned
+        // meanwhile, they go, and this revision's index replaces them, as an
+        // import's does (decision 0030, point 3).
         const auto checkpointed = store.has_file_rows(uuid, creates);
         if (!checkpointed) {
             return std::unexpected(checkpointed.error());
         }
         if (*checkpointed) {
             const auto plan = store.registration_plan(uuid, creates);
-            registering = plan && *plan ? **plan : std::string{};
-            return std::unexpected(IoError{IoErrorKind::Other, 0, "a registration creates the revision"});
+            if (!plan) {
+                return std::unexpected(plan.error());
+            }
+            if (*plan) {
+                registering = **plan;
+                return std::unexpected(IoError{IoErrorKind::Other, 0, "a registration creates the revision"});
+            }
+            if (auto cleared = store.delete_file_rows(uuid, creates); !cleared) {
+                return cleared;
+            }
         }
         // One that has hashed nothing yet can never finish once this revision
         // is recorded: its plan goes with the record, and it stops when it

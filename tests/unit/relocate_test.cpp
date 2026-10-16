@@ -1682,6 +1682,53 @@ void a_relocation_leaves_a_registration_its_saved_files()
 
 // Writes the repository through `inner`, except the files of a manifest,
 // which cannot be created (a sample failure, as a full disk would be).
+// Decision 0026, points 5 and 8: rows under the revision a relocation records
+// that no plan names are no registration's saved progress, as rows left by a
+// crash, or by a registration of an older version abandoned while it ran
+// (sample data): one of a file the manifest holds, with other hashes, and one
+// of a file it does not. The relocation's record removes them, as an import's
+// does (decision 0030, point 3), where it refused, naming a registration with
+// an empty root; it records the revision with its manifest's index, and the
+// new carrier verifies. A plan of another revision names none of them, and
+// stays. Rows that a plan of the revision names keep the revision for that
+// registration (a_relocation_leaves_a_registration_its_saved_files).
+void a_relocation_replaces_rows_that_no_plan_names()
+{
+    RelocationFixture fixture;
+    fixture.copy_to_new_disk();
+    va::Entry changed;
+    changed.path.p = "notes.txt";
+    changed.size = 5;
+    changed.b3 = va::blake3_hex("not the notes (sample data)");
+    va::Entry left_behind;
+    left_behind.path.p = "left behind.txt";
+    left_behind.size = 1;
+    left_behind.b3 = va::blake3_hex("x");
+    CHECK(fixture.store.upsert_file_rows(fixture.archive_uuid, 2, {changed, left_behind}));
+    const auto key = "registration:" + fixture.archive_uuid;
+    const nlohmann::json other_revision{{"archive_uuid", fixture.archive_uuid}, {"revision", 3},
+        {"label", "ARCH-0001"}, {"created", "2026-10-16T03:00:00Z"}, {"new_archive", false},
+        {"root", va::path_to_utf8(fixture.archive.root() / "old")}};
+    CHECK(fixture.store.set_setting(key, other_revision.dump()));
+
+    const auto relocated = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(relocated && relocated->revision == 2);
+    if (!relocated) {
+        std::cerr << "  relocation over rows that no plan names: " << relocated.error().message << '\n';
+        return;
+    }
+    std::map<std::string, std::string> indexed;
+    if (const auto rows = fixture.store.file_rows(fixture.archive_uuid, 2)) {
+        for (const auto& row : *rows) {
+            indexed[row.path.p] = std::string(1, row.type) + ":" + row.b3 + ":" + row.sha256;
+        }
+    }
+    CHECK(!indexed.empty() && indexed == hashes_of(fixture, 2));
+    CHECK(fixture.store.setting(key) == other_revision.dump());
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+}
+
 class ManifestFailingWriter final : public va::IFileWriter {
 public:
     explicit ManifestFailingWriter(va::IFileWriter& inner) : inner_(inner) {}
@@ -2175,6 +2222,7 @@ void relocate_tests()
     the_heartbeat_writes_only_its_own_relocation();
     a_relocation_removes_the_plan_of_its_revision();
     a_relocation_leaves_a_registration_its_saved_files();
+    a_relocation_replaces_rows_that_no_plan_names();
     an_abandoned_registration_lets_the_relocation_record();
     a_relocation_stopped_by_a_failure_says_how_to_go_on();
     a_relocation_waits_for_the_write_lock(WhileWaiting::OtherCommits);
