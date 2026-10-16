@@ -188,4 +188,49 @@ std::optional<bool> on_network_filesystem(const std::vector<Mount>& mounts, cons
     return is_network_filesystem_type(mount->filesystem_type);
 }
 
+namespace {
+
+// Whether the path lies on a network or remote filesystem, as
+// repository_on_network and archive_root_on_network tell it; nothing when
+// neither statfs nor the mounts tell.
+std::optional<bool> told_on_network(std::optional<FilesystemMagic> statfs_type, const std::vector<Mount>& mounts,
+    const std::filesystem::path& path)
+{
+    if (!statfs_type) {
+        return std::nullopt;
+    }
+    // The magic numbers statfs reports for network and remote filesystems.
+    constexpr FilesystemMagic network_magics[] = {
+        0x6969,     // NFS
+        0xFF534D42, // CIFS
+        0xFE534D42, // SMB2/3
+        0x517B,     // SMB
+        0x5346414F, // AFS
+        0x73757245, // Coda
+        0x564C,     // NCP
+        0x01021997, // 9P
+        0x00C36400, // Ceph
+    };
+    for (const auto network : network_magics) {
+        if (*statfs_type == network) {
+            return true;
+        }
+    }
+    return on_network_filesystem(mounts, path);
+}
+
+} // namespace
+
+bool repository_on_network(std::optional<FilesystemMagic> statfs_type, const std::vector<Mount>& mounts,
+    const std::filesystem::path& path)
+{
+    return told_on_network(statfs_type, mounts, path).value_or(true);
+}
+
+bool archive_root_on_network(std::optional<FilesystemMagic> statfs_type, const std::vector<Mount>& mounts,
+    const std::filesystem::path& path)
+{
+    return told_on_network(statfs_type, mounts, path).value_or(false);
+}
+
 } // namespace va::platform::linux_mounts

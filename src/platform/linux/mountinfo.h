@@ -1,6 +1,9 @@
 #pragma once
 // Parser for /proc/self/mountinfo. Mount boundaries come from here rather than
 // from st_dev, because btrfs subvolumes have distinct st_dev on one volume (R-30).
+// Also whether a path lies on a network filesystem, from the mounts and the
+// type that statfs reports: plain C++, so it is tested on every OS.
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -40,5 +43,26 @@ bool is_network_filesystem_type(std::string_view type);
 // filesystem: the type of the mount that contains it (mount_containing), or
 // nothing when no mount contains it.
 std::optional<bool> on_network_filesystem(const std::vector<Mount>& mounts, const std::filesystem::path& path);
+
+// The filesystem type that statfs reports (f_type, a magic number such as
+// 0x6969 for NFS), as its 32 bits: every Linux magic number fits in them,
+// while the C library's own type for it differs (long in glibc, unsigned long
+// in musl, 32 bits wide on 32-bit systems).
+using FilesystemMagic = std::uint32_t;
+
+// Whether a path lies on a network or remote filesystem: told by the type that
+// statfs reported for it (`statfs_type`: NFS, SMB, AFS, ... by their magic
+// numbers), then by the type of the mount in `mounts` that contains it
+// (on_network_filesystem). `path` should be absolute and canonical. Neither
+// tells when statfs failed (no `statfs_type`) or no mount contains the path,
+// and then each check decides on its own:
+//  - the repository's (R-83 step 4) fails closed: the path counts as on a
+//    network filesystem, so SQLite is never placed on a share unawares;
+//  - an archive root's (decision 0029) does not refuse the root: its volume
+//    lookup then says what is wrong.
+bool repository_on_network(std::optional<FilesystemMagic> statfs_type, const std::vector<Mount>& mounts,
+    const std::filesystem::path& path);
+bool archive_root_on_network(std::optional<FilesystemMagic> statfs_type, const std::vector<Mount>& mounts,
+    const std::filesystem::path& path);
 
 } // namespace va::platform::linux_mounts

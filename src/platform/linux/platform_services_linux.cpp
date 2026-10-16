@@ -66,54 +66,47 @@ bool writable_directory(const std::filesystem::path& directory)
 
 namespace {
 
-// Whether `path` lies on a network or remote filesystem: by the filesystem
-// type statfs reports, then by the type of the mount that contains it in
-// /proc/self/mountinfo. Nothing when neither tells (statfs fails, or no mount
-// contains the path).
-std::optional<bool> network_filesystem_of(const std::filesystem::path& path)
+// The type of the filesystem that holds `path`, as statfs reports it;
+// nothing when statfs fails.
+std::optional<linux_mounts::FilesystemMagic> statfs_type(const std::filesystem::path& path)
 {
     struct statfs information {};
     if (statfs(path.c_str(), &information) != 0) {
         return std::nullopt;
     }
+    return static_cast<linux_mounts::FilesystemMagic>(information.f_type);
+}
 
-    using magic = decltype(information.f_type);
-    constexpr magic remote_magics[] = {
-        static_cast<magic>(0x6969),     // NFS
-        static_cast<magic>(0xFF534D42), // CIFS
-        static_cast<magic>(0xFE534D42), // SMB2/3
-        static_cast<magic>(0x517B),     // SMB
-        static_cast<magic>(0x5346414F), // AFS
-        static_cast<magic>(0x73757245), // Coda
-        static_cast<magic>(0x564C),     // NCP
-        static_cast<magic>(0x01021997), // 9P
-        static_cast<magic>(0x00C36400), // Ceph
-    };
-    for (const auto remote : remote_magics) {
-        if (information.f_type == remote) {
-            return true;
-        }
-    }
-
+// `path` made canonical, or as it is where it cannot be made so (a path that
+// does not exist).
+std::filesystem::path canonical_or_as_is(const std::filesystem::path& path)
+{
     std::error_code error;
     const auto canonical = std::filesystem::canonical(path, error);
-    return linux_mounts::on_network_filesystem(linux_mounts::read_mountinfo(), error ? path : canonical);
+    return error ? path : canonical;
 }
 
 } // namespace
+
+// The two checks below only read (statfs, the canonical path, mountinfo);
+// linux_mounts judges what that tells, in plain C++ tested on every OS.
 
 // Fails closed: a filesystem that cannot be identified is treated as remote, so
 // SQLite is never silently placed on a network share.
 bool network_filesystem(const std::filesystem::path& path)
 {
-    return network_filesystem_of(path).value_or(true);
+    const auto type = statfs_type(path);
+    return linux_mounts::repository_on_network(type, linux_mounts::read_mountinfo(), canonical_or_as_is(path));
 }
 
 // Decision 0029: a root on a network filesystem is refused. One whose
 // filesystem cannot be told is left to its volume lookup, which says why.
 RootKind archive_root_kind(const std::filesystem::path& root)
 {
-    return network_filesystem_of(root).value_or(false) ? RootKind::NetworkShare : RootKind::Usable;
+    const auto type = statfs_type(root);
+    return linux_mounts::archive_root_on_network(type, linux_mounts::read_mountinfo(), canonical_or_as_is(root))
+               ? RootKind::NetworkShare
+               : RootKind::Usable;
 }
 
 bool process_is_elevated()

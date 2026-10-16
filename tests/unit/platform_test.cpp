@@ -167,6 +167,53 @@ void linux_roots_on_network_filesystems_are_told()
     CHECK(!on_network_filesystem({}, "/home/sample"));
 }
 
+// Decision 0029 and R-83 step 4 on Linux: whether a path lies on a network
+// filesystem, told by the type that statfs reports (sample magic numbers),
+// then by the mount that contains it (sample mountinfo: the local root, an
+// sshfs mount, a local volume through ntfs-3g). Where neither tells, statfs
+// having failed or no mount containing the path, the repository's check fails
+// closed and an archive root is not refused. Plain C++, so it is tested on
+// every OS although only Linux uses it.
+void linux_network_filesystems_are_told_by_statfs_and_mounts()
+{
+    using va::platform::linux_mounts::archive_root_on_network;
+    using va::platform::linux_mounts::FilesystemMagic;
+    using va::platform::linux_mounts::repository_on_network;
+    constexpr FilesystemMagic ext4 = 0xEF53, fuse = 0x65735546;
+    // NFS, CIFS, SMB2/3, SMB, AFS, Coda, NCP, 9P and Ceph.
+    constexpr FilesystemMagic network[] = {
+        0x6969, 0xFF534D42, 0xFE534D42, 0x517B, 0x5346414F, 0x73757245, 0x564C, 0x01021997, 0x00C36400};
+    const auto mounts = va::platform::linux_mounts::parse_mountinfo(
+        "22 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw\n"
+        "43 22 0:52 / /home/sample/remote rw,nosuid,nodev - fuse.sshfs sample@sample-server:/data rw\n"
+        "45 22 8:33 / /media/sample/SAMPLE rw,nosuid - fuseblk /dev/sdc1 rw\n");
+    CHECK(mounts.size() == 3);
+    // A network filesystem by the type statfs reports, whatever the mounts
+    // say: where they show the local root there, and where none could be read.
+    for (const auto type : network) {
+        CHECK(archive_root_on_network(type, mounts, "/mnt/sample-nas/photos"));
+        CHECK(repository_on_network(type, mounts, "/mnt/sample-nas/photos"));
+        CHECK(archive_root_on_network(type, {}, "/mnt/sample-nas/photos"));
+        CHECK(repository_on_network(type, {}, "/mnt/sample-nas/photos"));
+    }
+    // sshfs by its mount: statfs reports FUSE, as it does for ntfs-3g on a
+    // local disk, and ext4 for a folder on the local root.
+    CHECK(archive_root_on_network(fuse, mounts, "/home/sample/remote/photos"));
+    CHECK(repository_on_network(fuse, mounts, "/home/sample/remote/photos"));
+    CHECK(!archive_root_on_network(fuse, mounts, "/media/sample/SAMPLE/photos"));
+    CHECK(!repository_on_network(fuse, mounts, "/media/sample/SAMPLE/photos"));
+    CHECK(!archive_root_on_network(ext4, mounts, "/home/sample/photos"));
+    CHECK(!repository_on_network(ext4, mounts, "/home/sample/photos"));
+    // Neither tells: statfs failed (also below the sshfs mount), or no mount
+    // contains the path.
+    for (const auto* path : {"/home/sample/photos", "/home/sample/remote/photos"}) {
+        CHECK(!archive_root_on_network(std::nullopt, mounts, path));
+        CHECK(repository_on_network(std::nullopt, mounts, path));
+    }
+    CHECK(!archive_root_on_network(ext4, {}, "/home/sample/photos"));
+    CHECK(repository_on_network(ext4, {}, "/home/sample/photos"));
+}
+
 void network_types_are_recognised()
 {
     using va::platform::linux_mounts::is_network_filesystem_type;
@@ -269,6 +316,7 @@ void platform_tests()
     long_paths_keep_their_drive_or_share();
     windows_roots_on_shares_are_told();
     linux_roots_on_network_filesystems_are_told();
+    linux_network_filesystems_are_told_by_statfs_and_mounts();
     network_types_are_recognised();
     network_detection_fails_closed();
 }
