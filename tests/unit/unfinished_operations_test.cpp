@@ -1384,7 +1384,8 @@ void a_relocation_whose_new_carrier_differs_waits_to_be_abandoned()
 // the attempt has stopped (its stop mark, its process ended, or silent for
 // minutes) it is shown in a state of its own, to be abandoned, in both
 // languages, as --json says it and on the command line's line, ordered with
-// the stopped operations.
+// the stopped operations. A relocation whose new carrier differs keeps its
+// own state when it was made for an older revision as well.
 void an_operation_made_for_an_older_revision_waits_to_be_abandoned()
 {
     const va::app::Text english;
@@ -1436,6 +1437,30 @@ void an_operation_made_for_an_older_revision_waits_to_be_abandoned()
         const auto rows = va::app::describe_operations(english, watches, start, wall_now);
         CHECK(rows.size() == 2 && rows[0].state == "running" && rows[1].state_kind == OperationState::LaterRevision);
     }
+
+    // Both hold for a stopped relocation (decision 0030, point 7): its new
+    // carrier differs, and its archive has a later revision. It keeps the
+    // state of a new carrier that differs, as the next relocation needs
+    // another copy as well, and is offered for abandoning.
+    auto differing = registration(20, 10 * mib);
+    differing.kind = va::app::OperationKind::Relocation;
+    differing.key = "relocation:c0ffee00-0000-4000-8000-000000000030";
+    differing.revision = 1;
+    differing.files_total = 40;
+    differing.bytes_total = 20 * mib;
+    differing.differs = true;
+    differing.later_revision = true;
+    differing.resumable = false;
+    differing.recorded_stopped = true;
+    differing.updated = wall_now - 20s;
+    OperationWatch both;
+    both.update(differing, start, wall_now);
+    CHECK(both.state(start, wall_now) == OperationState::Differs);
+    const auto row = describe_operation(english, both, start, wall_now);
+    CHECK(row.state_kind == OperationState::Differs && row.abandonable &&
+          row.state == "new carrier differs; abandon it");
+    CHECK(describe_operation(chinese, both, start, wall_now).state == "新載體上的內容不符；請放棄它");
+    CHECK(va::app::state_code(va::app::state_of_one_read(differing, wall_now)) == "differs");
 
     // The command line's line under the archive.
     auto registering = registration(1200, 3 * gib);
