@@ -41,6 +41,21 @@ void local_date_tests()
     CHECK(local_date(std::chrono::sys_days(2026y / 10 / 17) + 2h, 5h + 30min) == 2026y / 10 / 17);
 }
 
+// The local date of a moment in the system's time zone is the date at the
+// system's offset from UTC at that moment, daylight saving time included:
+// every hour of a winter day and of a summer day, so that wherever the clock
+// is not at UTC, some hour's local date is not its UTC date.
+void system_local_date_tests()
+{
+    using va::app::local_date;
+    for (const auto day : {std::chrono::sys_days(2026y / 1 / 15), std::chrono::sys_days(2026y / 7 / 15)}) {
+        for (auto hour = 0h; hour < 24h; ++hour) {
+            const std::chrono::sys_seconds moment = day + hour;
+            CHECK(local_date(moment) == local_date(moment, va::platform::utc_offset(moment)));
+        }
+    }
+}
+
 // The system's offset is plausible: at most 14 hours, whole quarter hours,
 // and summer and winter differ by at most two hours (daylight saving time).
 void system_offset_tests()
@@ -60,5 +75,6 @@ void local_time_tests()
 {
     formatting_tests();
     local_date_tests();
+    system_local_date_tests();
     system_offset_tests();
 }

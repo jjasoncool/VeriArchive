@@ -1,0 +1,121 @@
+#include "test_support.h"
+
+#include "app/local_time.h"
+#include "app/session.h"
+#include "platform/platform_services.h"
+
+#include <chrono>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <optional>
+#include <sqlite3.h>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace {
+
+using namespace std::chrono_literals;
+
+// A folder of its own in the temporary directory for a sample repository and
+// its config file (sample data), removed afterwards.
+class SampleFolder {
+public:
+    explicit SampleFolder(std::string_view test_name)
+    {
+        const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ = std::filesystem::temp_directory_path() /
+                ("va-session-" + std::string(test_name) + '-' + std::to_string(unique));
+        std::filesystem::create_directories(path_);
+    }
+
+    ~SampleFolder()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    SampleFolder(const SampleFolder&) = delete;
+    SampleFolder& operator=(const SampleFolder&) = delete;
+
+    const std::filesystem::path& path() const { return path_; }
+
+private:
+    std::filesystem::path path_;
+};
+
+// Runs `sql` on the database of the repository at `root`, through a
+// connection of its own.
+void run_sql(const std::filesystem::path& root, const char* sql)
+{
+    sqlite3* database = nullptr;
+    const auto name = (root / "veriarchive.db").u8string();
+    CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &database) == SQLITE_OK);
+    CHECK(sqlite3_exec(database, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(database);
+}
+
+// A sample repository and its config file in `folder`, created as `repo init
+// --repository` creates one, its database then lowered to schema version 1,
+// as V1 left its databases. Returns the options that open it at `now`.
+std::optional<va::app::SessionOptions> repository_of_version_1(
+    const SampleFolder& folder, std::chrono::sys_seconds now)
+{
+    const auto repository = folder.path() / "SAMPLE-repository";
+    const auto config = folder.path() / "config.json";
+    std::ofstream(config) << "{}\n";
+    const auto created = va::app::open_session({true, repository, config, {}, false, now});
+    CHECK(created.has_value());
+    if (!created) {
+        return std::nullopt;
+    }
+    run_sql(repository, "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1");
+    return va::app::SessionOptions{false, repository, config, {}, false, now};
+}
+
+// A moment at which the local date here is not the UTC date, where there is
+// one in a day: the clock is not at UTC. Otherwise noon, whose local date is
+// its UTC date. On a day long past, so that it is never the day the tests
+// run on, whose date a session opened at the clock's moment would give.
+std::chrono::sys_seconds moment_of_another_date()
+{
+    const auto day = std::chrono::sys_days(2025y / 1 / 15);
+    for (auto hour = 0h; hour < 24h; ++hour) {
+        const std::chrono::sys_seconds moment = day + hour;
+        if (va::app::local_date(moment, va::platform::utc_offset(moment)) != std::chrono::year_month_day{day}) {
+            return moment;
+        }
+    }
+    return day + 12h;
+}
+
+// The copy of a database kept before its upgrade (decision 0032) is named for
+// the date that the clock here shows at the moment the repository is opened,
+// as people read it, not for the UTC date: opened at a moment when the two
+// differ, the copy and the note that says where it is name the local date.
+void the_copy_before_an_upgrade_is_named_for_the_local_date()
+{
+    SampleFolder folder("local-date");
+    const auto moment = moment_of_another_date();
+    const auto options = repository_of_version_1(folder, moment);
+    if (!options) {
+        return;
+    }
+    const auto date = va::app::local_date(moment, va::platform::utc_offset(moment));
+    const auto copy = options->repository->lexically_normal() /
+                      std::format("veriarchive-schema-1-before-upgrade-{:%F}.db", date);
+    const auto opened = va::app::open_session(*options);
+    CHECK(opened && opened->notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 3, copy})});
+    if (opened && opened->notes.size() == 1 && opened->notes.front() != va::app::schema_upgrade_note({1, 3, copy})) {
+        std::cerr << "  noted: " << opened->notes.front() << '\n';
+    }
+    CHECK(std::filesystem::exists(copy));
+}
+
+} // namespace
+
+void session_tests()
+{
+    the_copy_before_an_upgrade_is_named_for_the_local_date();
+}

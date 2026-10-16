@@ -297,7 +297,9 @@ bool upgradable(int version)
 // added and renamed once its own commit has synced it, so that a copy cut
 // short by a crash never has the name of a whole one; a leftover ".partial"
 // of that name is replaced, as only an attempt that holds the write lock
-// writes one. Returns where the copy is.
+// writes one. The journal that such a copy may have left beside it
+// ("-journal") SQLite deletes itself, as it finds the new file empty.
+// Returns where the copy is.
 std::expected<std::filesystem::path, IoError> keep_copy_before_upgrade(
     const RepositoryLayout& layout, int from, std::chrono::year_month_day today)
 {
@@ -314,11 +316,8 @@ std::expected<std::filesystem::path, IoError> keep_copy_before_upgrade(
     };
     auto partial = copy;
     partial += ".partial";
-    auto partial_journal = partial;
-    partial_journal += "-journal";
     const auto remove_partial = [&] {
         std::error_code ignored;
-        std::filesystem::remove(partial_journal, ignored);
         std::filesystem::remove(partial, ignored);
     };
     remove_partial();

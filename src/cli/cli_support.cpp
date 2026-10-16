@@ -82,7 +82,7 @@ Arguments parse_arguments(const std::vector<std::string>& raw, std::string& erro
 
 std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise, bool rebuild)
 {
-    auto session = app::open_session({initialise, arguments.repository, arguments.config, {}, rebuild});
+    auto session = app::open_session({initialise, arguments.repository, arguments.config, {}, rebuild, std::nullopt});
     // The warnings first, also where no repository could be opened: that
     // VeriArchive runs elevated may be why (R-12, decision 0037).
     for (const auto& warning : session ? session->warnings : session.error().warnings) {

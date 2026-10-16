@@ -308,6 +308,7 @@ if(BUILD_TESTING)
         tests/unit/repository_test.cpp
         tests/unit/retire_archive_test.cpp
         tests/unit/scanner_test.cpp
+        tests/unit/session_test.cpp
         tests/unit/sha256sums_test.cpp
         tests/unit/subst_drive_test.cpp
         tests/unit/text_test.cpp

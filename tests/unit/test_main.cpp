@@ -29,6 +29,7 @@ int main()
     relocate_tests();
     text_tests();
     local_time_tests();
+    session_tests();
     compare_archives_tests();
     vpd_tests();
     subst_drive_tests();

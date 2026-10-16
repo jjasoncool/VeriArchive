@@ -48,6 +48,7 @@ void transfer_tests();
 void relocate_tests();
 void text_tests();
 void local_time_tests();
+void session_tests();
 void compare_archives_tests();
 void vpd_tests();
 void subst_drive_tests();

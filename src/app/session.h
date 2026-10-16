@@ -8,6 +8,7 @@
 #include "core/repository/repository.h"
 
 #include <functional>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -25,6 +26,10 @@ struct SessionOptions {
     // repo rebuild-index: a database that is missing, empty, not a database
     // or damaged is put aside and made again (decision 0036).
     bool rebuild = false;
+    // The moment the repository is opened at, whose local date names the
+    // copy of a database kept before its upgrade (decision 0032): the system
+    // clock's when not given. Tests give one.
+    std::optional<std::chrono::sys_seconds> now;
 };
 
 struct Session {
@@ -50,7 +55,7 @@ struct SessionFailure {
 
 // Opens the repository, upgrading its database where it is of an older
 // schema version, with the copy from before the upgrade named for the local
-// date (decision 0032).
+// date at options.now (decision 0032).
 std::expected<Session, SessionFailure> open_session(const SessionOptions& options);
 
 // R-12: the warning that this process runs elevated, where it does; for a

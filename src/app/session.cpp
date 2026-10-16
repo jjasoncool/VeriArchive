@@ -68,7 +68,8 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
     Session session{std::move(*context), platform::make_file_writer(), warnings, {}, std::nullopt};
     // The copy of a database kept before its upgrade is named for the date
     // that the clock here shows, as people read it (decision 0017).
-    const auto today = local_date(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+    const auto today = local_date(
+        session_options.now.value_or(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now())));
     if (session_options.rebuild) {
         auto made = open_repository_to_rebuild(session.context, today);
         if (!made) {

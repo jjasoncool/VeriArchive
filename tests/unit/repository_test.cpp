@@ -1067,7 +1067,8 @@ void an_older_repository_is_raised_to_schema_version_3()
 // its name is taken, as by a copy that was put back and upgraded again on the
 // same day, it takes the next name with -2, -3, ... before .db, and the file
 // that has the name stays as it is. What a copy cut short by a crash left
-// under its name with ".partial" added (and its journal) is replaced.
+// under its name with ".partial" added is replaced, and the journal left
+// beside it is gone too: SQLite deletes it, as it finds the new file empty.
 void a_copy_before_an_upgrade_never_replaces_a_file()
 {
     TemporaryDirectory temporary("schema-copy-names");
