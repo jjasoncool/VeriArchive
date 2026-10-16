@@ -224,17 +224,18 @@ set(CPACK_PACKAGE_NAME "VeriArchive")
 set(CPACK_PACKAGE_VENDOR "VeriArchive")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Integrity verification for archive media")
 set(CPACK_GENERATOR ZIP)
-set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
-set(CPACK_COMPONENT_INCLUDE_TOPLEVEL_DIRECTORY ON)
-# Component mode is what makes CPack honour CPACK_COMPONENTS_ALL.
-set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-set(CPACK_COMPONENTS_ALL VeriArchive)
 if(WIN32)
     set(CPACK_PACKAGE_FILE_NAME "VeriArchive-${PROJECT_VERSION}-windows-x86_64")
 else()
     set(CPACK_PACKAGE_FILE_NAME "VeriArchive-${PROJECT_VERSION}-linux-x86_64")
 endif()
-set(CPACK_ARCHIVE_VERIARCHIVE_FILE_NAME "${CPACK_PACKAGE_FILE_NAME}") # zip and its top-level folder
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON) # zip and its top-level folder
+# CPack installs this project's VeriArchive component alone (build folder,
+# project, component, subfolder). Its component mode would do the same, but
+# stages the files two folders deeper (<component>/<package file name>/),
+# where paths in deep build folders reach 260 characters, more than
+# glib-compile-schemas (install_runtime.cmake) can open.
+set(CPACK_INSTALL_CMAKE_PROJECTS "${CMAKE_BINARY_DIR};${PROJECT_NAME};VeriArchive;/")
 include(CPack)
 
 if(BUILD_TESTING)
