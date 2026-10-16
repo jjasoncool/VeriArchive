@@ -367,9 +367,9 @@ void Job::wait()
     }
 }
 
-void Job::abandon()
+void Job::shut_down()
 {
-    abandoned_.store(true);
+    shut_down_.store(true);
     cancel();
     wait();
 }
@@ -386,7 +386,7 @@ void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done 
         Report report;
         GtkWidget* bar;  // the job's reference, given back on the main thread
         std::atomic<bool>* running;
-        const std::atomic<bool>* abandoned;
+        const std::atomic<bool>* shut_down;
     };
     // The job keeps the bar alive until it has finished, even if the window closes.
     g_object_ref(progress_bar);
@@ -402,12 +402,12 @@ void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done 
                 log_failure(std::string("exception in an operation: ") + error.what());
                 report = unexpected_error(error.what());
             }
-            auto* finished = new Finished{std::move(done), std::move(report), progress_bar, &running_, &abandoned_};
+            auto* finished = new Finished{std::move(done), std::move(report), progress_bar, &running_, &shut_down_};
             g_idle_add(
                 +[](gpointer data) -> gboolean {
                     std::unique_ptr<Finished> finished(static_cast<Finished*>(data));
                     finished->running->store(false);
-                    if (!finished->abandoned->load()) {
+                    if (!finished->shut_down->load()) {
                         try {
                             finished->done(finished->report);
                         } catch (const std::exception& error) {

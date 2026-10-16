@@ -12,12 +12,15 @@
 // operation also writes the time into its record ("updated", decision 0022),
 // which tells a working operation from a stopped one. For an operation that
 // does not (one started by an older version), a few quiet minutes only say
-// that it *may* have stopped.
+// that it *may* have stopped. A registration's plan also names the process
+// that runs its attempt (decision 0024): on this computer, whether that
+// process still runs tells at once whether the attempt does.
 #include "app/progress_estimate.h"
 #include "app/text.h"
 #include "common/error.h"
 #include "common/repository_layout.h"
 #include "common/types.h"
+#include "core/engine/registration_attempt.h"
 
 #include <chrono>
 #include <cstdint>
@@ -41,7 +44,8 @@ struct UnfinishedOperation {
     std::string label;
     std::string root;                  // UTF-8; may be empty for a verification
     std::string run_id;                // verifications only
-    Timestamp started;
+    std::uint32_t revision = 0;        // the revision a registration creates, or a verification verifies
+    Timestamp started;                 // for a registration, when its plan was made (its "created")
     std::uint64_t files_done = 0;
     std::uint64_t bytes_done = 0;
     std::uint64_t files_total = 0;     // 0: not known
@@ -54,6 +58,25 @@ struct UnfinishedOperation {
     bool done_counted = true;          // false: files_done and bytes_done are not known, as the checkpoints
                                        // are not counted where that would hold up the operation (a database
                                        // not in WAL mode, decision 0022); only the record's state is shown
+    // A registration whose plan does not say it stopped: whether the process
+    // that runs its attempt runs (decision 0024). Unknown for a plan that names
+    // no process, or one on another computer, and when no process table was
+    // read; and for verifications.
+    AttemptState attempt = AttemptState::Unknown;
+    std::optional<AttemptProcess> process;  // the process the plan names, if it names one
+};
+
+// How a read judges each registration's attempt (decision 0024): through this
+// computer's process table. Without one, by the plan's "updated" alone
+// (decision 0022).
+struct AttemptCheck {
+    IProcessTable* processes = nullptr;
+    std::string host;  // this computer (HostInfo::host)
+    // Whether this process runs an operation now (judge_attempt): asked only
+    // for a plan that names this process, as it is judged after the read, so
+    // a registration that this window started while the read ran is never
+    // taken for one that has ended. Without it, this process runs none.
+    std::function<bool()> runs_an_operation;
 };
 
 // What one read of the repository found.
@@ -81,16 +104,21 @@ std::optional<std::uint64_t> volume_used_bytes(const std::filesystem::path& root
 // INCOMPLETE never changes, so its counts are taken from there. Opens the
 // database read only, so watching never creates or changes it; meant to run
 // on a thread of its own, as a read can take a moment on large repositories.
+// `attempts`: how each registration's attempt is judged (decision 0024).
 std::expected<OperationsRead, IoError> read_unfinished_operations(const RepositoryLayout& layout,
     const std::vector<UnfinishedOperation>& previous = {},
     const std::function<std::optional<std::uint64_t>(const std::filesystem::path&)>& used_bytes =
-        volume_used_bytes);
+        volume_used_bytes,
+    const AttemptCheck& attempts = {});
 
 enum class OperationState {
     Waiting,   // first seen, and not yet seen to move
     Running,   // moved in the last few minutes, or its record says it works
     Quiet,     // no progress seen for a few minutes: stopped, or busy with a large file or the scan
-    Stopped,   // certainly stopped (its record says so, or has been silent for minutes)
+    Silent,    // a registration whose plan has said nothing for a few minutes, while the process that
+               // runs its attempt still runs (decision 0024): held up, not stopped
+    Stopped,   // certainly stopped (its record says so, has been silent for minutes, or the process
+               // that ran its attempt has ended)
     Unknown,   // its progress is not counted and its record says nothing of its state (an older version)
 };
 
@@ -116,11 +144,12 @@ public:
     void polls_held_up() { stopped_since_step_ = true; }
 
     // The operation as the latest poll saw it. A registration whose plan says
-    // it stopped, but whose checkpoints moved since a poll first saw that, has
-    // been taken up again by an attempt that does not write the plan (an
-    // older version's `register --resume`): its plan's "stopped" and
-    // "updated" belong to the attempt before, so they are left out here, and
-    // it is judged by its counts.
+    // it stopped, or names a process that has ended, but whose checkpoints
+    // moved since a poll first saw that, has been taken up again by an
+    // attempt that does not write the plan (an older version's `register
+    // --resume`): its plan's "stopped", "updated" and process belong to the
+    // attempt before, so they are left out here, and it is judged by its
+    // counts.
     const UnfinishedOperation& operation() const { return operation_; }
     OperationState state(Clock::time_point now, std::chrono::sys_seconds wall_now) const;
     // How long no progress was seen: since the last step, or since the first
@@ -134,8 +163,8 @@ private:
     // between, or the computer slept.
     Clock::duration long_gap() const;
     bool idle(Clock::duration gap, std::uint64_t brought) const;
-    // Leaves out a plan's stop mark once another attempt has taken the
-    // registration up again (see operation()).
+    // Leaves out a plan's stop mark, or its ended process, once another
+    // attempt has taken the registration up again (see operation()).
     void follow_stop_mark(UnfinishedOperation& operation);
 
     // One gap between two steps, and the bytes the later step brought.
@@ -143,9 +172,9 @@ private:
         Clock::duration gap{};
         std::uint64_t bytes = 0;
     };
-    // A registration's stop mark as a poll first saw it: the plan's "updated"
-    // written with it (a later attempt that stops writes its own), and the
-    // counts then.
+    // A registration's stop mark, or its ended process, as a poll first saw
+    // it: the plan's "updated" written with it (a later attempt writes its
+    // own), and the counts then.
     struct StopMark {
         std::optional<std::chrono::sys_seconds> updated;
         std::uint64_t files_done = 0;
@@ -189,6 +218,9 @@ struct OperationRow {
     std::optional<double> fraction;  // for a progress bar
     Uuid archive_uuid;               // for a tooltip
     std::string run_id;              // verifications only, for a tooltip
+    std::string process;             // a registration's: "Process: 4242 (veriarchive-cli.exe)", for a tooltip
+    std::string key;                 // the operation's key (UnfinishedOperation::key)
+    bool abandonable = false;        // a registration shown stopped: the operator may abandon it (decision 0025)
 };
 
 OperationRow describe_operation(const Text& text, const OperationWatch& watch, OperationWatch::Clock::time_point now,

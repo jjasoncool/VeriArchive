@@ -3,15 +3,21 @@
 // Above the archives, the registrations and verifications that have not
 // finished, with their progress, wherever they were started: a registration
 // of a whole volume from the command line takes many hours, and this is where
-// the operator sees how far it is.
+// the operator sees how far it is. A registration there that has stopped can
+// be abandoned (decision 0025), as when its media failed.
 #include "gui/gui_app.h"
 
 #include "app/local_time.h"
+#include "core/engine/abandon_registration.h"
 #include "core/engine/archive_status.h"
+#include "platform/process_table.h"
 
 #include <chrono>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 #include <utility>
 
 namespace va::gui {
@@ -73,6 +79,8 @@ GtkWidget* operation_cell(const std::string& text, bool bold = false, bool warni
     return label;
 }
 
+void ask_to_abandon(GuiState& state, const std::string& key);
+
 // The watches belong to one repository; another one opened in Settings starts afresh.
 void use_session_repository(GuiState& state)
 {
@@ -121,7 +129,19 @@ void show_operations(GuiState& state)
         GtkWidget* label = operation_cell(shown.label, true);
         gtk_widget_set_tooltip_text(label, shown.archive_uuid.c_str());
         gtk_grid_attach(GTK_GRID(view.operations_grid), label, 0, row, 1, 1);
-        gtk_grid_attach(GTK_GRID(view.operations_grid), operation_cell(shown.root), 1, row, 1, 1);
+        // A long root (a folder deep in a volume) wraps, anywhere in a name,
+        // rather than pushing the state and the row's button off the window;
+        // without the hyphens Pango would add, which would read as part of
+        // the path.
+        GtkWidget* root = operation_cell(shown.root);
+        gtk_label_set_wrap(GTK_LABEL(root), TRUE);
+        gtk_label_set_wrap_mode(GTK_LABEL(root), PANGO_WRAP_WORD_CHAR);
+        gtk_label_set_max_width_chars(GTK_LABEL(root), 40);
+        PangoAttrList* no_hyphens = pango_attr_list_new();
+        pango_attr_list_insert(no_hyphens, pango_attr_insert_hyphens_new(FALSE));
+        gtk_label_set_attributes(GTK_LABEL(root), no_hyphens);
+        pango_attr_list_unref(no_hyphens);
+        gtk_grid_attach(GTK_GRID(view.operations_grid), root, 1, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.operations_grid), operation_cell(shown.kind), 2, row, 1, 1);
 
         // The bar when the share is known, the numbers below it.
@@ -140,7 +160,8 @@ void show_operations(GuiState& state)
         gtk_grid_attach(GTK_GRID(view.operations_grid), progress, 3, row, 1, 1);
 
         const bool stopped = shown.state_kind == app::OperationState::Stopped;
-        const bool quiet = shown.state_kind == app::OperationState::Quiet;
+        const bool quiet = shown.state_kind == app::OperationState::Quiet ||
+                           shown.state_kind == app::OperationState::Silent;
         GtkWidget* state_cell = operation_cell(shown.state, quiet, stopped);
         // A long state ("stopped; it cannot be resumed ...") wraps rather
         // than running off the window's edge. One width for every state, so
@@ -150,8 +171,30 @@ void show_operations(GuiState& state)
         gtk_label_set_max_width_chars(GTK_LABEL(state_cell), 32);
         if (!shown.run_id.empty()) {
             gtk_widget_set_tooltip_text(state_cell, text.format("Run: {}", shown.run_id).c_str());
+        } else if (!shown.process.empty()) {
+            gtk_widget_set_tooltip_text(state_cell, shown.process.c_str());
         }
         gtk_grid_attach(GTK_GRID(view.operations_grid), state_cell, 4, row, 1, 1);
+
+        // A stopped registration can be given up on purpose (decision 0025).
+        if (shown.abandonable) {
+            GtkWidget* abandon = gtk_button_new_with_label(text("Abandon...").c_str());
+            gtk_widget_set_valign(abandon, GTK_ALIGN_START);
+            g_object_set_data_full(G_OBJECT(abandon), "operation-key", new std::string(shown.key),
+                +[](gpointer key) { delete static_cast<std::string*>(key); });
+            g_signal_connect(abandon, "clicked",
+                G_CALLBACK(+[](GtkButton* button, gpointer data) {
+                    auto& state = *static_cast<GuiState*>(data);
+                    const auto* key =
+                        static_cast<const std::string*>(g_object_get_data(G_OBJECT(button), "operation-key"));
+                    guarded([&] { ask_to_abandon(state, key ? *key : std::string{}); },
+                        [&](const Report& report) {
+                            gtk_label_set_text(GTK_LABEL(state.archive_list.status), report(state.text).c_str());
+                        });
+                }),
+                &state);
+            gtk_grid_attach(GTK_GRID(view.operations_grid), abandon, 5, row, 1, 1);
+        }
         ++row;
     }
 }
@@ -169,6 +212,7 @@ struct PollResult {
     GuiState* state;
     RepositoryLayout layout;
     std::vector<app::UnfinishedOperation> previous;  // the read before, for the counts that cannot change
+    std::string host;                                // this computer, for the processes the plans name
     std::vector<app::UnfinishedOperation> operations;
     std::string archives_mark;                       // ArchiveStore::archive_list_mark, read with them
     Report error;
@@ -225,8 +269,8 @@ void start_poll(GuiState& state, bool when_due = false)
     if (poll.thread.joinable()) {
         poll.thread.join();  // the last read; its result has arrived already
     }
-    auto result =
-        std::make_unique<PollResult>(PollResult{&state, state.session->context.repo, {}, {}, {}, nullptr, {}});
+    auto result = std::make_unique<PollResult>(
+        PollResult{&state, state.session->context.repo, {}, state.host.host, {}, {}, nullptr, {}});
     for (const auto& watch : poll.watches) {
         result->previous.push_back(watch.operation());
     }
@@ -235,7 +279,20 @@ void start_poll(GuiState& state, bool when_due = false)
     try {
         poll.thread = std::thread([result = std::move(result), now]() mutable {
             try {
-                auto read = app::read_unfinished_operations(result->layout, result->previous);
+                // Whether the process that runs each registration's attempt
+                // still runs (decision 0024). A plan that names this window's
+                // process is of an attempt that has ended while this window
+                // runs no operation; while it runs one, that may be its
+                // registration. Asked as such a plan is judged, so after the
+                // read: Job::running is set before an operation's work
+                // starts, and so before its registration writes a plan. The
+                // window's state outlives this thread (OperationsPoll, which
+                // joins it, goes first), and Job::running is safe on any thread.
+                const auto processes = platform::make_process_table();
+                const app::AttemptCheck attempts{processes.get(), result->host,
+                    [state = result->state] { return state->job.running(); }};
+                auto read = app::read_unfinished_operations(
+                    result->layout, result->previous, app::volume_used_bytes, attempts);
                 result->took = std::chrono::steady_clock::now() - now;
                 if (read) {
                     result->operations = std::move(read->operations);
@@ -316,6 +373,222 @@ void stop_watching(GuiState& state, GtkWidget* list)
         poll.timer = 0;
         poll.served = nullptr;
     }
+}
+
+// ---- Abandoning a registration (decision 0025) ------------------------------
+
+// What the operator was shown and confirmed, carried into the dialog's answer.
+struct AbandonChoice {
+    GuiState* state;
+    AbandonRequest request;
+    std::string label;
+};
+
+// The report of an abandon, in any language.
+Report abandon_report(const AbandonableRegistration& abandoned)
+{
+    return [abandoned](const app::Text& text) {
+        std::string body = text.format("Abandoned the unfinished registration of {} ({}), revision {}.",
+            abandoned.label, abandoned.archive_uuid, abandoned.revision);
+        if (abandoned.first_registration) {
+            body += "\n" + text("The archive had no revision: it is no longer listed.");
+            if (abandoned.media_copy) {
+                body += "\n" + text("Note: the media may still hold .veriarchive/identity.json naming this archive; "
+                                     "delete it before registering the folder or volume again, unless you register "
+                                     "it with a media copy.");
+            }
+        }
+        return body;
+    };
+}
+
+// Why a registration is not abandoned (refused, or the repository failed).
+Report not_abandoned(const AbandonFailure& failure)
+{
+    return [message = failure.message](const app::Text& text) {
+        return text.format("Not abandoned: {}", text(message));
+    };
+}
+
+Report cannot_open(const IoError& error)
+{
+    return [message = error.message](const app::Text& text) {
+        return text.format("Cannot open the repository: {}", text(message));
+    };
+}
+
+// Shows a report in a message of its own: the section the row was in may be
+// gone once the registration is.
+void show_abandon_result(GuiState& state, const Report& report)
+{
+    if (!state.window) {
+        return;
+    }
+    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s", report(state.text).c_str());
+    gtk_alert_dialog_show(dialog, state.window);
+    g_object_unref(dialog);
+}
+
+// Whether the window can run a step of abandoning now, as its one operation;
+// otherwise says why not.
+bool can_abandon(GuiState& state)
+{
+    if (state.session && !state.job.running() && state.archive_list.abandoning) {
+        return true;
+    }
+    show_abandon_result(state, fixed_message(state.session ? "Another operation is running."
+                                                            : "Open a repository first (Settings)."));
+    return false;
+}
+
+// A step of abandoning (reading what it removes, or abandoning) runs as the
+// window's one operation (Job), with `doing` on its bar: counting or deleting
+// the saved progress of millions of files takes a while, and no registration
+// may start in this window meanwhile (judge_attempt). `work` runs on the Job's
+// thread, `done` on the main thread once the bar is gone again.
+void run_abandon_step(GuiState& state, const std::string& doing, Job::Work work,
+    std::function<void(const Report&)> done)
+{
+    auto& view = state.archive_list;
+    lock_language(state, true);
+    gtk_widget_set_visible(view.abandoning, TRUE);
+    state.job.start(state.text, view.abandoning, std::move(work),
+        [&state, done = std::move(done)](const Report& report) {
+            guarded(
+                [&] {
+                    lock_language(state, false);
+                    if (state.archive_list.abandoning) {
+                        gtk_widget_set_visible(state.archive_list.abandoning, FALSE);
+                    }
+                    done(report);
+                },
+                [&](const Report& failure) { show_abandon_result(state, failure); });
+        });
+    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.abandoning), doing.c_str());
+}
+
+// Abandons the registration the operator confirmed, after the same checks
+// again, in its own transaction (abandon_registration); reports what it did.
+void start_abandon(GuiState& state, const AbandonRequest& request, const std::string& label)
+{
+    if (!can_abandon(state)) {
+        return;
+    }
+    run_abandon_step(state, state.text.format("Abandoning the registration of {} ...", label),
+        [layout = state.session->context.repo, host = state.host.host, request](
+            CancelToken&, IProgressSink&) -> Report {
+            auto store = ArchiveStore::open(layout);
+            if (!store) {
+                return cannot_open(store.error());
+            }
+            const auto processes = platform::make_process_table();
+            AbandonServices services{*store, *processes, host};
+            const auto abandoned = abandon_registration(services, request);
+            return abandoned ? abandon_report(*abandoned) : not_abandoned(abandoned.error());
+        },
+        [&state](const Report& result) {
+            refresh_archive_list(state);
+            start_poll(state);
+            show_abandon_result(state, result);
+        });
+}
+
+// Asks the operator, with Cancel as the default, saying what abandoning the
+// registration removes, as abandonable_registration read it.
+void confirm_abandon(GuiState& state, const AbandonableRegistration& registration)
+{
+    const auto& text = state.text;
+    const auto label = registration.label.empty() ? registration.archive_uuid.substr(0, 8) : registration.label;
+    std::string detail = text.format("Root: {}", registration.root) + "\n\n" +
+                         text.format("Its saved progress will be lost: {} files ({}) hashed so far.",
+                             registration.files, format_bytes(registration.bytes)) +
+                         " " +
+                         text("It cannot be resumed afterwards. Recorded revisions, manifests and the verification "
+                              "history are not changed.");
+    if (registration.first_registration) {
+        detail += "\n\n" + text("The archive has no revision yet: it is removed with its registration.");
+    }
+
+    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s",
+        text.format("Abandon the unfinished registration of {}?", label).c_str());
+    gtk_alert_dialog_set_detail(dialog, detail.c_str());
+    const auto cancel = text("Cancel");
+    const auto abandon = text("Abandon");
+    const char* buttons[] = {cancel.c_str(), abandon.c_str(), nullptr};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    // The request names the registration shown: one that changed meanwhile
+    // (resumed and finished, say) is not abandoned in its place.
+    auto* choice = new AbandonChoice{
+        &state, {registration.archive_uuid, registration.revision, registration.created}, label};
+    gtk_alert_dialog_choose(dialog, state.window, nullptr,
+        +[](GObject* source, GAsyncResult* result, gpointer data) {
+            std::unique_ptr<AbandonChoice> choice(static_cast<AbandonChoice*>(data));
+            GError* error = nullptr;
+            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
+            if (error) {
+                g_error_free(error); // dismissed, as when the window closed
+            }
+            g_object_unref(source);
+            auto& state = *choice->state;
+            if (button != 1 || !state.window) {
+                return;
+            }
+            guarded([&] { start_abandon(state, choice->request, choice->label); },
+                [&](const Report& report) { show_abandon_result(state, report); });
+        },
+        choice);
+}
+
+// The operator chose to abandon the registration `key` of the latest read.
+// What abandoning it removes is read first, by the check that abandons it
+// (abandonable_registration, as the CLI shows it), not taken from the read
+// the row came from: whether the archive goes, and the saved progress, which
+// is nothing once its revision is recorded. A refusal shows at once (an
+// attempt that runs, another registration by now); otherwise the question.
+void ask_to_abandon(GuiState& state, const std::string& key)
+{
+    if (!can_abandon(state)) {
+        return;
+    }
+    const auto& watches = state.operations.watches;
+    const auto found = std::ranges::find(watches, key,
+        [](const app::OperationWatch& watch) -> const std::string& { return watch.operation().key; });
+    if (key.empty() || found == watches.end() || found->operation().kind != app::OperationKind::Registration) {
+        show_abandon_result(state, fixed_message("This registration is no longer listed as unfinished."));
+        return;
+    }
+    const auto& operation = found->operation();
+    const auto label = operation.label.empty() ? operation.archive_uuid.substr(0, 8) : operation.label;
+    // The registration shown: one that changed since (resumed and finished,
+    // say) is refused, not read in its place.
+    const AbandonRequest request{operation.archive_uuid, operation.revision, operation.started};
+    auto examined = std::make_shared<std::optional<AbandonableRegistration>>();
+    run_abandon_step(state, state.text.format("Reading the registration of {} ...", label),
+        [layout = state.session->context.repo, host = state.host.host, request, examined](
+            CancelToken&, IProgressSink&) -> Report {
+            // Reads only, as the Archive List does (decision 0022).
+            auto store = ArchiveStore::open_read_only(layout);
+            if (!store) {
+                return cannot_open(store.error());
+            }
+            const auto processes = platform::make_process_table();
+            AbandonServices services{*store, *processes, host};
+            auto registration = abandonable_registration(services, request);
+            if (!registration) {
+                return not_abandoned(registration.error());
+            }
+            *examined = std::move(*registration);
+            return {};
+        },
+        [&state, examined](const Report& refused) {
+            if (refused) {
+                show_abandon_result(state, refused);
+            } else if (*examined) {
+                confirm_abandon(state, **examined);
+            }
+        });
 }
 
 GtkWidget* build_operations_section(GuiState& state)
@@ -454,8 +727,14 @@ GtkWidget* build_archive_list_view(GuiState& state)
     // The free width of the row, so the count stays on one line; a long
     // message (an error) still wraps.
     gtk_widget_set_hexpand(view.status, TRUE);
+    // Shown only while a registration is abandoned (decision 0025).
+    view.abandoning = gtk_progress_bar_new();
+    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(view.abandoning), TRUE);
+    gtk_widget_set_valign(view.abandoning, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(view.abandoning, FALSE);
     gtk_box_append(GTK_BOX(toolbar), refresh);
     gtk_box_append(GTK_BOX(toolbar), view.status);
+    gtk_box_append(GTK_BOX(toolbar), view.abandoning);
     gtk_box_append(GTK_BOX(box), toolbar);
 
     gtk_box_append(GTK_BOX(box), build_operations_section(state));

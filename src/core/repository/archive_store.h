@@ -107,6 +107,8 @@ struct PendingRegistration {
     Timestamp updated;                          // the plan's "updated": when it last said it was working
     Timestamp stopped;                          // the plan's "stopped": when the attempt ended without
                                                 // finishing (cancelled, failed); empty while it may run
+    std::string plan;                           // the plan as stored (JSON), for judging which process
+                                                // runs its attempt (decision 0024)
 };
 
 // A verification that has not finished: running now (it has no history row
@@ -187,6 +189,19 @@ public:
 
     std::expected<void, IoError> insert_archive(const ArchiveRecord& archive);
     std::expected<void, IoError> update_archive(const ArchiveRecord& archive);
+    // True while the archive's record holds nothing but itself: the archive
+    // never had a revision, so its record says revision 0 and that it was
+    // never registered (REGISTRATION_INCOMPLETE, or RETIRED by the operator
+    // since), and no revision, verification or media evidence refers to it
+    // (decision 0025). Never the index alone (R-14): the record of an
+    // archive whose index lost its revisions (rebuild-index skips a manifest
+    // it cannot read) still says its revision.
+    std::expected<bool, IoError> archive_without_revision(const Uuid& archive_uuid);
+    // Removes the archive's record, in one statement, only while
+    // archive_without_revision holds, as when its first registration is
+    // abandoned (decision 0025); every other record is left alone. True when
+    // it was removed.
+    std::expected<bool, IoError> remove_archive_without_revision(const Uuid& archive_uuid);
     std::expected<std::optional<ArchiveRecord>, IoError> find_archive(const Uuid& archive_uuid);
     std::expected<std::vector<ArchiveRecord>, IoError> archives();
 
@@ -217,6 +232,10 @@ public:
     // archive: its index once the revision is recorded, before that the
     // checkpoints of a registration creating it (R-104).
     std::expected<bool, IoError> has_file_rows(const Uuid& archive_uuid, std::uint32_t revision);
+    // The rows under this revision of the archive and their bytes: before the
+    // revision is recorded, the files a registration creating it has hashed
+    // and saved (its checkpoints).
+    std::expected<CheckpointCount, IoError> file_row_count(const Uuid& archive_uuid, std::uint32_t revision);
     // Empties the rebuildable index tables (archive_revisions, files) for rebuild-index.
     std::expected<void, IoError> clear_index();
 
@@ -268,12 +287,21 @@ public:
     std::expected<void, IoError> set_setting(const std::string& key, const std::string& value);
     // Changes the value of a setting that exists; does nothing when it does not.
     std::expected<void, IoError> update_setting(const std::string& key, const std::string& value);
-    // As update_setting, for the plan of a registration: also does nothing
-    // once the revision the registration creates is recorded, in one
-    // statement. By then the plan is done with, and the key may hold the plan
-    // of the archive's next registration (decision 0023).
-    std::expected<void, IoError> update_setting_unless_recorded(const std::string& key, const std::string& value,
-        const Uuid& archive_uuid, std::uint32_t revision);
+    // Writes the plan of a registration (the setting
+    // "registration:<archive_uuid>"), in one statement, only while the key
+    // holds this registration's plan, the one that creates `revision` and was
+    // made at `created`, and that revision is not recorded. Once it is
+    // recorded, the plan is done with and the key may hold the plan of the
+    // archive's next registration (decision 0023); once the registration is
+    // abandoned, the plan is gone, or the key holds a later registration's
+    // plan (decision 0025). Neither may be written.
+    std::expected<void, IoError> update_registration_plan(const Uuid& archive_uuid, std::uint32_t revision,
+        const Timestamp& created, const std::string& value);
+    // True while the key "registration:<archive_uuid>" holds this
+    // registration's plan: the one that creates `revision`, made at
+    // `created`. Inside a write transaction the answer holds until it ends.
+    std::expected<bool, IoError> registration_planned(const Uuid& archive_uuid, std::uint32_t revision,
+        const Timestamp& created);
     std::expected<void, IoError> remove_setting(const std::string& key);
     // The plan of an unfinished registration of the archive (the setting
     // "registration:<archive_uuid>", decision 0022) when it creates

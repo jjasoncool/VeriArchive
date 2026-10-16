@@ -50,6 +50,7 @@ target_link_libraries(veriarchive_common
     PRIVATE PkgConfig::GLIB)
 
 add_library(veriarchive_core
+    src/core/engine/abandon_registration.cpp
     src/core/engine/archive_status.cpp
     src/core/engine/compare_archives.cpp
     src/core/engine/candidates.cpp
@@ -58,6 +59,7 @@ add_library(veriarchive_core
     src/core/engine/rebuild_index.cpp
     src/core/engine/recorded_manifest.cpp
     src/core/engine/register_engine.cpp
+    src/core/engine/registration_attempt.cpp
     src/core/engine/relocate_engine.cpp
     src/core/engine/sha256sums.cpp
     src/core/engine/transfer.cpp
@@ -96,6 +98,7 @@ if(WIN32)
         src/platform/windows/interrupt_win.cpp
         src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
+        src/platform/windows/process_table_win.cpp
         src/platform/windows/win_util.cpp
     )
     target_link_libraries(veriarchive_platform PRIVATE mpr)
@@ -108,6 +111,7 @@ elseif(UNIX AND NOT APPLE)
         src/platform/linux/mountinfo.cpp
         src/platform/linux/platform_services_linux.cpp
         src/platform/linux/posix_util.cpp
+        src/platform/linux/process_table_linux.cpp
         src/platform/linux/vpd.cpp
     )
 else()
@@ -215,6 +219,7 @@ include(CPack)
 if(BUILD_TESTING)
     add_executable(veriarchive_tests
         tests/unit/test_main.cpp
+        tests/unit/abandon_registration_test.cpp
         tests/unit/archive_path_test.cpp
         tests/unit/archive_status_test.cpp
         tests/unit/compare_archives_test.cpp

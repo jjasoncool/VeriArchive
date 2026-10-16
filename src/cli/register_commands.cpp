@@ -8,6 +8,7 @@
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
 #include "platform/media_enumerator.h"
+#include "platform/process_table.h"
 
 #include <iostream>
 
@@ -137,8 +138,9 @@ int register_command(const Arguments& arguments)
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();
     const auto media = platform::make_media_enumerator();
+    const auto processes = platform::make_process_table();
     RegisterServices services{*archive_files, *repository_files, *session->writer, *session->writer, *media,
-        *store, session->context.repo, host_info()};
+        *store, session->context.repo, host_info(), *processes};
 
     CancelToken cancel;
     platform::cancel_on_interrupt(cancel);

@@ -3,9 +3,12 @@
 #include "common/error.h"
 #include "common/types.h"
 #include <atomic>
+#include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace va {
@@ -157,6 +160,33 @@ class IEntropySource {
 public:
     virtual ~IEntropySource() = default;
     virtual std::expected<void, IoError> fill(std::span<std::byte> output) = 0;
+};
+
+// A process as the operating system of this computer knows it (decision
+// 0024). Once a process has ended, its id may be given to a later process:
+// `start` tells the two apart.
+struct ProcessIdentity {
+    std::uint64_t id = 0;   // the process id
+    std::string start;      // when it started, in the operating system's own terms: the same in every
+                            // reading while the process runs, another for a later process given the
+                            // same id (Windows: its creation time; Linux: the boot's id and the clock
+                            // ticks since that boot). Compared, never shown.
+    std::string program;    // the file name of its program, for people; may be empty
+};
+
+// The processes running on this computer, read to tell whether the process
+// that runs an attempt of a registration still runs (decision 0024). It reads
+// only what the operating system shows an unprivileged process (R-08).
+class IProcessTable {
+public:
+    virtual ~IProcessTable() = default;
+
+    // This process.
+    virtual std::expected<ProcessIdentity, IoError> current() = 0;
+    // The process that has `id` now; nothing when no process has it, or the
+    // process that had it has ended. An error when it cannot be told, such as
+    // when the operating system refuses to show that process.
+    virtual std::expected<std::optional<ProcessIdentity>, IoError> find(std::uint64_t id) = 0;
 };
 
 class NullChangeTracker final : public IChangeTracker {

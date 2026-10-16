@@ -247,10 +247,15 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                                            "nothing was changed");
         }
         if (registering) {
+            // The registration keeps the revision (decision 0023) until it is
+            // finished, or the operator abandons it, as when its root is gone
+            // (decision 0025).
             return fail(Kind::Refused, "an unfinished registration of archive " + archive.archive_uuid +
                                            " (root \"" + *registering + "\") is creating revision " +
                                            std::to_string(outcome.revision) +
-                                           "; nothing was changed (finish it with `register --resume` first)");
+                                           "; nothing was changed (finish it with `register --resume` first, or "
+                                           "abandon it with `archive abandon-registration " +
+                                           archive.archive_uuid + "`)");
         }
         if (cancelled_waiting) {
             return fail(Kind::Incomplete, "relocation was interrupted; nothing was changed");

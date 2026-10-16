@@ -1,8 +1,12 @@
 #include "test_support.h"
 
+#include "core/engine/registration_attempt.h"
 #include "platform/linux/mountinfo.h"
 #include "platform/media_enumerator.h"
 #include "platform/platform_services.h"
+#include "platform/process_table.h"
+
+#include <nlohmann/json.hpp>
 
 
 namespace {
@@ -83,10 +87,53 @@ void media_enumeration_identifies_local_volume()
     CHECK(all && !all->empty());
 }
 
+// Decision 0024, with this computer's processes: this process is found, with
+// the start it had a moment ago and the program it runs; an id that no
+// process has reads as ended. Judged, a plan naming this process runs (when
+// this process may run a registration), and one naming its id with another
+// start is a later process given the same id: the attempt has ended.
+void process_table_tells_running_from_ended()
+{
+    const auto processes = va::platform::make_process_table();
+    const auto self = processes->current();
+    CHECK(self && self->id != 0 && !self->start.empty() && !self->program.empty());
+    if (!self) {
+        std::cerr << "  " << self.error().message << '\n';
+        return;
+    }
+    const auto again = processes->current();
+    CHECK(again && again->id == self->id && again->start == self->start);
+    const auto found = processes->find(self->id);
+    CHECK(found && *found && (*found)->id == self->id && (*found)->start == self->start);
+    // Beyond every process id either system gives out (Windows: multiples of
+    // 4 well below this; Linux: at most 2^22).
+    for (const std::uint64_t unused : {std::uint64_t{0x7FFFFFF0}, std::uint64_t{0}}) {
+        const auto none = processes->find(unused);
+        CHECK(none && !*none);
+    }
+
+    const auto naming = [](const va::ProcessIdentity& process) {
+        nlohmann::json plan{{"archive_uuid", "c0ffee00-0000-4000-8000-000000000001"}, {"revision", 1}};
+        va::record_attempt(plan, {process, "this-computer"});
+        return plan;
+    };
+    // `runs_an_operation`: whether this process runs an operation now.
+    const auto judged = [&](const va::ProcessIdentity& process, bool runs_an_operation) {
+        return va::judge_attempt(naming(process), *processes, "this-computer", [runs_an_operation] {
+            return runs_an_operation;
+        }).state;
+    };
+    CHECK(judged(*self, true) == va::AttemptState::Running);
+    CHECK(judged(*self, false) == va::AttemptState::Ended);
+    CHECK(judged({self->id, self->start + "0", self->program}, true) == va::AttemptState::Ended);
+    CHECK(judged({0x7FFFFFF0, "1", "gone"}, true) == va::AttemptState::Ended);
+}
+
 } // namespace
 
 void platform_tests()
 {
+    process_table_tells_running_from_ended();
     media_enumeration_identifies_local_volume();
     mountinfo_is_parsed();
     network_types_are_recognised();

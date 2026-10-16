@@ -6,6 +6,7 @@
 #include "core/engine/register_engine.h"
 #include "platform/file_system.h"
 #include "platform/media_enumerator.h"
+#include "platform/process_table.h"
 
 namespace va::gui {
 namespace {
@@ -104,8 +105,9 @@ void start_registration(GuiState& state)
             const auto archive_files = platform::make_file_system_access();
             const auto repository_files = platform::make_file_system_access();
             const auto media = platform::make_media_enumerator();
+            const auto processes = platform::make_process_table();
             RegisterServices services{*archive_files, *repository_files, *session.writer, *session.writer,
-                *media, *store, session.context.repo, state.host};
+                *media, *store, session.context.repo, state.host, *processes};
             auto outcome = register_archive(services, request, cancel, progress);
             if (!outcome) {
                 return [message = outcome.error().message](const app::Text& text) {

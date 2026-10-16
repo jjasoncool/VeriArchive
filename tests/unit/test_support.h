@@ -39,3 +39,4 @@ void compare_archives_tests();
 void vpd_tests();
 void progress_estimate_tests();
 void unfinished_operations_tests();
+void abandon_registration_tests();

@@ -12,12 +12,46 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace test {
 
 class NullProgress final : public va::IProgressSink {
 public:
     void on_progress(const va::Progress&) override {}
+};
+
+// The processes of a computer, as a table the test fills (decision 0024):
+// `self` is the process the engines run in, `others` the other processes that
+// run. A process missing from both has ended. With `error`, finding a process
+// fails, as when the operating system refuses to show it.
+class FakeProcessTable final : public va::IProcessTable {
+public:
+    va::ProcessIdentity self{4242, "boot-1:1000", "veriarchive-cli.exe"};
+    std::vector<va::ProcessIdentity> others;
+    std::optional<va::IoError> error;
+    std::optional<va::IoError> current_error;  // this process cannot be read either
+
+    std::expected<va::ProcessIdentity, va::IoError> current() override
+    {
+        if (current_error) {
+            return std::unexpected(*current_error);
+        }
+        return self;
+    }
+
+    std::expected<std::optional<va::ProcessIdentity>, va::IoError> find(std::uint64_t id) override
+    {
+        if (error) {
+            return std::unexpected(*error);
+        }
+        if (id == self.id) {
+            return std::optional<va::ProcessIdentity>(self);
+        }
+        const auto found =
+            std::find_if(others.begin(), others.end(), [&](const va::ProcessIdentity& other) { return other.id == id; });
+        return found == others.end() ? std::optional<va::ProcessIdentity>{} : std::optional<va::ProcessIdentity>(*found);
+    }
 };
 
 // Reports `volume` for every path, except paths below the mount point of one of

@@ -342,20 +342,38 @@ std::expected<void, IoError> ArchiveStore::update_setting(const std::string& key
     return statement->bind(1, value).bind(2, key).run();
 }
 
-std::expected<void, IoError> ArchiveStore::update_setting_unless_recorded(const std::string& key,
-    const std::string& value, const Uuid& archive_uuid, std::uint32_t revision)
+std::expected<void, IoError> ArchiveStore::update_registration_plan(const Uuid& archive_uuid,
+    std::uint32_t revision, const Timestamp& created, const std::string& value)
 {
+    // The plan's members are read by SQLite's JSON functions; a damaged plan
+    // (not JSON) is never this registration's, and CASE keeps json_extract
+    // from reading it.
     auto statement = database_.prepare(
-        "UPDATE settings SET value = ? WHERE key = ? AND NOT EXISTS "
-        "(SELECT 1 FROM archive_revisions WHERE archive_uuid = ? AND revision = ?)");
+        "UPDATE settings SET value = ?1 WHERE key = ?2 "
+        "AND (CASE WHEN json_valid(value) THEN json_extract(value, '$.revision') END) = ?3 "
+        "AND (CASE WHEN json_valid(value) THEN json_extract(value, '$.created') END) = ?4 "
+        "AND NOT EXISTS (SELECT 1 FROM archive_revisions WHERE archive_uuid = ?5 AND revision = ?3)");
     if (!statement) {
         return std::unexpected(statement.error());
     }
     return statement->bind(1, value)
-        .bind(2, key)
-        .bind(3, archive_uuid)
-        .bind(4, static_cast<std::int64_t>(revision))
+        .bind(2, "registration:" + archive_uuid)
+        .bind(3, static_cast<std::int64_t>(revision))
+        .bind(4, created)
+        .bind(5, archive_uuid)
         .run();
+}
+
+std::expected<bool, IoError> ArchiveStore::registration_planned(const Uuid& archive_uuid, std::uint32_t revision,
+    const Timestamp& created)
+{
+    const auto value = setting("registration:" + archive_uuid);
+    if (!value) {
+        return std::unexpected(value.error());
+    }
+    const auto plan = nlohmann::json::parse(*value, nullptr, false);
+    return plan.is_object() && json_unsigned(plan, "revision") == std::optional<std::uint64_t>(revision) &&
+           json_text(plan, "created") == created;
 }
 
 std::expected<void, IoError> ArchiveStore::remove_setting(const std::string& key)
@@ -467,6 +485,51 @@ std::expected<void, IoError> ArchiveStore::update_archive(const ArchiveRecord& a
     bind_optional_text(*statement, 5, archive.notes);
     statement->bind(6, archive.archive_uuid);
     return statement->run();
+}
+
+namespace {
+
+// The record of archive ?1 holds nothing but itself (decision 0025): it says
+// that the archive never had a revision, and nothing refers to it. A record
+// that says it has a revision, or one that a revision, a verification or
+// media evidence refers to, never matches, whatever the index has lost.
+constexpr const char* without_revision =
+    "archive_uuid = ?1 AND current_revision = 0 AND status IN ('REGISTRATION_INCOMPLETE', 'RETIRED') "
+    "AND NOT EXISTS (SELECT 1 FROM archive_revisions WHERE archive_uuid = ?1) "
+    "AND NOT EXISTS (SELECT 1 FROM verify_runs WHERE archive_uuid = ?1) "
+    "AND NOT EXISTS (SELECT 1 FROM media_evidence WHERE archive_uuid = ?1)";
+
+} // namespace
+
+std::expected<bool, IoError> ArchiveStore::archive_without_revision(const Uuid& archive_uuid)
+{
+    auto statement = database_.prepare(std::string("SELECT 1 FROM archives WHERE ") + without_revision);
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid);
+    return statement->step();
+}
+
+std::expected<bool, IoError> ArchiveStore::remove_archive_without_revision(const Uuid& archive_uuid)
+{
+    auto statement = database_.prepare(std::string("DELETE FROM archives WHERE ") + without_revision);
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid);
+    if (auto removed = statement->run(); !removed) {
+        return std::unexpected(removed.error());
+    }
+    auto changes = database_.prepare("SELECT changes()");
+    if (!changes) {
+        return std::unexpected(changes.error());
+    }
+    const auto row = changes->step();
+    if (!row) {
+        return std::unexpected(row.error());
+    }
+    return *row && changes->integer(0) > 0;
 }
 
 std::expected<std::optional<ArchiveRecord>, IoError> ArchiveStore::find_archive(const Uuid& archive_uuid)
@@ -649,6 +712,21 @@ std::expected<bool, IoError> ArchiveStore::has_file_rows(const Uuid& archive_uui
     }
     statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision));
     return statement->step();
+}
+
+std::expected<CheckpointCount, IoError> ArchiveStore::file_row_count(const Uuid& archive_uuid, std::uint32_t revision)
+{
+    auto statement = database_.prepare(
+        "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE archive_uuid = ? AND revision = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision));
+    const auto counted = count_and_bytes(*statement);
+    if (!counted) {
+        return std::unexpected(counted.error());
+    }
+    return CheckpointCount{counted->first, counted->second};
 }
 
 std::expected<void, IoError> ArchiveStore::write_file_rows(const char* verb,
@@ -976,6 +1054,7 @@ std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_r
         registration.bytes_total = json_unsigned(plan, "bytes_total");
         registration.updated = json_text(plan, "updated");
         registration.stopped = json_text(plan, "stopped");
+        registration.plan = value;
 
         archive->bind(1, registration.archive_uuid);
         const auto found = archive->step();

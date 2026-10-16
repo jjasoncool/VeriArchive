@@ -92,13 +92,13 @@ public:
     // Cancels the operation and waits for it; its `done` is then never called,
     // because the window it would report into is gone. For the application's
     // shutdown.
-    void abandon();
+    void shut_down();
 
 private:
     class BarProgress;
     std::thread thread_;
     std::atomic<bool> running_{false};
-    std::atomic<bool> abandoned_{false};
+    std::atomic<bool> shut_down_{false};
     CancelToken cancel_;
 };
 

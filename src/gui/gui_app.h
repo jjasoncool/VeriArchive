@@ -71,6 +71,7 @@ struct GuiState {
         GtkWidget* operations = nullptr;       // "Unfinished operations", hidden when there are none
         GtkWidget* operations_note = nullptr;  // what the section shows, or why it cannot
         GtkWidget* operations_grid = nullptr;
+        GtkWidget* abandoning = nullptr;       // progress while a registration is abandoned (decision 0025)
     } archive_list;
 
     struct {

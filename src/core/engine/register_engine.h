@@ -32,6 +32,7 @@ struct RegisterServices {
     ArchiveStore& store;
     RepositoryLayout layout;
     HostInfo host;
+    IProcessTable& processes;               // which process runs an attempt, and whether it still runs (decision 0024)
 };
 
 struct RegisterOutcome {

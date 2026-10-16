@@ -58,7 +58,7 @@ int main(int argc, char* argv[])
     g_signal_connect(state.application, "shutdown",
         G_CALLBACK(+[](GApplication*, gpointer data) {
             auto& state = *static_cast<va::gui::GuiState*>(data);
-            va::gui::guarded([&] { state.job.abandon(); }, [](const va::gui::Report&) {});
+            va::gui::guarded([&] { state.job.shut_down(); }, [](const va::gui::Report&) {});
             // The window is gone. GLib still runs the callbacks already queued
             // (a language change, say); they check this and do nothing.
             state.window = nullptr;

@@ -29,5 +29,6 @@ int main()
     vpd_tests();
     progress_estimate_tests();
     unfinished_operations_tests();
+    abandon_registration_tests();
     return test_failures == 0 ? 0 : 1;
 }

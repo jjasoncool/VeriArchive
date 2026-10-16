@@ -4,6 +4,8 @@
 #include "common/utf8.h"
 #include "core/repository/archive_store.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -64,7 +66,8 @@ std::optional<std::uint64_t> volume_used_bytes(const std::filesystem::path& root
 
 std::expected<OperationsRead, IoError> read_unfinished_operations(const RepositoryLayout& layout,
     const std::vector<UnfinishedOperation>& previous,
-    const std::function<std::optional<std::uint64_t>(const std::filesystem::path&)>& used_bytes)
+    const std::function<std::optional<std::uint64_t>(const std::filesystem::path&)>& used_bytes,
+    const AttemptCheck& attempts)
 {
     // Read only: a database moved away while the list is shown reads as an
     // error instead of coming back empty, and watching never writes to it.
@@ -135,6 +138,16 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         // An attempt that ended without finishing says so in its plan.
         operation.recorded_stopped = !registration.stopped.empty();
         operation.done_counted = registration.done_counted;
+        operation.revision = registration.revision;
+        // Otherwise the process its plan names tells whether it still runs
+        // (decision 0024): one that has ended has stopped at once, not when
+        // its plan has said nothing for minutes.
+        const auto plan = nlohmann::json::parse(registration.plan, nullptr, false);
+        operation.process = recorded_attempt(plan);
+        if (attempts.processes && !operation.recorded_stopped) {
+            operation.attempt =
+                judge_attempt(plan, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+        }
         operations.push_back(std::move(operation));
     }
     for (const auto& verification : verifications) {
@@ -145,6 +158,7 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         operation.label = verification.label;
         operation.root = verification.root;
         operation.run_id = verification.run_id;
+        operation.revision = verification.revision;
         operation.started = verification.started;
         operation.files_done = verification.files_done;
         operation.bytes_done = verification.bytes_done;
@@ -267,7 +281,10 @@ bool OperationWatch::idle(Clock::duration gap, std::uint64_t brought) const
 
 void OperationWatch::follow_stop_mark(UnfinishedOperation& operation)
 {
-    if (operation.kind != OperationKind::Registration || !operation.recorded_stopped) {
+    // The plan says its attempt ended: by its stop mark, or by naming a
+    // process that has ended (decision 0024).
+    const bool ended = operation.recorded_stopped || operation.attempt == AttemptState::Ended;
+    if (operation.kind != OperationKind::Registration || !ended) {
         stop_mark_.reset();
         return;
     }
@@ -278,24 +295,37 @@ void OperationWatch::follow_stop_mark(UnfinishedOperation& operation)
     } else if (operation.files_done != stop_mark_->files_done || operation.bytes_done != stop_mark_->bytes_done) {
         // The counts moved under the same mark: an attempt that does not
         // write the plan works on it (an older version's resume, decision
-        // 0022). This version's resume writes the plan without the mark.
+        // 0022). This version's resume writes the plan without the mark, and
+        // with its own process.
         stop_mark_->taken_up = true;
     }
     if (stop_mark_->taken_up) {
-        // The mark and the "updated" with it are the attempt's before.
+        // The mark, the process and the "updated" with them are the attempt's before.
         operation.recorded_stopped = false;
+        operation.attempt = AttemptState::Unknown;
         operation.updated.reset();
     }
 }
 
 OperationState OperationWatch::state(Clock::time_point now, std::chrono::sys_seconds wall_now) const
 {
-    if (operation_.recorded_stopped) {
+    // Its record says it stopped, or the process that ran its attempt has
+    // ended (decision 0024).
+    if (operation_.recorded_stopped || operation_.attempt == AttemptState::Ended) {
         return OperationState::Stopped;
     }
     if (operation_.updated) {
         // The operation says itself when it last worked.
-        return wall_now - *operation_.updated > quiet_after ? OperationState::Stopped : OperationState::Running;
+        if (wall_now - *operation_.updated <= quiet_after) {
+            return OperationState::Running;
+        }
+        // Silent for minutes. While the process that runs its attempt still
+        // runs, it has not stopped (and a resume would be refused): something
+        // holds it up, such as a read from a failing device.
+        return operation_.attempt == AttemptState::Running ? OperationState::Silent : OperationState::Stopped;
+    }
+    if (operation_.attempt == AttemptState::Running) {
+        return OperationState::Running;
     }
     if (!operation_.done_counted) {
         // An older version's record says nothing of its state, and its counts
@@ -362,6 +392,15 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     row.fraction = share_done(operation);
     row.archive_uuid = operation.archive_uuid;
     row.run_id = operation.run_id;
+    row.key = operation.key;
+    if (operation.kind == OperationKind::Registration && operation.process) {
+        const auto& program = operation.process->process.program;
+        row.process = text.format(
+            "Process: {} ({})", operation.process->process.id, program.empty() ? std::string("?") : program);
+    }
+    // A stopped registration may be given up on purpose (decision 0025); one
+    // that runs, or may, may not.
+    row.abandonable = operation.kind == OperationKind::Registration && row.state_kind == OperationState::Stopped;
 
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;
@@ -426,6 +465,16 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         row.state = minutes < 120
                         ? text.format("no progress seen for {} minutes; it may have stopped", minutes)
                         : text.format("no progress seen for {} hours; it may have stopped", minutes / 60);
+        break;
+    }
+    case OperationState::Silent: {
+        // Counted from the attempt's own last word ("updated").
+        const auto minutes =
+            operation.updated ? std::chrono::floor<std::chrono::minutes>(wall_now - *operation.updated).count() : 0;
+        // Two calls, as above.
+        row.state = minutes < 120
+                        ? text.format("no progress reported for {} minutes; its process is still running", minutes)
+                        : text.format("no progress reported for {} hours; its process is still running", minutes / 60);
         break;
     }
     case OperationState::Stopped:

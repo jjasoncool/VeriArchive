@@ -148,6 +148,72 @@ endif()
 # Two archives are needed.
 run_cli("10" archive compare "${archive_uuid}")
 
+# An unfinished registration given up on purpose (decision 0025). The first
+# registration of a folder fails before it is recorded: its manifest cannot be
+# written while a file stands where the manifests folder belongs (sample
+# data). Its plan and saved progress stay, so the folder takes no other
+# registration until the registration is resumed or abandoned.
+set(BROKEN "${WORK}/abandoned")
+file(WRITE "${BROKEN}/a.txt" "abandoned sample a\n")
+file(WRITE "${BROKEN}/b.txt" "abandoned sample b\n")
+file(RENAME "${WORK}/repo/manifests" "${WORK}/repo/manifests.away")
+file(WRITE "${WORK}/repo/manifests" "not a folder (sample data)\n")
+run_cli("11" register "${BROKEN}")
+file(REMOVE "${WORK}/repo/manifests")
+file(RENAME "${WORK}/repo/manifests.away" "${WORK}/repo/manifests")
+run_cli("12" register "${BROKEN}")
+set(refusal "${last_errors}")
+run_cli("0" archive list --json)
+string(JSON archive_count LENGTH "${last_output}" archives)
+math(EXPR last_archive "${archive_count} - 1")
+set(broken_uuid "")
+foreach(index RANGE ${last_archive})
+    string(JSON status GET "${last_output}" archives ${index} status)
+    if(status STREQUAL "REGISTRATION_INCOMPLETE")
+        string(JSON broken_uuid GET "${last_output}" archives ${index} archive_uuid)
+    endif()
+endforeach()
+if(broken_uuid STREQUAL "")
+    message(FATAL_ERROR "the failed registration is not listed:\n${last_output}")
+endif()
+# The refusal names both ways out: --resume, and abandoning it.
+if(NOT refusal MATCHES "--resume" OR NOT refusal MATCHES "archive abandon-registration ${broken_uuid}")
+    message(FATAL_ERROR "register of a folder whose registration is unfinished:\n${refusal}")
+endif()
+string(SUBSTRING "${broken_uuid}" 0 8 broken_prefix)
+# Without --confirm it says what would be lost, and changes nothing (exit 12).
+run_cli("12" --lang en archive abandon-registration "${broken_prefix}")
+if(NOT last_output MATCHES "Unfinished registration of ARCH-[0-9]+ \\(${broken_uuid}\\), revision 1\n"
+        OR NOT last_output MATCHES "\n  saved progress: 2 files, [0-9]+ bytes\n"
+        OR NOT last_output MATCHES "The archive has no revision yet"
+        OR NOT last_errors MATCHES "--confirm")
+    message(FATAL_ERROR "abandon-registration without --confirm:\n${last_output}\n${last_errors}")
+endif()
+run_cli("12" archive abandon-registration "${broken_prefix}" --json)
+string(JSON first_registration GET "${last_output}" registration first_registration)
+string(JSON saved_files GET "${last_output}" registration saved_progress files)
+if(NOT first_registration OR NOT saved_files EQUAL 2)
+    message(FATAL_ERROR "abandon-registration --json without --confirm:\n${last_output}")
+endif()
+run_cli("0" archive abandon-registration "${broken_prefix}" --confirm --json)
+string(JSON archive_removed GET "${last_output}" archive_removed)
+string(JSON saved_files GET "${last_output}" saved_progress files)
+if(NOT archive_removed OR NOT saved_files EQUAL 2)
+    message(FATAL_ERROR "abandon-registration --confirm:\n${last_output}")
+endif()
+run_cli("0" archive list --json)
+if(last_output MATCHES "${broken_uuid}")
+    message(FATAL_ERROR "the abandoned registration's archive is still listed:\n${last_output}")
+endif()
+# The folder takes a registration again, which leaves nothing to abandon.
+run_cli("0" register "${BROKEN}" --json)
+string(JSON registered_uuid GET "${last_output}" archive_uuid)
+run_cli("12" archive abandon-registration "${registered_uuid}")
+if(NOT last_errors MATCHES "沒有未完成的註冊")
+    message(FATAL_ERROR "abandon-registration of a registered archive:\n${last_errors}")
+endif()
+run_cli("10" archive abandon-registration "${broken_prefix}")
+
 # Damage: one changed byte, one deleted file, one new file -> FAILED (exit 3).
 file(WRITE "${ROOT}/readme.txt" "hellp\n")
 file(REMOVE "${ROOT}/日本語/ファイル.txt")

@@ -3,6 +3,7 @@
 #include "engine_fixture.h"
 
 #include "common/time.h"
+#include "core/engine/abandon_registration.h"
 #include "core/engine/heartbeat.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
@@ -330,7 +331,8 @@ void plan_records_totals_and_updated()
     fixture.archive.node("f4").open_error.reset();
     PlanWatcher watcher(fixture.store);
     va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
-        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     auto request = at("/vol");
     request.resume = true;
     const auto resumed = va::register_archive(services, request, fixture.cancel, watcher);
@@ -394,7 +396,8 @@ void a_resumed_registration_counts_what_it_reuses()
 
     CountWatcher watcher(fixture.store);
     va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
-        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     auto request = at("/vol");
     request.resume = true;
     fixture.archive.bytes_read = 0;
@@ -472,7 +475,8 @@ void a_recorded_registration_leaves_the_next_plan_alone()
         CHECK(other.set_setting("registration:" + archive_uuid, next_plan));
     });
     va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
-        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     auto request = at("/vol");
     request.write_media_copy = true;
     const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
@@ -520,24 +524,26 @@ void heartbeat_updates_only_its_record()
 // Decision 0023: a registration's plan is written only while the revision it
 // creates is not recorded. Once another attempt of the registration recorded
 // it, the key may hold the plan of the archive's next registration, which
-// neither a beat nor the stop mark of this attempt may replace.
+// neither a beat nor the stop mark of this attempt may replace. Decision 0025:
+// nor once the registration was abandoned and a later one took its key.
 void heartbeat_of_a_plan_stops_once_its_revision_is_recorded()
 {
     test::TestRepository repository;
     auto store = repository.store();
     test::NullProgress forward;
     const std::string key = "registration:u";
-    CHECK(store.set_setting(key, R"({"archive_uuid":"u","revision":1})"));
-    va::Heartbeat heartbeat(store, key, nlohmann::json{{"archive_uuid", "u"}, {"revision", 1}}, forward,
+    CHECK(store.set_setting(key, R"({"archive_uuid":"u","revision":1,"created":"2026-10-15T01:00:00Z"})"));
+    va::Heartbeat heartbeat(store, key,
+        nlohmann::json{{"archive_uuid", "u"}, {"revision", 1}, {"created", "2026-10-15T01:00:00Z"}}, forward,
         std::chrono::seconds(0));
-    heartbeat.only_while_unrecorded("u", 1);
+    heartbeat.only_while_planned("u", 1, "2026-10-15T01:00:00Z");
     heartbeat.beat();
     const auto beaten = nlohmann::json::parse(store.setting(key).value_or(""), nullptr, false);
     CHECK(va::parse_timestamp(beaten.value("updated", std::string{})).has_value());
 
     // Another attempt records revision 1, and the next registration writes its plan.
     CHECK(store.insert_revision({"u", 1, "manifests/u/r0001.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z"}));
-    const std::string next_plan = R"({"archive_uuid":"u","revision":2})";
+    const std::string next_plan = R"({"archive_uuid":"u","revision":2,"created":"2026-10-15T02:00:00Z"})";
     CHECK(store.set_setting(key, next_plan));
     heartbeat.on_progress({});
     heartbeat.beat();
@@ -545,11 +551,27 @@ void heartbeat_of_a_plan_stops_once_its_revision_is_recorded()
     CHECK(store.setting(key) == next_plan);
 
     // The plan of another revision of another archive is not held back by it.
-    CHECK(store.set_setting("registration:w", "{}"));
-    va::Heartbeat other(store, "registration:w", nlohmann::json::object(), forward, std::chrono::seconds(0));
-    other.only_while_unrecorded("w", 1);
+    const std::string other_plan = R"({"archive_uuid":"w","revision":1,"created":"2026-10-15T01:00:00Z"})";
+    CHECK(store.set_setting("registration:w", other_plan));
+    va::Heartbeat other(store, "registration:w", nlohmann::json::parse(other_plan), forward, std::chrono::seconds(0));
+    other.only_while_planned("w", 1, "2026-10-15T01:00:00Z");
     other.beat();
-    CHECK(store.setting("registration:w") != std::string("{}"));
+    const auto beaten_other = nlohmann::json::parse(store.setting("registration:w").value_or(""), nullptr, false);
+    CHECK(va::parse_timestamp(beaten_other.value("updated", std::string{})).has_value());
+
+    // Decision 0025: once the registration is abandoned and the archive's next
+    // registration of the same revision begins, the key holds that plan, made
+    // later: neither a beat nor the stop mark of the abandoned attempt replaces it.
+    CHECK(store.remove_setting("registration:w"));
+    const std::string later_plan = R"({"archive_uuid":"w","revision":1,"created":"2026-10-16T01:00:00Z"})";
+    CHECK(store.set_setting("registration:w", later_plan));
+    other.beat();
+    other.stop();
+    CHECK(store.setting("registration:w") == later_plan);
+    // A damaged plan is no registration's plan, and is not written either.
+    CHECK(store.set_setting("registration:w", "not a plan"));
+    other.beat();
+    CHECK(store.setting("registration:w") == std::string("not a plan"));
 }
 
 // Sample data for the tests of attempts that run at once: 40 files in two
@@ -640,12 +662,15 @@ void check_index_is_the_manifest(Fixture& fixture, const va::Uuid& archive_uuid)
 }
 
 // One attempt of a registration in a thread of its own, as in a process of
-// its own: its own database connection and view of the media, and a host name
-// of its own, so that two attempts write different manifests. Once its
-// manifest is written and flushed, it says so (`staged`) and waits (`go`);
-// `on_naming` runs when it gives its manifest its name, inside the
-// transaction that records the revision. `lock_wait`: how long its
-// statements wait for another connection's write lock.
+// its own: its own database connection, view of the media and process, and a
+// host name of its own, so that two attempts write different manifests. Two
+// attempts that run at once are then on two computers sharing the repository,
+// where neither can see the other's process (decision 0024), as attempts of an
+// older version cannot either. Once its manifest is written and flushed, it
+// says so (`staged`) and waits (`go`); `on_naming` runs when it gives its
+// manifest its name, inside the transaction that records the revision.
+// `lock_wait`: how long its statements wait for another connection's write
+// lock.
 struct Attempt {
     Attempt(Fixture& fixture, std::string host_name,
         std::chrono::milliseconds lock_wait = va::statement_lock_wait)
@@ -665,13 +690,16 @@ struct Attempt {
         fill_sample(files);
         host = fixture.host;
         host.host = std::move(host_name);
+        static std::uint64_t next_process = 5000;
+        processes.self = {next_process, "boot-1:" + std::to_string(next_process), "veriarchive-cli.exe"};
+        ++next_process;
     }
 
     void start(Fixture& fixture, va::RegisterRequest request)
     {
         thread = std::thread([this, &fixture, request] {
             va::RegisterServices services{files, *fixture.repository.files, writer, media_writer, fixture.media,
-                store, fixture.repository.context.repo, host};
+                store, fixture.repository.context.repo, host, processes};
             outcome = va::register_archive(services, request, cancel, progress);
         });
     }
@@ -684,6 +712,7 @@ struct Attempt {
     test::StagingHookWriter writer;
     std::function<void()> on_naming;
     va::HostInfo host;
+    test::FakeProcessTable processes;
     va::CancelToken cancel;
     test::NullProgress progress;
     std::expected<va::RegisterOutcome, va::RegisterFailure> outcome = std::unexpected(va::RegisterFailure{});
@@ -820,7 +849,8 @@ void a_record_waiting_for_the_lock_can_be_cancelled()
     });
     auto store = fixture.repository.store(std::chrono::milliseconds(100));
     va::RegisterServices services{fixture.archive, *fixture.repository.files, hooked, fixture.media_writer,
-        fixture.media, store, fixture.repository.context.repo, fixture.host};
+        fixture.media, store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     const auto cancelled = va::register_archive(services, request, cancel, fixture.progress);
     if (holder.joinable()) {
         holder.join();
@@ -856,7 +886,8 @@ void an_attempt_that_loses_while_hashing_changes_nothing()
         // The other attempt runs to its end, as another process would...
         auto store = fixture.repository.store();
         va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
-            fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host};
+            fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host,
+            fixture.processes};
         test::NullProgress quiet;
         va::CancelToken cancel;
         other = va::register_archive(services, request, cancel, quiet);
@@ -868,7 +899,8 @@ void an_attempt_that_loses_while_hashing_changes_nothing()
     });
     auto store = fixture.repository.store();
     va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer,
-        fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host};
+        fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     const auto late = va::register_archive(services, request, fixture.cancel, fixture.progress);
 
     CHECK(other && other->revision == 1);
@@ -1026,7 +1058,8 @@ void a_resume_leaves_the_identity_file_it_finds()
 
     RacingMediaWriter media(fixture.archive, 0, false);
     va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
-        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     request.resume = true;
     const auto resumed = va::register_archive(services, request, fixture.cancel, fixture.progress);
     CHECK(resumed && resumed->revision == 1 && !resumed->media_copy.empty());
@@ -1047,7 +1080,8 @@ void an_identity_file_another_attempt_wrote_counts()
         fixture.archive.add_file("a.txt", "a");
         RacingMediaWriter media(fixture.archive, 1, true);
         va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
-            fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+            fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+            fixture.processes};
         auto request = at("/vol");
         request.write_media_copy = true;
         const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
@@ -1061,7 +1095,8 @@ void an_identity_file_another_attempt_wrote_counts()
         fixture.archive.add_file("a.txt", "a");
         RacingMediaWriter media(fixture.archive, 100, false);
         va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer, media,
-            fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+            fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+            fixture.processes};
         auto request = at("/vol");
         request.write_media_copy = true;
         const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
@@ -1069,6 +1104,424 @@ void an_identity_file_another_attempt_wrote_counts()
               registered.error().message == "cannot write the media copy: MoveFileExW failed (Win32 error 5)");
         CHECK(media.identity_failures == 3);
         CHECK(!fixture.archive.contains(".veriarchive/identity.json"));
+    }
+}
+
+
+// ---- Which process runs an attempt (decision 0024) -------------------------
+
+nlohmann::json plan_of(va::ArchiveStore& store, const va::Uuid& archive_uuid)
+{
+    return nlohmann::json::parse(store.setting("registration:" + archive_uuid).value_or(""), nullptr, false);
+}
+
+// An interrupted registration of the sample at /vol whose attempt ran in
+// `process` on this computer. `killed`: the process ended without writing
+// the stop mark; otherwise the attempt wrote it (cancelled, its device gone).
+va::Uuid interrupted_in(Fixture& fixture, const va::ProcessIdentity& process, bool killed)
+{
+    const auto runs_in = fixture.processes.self;
+    fixture.processes.self = process;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    fixture.processes.self = runs_in;
+    if (killed) {
+        auto plan = plan_of(fixture.store, archive_uuid);
+        plan.erase("stopped");
+        CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+    }
+    return archive_uuid;
+}
+
+std::string still_running_message(const va::ProcessIdentity& process)
+{
+    return "this registration is still running in process " + std::to_string(process.id) + " (" + process.program +
+           ") on this computer; resume it once that process has ended";
+}
+
+// Every attempt records in its plan which process runs it: its id, its start
+// (which tells it from a later process given the same id), the computer and
+// the program. `register --resume` refuses while that process still runs,
+// names it, reads nothing of the media and leaves the plan as it is; once the
+// process has ended, it goes ahead at once, without waiting for the plan to
+// go quiet, and the plan names the resuming process while it works.
+void a_resume_waits_while_the_attempt_before_runs()
+{
+    Fixture fixture;
+    const va::ProcessIdentity first{1000, "boot-1:1000", "veriarchive-gui.exe"};
+    const auto archive_uuid = interrupted_in(fixture, first, true);
+    const auto plan = plan_of(fixture.store, archive_uuid);
+    CHECK(plan.contains("process") && plan["process"] == (nlohmann::json{{"id", 1000}, {"start", "boot-1:1000"},
+                                                             {"host", "test-host"}, {"program", "veriarchive-gui.exe"}}));
+    CHECK(!plan.contains("stopped"));
+
+    // A resume from the command line while the window's attempt hangs.
+    fixture.processes.self = {2000, "boot-1:2000", "veriarchive-cli.exe"};
+    fixture.processes.others = {first};
+    fixture.archive.bytes_read = 0;
+    auto request = at("/vol");
+    request.resume = true;
+    const auto refused = fixture.run(request);
+    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+          refused.error().message == still_running_message(first));
+    CHECK(fixture.archive.bytes_read == 0);
+    CHECK(plan_of(fixture.store, archive_uuid) == plan);
+
+    // The window's process ends: the resume goes ahead at once.
+    fixture.processes.others.clear();
+    PlanWatcher watcher(fixture.store);
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
+    const auto resumed = va::register_archive(services, request, fixture.cancel, watcher);
+    CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+    CHECK(!watcher.plans_seen.empty());
+    for (const auto& seen : watcher.plans_seen) {
+        CHECK(seen.contains("process") && seen["process"].value("id", 0) == 2000 &&
+              seen["process"].value("program", std::string{}) == "veriarchive-cli.exe");
+        CHECK(!seen.contains("stopped"));
+    }
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+}
+
+// A process id is given to a later process once its process has ended (also
+// after a reboot, when the clock ticks start again): a process with the
+// recorded id but another start is not the attempt's, and the resume goes on.
+void a_resume_goes_ahead_when_the_process_id_is_reused()
+{
+    for (const auto* later : {"boot-1:98765", "boot-2:1000"}) {
+        Fixture fixture;
+        const va::ProcessIdentity first{1000, "boot-1:1000", "veriarchive-cli.exe"};
+        const auto archive_uuid = interrupted_in(fixture, first, true);
+        fixture.processes.self = {2000, "boot-1:2000", "veriarchive-cli.exe"};
+        fixture.processes.others = {{1000, later, "notepad.exe"}};
+        auto request = at("/vol");
+        request.resume = true;
+        const auto resumed = fixture.run(request);
+        CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+    }
+}
+
+// Where nothing tells whether the attempt before still runs, the resume goes
+// ahead as before (decision 0023: the first attempt to record the revision
+// wins): a plan of an older version names no process, a repository shared by
+// computers holds plans whose process id means something only on the other
+// computer, and the process table may refuse to answer. A plan that says the
+// attempt stopped (its last write) needs no process: the GUI's window goes on
+// after a cancel. And a plan that names this very process is of an attempt
+// that ended: a process runs one registration at a time.
+void a_resume_goes_ahead_where_the_attempt_before_has_ended_or_cannot_be_seen()
+{
+    enum class Case { OlderVersion, OtherComputer, TableRefuses, StopMark, ThisProcess };
+    for (const auto kind :
+        {Case::OlderVersion, Case::OtherComputer, Case::TableRefuses, Case::StopMark, Case::ThisProcess}) {
+        Fixture fixture;
+        const va::ProcessIdentity first{1000, "boot-1:1000", "veriarchive-gui.exe"};
+        const auto archive_uuid = interrupted_in(fixture, first, kind != Case::StopMark);
+        fixture.processes.self = kind == Case::ThisProcess ? first : va::ProcessIdentity{2000, "boot-1:2000", "x"};
+        fixture.processes.others = {first};
+        auto plan = plan_of(fixture.store, archive_uuid);
+        if (kind == Case::OlderVersion) {
+            plan.erase("process");
+        } else if (kind == Case::OtherComputer) {
+            plan["process"]["host"] = "another-computer";
+        } else if (kind == Case::TableRefuses) {
+            fixture.processes.error = va::IoError{va::IoErrorKind::PermissionDenied, 5, "OpenProcess failed"};
+        }
+        CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+        auto request = at("/vol");
+        request.resume = true;
+        const auto resumed = fixture.run(request);
+        CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+        if (!resumed) {
+            std::cerr << "  case " << static_cast<int>(kind) << ": " << resumed.error().message << '\n';
+        }
+    }
+}
+
+// Two resumes started at once on one computer: the first takes the
+// registration over in the transaction that finds the attempt before ended,
+// so the second, a moment later, finds the first's process running and stops
+// before it reads anything. Only one attempt hashes and records.
+void resumes_started_at_once_take_turns()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    auto request = at("/vol");
+    request.resume = true;
+    Attempt first(fixture, fixture.host.host);
+    Attempt second(fixture, fixture.host.host);
+    second.processes.others = {first.processes.self};
+    first.start(fixture, request);
+    CHECK(first.staged.try_acquire_for(std::chrono::seconds(60)));
+    const auto plan = plan_of(fixture.store, archive_uuid);
+    CHECK(plan.contains("process") && plan["process"].value("id", std::uint64_t{0}) == first.processes.self.id);
+
+    second.start(fixture, request);
+    second.thread.join();
+    CHECK(!second.outcome && second.outcome.error().kind == va::RegisterFailure::Kind::Refused &&
+          second.outcome.error().message == still_running_message(first.processes.self));
+    CHECK(second.files.bytes_read == 0);
+    const auto unchanged = plan_of(fixture.store, archive_uuid);
+    CHECK(unchanged.contains("process") && unchanged["process"] == plan["process"]);
+
+    first.go.release();
+    first.thread.join();
+    CHECK(first.outcome && first.outcome->revision == 1);
+    check_index_is_the_manifest(fixture, archive_uuid);
+}
+
+// ---- An attempt whose registration is abandoned (decision 0025) ------------
+
+// The operator abandons a registration whose attempt runs where this computer
+// cannot see it (another computer sharing the repository) and whose plan has
+// said nothing for minutes. The attempt stops at its next checkpoint, writes
+// none of its saved progress, and records nothing: the archive of an
+// abandoned first registration is gone. The root takes a new registration.
+void an_attempt_stops_when_its_first_registration_is_abandoned()
+{
+    Fixture fixture;
+    fill_sample(fixture.archive);
+    std::expected<va::AbandonableRegistration, va::AbandonFailure> abandoned =
+        std::unexpected(va::AbandonFailure{});
+    test::HookedFiles hooked(fixture.archive, "v133.bin", [&] {
+        auto store = fixture.repository.store();
+        const auto archives = store.archives();
+        if (!archives || archives->size() != 1) {
+            CHECK(false);
+            return;
+        }
+        const auto archive_uuid = archives->front().archive_uuid;
+        auto plan = plan_of(store, archive_uuid);
+        plan["updated"] = "2026-01-01T00:00:00Z";  // silent for long
+        CHECK(store.set_setting("registration:" + archive_uuid, plan.dump()));
+        va::AbandonServices services{store, fixture.processes, fixture.host.host};
+        abandoned = va::abandon_registration(services, {archive_uuid, std::nullopt, std::nullopt});
+    });
+    va::HostInfo elsewhere = fixture.host;
+    elsewhere.host = "another-computer";
+    va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media_writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, elsewhere, fixture.processes};
+    const auto registered = va::register_archive(services, at("/vol"), fixture.cancel, fixture.progress);
+    CHECK(abandoned && abandoned->first_registration);
+    if (!abandoned) {
+        return;
+    }
+    const auto& archive_uuid = abandoned->archive_uuid;
+    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Refused &&
+          registered.error().message == "the unfinished registration of archive " + archive_uuid +
+                                            " was abandoned while this attempt ran; this attempt recorded nothing");
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->empty());
+    const auto rows = fixture.store.file_rows(archive_uuid, 1);
+    CHECK(rows && rows->empty());
+    CHECK(fixture.store.setting("registration:" + archive_uuid) == std::string{});
+    CHECK(names_in(fixture.repository.context.repo.manifests() / archive_uuid).empty());
+    const auto again = fixture.run(at("/vol"));
+    CHECK(again && again->revision == 1 && again->archive_uuid != archive_uuid);
+}
+
+// As above, but abandoned after the attempt's last checkpoint, while it
+// writes its manifest: its record finds the registration abandoned, and
+// records nothing, so no revision is left without its archive's record.
+void an_attempt_abandoned_while_it_writes_its_manifest_records_nothing()
+{
+    Fixture fixture;
+    fill_sample(fixture.archive);
+    std::expected<va::AbandonableRegistration, va::AbandonFailure> abandoned =
+        std::unexpected(va::AbandonFailure{});
+    test::StagingHookWriter writer(*fixture.repository.writer, [&] {
+        auto store = fixture.repository.store();
+        const auto archives = store.archives();
+        if (!archives || archives->size() != 1) {
+            CHECK(false);
+            return;
+        }
+        const auto archive_uuid = archives->front().archive_uuid;
+        auto plan = plan_of(store, archive_uuid);
+        plan["updated"] = "2026-01-01T00:00:00Z";  // silent for long
+        CHECK(store.set_setting("registration:" + archive_uuid, plan.dump()));
+        va::AbandonServices services{store, fixture.processes, fixture.host.host};
+        abandoned = va::abandon_registration(services, {archive_uuid, std::nullopt, std::nullopt});
+    });
+    va::HostInfo elsewhere = fixture.host;
+    elsewhere.host = "another-computer";
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, writer, fixture.media_writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, elsewhere, fixture.processes};
+    const auto registered = va::register_archive(services, at("/vol"), fixture.cancel, fixture.progress);
+    CHECK(abandoned && abandoned->first_registration && abandoned->files == 40);
+    if (!abandoned) {
+        return;
+    }
+    const auto& archive_uuid = abandoned->archive_uuid;
+    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Refused &&
+          registered.error().message == "the unfinished registration of archive " + archive_uuid +
+                                            " was abandoned while this attempt ran; this attempt recorded nothing");
+    const auto revision = fixture.store.revision(archive_uuid, 1);
+    CHECK(revision && !*revision);
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->empty());
+    const auto rows = fixture.store.file_rows(archive_uuid, 1);
+    CHECK(rows && rows->empty());
+    CHECK(names_in(fixture.repository.context.repo.manifests() / archive_uuid).empty());
+}
+
+// As above for `register --new-revision`, and meanwhile the archive's next
+// registration of the same revision began (its plan made later). The
+// abandoned attempt stops, and neither its checkpoints, its heartbeat nor its
+// stop mark touch that registration's plan; revision 1 stays.
+void an_abandoned_attempt_leaves_the_next_registration_alone()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    const auto first = fixture.run(at("/vol"));
+    CHECK(first.has_value());
+    if (!first) {
+        return;
+    }
+    const auto& archive_uuid = first->archive_uuid;
+    fill_sample(fixture.archive);
+    std::string next_plan;
+    test::HookedFiles hooked(fixture.archive, "v133.bin", [&] {
+        auto store = fixture.repository.store();
+        auto plan = plan_of(store, archive_uuid);
+        plan["updated"] = "2026-01-01T00:00:00Z";
+        CHECK(store.set_setting("registration:" + archive_uuid, plan.dump()));
+        va::AbandonServices services{store, fixture.processes, fixture.host.host};
+        CHECK(va::abandon_registration(services, {archive_uuid, std::nullopt, std::nullopt}).has_value());
+        // The next registration's plan: of the same revision, made at another time.
+        auto next = plan;
+        next["created"] = "1999-12-31T23:59:59Z";
+        next.erase("process");
+        next.erase("updated");
+        next_plan = next.dump();
+        CHECK(store.set_setting("registration:" + archive_uuid, next_plan));
+    });
+    va::HostInfo elsewhere = fixture.host;
+    elsewhere.host = "another-computer";
+    va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media_writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, elsewhere, fixture.processes};
+    auto request = at("/vol");
+    request.new_revision = true;
+    const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+    CHECK(!next_plan.empty());
+    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Refused &&
+          registered.error().message == "the unfinished registration of archive " + archive_uuid +
+                                            " was abandoned while this attempt ran; this attempt recorded nothing");
+    CHECK(fixture.store.setting("registration:" + archive_uuid) == next_plan);
+    CHECK(!fixture.store.has_file_rows(archive_uuid, 2).value_or(true));
+    const auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 1);
+}
+
+// Decision 0025: an archive has one unfinished registration at a time. Its
+// volume is also reached through a second path, a second mount point (sample
+// data): a `register --new-revision` through that path does not find the
+// running registration by its root, and would replace its plan, so that the
+// running attempt stopped as if abandoned. It is refused instead, before it
+// reads anything, naming that registration's root and both ways out; the
+// running attempt records its revision. Once a registration has stopped, a
+// registration through either path is refused too: through its own root as
+// before, now also naming the abandon; and once it is abandoned, the other
+// path takes the archive's next revision.
+void a_registration_never_replaces_another_unfinished_one_of_its_archive()
+{
+    Fixture fixture;
+    for (int index = 0; index < 40; ++index) {
+        const auto name = "f" + std::to_string(100 + index) + ".bin";
+        const auto content = std::string(500 + index, static_cast<char>('a' + index % 26));
+        fixture.archive.add_file("data/" + name, content);
+        fixture.archive.add_file("alias/data/" + name, content);
+    }
+    auto alias = fixture.media.volume;
+    alias.mount_point = fixture.archive.root() / "alias";
+    fixture.media.extra_volumes.push_back(alias);
+    const auto data = fixture.archive.root() / "data";
+    const auto registered = fixture.run(at(data));
+    CHECK(registered && registered->revision == 1);
+    if (!registered) {
+        return;
+    }
+    const auto& archive_uuid = registered->archive_uuid;
+    const auto another = [&](std::uint32_t revision) {
+        return "an unfinished registration of archive " + archive_uuid + " (root \"" + va::path_to_utf8(data) +
+               "\") is creating revision " + std::to_string(revision) +
+               "; nothing was changed (finish it with `register --resume` first, or abandon it with "
+               "`archive abandon-registration " +
+               archive_uuid + "`)";
+    };
+    auto through_alias = at(fixture.archive.root() / "alias" / "data");
+    through_alias.new_revision = true;
+    auto through_data = at(data);
+    through_data.new_revision = true;
+
+    // While the first runs.
+    fixture.archive.add_file("data/new.bin", "new (sample data)");
+    fixture.archive.add_file("alias/data/new.bin", "new (sample data)");
+    std::expected<va::RegisterOutcome, va::RegisterFailure> second = std::unexpected(va::RegisterFailure{});
+    std::string plan_meanwhile;
+    test::HookedFiles hooked(fixture.archive, "f120.bin", [&] {
+        // A second command, in a process of its own, which sees the first's.
+        auto store = fixture.repository.store();
+        plan_meanwhile = store.setting("registration:" + archive_uuid).value_or("");
+        test::FakeProcessTable processes;
+        processes.self = {7000, "boot-1:7000", "veriarchive-cli.exe"};
+        processes.others = {fixture.processes.self};
+        va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+            fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host, processes};
+        va::CancelToken cancel;
+        test::NullProgress quiet;
+        second = va::register_archive(services, through_alias, cancel, quiet);
+        CHECK(store.setting("registration:" + archive_uuid).value_or("") == plan_meanwhile);
+    });
+    va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media_writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host, fixture.processes};
+    const auto first = va::register_archive(services, through_data, fixture.cancel, fixture.progress);
+    CHECK(!plan_meanwhile.empty());
+    CHECK(!second && second.error().kind == va::RegisterFailure::Kind::Refused &&
+          second.error().message == another(2));
+    if (second || second.error().message != another(2)) {
+        std::cerr << "  second: " << (second ? std::string("recorded") : second.error().message) << '\n';
+    }
+    CHECK(first && first->revision == 2);
+    const auto verified = fixture.verify(data);
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+
+    // The next registration stops: its device went away (sample data).
+    fixture.archive.add_file("data/newer.bin", "newer (sample data)");
+    fixture.archive.node("data/f130.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto stopped = fixture.run(through_data);
+    CHECK(!stopped && stopped.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("data/f130.bin").open_error.reset();
+    const auto plan = fixture.store.setting("registration:" + archive_uuid).value_or("");
+    const auto refused = fixture.run(through_alias);
+    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+          refused.error().message == another(3));
+    const auto same_root = fixture.run(through_data);
+    CHECK(!same_root && same_root.error().kind == va::RegisterFailure::Kind::Refused &&
+          same_root.error().message == "an interrupted registration of this root exists (archive " + archive_uuid +
+                                           "); finish it with --resume, or abandon it with `archive "
+                                           "abandon-registration " +
+                                           archive_uuid + "`");
+    CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("") == plan);
+
+    va::AbandonServices abandoning{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandoned = va::abandon_registration(abandoning, {archive_uuid, std::nullopt, std::nullopt});
+    CHECK(abandoned && abandoned->revision == 3 && !abandoned->first_registration);
+    const auto next = fixture.run(through_alias);
+    CHECK(next && next->archive_uuid == archive_uuid && next->revision == 3);
+
+    // A plan whose revision is recorded is done with (decision 0023), as one
+    // an older version leaves when another operation records its revision:
+    // it is replaced, and the archive takes its next revision.
+    const nlohmann::json dead_plan{{"archive_uuid", archive_uuid}, {"revision", 3}, {"label", "ARCH-0001"},
+        {"created", "2026-10-15T01:00:00Z"}, {"new_archive", false},
+        {"root", va::path_to_utf8(fixture.archive.root() / "alias" / "data")}};
+    CHECK(fixture.store.set_setting("registration:" + archive_uuid, dead_plan.dump()));
+    const auto after_dead = fixture.run(through_data);
+    CHECK(after_dead && after_dead->revision == 4);
+    if (!after_dead) {
+        std::cerr << "  after a dead plan: " << after_dead.error().message << '\n';
     }
 }
 
@@ -1101,4 +1554,12 @@ void register_engine_tests()
     crashed_attempts_leave_nothing_that_blocks_a_resume();
     a_resume_leaves_the_identity_file_it_finds();
     an_identity_file_another_attempt_wrote_counts();
+    a_resume_waits_while_the_attempt_before_runs();
+    a_resume_goes_ahead_when_the_process_id_is_reused();
+    a_resume_goes_ahead_where_the_attempt_before_has_ended_or_cannot_be_seen();
+    resumes_started_at_once_take_turns();
+    an_attempt_stops_when_its_first_registration_is_abandoned();
+    an_attempt_abandoned_while_it_writes_its_manifest_records_nothing();
+    an_abandoned_attempt_leaves_the_next_registration_alone();
+    a_registration_never_replaces_another_unfinished_one_of_its_archive();
 }

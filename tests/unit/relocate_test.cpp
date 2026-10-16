@@ -2,6 +2,7 @@
 
 #include "engine_fixture.h"
 
+#include "core/engine/abandon_registration.h"
 #include "core/engine/relocate_engine.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
@@ -221,7 +222,8 @@ void a_relocation_ends_a_registration_that_saved_nothing()
     request.root = fixture.archive.root() / "old";
     request.new_revision = true;
     va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer,
-        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
 
     CHECK(!plan_seen.empty());
@@ -313,7 +315,9 @@ void a_relocation_leaves_a_registration_its_saved_files()
           refused.error().message == "an unfinished registration of archive " + fixture.archive_uuid + " (root \"" +
                                          va::path_to_utf8(request.root) +
                                          "\") is creating revision 2; nothing was changed (finish it with "
-                                         "`register --resume` first)");
+                                         "`register --resume` first, or abandon it with `archive "
+                                         "abandon-registration " +
+                                         fixture.archive_uuid + "`)");
     const auto archive = fixture.store.find_archive(fixture.archive_uuid);
     CHECK(archive && *archive && (*archive)->current_revision == 1);
     const auto revision = fixture.store.revision(fixture.archive_uuid, 2);
@@ -412,6 +416,49 @@ void a_relocation_waits_for_the_write_lock(WhileWaiting what)
     CHECK(runs && runs->empty());
 }
 
+// Decision 0025: the old carrier failed while `register --new-revision` of
+// it was unfinished, after it had saved files for revision 2. The relocation
+// of the archive to its new carrier leaves the revision to that registration
+// and says how to give it up; once the operator abandons it, the relocation
+// records revision 2, and nothing of the registration is left to resume.
+void an_abandoned_registration_lets_the_relocation_record()
+{
+    RelocationFixture fixture;
+    fixture.copy_to_new_disk();
+    fixture.archive.node("old/photos/a.jpg").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RegisterRequest request;
+    request.root = fixture.archive.root() / "old";
+    request.new_revision = true;
+    const auto interrupted = fixture.register_root(request);
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    CHECK(fixture.store.has_file_rows(fixture.archive_uuid, 2).value_or(false));
+
+    const auto refused = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!refused && refused.error().kind == va::RelocateFailure::Kind::Refused &&
+          refused.error().message.ends_with("or abandon it with `archive abandon-registration " +
+                                            fixture.archive_uuid + "`)"));
+
+    va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandoned = va::abandon_registration(services, {fixture.archive_uuid, std::nullopt, std::nullopt});
+    CHECK(abandoned && abandoned->revision == 2 && !abandoned->first_registration && abandoned->files > 0);
+    CHECK(!fixture.store.has_file_rows(fixture.archive_uuid, 2).value_or(true));
+
+    const auto relocated = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(relocated && relocated->revision == 2);
+    // Revision 2 is the relocation's: the new carrier's identity, and the index of its manifest only.
+    auto reader = va::ManifestReader::open(*fixture.repository.files,
+        va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 2));
+    CHECK(reader && reader->header().identity.filesystem_uuid == "5555666677778888");
+    const auto rows = fixture.store.file_rows(fixture.archive_uuid, 2);
+    CHECK(rows && rows->size() == 2);
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+    request.new_revision = false;
+    request.resume = true;
+    const auto resumed = fixture.register_root(request);
+    CHECK(!resumed && resumed.error().message == "there is no interrupted registration of this root to resume");
+}
+
 } // namespace
 
 void relocate_tests()
@@ -423,6 +470,7 @@ void relocate_tests()
     a_relocation_ends_a_registration_that_saved_nothing();
     a_relocation_removes_the_plan_of_its_revision();
     a_relocation_leaves_a_registration_its_saved_files();
+    an_abandoned_registration_lets_the_relocation_record();
     a_relocation_waits_for_the_write_lock(WhileWaiting::OtherCommits);
     a_relocation_waits_for_the_write_lock(WhileWaiting::OtherRecordsIt);
     a_relocation_waits_for_the_write_lock(WhileWaiting::RelocationCancelled);

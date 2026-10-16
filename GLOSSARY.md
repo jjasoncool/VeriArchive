@@ -85,6 +85,10 @@ _Avoid_: database (the database is only its index)
 Creating an archive's first or a new revision by scanning its root.
 _Avoid_: backup, import
 
+**Abandoned registration**:
+An unfinished registration that the operator gave up on purpose, as when its media failed: its plan and saved progress are removed, so it can never be resumed, while recorded revisions, manifests and history stay. An archive that never had a revision goes with its abandoned first registration.
+_Avoid_: cancelled registration (a cancelled one can be resumed), deleted registration
+
 **Verification**:
 Re-reading an archive and comparing it against a revision's manifest; its outcome is a run result qualified by its mode.
 _Avoid_: check, integrity status

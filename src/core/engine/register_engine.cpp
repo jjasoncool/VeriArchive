@@ -6,6 +6,7 @@
 #include "common/uuid.h"
 #include "core/hash/hash_pipeline.h"
 #include "core/engine/heartbeat.h"
+#include "core/engine/registration_attempt.h"
 #include "core/engine/transfer.h"
 #include "core/identity/volume_json.h"
 #include "core/write_file.h"
@@ -80,6 +81,80 @@ std::unexpected<RegisterFailure> already_recorded(const Plan& plan)
         "revision " + std::to_string(plan.revision) + " of archive " + plan.archive_uuid +
             " is already recorded (by another attempt of this registration or by another operation, such as a "
             "relocation); this attempt recorded nothing");
+}
+
+// An attempt of a registration whose plan names a process that still runs it
+// on this computer: `register --resume` waits for that process to end
+// (decision 0024), so two attempts of one registration do not run at once
+// where it can tell.
+std::unexpected<RegisterFailure> still_running(const AttemptProcess& attempt)
+{
+    return fail(RegisterFailure::Kind::Refused,
+        "this registration is still running in process " + std::to_string(attempt.process.id) + " (" +
+            (attempt.process.program.empty() ? std::string("?") : attempt.process.program) +
+            ") on this computer; resume it once that process has ended");
+}
+
+// The operator abandoned the registration while this attempt ran, where its
+// process could not be seen (another computer sharing the repository, decision
+// 0025): its plan is gone, or the key holds a later registration's plan.
+std::unexpected<RegisterFailure> abandoned_meanwhile(const Plan& plan)
+{
+    return fail(RegisterFailure::Kind::Refused,
+        "the unfinished registration of archive " + plan.archive_uuid +
+            " was abandoned while this attempt ran; this attempt recorded nothing");
+}
+
+// Another registration of the archive is unfinished: the plan its key holds
+// (decision 0025), and the root that registration reads.
+struct UnfinishedRegistration {
+    std::string root;
+    std::uint32_t revision = 0;
+};
+
+// The archive's unfinished registration, if its key holds one: a plan whose
+// revision is not recorded. A plan whose revision is recorded is done with
+// (decision 0023), and a value that is no plan is no registration's.
+std::expected<std::optional<UnfinishedRegistration>, IoError> unfinished_registration(
+    ArchiveStore& store, const Uuid& archive_uuid)
+{
+    const auto stored = store.setting(pending_key(archive_uuid));
+    if (!stored) {
+        return std::unexpected(stored.error());
+    }
+    const auto plan = nlohmann::json::parse(*stored, nullptr, false);
+    const auto revision = plan.is_object() ? plan.find("revision") : plan.end();
+    if (stored->empty() || !plan.is_object() || revision == plan.end() || !revision->is_number_unsigned()) {
+        return std::optional<UnfinishedRegistration>{};
+    }
+    UnfinishedRegistration registration;
+    registration.revision = revision->get<std::uint32_t>();
+    const auto recorded = store.revision_recorded(archive_uuid, registration.revision);
+    if (!recorded) {
+        return std::unexpected(recorded.error());
+    }
+    if (*recorded) {
+        return std::optional<UnfinishedRegistration>{};
+    }
+    const auto root = plan.find("root");
+    registration.root = root != plan.end() && root->is_string() ? root->get<std::string>() : std::string{};
+    return std::optional<UnfinishedRegistration>(std::move(registration));
+}
+
+// A registration that is not a resume never replaces the plan of another
+// unfinished registration of its archive (decision 0025), such as one of the
+// same volume reached through another path (a second mount point): the
+// attempt running under that plan would stop as if it had been abandoned. In
+// the words of a relocation that meets it (decision 0023).
+std::unexpected<RegisterFailure> another_registration(const Uuid& archive_uuid,
+    const UnfinishedRegistration& registration)
+{
+    return fail(RegisterFailure::Kind::Refused,
+        "an unfinished registration of archive " + archive_uuid + " (root \"" + registration.root +
+            "\") is creating revision " + std::to_string(registration.revision) +
+            "; nothing was changed (finish it with `register --resume` first, or abandon it with "
+            "`archive abandon-registration " +
+            archive_uuid + "`)");
 }
 
 // A plan whose revision is recorded can never be finished. An attempt of the
@@ -260,25 +335,105 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         return fail(Kind::Repository, pending.error().message);
     }
 
+    // Which process runs this attempt, recorded in its plan (decision 0024).
+    // When this process cannot be read, the plan names none, as an older
+    // version's does, and nothing can tell whether this attempt still runs.
+    std::optional<AttemptProcess> this_attempt;
+    if (const auto self = services.processes.current()) {
+        this_attempt = AttemptProcess{*self, services.host.host};
+    }
+    const auto no_resumable = [] {
+        return fail(Kind::Refused, "there is no interrupted registration of this root to resume");
+    };
+
     // Decide which archive and revision this registration creates.
     Plan plan;
+    nlohmann::json plan_record;            // the plan as this attempt writes it
     std::optional<ArchiveRecord> existing; // archive receiving a new revision
     std::map<std::string, Entry> cached;   // R-104: hashes from the interrupted attempt
     if (request.resume) {
         if (!*pending) {
-            return fail(Kind::Refused, "there is no interrupted registration of this root to resume");
+            return no_resumable();
         }
         plan = **pending;
-        // A plan found with its revision recorded was read just before
-        // another attempt recorded it, or another operation recorded the
-        // revision and left the plan, which goes now.
-        const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
-        if (!recorded) {
-            return fail(Kind::Repository, recorded.error().message);
+        // Before it reads anything of the media, this attempt takes the
+        // registration over, in one write transaction (decision 0024): the
+        // plan must still be the one found; an attempt before it whose process
+        // still runs on this computer keeps it; otherwise the plan names this
+        // attempt's process from now on. Two resumes started at once cannot
+        // both go on: the second finds the first's process running.
+        std::optional<RegisterFailure> refused;
+        bool dead_plan = false; // the plan's revision is recorded: the plan goes
+        const auto claimed = [&]() -> std::expected<void, IoError> {
+            if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
+                return begun;
+            }
+            // A plan found with its revision recorded was read just before
+            // another attempt recorded it, or another operation recorded the
+            // revision and left the plan, which goes now (decision 0023).
+            const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
+            if (!recorded) {
+                return std::unexpected(recorded.error());
+            }
+            if (*recorded) {
+                dead_plan = true;
+                if (auto removed = store.remove_registration_plan(plan.archive_uuid, plan.revision); !removed) {
+                    return removed;
+                }
+                return store.commit();
+            }
+            const auto stored = store.setting(pending_key(plan.archive_uuid));
+            if (!stored) {
+                return std::unexpected(stored.error());
+            }
+            auto record = nlohmann::json::parse(*stored, nullptr, false);
+            const auto planned = store.registration_planned(plan.archive_uuid, plan.revision, plan.created);
+            if (!planned) {
+                return std::unexpected(planned.error());
+            }
+            if (!*planned || !record.is_object()) {
+                // Finished, abandoned or replaced since it was found.
+                refused = no_resumable().error();
+                store.rollback();
+                return {};
+            }
+            if (const auto judged = judge_attempt(record, services.processes, services.host.host);
+                judged.state == AttemptState::Running) {
+                refused = still_running(*judged.attempt).error();
+                store.rollback();
+                return {};
+            }
+            // Working again: the stop of the attempt before no longer holds.
+            // The totals of the attempt before show until this one's scan has
+            // counted them (decision 0022).
+            record.erase("stopped");
+            record.erase("process");
+            if (this_attempt) {
+                record_attempt(record, *this_attempt);
+            }
+            if (request.write_media_copy) {
+                record["media_copy"] = true; // decision 0025: an attempt writes identity.json on the media
+            }
+            record["updated"] = current_timestamp();
+            if (auto saved = store.update_setting(pending_key(plan.archive_uuid), record.dump()); !saved) {
+                return saved;
+            }
+            plan_record = std::move(record);
+            return store.commit();
+        }();
+        if (!claimed) {
+            store.rollback();
+            if (cancel.cancelled()) {
+                return fail(Kind::Incomplete,
+                    "registration was cancelled; continue with `register <root_path> --resume`");
+            }
+            return fail(Kind::Repository, claimed.error().message);
         }
-        if (*recorded) {
-            remove_dead_plan(store, plan);
+        if (dead_plan) {
             return already_recorded(plan);
+        }
+        if (refused) {
+            return std::unexpected(*refused);
         }
         if (!plan.new_archive) {
             const auto found = store.find_archive(plan.archive_uuid);
@@ -295,9 +450,14 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             cached.emplace(entry_key(row), row);
         }
     } else {
+        // Its root takes no other registration until it is finished or
+        // given up (decision 0025).
         if (*pending) {
             return fail(Kind::Refused, "an interrupted registration of this root exists (archive " +
-                                           (*pending)->archive_uuid + "); finish it with --resume");
+                                           (*pending)->archive_uuid +
+                                           "); finish it with --resume, or abandon it with "
+                                           "`archive abandon-registration " +
+                                           (*pending)->archive_uuid + "`");
         }
         const auto candidates = load_candidates(store);
         if (!candidates) {
@@ -340,10 +500,35 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 plan.label = *label;
             }
         }
-        // Recorded before any work, so an interruption leaves a resumable registration.
+        // Recorded before any work, so an interruption leaves a resumable
+        // registration. The plan names the process that runs this attempt
+        // (decision 0024), and whether an attempt writes on the media
+        // (decision 0025).
+        plan_record = plan_json(plan, request.root);
+        if (this_attempt) {
+            record_attempt(plan_record, *this_attempt);
+        }
+        if (request.write_media_copy) {
+            plan_record["media_copy"] = true;
+        }
+        std::optional<RegisterFailure> refused;
         const auto recorded = [&]() -> std::expected<void, IoError> {
             if (auto begun = store.begin(); !begun) {
                 return begun;
+            }
+            // One unfinished registration per archive (decision 0025): the
+            // key may hold the plan of another registration of it, reached
+            // through another root path than this one, whose attempt may run.
+            // Looked for in the transaction that writes this plan, so two
+            // registrations started at once cannot both write theirs.
+            const auto other = unfinished_registration(store, plan.archive_uuid);
+            if (!other) {
+                return std::unexpected(other.error());
+            }
+            if (*other) {
+                refused = another_registration(plan.archive_uuid, **other).error();
+                store.rollback();
+                return {};
             }
             if (plan.new_archive) {
                 ArchiveRecord archive{plan.archive_uuid, plan.label, plan.created, 0,
@@ -352,8 +537,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     return inserted;
                 }
             }
-            if (auto saved = store.set_setting(pending_key(plan.archive_uuid), plan_json(plan, request.root).dump());
-                !saved) {
+            if (auto saved = store.set_setting(pending_key(plan.archive_uuid), plan_record.dump()); !saved) {
                 return saved;
             }
             return store.commit();
@@ -362,24 +546,17 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             store.rollback();
             return fail(Kind::Repository, recorded.error().message);
         }
+        if (refused) {
+            return std::unexpected(*refused);
+        }
     }
 
     // The plan says while the registration works that it does ("updated"), and
-    // after the scan how much there is to do (decision 0022). A resumed
-    // registration starts from the plan as stored, so the totals of the
-    // attempt before show until its own scan has counted them; the stop of
-    // the attempt before no longer holds.
-    auto plan_record = plan_json(plan, request.root);
-    if (request.resume) {
-        if (const auto stored = store.setting(pending_key(plan.archive_uuid))) {
-            if (auto parsed = nlohmann::json::parse(*stored, nullptr, false); parsed.is_object()) {
-                parsed.erase("stopped");
-                plan_record = std::move(parsed);
-            }
-        }
-    }
+    // after the scan how much there is to do (decision 0022). It is written
+    // only while it is this registration's plan and its revision is not
+    // recorded (decisions 0023, 0025).
     Heartbeat heartbeat(store, pending_key(plan.archive_uuid), std::move(plan_record), progress);
-    heartbeat.only_while_unrecorded(plan.archive_uuid, plan.revision);
+    heartbeat.only_while_planned(plan.archive_uuid, plan.revision, plan.created);
     heartbeat.beat();
     // However this attempt returns without finishing (cancelled, the device
     // removed, a failure), the plan says last that it stopped ("stopped"), so
@@ -476,11 +653,15 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // recorded the revision, the rows under it are the index of the recorded
     // manifest, which no checkpoint may change: each checkpoint looks first,
     // in its own transaction, and this attempt stops when it finds the
-    // revision recorded (decision 0023). flush_checkpoint() then returns false.
+    // revision recorded (decision 0023). Likewise once the operator has
+    // abandoned the registration (decision 0025): its plan is gone, or the
+    // key holds a later registration's plan, whose checkpoints this attempt's
+    // rows must not join. flush_checkpoint() then returns false.
     std::vector<Entry> checkpoint;
     std::size_t hashed_since_checkpoint = 0;
     auto last_checkpoint = std::chrono::steady_clock::now();
-    bool lost = false; // the revision was recorded by another attempt or operation first
+    bool lost = false;      // the revision was recorded by another attempt or operation first
+    bool abandoned = false; // the operator abandoned the registration meanwhile
     const auto flush_checkpoint = [&] {
         if ((!checkpoint.empty() || !stale.empty()) &&
             store.write_transaction([&]() -> std::expected<void, IoError> {
@@ -490,6 +671,14 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 }
                 if (*recorded) {
                     lost = true;
+                    return {};
+                }
+                const auto planned = store.registration_planned(plan.archive_uuid, plan.revision, plan.created);
+                if (!planned) {
+                    return std::unexpected(planned.error());
+                }
+                if (!*planned) {
+                    abandoned = true;
                     return {};
                 }
                 // Deleted first: a changed file hashed again has the same key.
@@ -503,12 +692,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         hashed_since_checkpoint = 0;
         last_checkpoint = std::chrono::steady_clock::now();
-        return !lost;
+        return !lost && !abandoned;
     };
     // The stale checkpoints go before the plan has the totals, so a reader
     // never sees more done than there is.
     if (!flush_checkpoint()) {
-        return lost_to_another();
+        return lost ? lost_to_another() : abandoned_meanwhile(plan);
     }
     heartbeat.set("files_total", files_total);
     heartbeat.set("bytes_total", bytes_total);
@@ -533,13 +722,18 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             checkpoint.push_back(entry); // R-104: every 1000 files or 60 seconds
             if (++hashed_since_checkpoint >= 1000 ||
                 std::chrono::steady_clock::now() - last_checkpoint > std::chrono::seconds(60)) {
-                return flush_checkpoint(); // false stops hashing: the revision is recorded
+                // False stops hashing: the revision is recorded, or the
+                // registration was abandoned.
+                return flush_checkpoint();
             }
             return true;
         });
     flush_checkpoint();
     if (lost) {
         return lost_to_another();
+    }
+    if (abandoned) {
+        return abandoned_meanwhile(plan);
     }
     if (!hashed || device_removed) {
         return interrupted(device_removed ? "the device disappeared during registration"
@@ -614,10 +808,15 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
             // Locked for longer still, or cancelled while it waited. Whoever
             // held the lock may have recorded the revision, and another
-            // operation taken it since.
+            // operation taken it since, or the operator abandoned the
+            // registration.
             if (const auto recorded = store.revision_recorded(plan.archive_uuid, plan.revision);
                 recorded && *recorded) {
                 lost = true;
+            } else if (const auto planned =
+                           store.registration_planned(plan.archive_uuid, plan.revision, plan.created);
+                       recorded && planned && !*planned) {
+                abandoned = true;
             }
             cancelled_waiting = cancel.cancelled();
             return begun;
@@ -629,6 +828,16 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (*recorded) {
             lost = true;
             return std::unexpected(IoError{IoErrorKind::Other, 0, "the revision is recorded"});
+        }
+        // Abandoned while this attempt ran (decision 0025): for a first
+        // registration the archive's record went with its plan.
+        const auto planned = store.registration_planned(plan.archive_uuid, plan.revision, plan.created);
+        if (!planned) {
+            return std::unexpected(planned.error());
+        }
+        if (!*planned) {
+            abandoned = true;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the registration was abandoned"});
         }
         ArchiveRecord archive;
         if (existing) {
@@ -672,6 +881,9 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         store.rollback();
         if (lost) {
             return lost_to_another(); // this attempt's manifest goes with `written`
+        }
+        if (abandoned) {
+            return abandoned_meanwhile(plan);
         }
         if (cancelled_waiting) {
             return interrupted("registration was cancelled");

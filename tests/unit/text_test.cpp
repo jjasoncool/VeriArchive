@@ -290,6 +290,35 @@ void translation_tests()
     CHECK(chinese.format("skipped: {}", chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest")) ==
           "已略過：無法讀取清單檔 " + uuid + "/r0001.vam：清單檔是空的");
 
+    // Which process runs a registration (decision 0024) and abandoning one
+    // (decision 0025): the process id, the program and the uuid are values.
+    CHECK(chinese("this registration is still running in process 4242 (veriarchive-cli.exe) on this computer; "
+                  "resume it once that process has ended") ==
+          "此註冊仍在這台電腦的處理程序 4242（veriarchive-cli.exe）中執行；請等該處理程序結束後再繼續");
+    CHECK(chinese("error: the registration of archive " + uuid + " is still running in process 77 "
+                  "(veriarchive-gui.exe) on this computer; abandon it once that process has ended") ==
+          "錯誤：封存 " + uuid + " 的註冊仍在這台電腦的處理程序 77（veriarchive-gui.exe）中執行；請等該處理程序結束後再放棄");
+    CHECK(chinese("an unfinished registration of archive " + uuid + " (root \"Z:\\範例\") is creating revision 2; "
+                  "nothing was changed (finish it with `register --resume` first, or abandon it with "
+                  "`archive abandon-registration " + uuid + "`)") ==
+          "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；未做任何變更（請先以 "
+          "`register --resume` 完成該註冊，或以 `archive abandon-registration " + uuid + "` 放棄它）");
+    CHECK(chinese("error: an interrupted registration of this root exists (archive " + uuid +
+                  "); finish it with --resume, or abandon it with `archive abandon-registration " + uuid + "`") ==
+          "錯誤：此根目錄有一個中斷的註冊（封存 " + uuid + "）；請以 --resume 完成它，或以 `archive "
+          "abandon-registration " + uuid + "` 放棄它");
+    CHECK(chinese.format("Reading the registration of {} ...", "ARCH-0007") == "正在讀取 ARCH-0007 的註冊……");
+    CHECK(chinese.format("Not abandoned: {}", chinese("archive " + uuid + " has no unfinished registration")) ==
+          "未能放棄：封存 " + uuid + " 沒有未完成的註冊");
+    CHECK(chinese("cannot abandon the registration: cannot run SQL: database is locked") ==
+          "無法放棄註冊：無法執行 SQL 陳述式：資料庫已被鎖定");
+    CHECK(chinese("the unfinished registration of archive " + uuid +
+                  " was abandoned while this attempt ran; this attempt recorded nothing") ==
+          "封存 " + uuid + " 未完成的註冊已在這次執行期間被放棄；這次執行未記錄任何內容");
+    CHECK(chinese.format("Process: {} ({})", 4242, "veriarchive-cli.exe") == "處理程序：4242（veriarchive-cli.exe）");
+    CHECK(english("archive " + uuid + " has no unfinished registration") ==
+          "archive " + uuid + " has no unfinished registration");
+
     // Comparing archives (CLI `archive compare`, GUI Compare Archives). The
     // result line keeps its mode word in every language, as verification's does.
     const std::string uuid_b = "94bbff52-39fa-458a-8831-9b30fb0cadf1";

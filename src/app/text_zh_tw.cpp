@@ -73,6 +73,7 @@ constexpr CatalogEntry entries[] = {
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
         "  archive compare <uuid> <uuid>\n"
+        "  archive abandon-registration <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n",
@@ -86,6 +87,7 @@ constexpr CatalogEntry entries[] = {
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
         "  archive compare <uuid> <uuid>\n"
+        "  archive abandon-registration <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n"},
@@ -203,9 +205,9 @@ constexpr CatalogEntry entries[] = {
     {"several archives start with {}", "有多個封存以 {} 開頭"},
     {"no archive {}", "找不到封存 {}"},
     {"usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
-        "[--io hdd|ssd] | compare <uuid> <uuid>",
+        "[--io hdd|ssd] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm]",
         "用法：archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
-        "[--io hdd|ssd] | compare <uuid> <uuid>"},
+        "[--io hdd|ssd] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm]"},
     // archive compare: A is the reference archive, B the copy compared with it.
     {"COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", "比較結果：{}  {}（{}）r{}  與  {}（{}）r{}"},
     {"A: {}, registered {}, {} entries", "A：{}，註冊於 {}，共 {} 個項目"},
@@ -215,6 +217,24 @@ constexpr CatalogEntry entries[] = {
         "carrier still holds that content.",
         "此比較依據各封存註冊時讀取的內容。對各封存進行完整驗證，才能證明其載體仍保有這些內容。"},
     {"comparing: reading the manifests", "比較中：正在讀取清單檔"},
+    // archive abandon-registration (decision 0025)
+    {"Unfinished registration of {} ({}), revision {}", "{}（{}）未完成的註冊，版次 {}"},
+    {"started: {}", "開始時間：{}"},
+    {"saved progress: {} files, {} bytes", "已儲存的進度：{} 個檔案，{} 位元組"},
+    {"Abandoning it removes its saved progress, and it can never be resumed afterwards. "
+        "Recorded revisions, manifests and the verification history stay as they are.",
+        "放棄後，已儲存的進度會被刪除，而且之後再也無法繼續。已記錄的版次、清單檔與驗證歷程都維持不變。"},
+    {"The archive has no revision yet: it is removed with its registration.",
+        "此封存還沒有任何版次：會隨著它的註冊一起移除。"},
+    {"run the command again with --confirm to abandon it", "若要放棄，請加上 --confirm 再執行一次"},
+    {"Abandoned the unfinished registration of {} ({}), revision {}: its saved progress "
+        "({} files, {} bytes) was removed.",
+        "已放棄 {}（{}）未完成的註冊，版次 {}：已刪除其已儲存的進度（{} 個檔案，{} 位元組）。"},
+    {"The archive had no revision: it is no longer listed.", "此封存沒有任何版次：已不再列出。"},
+    {"note: the media may still hold .veriarchive/identity.json naming this archive; delete it before "
+        "registering the folder or volume again, unless you register it with --write-media-copy.",
+        "注意：媒體上可能仍有指向此封存的 .veriarchive/identity.json；再次註冊此資料夾或磁碟區前請先刪除它，"
+        "除非註冊時加上 --write-media-copy。"},
     {"usage: history <uuid>", "用法：history <uuid>"},
     // src/cli/export_commands.cpp
     {"usage: export-sha256sums <uuid> --out FILE", "用法：export-sha256sums <uuid> --out FILE"},
@@ -312,6 +332,27 @@ constexpr CatalogEntry entries[] = {
     {"stopped; it cannot be resumed (the archive has a newer revision)", "已停止；無法繼續（封存已有較新的版次）"},
     {"not counted", "未計算"},
     {"not known", "不明"},
+    {"no progress reported for {} minutes; its process is still running", "已 {} 分鐘未回報進度；其處理程序仍在執行",
+        Match::FormatOnly},
+    {"no progress reported for {} hours; its process is still running", "已 {} 小時未回報進度；其處理程序仍在執行",
+        Match::FormatOnly},
+    {"Process: {} ({})", "處理程序：{}（{}）", Match::FormatOnly},
+    {"Abandon...", "放棄…"},
+    {"Abandon", "放棄"},
+    {"Abandon the unfinished registration of {}?", "要放棄 {} 未完成的註冊嗎？"},
+    {"Its saved progress will be lost: {} files ({}) hashed so far.",
+        "已儲存的進度會遺失：目前已計算雜湊的 {} 個檔案（{}）。"},
+    {"It cannot be resumed afterwards. Recorded revisions, manifests and the verification history are not changed.",
+        "之後再也無法繼續。已記錄的版次、清單檔與驗證歷程都不會變更。"},
+    {"Reading the registration of {} ...", "正在讀取 {} 的註冊……"},
+    {"Abandoning the registration of {} ...", "正在放棄 {} 的註冊……"},
+    {"Abandoned the unfinished registration of {} ({}), revision {}.", "已放棄 {}（{}）未完成的註冊，版次 {}。"},
+    {"Note: the media may still hold .veriarchive/identity.json naming this archive; delete it before "
+        "registering the folder or volume again, unless you register it with a media copy.",
+        "注意：媒體上可能仍有指向此封存的 .veriarchive/identity.json；再次註冊此資料夾或磁碟區前請先刪除它，"
+        "除非註冊時同時寫入媒體副本。"},
+    {"Not abandoned: {}", "未能放棄：{}"},
+    {"This registration is no longer listed as unfinished.", "此註冊已不在未完成的作業中。"},
     {"Cannot read the unfinished operations: {}", "無法讀取未完成的作業：{}", Match::FormatOnly},
     // src/gui/history_view.cpp
     {"Finished", "完成時間"},
@@ -495,8 +536,9 @@ constexpr CatalogEntry entries[] = {
     {"cannot identify the volume of the root: {}", "無法識別根目錄所在的磁碟區：{}", Match::Cause},
     {"there is no interrupted registration of this root to resume", "此根目錄沒有可繼續的中斷註冊"},
     {"the archive of the interrupted registration is missing", "找不到中斷的註冊所屬的封存"},
-    {"an interrupted registration of this root exists (archive {}); finish it with --resume",
-        "此根目錄有一個中斷的註冊（封存 {}）；請以 --resume 完成它"},
+    {"an interrupted registration of this root exists (archive {}); finish it with --resume, or abandon it "
+        "with `archive abandon-registration {}`",
+        "此根目錄有一個中斷的註冊（封存 {}）；請以 --resume 完成它，或以 `archive abandon-registration {}` 放棄它"},
     {"the archive to re-baseline is missing from the database",
         "資料庫中找不到要重新建立基準的封存"},
     {"cannot write the media copy: {}", "無法寫入媒體副本：{}", Match::Cause},
@@ -515,6 +557,25 @@ constexpr CatalogEntry entries[] = {
         "another operation, such as a relocation); this attempt recorded nothing",
         "封存 {1} 的版次 {0} 已有紀錄（由同一個註冊的另一次執行，或由其他作業，例如搬移）；"
         "這次執行未記錄任何內容"},
+    {"this registration is still running in process {} ({}) on this computer; "
+        "resume it once that process has ended",
+        "此註冊仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再繼續"},
+    {"the unfinished registration of archive {} was abandoned while this attempt ran; "
+        "this attempt recorded nothing",
+        "封存 {} 未完成的註冊已在這次執行期間被放棄；這次執行未記錄任何內容"},
+    // src/core/engine/abandon_registration.cpp
+    {"archive {} has no unfinished registration", "封存 {} 沒有未完成的註冊"},
+    {"the unfinished registration of archive {} is no longer the one shown (it was resumed, finished or "
+        "abandoned meanwhile); nothing was changed",
+        "封存 {} 未完成的註冊已不是畫面上顯示的那一個（期間已被繼續、完成或放棄）；未做任何變更"},
+    {"the registration of archive {} is still running in process {} ({}) on this computer; "
+        "abandon it once that process has ended",
+        "封存 {} 的註冊仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再放棄"},
+    {"an attempt of the registration of archive {} said it was working less than 3 minutes ago; "
+        "abandon it once it has stopped",
+        "封存 {} 的註冊在不到 3 分鐘前仍回報正在執行；請等它停止後再放棄"},
+    {"cannot read the unfinished registration: {}", "無法讀取未完成的註冊：{}", Match::Cause},
+    {"cannot abandon the registration: {}", "無法放棄註冊：{}", Match::Cause},
     {"the manifest copy on the media could not be written: {}", "無法寫入清單檔的媒體副本：{}",
         Match::Cause},
     {"{} entries carry portability warnings", "{} 個項目帶有可攜性警告"},
@@ -632,10 +693,12 @@ constexpr CatalogEntry entries[] = {
     {"revision {} of archive {} was recorded by another operation while this relocation ran; "
         "nothing was changed",
         "封存 {1} 的版次 {0} 已在這次搬移期間由其他作業記錄；未做任何變更"},
+    // Also register_engine.cpp's, for a registration of the archive through another root path (decision 0025).
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; "
-        "nothing was changed (finish it with `register --resume` first)",
+        "nothing was changed (finish it with `register --resume` first, or abandon it with "
+        "`archive abandon-registration {}`)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更"
-        "（請先以 `register --resume` 完成該註冊）"},
+        "（請先以 `register --resume` 完成該註冊，或以 `archive abandon-registration {}` 放棄它）"},
     // src/core/engine/transfer.cpp
     {"cannot compare with the stored manifest", "無法與已儲存的清單檔比較"},
     {"revision {} is already known with different bytes", "版次 {} 已存在，但位元組內容不同"},

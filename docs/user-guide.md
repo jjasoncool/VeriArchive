@@ -73,7 +73,7 @@ Options:
 | `--write-media-copy` | Also write the manifest onto the disk (`.veriarchive` folder) as a media copy. By default nothing is written to the archive. |
 | `--new-revision` | The folder or volume is already registered and its content changed on purpose: create a new revision (a new baseline). |
 | `--force-new-archive` | The folder or volume is already registered, but register it as a separate archive. |
-| `--resume` | Continue an interrupted registration without re-reading hashed files. |
+| `--resume` | Continue an interrupted registration without re-reading hashed files. While the program that ran it still runs, it stops and says which one. |
 | `--io hdd` or `--io ssd` | Reading strategy: `hdd` reads sequentially, `ssd` in parallel. Usually detected automatically. |
 
 Registering an already registered folder or volume again stops with exit code 12 and asks you to choose `--new-revision` or `--force-new-archive`.
@@ -241,7 +241,7 @@ The Archive List view, or `veriarchive-cli archive list`, shows for each archive
 - **Last verify**: result and date of the last verification of any mode
 - **OVERDUE**: no FULL verify for 365 days or no verification for 180 days (adjust under `policy` in the config file)
 
-Above the archives, the Archive List view also shows the registrations and verifications that have not finished, with their progress, also those started from the command line.
+Above the archives, the Archive List view also shows the registrations and verifications that have not finished, with their progress, also those started from the command line. A stopped registration that can never be finished, for example because its media failed, can be given up there with "Abandon..." (CLI: `veriarchive-cli archive abandon-registration <uuid> --confirm`): its saved progress is lost, while recorded revisions and history stay.
 
 Times are shown in this computer's local time with the offset from UTC, for example `2026-10-14 08:13:53 (UTC+8)`. `--json` output and the history database always use UTC, for example `2026-10-14T00:13:53Z`.
 

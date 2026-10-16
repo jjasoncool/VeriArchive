@@ -85,9 +85,10 @@ veriarchive-cli export-sha256sums <uuid> --out sums.txt   # check later with sha
 ```
 
 More: `register --new-revision | --force-new-archive | --copy-of UUID | --write-media-copy |
---resume`, `verify --full ... --resume RUN_ID`, `archive show | retire | relocate`, `export`,
-`import`, `repo rebuild-index`. Every command accepts `--json`. Exit codes: 0 passed, 2 passed with
-warnings, 3 failed, 4 incomplete, 10 usage, 11 repository, 12 needs an operator decision.
+--resume`, `verify --full ... --resume RUN_ID`,
+`archive show | retire | relocate | abandon-registration`, `export`, `import`, `repo rebuild-index`.
+Every command accepts `--json`. Exit codes: 0 passed, 2 passed with warnings, 3 failed, 4
+incomplete, 10 usage, 11 repository, 12 needs an operator decision.
 
 `archive compare` compares the manifests of two registered archives, typically an archive and its
 copy on other media, entry by entry: presence, type and content (BLAKE3 and SHA-256), not metadata.

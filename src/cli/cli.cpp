@@ -24,6 +24,7 @@ void print_usage(const app::Text& text)
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
         "  archive compare <uuid> <uuid>\n"
+        "  archive abandon-registration <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n");

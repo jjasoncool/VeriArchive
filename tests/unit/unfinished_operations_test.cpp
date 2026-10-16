@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <format>
+#include <functional>
 
 namespace {
 
@@ -222,7 +224,8 @@ void a_cancelled_registration_reads_stopped()
     }
     CancelWhileHashing cancelling(fixture.cancel);
     va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
-        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     va::RegisterRequest request;
     request.root = fixture.archive.root();
     const auto outcome = va::register_archive(services, request, fixture.cancel, cancelling);
@@ -259,7 +262,8 @@ void a_registration_resumed_by_an_older_version_runs()
     }
     CancelWhileHashing cancelling(fixture.cancel);
     va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
-        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host};
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
     va::RegisterRequest request;
     request.root = fixture.archive.root();
     const auto outcome = va::register_archive(services, request, fixture.cancel, cancelling);
@@ -983,6 +987,164 @@ void orders_the_rows()
     CHECK(labels == (std::vector<std::string>{"running-new", "running-old", "stopped-new", "stopped-old"}));
 }
 
+
+// ---- Which process runs a registration (decision 0024) ---------------------
+
+// A repository with one registration of a sample volume (Z:, never a real
+// one) whose plan names process 1000 of this computer and says it worked
+// `updated`; no stop mark. Returns the repository's layout.
+struct PlannedRegistration {
+    test::TestRepository repository;
+    const std::string archive_uuid = "c0ffee00-0000-4000-8000-000000000024";
+
+    explicit PlannedRegistration(const std::string& updated, const std::string& host = "test-host")
+    {
+        auto store = repository.store();
+        CHECK(store.insert_archive({archive_uuid, "ARCH-0024", "2026-10-15T01:00:00Z", 0, "REGISTRATION_INCOMPLETE",
+            "", ""}));
+        nlohmann::json plan{{"archive_uuid", archive_uuid}, {"revision", 1}, {"label", "ARCH-0024"},
+            {"created", "2026-10-15T01:00:00Z"}, {"new_archive", true}, {"root", "Z:\\"}, {"files_total", 10},
+            {"bytes_total", 1000}, {"updated", updated}};
+        va::record_attempt(plan, {{1000, "boot-1:1000", "veriarchive-cli.exe"}, host});
+        CHECK(store.set_setting("registration:" + archive_uuid, plan.dump()));
+    }
+
+    // `runs_an_operation`: whether the reading window runs an operation.
+    va::app::UnfinishedOperation read(va::IProcessTable* processes, std::function<bool()> runs_an_operation = {})
+    {
+        const va::app::AttemptCheck attempts{processes, "test-host", std::move(runs_an_operation)};
+        const auto read = va::app::read_unfinished_operations(repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+        CHECK(read && read->operations.size() == 1);
+        return read && read->operations.size() == 1 ? read->operations.front() : UnfinishedOperation{};
+    }
+};
+
+std::string timestamp(std::chrono::sys_seconds time)
+{
+    return std::format("{:%Y-%m-%dT%H:%M:%SZ}", time);
+}
+
+// A registration whose process has ended (killed) reads stopped at once,
+// though its plan said a moment ago that it worked: it can be resumed, and
+// abandoned. So does one whose process id now belongs to a later process.
+void a_registration_whose_process_ended_reads_stopped_at_once()
+{
+    const va::app::Text english;
+    const Clock::time_point start{};
+    PlannedRegistration planned(timestamp(wall_now - 20s));
+    test::FakeProcessTable processes;
+    processes.self = {4242, "boot-1:4242", "veriarchive-gui.exe"};
+    for (const bool reused : {false, true}) {
+        processes.others.clear();
+        if (reused) {
+            processes.others.push_back({1000, "boot-1:31337", "notepad.exe"});
+        }
+        const auto operation = planned.read(&processes);
+        CHECK(operation.attempt == va::AttemptState::Ended && operation.revision == 1);
+        CHECK(operation.process && operation.process->process.id == 1000);
+        OperationWatch watch;
+        watch.update(operation, start, wall_now);
+        CHECK(watch.state(start, wall_now) == OperationState::Stopped);
+        const auto row = describe_operation(english, watch, start, wall_now);
+        CHECK(row.state == "stopped; it can be resumed" && row.abandonable);
+        CHECK(row.process == "Process: 1000 (veriarchive-cli.exe)" && row.key == operation.key);
+    }
+
+    // Judged by its plan alone, as before decision 0024, without a process
+    // table, or for a plan of another computer: running while its plan is fresh.
+    for (const bool other_computer : {false, true}) {
+        PlannedRegistration elsewhere(timestamp(wall_now - 20s), other_computer ? "another-computer" : "test-host");
+        const auto operation = elsewhere.read(other_computer ? &processes : nullptr);
+        CHECK(operation.attempt == va::AttemptState::Unknown);
+        OperationWatch watch;
+        watch.update(operation, start, wall_now);
+        CHECK(watch.state(start, wall_now) == OperationState::Running);
+        CHECK(!describe_operation(english, watch, start, wall_now).abandonable);
+        watch.update(operation, start + 4min, wall_now + 4min);
+        CHECK(watch.state(start + 4min, wall_now + 4min) == OperationState::Stopped);
+    }
+}
+
+// While its process runs, a registration runs: while its plan is fresh it is
+// running, and once its plan has said nothing for minutes it is held up, not
+// stopped, as a resume would be refused (a read from a failing device can take
+// that long). Neither may be abandoned. This window's own process counts as
+// ended only while the window runs no operation.
+void a_registration_whose_process_runs_is_held_up_not_stopped()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const Clock::time_point start{};
+    PlannedRegistration planned(timestamp(wall_now - 20s));
+    test::FakeProcessTable processes;
+    processes.self = {4242, "boot-1:4242", "veriarchive-gui.exe"};
+    processes.others = {{1000, "boot-1:1000", "veriarchive-cli.exe"}};
+    // Whether the window runs an operation, and how often a read asked.
+    bool window_runs = false;
+    int asked = 0;
+    const auto window = [&] {
+        ++asked;
+        return window_runs;
+    };
+    const auto operation = planned.read(&processes, window);
+    CHECK(operation.attempt == va::AttemptState::Running);
+    CHECK(asked == 0);  // asked only of a plan that names the window's process
+    OperationWatch watch;
+    watch.update(operation, start, wall_now);
+    CHECK(watch.state(start, wall_now) == OperationState::Running);
+    auto row = describe_operation(english, watch, start, wall_now);
+    CHECK(row.state == "running" && !row.abandonable);
+
+    watch.update(operation, start + 10min, wall_now + 10min);
+    CHECK(watch.state(start + 10min, wall_now + 10min) == OperationState::Silent);
+    row = describe_operation(english, watch, start + 10min, wall_now + 10min);
+    CHECK(row.state == "no progress reported for 10 minutes; its process is still running" && !row.abandonable);
+    CHECK(describe_operation(chinese, watch, start + 10min, wall_now + 10min).state ==
+          "已 10 分鐘未回報進度；其處理程序仍在執行");
+    CHECK(describe_operation(chinese, watch, start + 10min, wall_now + 10min).process ==
+          "處理程序：1000（veriarchive-cli.exe）");
+    watch.update(operation, start + 3h, wall_now + 3h);
+    CHECK(describe_operation(english, watch, start + 3h, wall_now + 3h).state ==
+          "no progress reported for 3 hours; its process is still running");
+    // Held up, it is listed with what runs, ahead of what stopped.
+    CHECK(watch.state(start + 3h, wall_now + 3h) != OperationState::Stopped);
+
+    // The plan names this window's process: an attempt that this window
+    // cancelled, whose stop mark could not be written, while it runs no
+    // operation; possibly the registration it runs, while it runs one. The
+    // window is asked as the plan is judged, after the read, so a
+    // registration it started while a read ran shows running, not stopped.
+    processes.self = {1000, "boot-1:1000", "veriarchive-gui.exe"};
+    processes.others.clear();
+    CHECK(planned.read(&processes, window).attempt == va::AttemptState::Ended && asked == 1);
+    window_runs = true;
+    CHECK(planned.read(&processes, window).attempt == va::AttemptState::Running && asked == 2);
+    CHECK(planned.read(&processes).attempt == va::AttemptState::Ended);  // without the question: it runs none
+}
+
+// A registration whose process has ended, taken up by an older version's
+// `register --resume`, which writes no plan: once its checkpoints move under
+// the plan the watch first saw, it runs again, judged by its counts, as one
+// taken up after a stop mark (decision 0022).
+void a_registration_taken_up_after_its_process_ended_runs()
+{
+    const Clock::time_point start{};
+    auto operation = registration(10, 10 * mib);
+    operation.attempt = va::AttemptState::Ended;
+    operation.updated = wall_now - 1min;
+    OperationWatch watch;
+    watch.update(operation, start, wall_now);
+    CHECK(watch.state(start, wall_now) == OperationState::Stopped);
+    watch.update(operation, start + 5s, wall_now + 5s);
+    CHECK(watch.state(start + 5s, wall_now + 5s) == OperationState::Stopped);
+    operation.files_done = 1010;
+    operation.bytes_done = 70 * mib;
+    watch.update(operation, start + 65s, wall_now + 65s);
+    CHECK(watch.state(start + 65s, wall_now + 65s) == OperationState::Running);
+    CHECK(watch.operation().attempt == va::AttemptState::Unknown && !watch.operation().updated);
+}
+
 } // namespace
 
 void unfinished_operations_tests()
@@ -1005,4 +1167,7 @@ void unfinished_operations_tests()
     follows_operations_between_polls();
     words_one_row();
     orders_the_rows();
+    a_registration_whose_process_ended_reads_stopped_at_once();
+    a_registration_whose_process_runs_is_held_up_not_stopped();
+    a_registration_taken_up_after_its_process_ended_runs();
 }

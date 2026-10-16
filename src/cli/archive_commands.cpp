@@ -1,5 +1,5 @@
 // `archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>
-// | compare <uuid> <uuid>` and `history <uuid>`.
+// | compare <uuid> <uuid> | abandon-registration <uuid>` and `history <uuid>`.
 // Archives are always shown with their last FULL verify and last verify of any
 // mode, with dates and OVERDUE flags, never a bare "integrity status" (R-21).
 #include "cli/commands.h"
@@ -7,12 +7,14 @@
 #include "app/local_time.h"
 
 #include "common/utf8.h"
+#include "core/engine/abandon_registration.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
 #include "core/engine/relocate_engine.h"
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
 #include "platform/media_enumerator.h"
+#include "platform/process_table.h"
 
 #include <iostream>
 
@@ -374,6 +376,106 @@ int compare(const Arguments& arguments)
     return comparison_code(comparison->result);
 }
 
+// An unfinished registration as --json shows it, abandoned or to be.
+nlohmann::json abandonable_json(const AbandonableRegistration& registration)
+{
+    return {
+        {"archive_uuid", registration.archive_uuid},
+        {"label", registration.label},
+        {"revision", registration.revision},
+        {"root", registration.root},
+        {"started", registration.created},
+        {"saved_progress", {{"files", registration.files}, {"bytes", registration.bytes}}},
+        {"first_registration", registration.first_registration},
+        {"media_copy", registration.media_copy},
+    };
+}
+
+// `archive abandon-registration <uuid> [--confirm]` (decision 0025): gives up
+// an unfinished registration on purpose, such as one whose media failed. Its
+// plan and saved progress go; recorded revisions, manifests and the history
+// stay. Without --confirm it only says what would be lost (exit 12).
+int abandon(const Arguments& arguments)
+{
+    auto session = open_session(arguments, false);
+    if (!session) {
+        return report_failure(arguments, session.error());
+    }
+    auto store = ArchiveStore::open(session->context.repo);
+    if (!store) {
+        return report_failure(arguments, {exit_code::repository, store.error().message});
+    }
+    const auto archive_uuid = find_archive_uuid(*store, arguments.words[2]);
+    if (!archive_uuid) {
+        return report_failure(arguments, archive_uuid.error());
+    }
+    const auto processes = platform::make_process_table();
+    AbandonServices services{*store, *processes, host_info().host};
+    const AbandonRequest request{*archive_uuid, std::nullopt, std::nullopt};
+    const auto failed = [&](const AbandonFailure& failure) {
+        return report_failure(arguments, {failure.kind == AbandonFailure::Kind::Refused ? exit_code::identity_decision
+                                                                                       : exit_code::repository,
+                                             failure.message});
+    };
+    const auto& text = arguments.text;
+
+    // The confirmation: what would be lost, and how to go ahead.
+    if (!arguments.has("--confirm")) {
+        const auto registration = abandonable_registration(services, request);
+        if (!registration) {
+            return failed(registration.error());
+        }
+        const std::string confirm = "run the command again with --confirm to abandon it";
+        if (arguments.json) {
+            print_json({{"error", confirm}, {"exit_code", exit_code::identity_decision},
+                {"registration", abandonable_json(*registration)}});
+            return exit_code::identity_decision;
+        }
+        std::cout << text.format("Unfinished registration of {} ({}), revision {}", registration->label,
+                         registration->archive_uuid, registration->revision)
+                  << "\n  " << text.format("root: {}", registration->root)
+                  << "\n  " << text.format("started: {}", app::local_time(registration->created, text))
+                  << "\n  "
+                  << text.format("saved progress: {} files, {} bytes", registration->files, registration->bytes)
+                  << '\n'
+                  << text("Abandoning it removes its saved progress, and it can never be resumed afterwards. "
+                          "Recorded revisions, manifests and the verification history stay as they are.")
+                  << '\n';
+        if (registration->first_registration) {
+            std::cout << text("The archive has no revision yet: it is removed with its registration.") << '\n';
+        }
+        return report_failure(arguments, {exit_code::identity_decision, confirm});
+    }
+
+    const auto abandoned = abandon_registration(services, request);
+    if (!abandoned) {
+        return failed(abandoned.error());
+    }
+    if (arguments.json) {
+        auto json = abandonable_json(*abandoned);
+        json["archive_removed"] = abandoned->first_registration;
+        print_json(json);
+        return exit_code::passed;
+    }
+    std::cout << text.format("Abandoned the unfinished registration of {} ({}), revision {}: its saved progress "
+                             "({} files, {} bytes) was removed.",
+                     abandoned->label, abandoned->archive_uuid, abandoned->revision, abandoned->files,
+                     abandoned->bytes)
+              << '\n';
+    if (abandoned->first_registration) {
+        std::cout << "  " << text("The archive had no revision: it is no longer listed.") << '\n';
+        // The media is never written to remove it (R-03).
+        if (abandoned->media_copy) {
+            std::cout << "  "
+                      << text("note: the media may still hold .veriarchive/identity.json naming this archive; "
+                              "delete it before registering the folder or volume again, unless you register it "
+                              "with --write-media-copy.")
+                      << '\n';
+        }
+    }
+    return exit_code::passed;
+}
+
 } // namespace
 
 // Decision 0004: accept a copy (or a new enclosure) as the archive's carrier
@@ -441,22 +543,30 @@ int relocate(const Arguments& arguments, Opened& opened)
 int archive_command(const Arguments& arguments)
 {
     const bool relocate_command = arguments.words.size() == 4 && arguments.words[1] == "relocate";
-    if (const auto problem = check_options(arguments, {}, relocate_command ? std::initializer_list<std::string_view>{"--io"}
-                                                                           : std::initializer_list<std::string_view>{})) {
+    const bool abandon_command = arguments.words.size() == 3 && arguments.words[1] == "abandon-registration";
+    if (const auto problem = check_options(arguments,
+            abandon_command ? std::initializer_list<std::string_view>{"--confirm"}
+                            : std::initializer_list<std::string_view>{},
+            relocate_command ? std::initializer_list<std::string_view>{"--io"}
+                             : std::initializer_list<std::string_view>{})) {
         return report_failure(arguments, *problem);
     }
     const bool list_command = arguments.words.size() == 2 && arguments.words[1] == "list";
     const bool uuid_command = arguments.words.size() == 3 &&
                               (arguments.words[1] == "show" || arguments.words[1] == "retire");
     const bool compare_command = arguments.words.size() == 4 && arguments.words[1] == "compare";
-    if (!list_command && !uuid_command && !relocate_command && !compare_command) {
+    if (!list_command && !uuid_command && !relocate_command && !compare_command && !abandon_command) {
         return report_failure(arguments, {exit_code::usage,
             "usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--io hdd|ssd] "
-            "| compare <uuid> <uuid>"});
+            "| compare <uuid> <uuid> | abandon-registration <uuid> [--confirm]"});
     }
-    // Compare needs no verification status of every archive, only the two manifests.
+    // Compare needs no verification status of every archive, only the two
+    // manifests; abandoning only the archive's unfinished registration.
     if (compare_command) {
         return compare(arguments);
+    }
+    if (abandon_command) {
+        return abandon(arguments);
     }
     auto opened = open_statuses(arguments);
     if (!opened) {
