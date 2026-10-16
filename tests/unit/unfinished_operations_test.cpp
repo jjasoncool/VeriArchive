@@ -5,6 +5,7 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "core/engine/relocate_engine.h"
+#include "core/engine/retire_archive.h"
 #include "core/manifest/manifest_reader.h"
 #include "engine_fixture.h"
 #include "test_repository.h"
@@ -104,9 +105,8 @@ void reads_operations_with_approximate_totals()
 // counts and root_hint), never the index's copy of that header (R-14). When
 // the manifest cannot be used (the index's copy differs, or the manifest is
 // gone; sample data), the totals stay unknown and the row says why, last in
-// its details, in either language: for a retired archive, without the
-// registration over its lost manifest, which it takes no more (decision 0028,
-// point 9).
+// its details, in either language. Once its archive is retired, the run is
+// not listed at all (decision 0022, point 5).
 void an_older_verification_takes_its_totals_from_the_manifest()
 {
     test::EngineFixture fixture;
@@ -169,12 +169,9 @@ void an_older_verification_takes_its_totals_from_the_manifest()
           gone->totals_failure ==
               "the manifest of revision 1 (manifests/" + uuid + "/r0001.vam) is missing" + test::put_back(uuid, 1));
     fixture.repository.execute("UPDATE archives SET status = 'RETIRED'");
-    const auto retired = read_older();
-    CHECK(retired && retired->totals_failure ==
-                         "the manifest of revision 1 (manifests/" + uuid +
-                             "/r0001.vam) is missing; put it back with `import <folder>/r0001.vam` from a backup of "
-                             "the repository, an export of revision 1, or the media copy in the archive's "
-                             ".veriarchive folder, where registration wrote one");
+    const auto retired = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+        [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; });
+    CHECK(retired && retired->operations.empty());
 }
 
 // Watching reads a database, never creates one: a repository folder whose
@@ -1958,6 +1955,82 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
     CHECK(read_operations(fixture).empty());
 }
 
+// ---- A retired archive (decision 0022, point 5) ----------------------------
+
+// A retired archive is no longer expected to be verified (decision 0003), so
+// it has no unfinished verification to show. Archives A and B at /vol/a and
+// /vol/b (sample data), each verification interrupted as the device of its
+// last file went away: both listed, stopped and resumable. A retired as any
+// archive: only B's run is listed. B's manifest gone and its device taken for
+// gone as well, B retired with the confirmation (decision 0028, point 9):
+// neither is listed. Each run's record and checkpoints stay as they were.
+void leaves_out_the_verifications_of_a_retired_archive()
+{
+    test::EngineFixture fixture;
+    for (int index = 1; index <= 5; ++index) {
+        for (const auto* folder : {"a", "b"}) {
+            fixture.archive.add_file(std::format("{}/SAMPLE-{}.txt", folder, index),
+                std::string(1000, static_cast<char>('0' + index)));
+        }
+    }
+    const auto a = fixture.register_root(fixture.archive.root() / "a");
+    const auto b = fixture.register_root(fixture.archive.root() / "b");
+    CHECK(a && b);
+    if (!a || !b) {
+        return;
+    }
+    const va::IoError unplugged{va::IoErrorKind::DeviceRemoved, 0, "unplugged (sample)"};
+    fixture.archive.node("a/SAMPLE-5.txt").open_error = unplugged;
+    fixture.archive.node("b/SAMPLE-5.txt").open_error = unplugged;
+    const auto a_run = fixture.verify(fixture.archive.root() / "a");
+    const auto b_run = fixture.verify(fixture.archive.root() / "b");
+    CHECK(a_run && a_run->result == "INCOMPLETE" && b_run && b_run->result == "INCOMPLETE");
+    if (!a_run || !b_run) {
+        return;
+    }
+
+    // The archives whose verifications are listed, each stopped and resumable.
+    const auto listed = [&] {
+        std::vector<va::Uuid> archives;
+        for (const auto& operation : read_operations(fixture)) {
+            CHECK(operation.kind == va::app::OperationKind::Verification);
+            CHECK(row_of(operation).state == "stopped; it can be resumed");
+            archives.push_back(operation.archive_uuid);
+        }
+        std::ranges::sort(archives);
+        return archives;
+    };
+    auto both = std::vector<va::Uuid>{a->archive_uuid, b->archive_uuid};
+    std::ranges::sort(both);
+    CHECK(listed() == both);
+    // What each run left for a resume.
+    const auto kept = [&](const std::string& run_id) {
+        return std::pair{fixture.store.setting("run:" + run_id).value_or(""),
+            fixture.store.progress(run_id).value_or(std::set<std::string>{})};
+    };
+    const auto a_kept = kept(a_run->run_id);
+    const auto b_kept = kept(b_run->run_id);
+    CHECK(!a_kept.first.empty() && !a_kept.second.empty() && !b_kept.first.empty() && !b_kept.second.empty());
+
+    const auto retire = [&](const va::Uuid& archive_uuid, bool confirmed) {
+        return va::retire_archive(fixture.store, *fixture.repository.files, fixture.repository.context.repo,
+            va::RetireRequest{archive_uuid, confirmed});
+    };
+    const auto a_retired = retire(a->archive_uuid, false);
+    CHECK(a_retired && !a_retired->lost_manifest);
+    CHECK(listed() == std::vector<va::Uuid>{b->archive_uuid});
+    CHECK(kept(a_run->run_id) == a_kept);
+
+    std::filesystem::remove(b->manifest);
+    const auto asked = retire(b->archive_uuid, false);
+    CHECK(!asked && asked.error().kind == va::RetireFailure::Kind::Unconfirmed);
+    CHECK(listed() == std::vector<va::Uuid>{b->archive_uuid});
+    const auto b_retired = retire(b->archive_uuid, true);
+    CHECK(b_retired && b_retired->lost_manifest);
+    CHECK(listed().empty());
+    CHECK(kept(a_run->run_id) == a_kept && kept(b_run->run_id) == b_kept);
+}
+
 } // namespace
 
 void unfinished_operations_tests()
@@ -1981,6 +2054,7 @@ void unfinished_operations_tests()
     offers_resume_only_where_it_continues();
     a_stopped_verification_resumes_from_the_list_as_on_the_command_line();
     a_stopped_registration_resumes_from_the_list_as_on_the_command_line();
+    leaves_out_the_verifications_of_a_retired_archive();
     follows_operations_between_polls();
     words_one_row();
     orders_the_rows();

@@ -1298,7 +1298,7 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         return std::unexpected(runs.error());
     }
     auto recorded = database_.prepare("SELECT result, rowid, finished FROM verify_runs WHERE run_id = ?");
-    auto archive = database_.prepare("SELECT label, current_revision FROM archives WHERE archive_uuid = ?");
+    auto archive = database_.prepare("SELECT label, current_revision, status FROM archives WHERE archive_uuid = ?");
     // Every run of an archive ever recorded, in the order recorded (rowid).
     // verify_runs holds one row per verification, so this stays small.
     auto history = database_.prepare(
@@ -1376,7 +1376,16 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         run.label = *has_archive ? archive->text(0) : std::string{};
         // R-104: a run resumes only while its archive is at the revision it verifies.
         run.resumable = *has_archive && static_cast<std::uint32_t>(archive->integer(1)) == run.revision;
+        // A retired archive is no longer expected to be verified (decision
+        // 0003): it has no unfinished verification to show, whether its run
+        // stopped before or after it was retired, and whatever became of its
+        // manifest (decision 0022, point 5). The run's record and checkpoints
+        // stay as they are.
+        const bool retired = *has_archive && archive->text(2) == "RETIRED";
         archive->reset();
+        if (retired) {
+            continue;
+        }
         // Stopped, and cannot be resumed: nothing will ever finish it. A run
         // never recorded has stopped once its record has said nothing for
         // minutes (its process was killed); until then it may still work and

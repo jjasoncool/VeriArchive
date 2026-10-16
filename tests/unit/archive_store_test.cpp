@@ -510,6 +510,60 @@ void superseded_verifications_are_left_out()
     }
 }
 
+// A retired archive is no longer expected to be verified (decision 0003), so
+// it has no unfinished verification to show (decision 0022, point 5): each
+// kind of unfinished run of the sample archive, alone, is left out once the
+// archive is retired: recorded INCOMPLETE, killed (its record silent for
+// minutes), working (its record said so a minute ago), and of an older version
+// (no "updated"). Its record and checkpoints stay as they were, and another
+// archive's run is listed as before. Sample data only.
+void a_retired_archives_verifications_are_left_out()
+{
+    const auto now = at("2026-10-10T02:01:00Z");
+    const std::string other = "c0ffee00-0000-4000-8000-000000000003";
+    using AddRun = void (*)(va::ArchiveStore&, const TestRepository&);
+    const AddRun kinds[] = {
+        [](va::ArchiveStore& store, const TestRepository& repository) {
+            add_run_setting(store, "run-1", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T01:00:00Z")");
+            record_run(store, repository, "run-1", "INCOMPLETE", "2026-10-10T00:00:00Z", "2026-10-10T01:00:00Z");
+        },
+        [](va::ArchiveStore& store, const TestRepository&) {
+            add_run_setting(store, "run-1", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T01:00:00Z")");
+        },
+        [](va::ArchiveStore& store, const TestRepository&) {
+            add_run_setting(store, "run-1", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T02:00:00Z")");
+        },
+        [](va::ArchiveStore& store, const TestRepository&) {
+            add_run_setting(store, "run-1", "2026-10-10T00:00:00Z");
+        },
+    };
+    for (const auto add_run : kinds) {
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run(store, repository);
+        CHECK(store.add_progress("run-1", {va::entry_key(file_entry("a.txt", 0))}));
+        CHECK(store.insert_archive({other, "ARCH-0003", "2026-10-08T00:00:00Z", 1, "REGISTERED", "", ""}));
+        CHECK(store.set_setting("run:other-1",
+            R"({"archive_uuid":")" + other + R"(","revision":1,"started":"2026-10-10T00:30:00Z"})"));
+        CHECK(unfinished_run_ids(store, now) == (std::vector<std::string>{"run-1", "other-1"}));
+        const auto record = store.setting("run:run-1");
+        const auto checkpoints = store.progress("run-1");
+        CHECK(record && !record->empty() && checkpoints && checkpoints->size() == 1);
+
+        auto archive = store.find_archive(verified_archive);
+        CHECK(archive && *archive);
+        if (!archive || !*archive) {
+            continue;
+        }
+        (*archive)->status = "RETIRED";
+        CHECK(store.update_archive(**archive));
+        CHECK(unfinished_run_ids(store, now) == std::vector<std::string>{"other-1"});
+        CHECK(record && store.setting("run:run-1").value_or("") == *record);
+        CHECK(checkpoints && store.progress("run-1").value_or(std::set<std::string>{}) == *checkpoints);
+    }
+}
+
 // The mark of what the Archive List shows changes with everything the list
 // shows of the archives, and not with the operations' own records and
 // checkpoints, which the section of unfinished operations shows. Sample data
@@ -744,6 +798,7 @@ void archive_store_tests()
     unfinished_verifications_with_checkpoints();
     unfinished_verification_totals_from_its_record();
     superseded_verifications_are_left_out();
+    a_retired_archives_verifications_are_left_out();
     archive_list_mark_follows_the_archives();
     reads_in_one_transaction();
     read_only_open_creates_nothing();

@@ -114,10 +114,11 @@ std::optional<std::uint64_t> volume_used_bytes(const std::filesystem::path& root
 // Reads the unfinished operations of the repository, newest first, without
 // the verifications that cannot be resumed or that a later verification of the
 // same archive supersedes (judged at the time now,
-// ArchiveStore::unfinished_verifications), and the mark of its archives. A
-// registration whose plan has no totals yet, and whose root is a whole volume,
-// gets that volume's used space (`used_bytes`) as its approximate total: every
-// file on it is registered, so the files to hash fill about that much. A
+// ArchiveStore::unfinished_verifications), nor those of a retired archive, and
+// the mark of its archives. A registration whose plan has no totals yet, and
+// whose root is a whole volume, gets that volume's used space (`used_bytes`)
+// as its approximate total: every file on it is registered, so the files to
+// hash fill about that much. A
 // verification of a version before decision 0022, whose record has neither
 // totals nor root, gets them from the header of its revision's manifest (its
 // counts and root_hint, load_recorded_header), never from the index's copy of

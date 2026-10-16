@@ -365,9 +365,12 @@ public:
     // worked or finished when it had been silent for minutes, or, once it has
     // been silent for minutes at `now`, one started after it last said
     // anything that PASSED (with warnings or not). A verification that read
-    // no media (read_no_media) supersedes none (decision 0028). `counted`: the
-    // checkpoints of runs recorded INCOMPLETE, counted by an earlier read;
-    // such a run never changes, so it is not counted again.
+    // no media (read_no_media) supersedes none (decision 0028). Every
+    // verification of a retired archive is left out too: the archive is no
+    // longer expected to be verified (decision 0003); its runs' records and
+    // checkpoints are left as they are. `counted`: the checkpoints of runs
+    // recorded INCOMPLETE, counted by an earlier read; such a run never
+    // changes, so it is not counted again.
     std::expected<std::vector<UnfinishedVerification>, IoError> unfinished_verifications(
         std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted = {});
     // Every relocation whose record exists (decision 0026), its checkpoints
