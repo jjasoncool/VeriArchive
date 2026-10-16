@@ -36,10 +36,12 @@ struct ComparisonInput {
     // R-104 resume: entry keys whose content already matched in the run being resumed.
     std::set<std::string> content_verified;
     // Called with keys of entries whose content matched, in batches
-    // (checkpoints). Returning false stops the comparison, as a cancel does
-    // (the result is incomplete): the operation found that it can no longer
-    // finish, such as a relocation whose revision another operation recorded
-    // (decision 0026).
+    // (checkpoints): compared by chunk, every chunk hash of it too, so that a
+    // resume reads again a file whose chunk hashes cannot be relied on, and
+    // warns again (decision 0032). Returning false stops the comparison, as a
+    // cancel does (the result is incomplete): the operation found that it can
+    // no longer finish, such as a relocation whose revision another operation
+    // recorded (decision 0026).
     std::function<bool(const std::vector<std::string>&)> checkpoint;
     // Called on the comparison's thread for each entry as it is classified
     // with a status other than Verified, with whether that status fails the

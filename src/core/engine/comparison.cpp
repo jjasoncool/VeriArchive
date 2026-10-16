@@ -526,6 +526,8 @@ ComparisonResult compare_with_manifest(
         // not proves the manifest wrong, not the file (decision 0032).
         if (const auto differing = differing_chunks(was, hash); !differing.empty()) {
             unreliable.emplace_back(&was, unreliable_chunk_hashes(was, differing));
+            // Not checkpointed: a resume reads it again, and warns again (R-104).
+            return true;
         }
         // R-104: checkpoint every 1000 items or 60 seconds.
         pending_checkpoint.push_back(entry_key(was));

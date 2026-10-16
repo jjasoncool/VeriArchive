@@ -26,6 +26,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -2439,16 +2440,20 @@ void entries_read_otherwise_than_validated_fail()
 constexpr std::uint64_t test_chunk_size = 64 * 1024;
 
 // An archive registered with 64 KiB chunks, or with `chunk_size` (0: none, as
-// V1 registered): big.bin of three chunks, the last 100 bytes long, and a
-// small file (sample data).
+// V1 registered): big.bin of three chunks, the last 100 bytes long, a small
+// file, and the files of `more` (sample data).
 struct Chunked : EngineFixture {
     va::Uuid archive_uuid;
     std::string big = test::patterned(2 * test_chunk_size + 100, 1);
 
-    explicit Chunked(std::uint64_t chunk_size = test_chunk_size)
+    explicit Chunked(std::uint64_t chunk_size = test_chunk_size,
+        const std::vector<std::pair<std::string, std::string>>& more = {})
     {
         archive.add_file("big.bin", big);
         archive.add_file("notes.txt", "notes (sample data)");
+        for (const auto& [p, content] : more) {
+            archive.add_file(p, content);
+        }
         va::RegisterRequest request;
         request.root = archive.root();
         request.chunk_size = chunk_size;
@@ -2643,6 +2648,52 @@ void chunk_hashes_that_do_not_match_a_file_that_matches_warn()
     CHECK(outcome && outcome->revision == 2 && outcome->result == "PASSED" && outcome->warnings.empty());
 }
 
+// R-104 with decision 0032: a resumed FULL verify compares by chunk. A run
+// interrupted at its last file (the device gone) checkpointed only what
+// matched by file and by chunk: notes.txt, neither big.bin, whose chunk hashes
+// cannot be relied on, nor mod.bin, whose content differs in chunk 2. The
+// resume reads both again, and only them and the file not reached (by bytes):
+// it warns for the first and names the chunk that differs in the second
+// (sample data).
+void a_resumed_verification_compares_by_chunk()
+{
+    const auto mod = test::patterned(2 * test_chunk_size + 100, 3);
+    const std::string last = "last (sample data)";
+    Chunked fixture(test_chunk_size, {{"mod.bin", mod}, {"z.txt", last}});
+    write_wrong_chunk_hashes(fixture, {1});
+    auto& changed = fixture.archive.node("mod.bin").content;
+    changed[2 * test_chunk_size + 10] = static_cast<char>(changed[2 * test_chunk_size + 10] ^ 0x01);
+    fixture.archive.node("z.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.verify(fixture.archive.root());
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+    if (!interrupted) {
+        return;
+    }
+    va::Entry notes;
+    notes.path.p = "notes.txt";
+    const auto saved = fixture.store.progress(interrupted->run_id);
+    CHECK(saved && *saved == std::set<std::string>{va::entry_key(notes)});
+
+    fixture.archive.node("z.txt").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    request.resume_run = interrupted->run_id;
+    const auto resumed = fixture.verify(request);
+    CHECK(resumed && resumed->result == "FAILED" && resumed->resumed_from == interrupted->run_id);
+    if (!resumed) {
+        return;
+    }
+    CHECK(fixture.archive.bytes_read == fixture.big.size() + mod.size() + last.size());
+    const auto* item = item_of(*resumed, "mod.bin");
+    CHECK(item && item->detail == "content differs: chunk 2 of 3 differs, from byte 131,072" &&
+          resumed->items.size() == 1);
+    CHECK(resumed->warnings == std::vector<std::string>{"the chunk hashes of big.bin cannot be relied on: chunk 1 of "
+                                                        "3 does not match, while the whole file matches its hashes; "
+                                                        "the file is fine, and a new revision fixes them"});
+    CHECK(resumed->counts.at("Verified") == 3);
+}
+
 void item_rules()
 {
     CHECK(va::mtime_matches("ntfs", 1'000'000'000, 1'900'000'000));
@@ -2749,5 +2800,6 @@ void verify_engine_tests()
     the_chunks_that_differ_are_named_in_runs();
     whole_files_are_compared_as_before();
     chunk_hashes_that_do_not_match_a_file_that_matches_warn();
+    a_resumed_verification_compares_by_chunk();
     item_rules();
 }
