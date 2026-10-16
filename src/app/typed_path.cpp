@@ -53,7 +53,10 @@ std::filesystem::path typed_path(std::string_view text)
     }
     const auto typed = path_from_utf8(text);
     if (starts_with_two_separators(typed)) {
-        return typed;
+        // As typed, but for a volume's GUID path, made normal after its GUID
+        // (decision 0029, point 3): Windows reads it as given, so ".." and
+        // "." in it would otherwise be read as names.
+        return platform::normal_volume_guid_path(typed);
     }
     std::error_code error;
     const auto absolute = std::filesystem::absolute(typed, error);

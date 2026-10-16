@@ -14,7 +14,11 @@ namespace va::app {
 // Windows every '/' becomes '\' (lexically_normal). On Windows a path that
 // starts with two separators, a network path ("\\server\share\dir") or one
 // such as "\\?\D:\Photos", is taken as typed, because the C++ library reads
-// it as a path on the current drive. Empty text gives an empty path.
+// it as a path on the current drive; but a volume's GUID path in that form
+// ("\\?\Volume{...}\Photos\..\Music") is made so after its GUID, and its
+// prefix written with '\' (platform::normal_volume_guid_path), as Windows
+// reads that form as given (decision 0029, point 3). Empty text gives an
+// empty path.
 std::filesystem::path typed_path(std::string_view text);
 
 // The folder or volume root typed by the operator (register, verify --full,

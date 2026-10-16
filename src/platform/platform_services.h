@@ -22,6 +22,17 @@ bool process_is_elevated();
 // comes back unchanged, and on Linux every path.
 std::filesystem::path resolve_subst_drive(const std::filesystem::path& path);
 
+// `path`, when it is a volume's GUID path in the \\?\ form (Windows,
+// "\\?\Volume{...}\Photos", decision 0029, point 3), with what follows its
+// GUID made normal as the C++ library makes any other path the operator types
+// (app::typed_path): every run of separators one '\', "." dropped and ".."
+// dropping the name before it, never the volume's root folder, and its prefix
+// written with '\'. Windows reads a path in that form exactly as given, while
+// a root's place on its volume is told from the path made normal, so made so,
+// the root read is the root identified. Any other path comes back unchanged,
+// and on Linux every path.
+std::filesystem::path normal_volume_guid_path(const std::filesystem::path& path);
+
 // What keeps a folder the operator gave from being taken as an archive root
 // before anything of it is read (decision 0029). `root` is a root as the user
 // interfaces make it (app::typed_root).

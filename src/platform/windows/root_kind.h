@@ -10,6 +10,7 @@
 // so it is tested on every OS, like the drive letters made with subst.
 #include "platform/platform_services.h"
 
+#include <cstddef>
 #include <functional>
 #include <string_view>
 
@@ -18,6 +19,15 @@ namespace va::platform::windows {
 // Whether the drive letter `drive` ("Z:") is a network drive, as
 // GetDriveTypeW reports it for "Z:\" (DRIVE_REMOTE).
 using NetworkDriveQuery = std::function<bool(std::wstring_view drive)>;
+
+// Whether `path`, what follows "\\?\", starts with a volume's name by its
+// GUID as mountvol lists it, "Volume{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}"
+// ("Volume" and the GUID's digits in any case), followed by a separator or
+// nothing (decision 0029, point 3).
+bool names_volume_guid(std::wstring_view path);
+
+// The length of that name: "Volume{", the GUID's 36 characters and "}".
+inline constexpr std::size_t volume_guid_name_length = 7 + 36 + 1;
 
 // The kind of `root`, a root as the user interfaces make it (a drive letter
 // made with subst already resolved, decision 0027), with '\' or '/':

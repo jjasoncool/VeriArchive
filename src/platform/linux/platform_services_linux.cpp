@@ -126,6 +126,12 @@ std::filesystem::path resolve_subst_drive(const std::filesystem::path& path)
     return path;
 }
 
+// Nor GUID paths of volumes: a backslash is an ordinary character (R-40).
+std::filesystem::path normal_volume_guid_path(const std::filesystem::path& path)
+{
+    return path;
+}
+
 std::string os_name()
 {
     return "linux";

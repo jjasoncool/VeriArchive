@@ -6,10 +6,24 @@
 // ("\\server\share") or a \\?\ path as one on the current drive. Plain C++
 // without Windows headers, so it is tested on every OS, like the drive letters
 // made with subst.
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace va::platform::windows {
+
+// A volume's GUID path in the \\?\ form ("\\?\Volume{...}\Photos", decision
+// 0029, point 3), written in one form: the prefix with '\', the name
+// "Volume{...}" as written, then what follows it as a path from the root of a
+// drive letter is made (see long_path): every run of separators one '\', "."
+// dropped and ".." dropping the name before it, never the volume's root
+// folder, and a separator at the end kept, also one alone, which makes the
+// path the volume's root folder. Windows reads a path in the \\?\ form exactly
+// as given, without resolving "." and "..", while the place of a root on its
+// volume is told from the path made normal: made so, the root read is the
+// root identified. Nothing for any other path, also one in the \\?\ form or
+// in the \\.\ form that names no volume by its GUID.
+std::optional<std::wstring> normal_volume_guid_path(std::wstring_view path);
 
 // `path` in the form the Windows file functions take at any length. A path
 // from the root of a drive letter gets the \\?\ prefix: "C:\Data\a\..\b"

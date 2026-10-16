@@ -175,6 +175,43 @@ void windows_volume_guid_paths_are_taken()
     CHECK(kind(LR"(\\Volume{c0ffee00-0000-4000-8000-000000000001}\share)") == RootKind::NetworkShare);
 }
 
+// Decision 0029, point 3: a volume's GUID path in the \\?\ form, which
+// Windows reads exactly as given, is written in one form: its prefix with '\',
+// "Volume" and the GUID as written, and what follows them made normal as a
+// path from a drive letter is (long_path): '/' is '\', a run of separators
+// one, "." dropped and ".." dropping the name before it, never the volume's
+// root folder, a separator at the end kept. Any other path is not made so,
+// also one in the \\?\ or \\.\ form, which is refused with its prefix as
+// typed. (Sample GUIDs.) Plain C++, so it is tested on every OS although only
+// Windows uses it.
+void volume_guid_paths_are_made_normal()
+{
+    using va::platform::windows::normal_volume_guid_path;
+    const std::wstring volume = LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001})";
+    CHECK(normal_volume_guid_path(volume + LR"(\SAMPLE\..\SAMPLE-2)") == volume + LR"(\SAMPLE-2)");
+    CHECK(normal_volume_guid_path(volume + LR"(\SAMPLE\.)") == volume + LR"(\SAMPLE\)");
+    CHECK(normal_volume_guid_path(volume + LR"(\SAMPLE\\photos)") == volume + LR"(\SAMPLE\photos)");
+    CHECK(normal_volume_guid_path(volume + LR"(\\SAMPLE)") == volume + LR"(\SAMPLE)");
+    CHECK(normal_volume_guid_path(volume + LR"(\..\..\SAMPLE)") == volume + LR"(\SAMPLE)");
+    CHECK(normal_volume_guid_path(volume + LR"(\SAMPLE\..)") == volume + LR"(\)");
+    CHECK(normal_volume_guid_path(volume + LR"(\相片\.\範例\)") == volume + LR"(\相片\範例\)");
+    CHECK(normal_volume_guid_path(volume + LR"(\)") == volume + LR"(\)");
+    CHECK(normal_volume_guid_path(volume + LR"(\\)") == volume + LR"(\)");
+    CHECK(normal_volume_guid_path(volume) == volume);
+    CHECK(normal_volume_guid_path(L"//?/volume{C0FFEE00-0000-4000-8000-0000000000AB}/SAMPLE/./photos/") ==
+          LR"(\\?\volume{C0FFEE00-0000-4000-8000-0000000000AB}\SAMPLE\photos\)");
+    // No volume's GUID path in the \\?\ form.
+    CHECK(!normal_volume_guid_path(LR"(\\?\K:\SAMPLE\..\photos)"));
+    CHECK(!normal_volume_guid_path(L"//?/K:/SAMPLE"));
+    CHECK(!normal_volume_guid_path(LR"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE\..)"));
+    CHECK(!normal_volume_guid_path(LR"(\\?\Volume{c0ffee00-0000-4000-8000-00000000001}\SAMPLE\..)"));
+    CHECK(!normal_volume_guid_path(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}SAMPLE)"));
+    CHECK(!normal_volume_guid_path(LR"(\\?\UNC\sample-server\sample-share\SAMPLE\..)"));
+    CHECK(!normal_volume_guid_path(LR"(\\sample-server\sample-share\SAMPLE\..)"));
+    CHECK(!normal_volume_guid_path(LR"(K:\SAMPLE\..\photos)"));
+    CHECK(!normal_volume_guid_path(L""));
+}
+
 // Decision 0029, point 3: every volume that Windows names is listed, one with
 // a drive letter or folder path under the first of them, one with neither
 // under its GUID path, its only name, so that verification by archive uuid
@@ -422,6 +459,7 @@ void platform_tests()
     long_paths_keep_their_drive_or_share();
     windows_roots_on_shares_are_told();
     windows_volume_guid_paths_are_taken();
+    volume_guid_paths_are_made_normal();
     volumes_without_a_mount_point_are_listed_by_their_guid_path();
     volume_guid_paths_name_folders();
     linux_roots_on_network_filesystems_are_told();

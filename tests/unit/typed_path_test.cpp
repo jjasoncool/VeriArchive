@@ -43,12 +43,36 @@ void typed_roots_name_their_folders()
               R"(\\?\volume{c0ffee00-0000-4000-8000-000000000001}\)");
         CHECK(root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos\)") ==
               R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos)");
+        // Written with "." or "..", or two separators in a row, after its
+        // GUID, it names the folder they resolve to, as a path through a
+        // drive letter does, and its prefix is written with '\': Windows
+        // reads such a path as given, so the root read is then the root
+        // identified. The volume's root folder stays its lowest folder.
+        CHECK(root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE\..\Photos\)") ==
+              R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos)");
+        CHECK(root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos\.)") ==
+              R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos)");
+        CHECK(root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\\Photos\\2026)") ==
+              R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos\2026)");
+        CHECK(root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos\..\..)") ==
+              R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)");
+        CHECK(root("//?/Volume{c0ffee00-0000-4000-8000-000000000001}/Photos/") ==
+              R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos)");
+        // Any other path in the \\?\ or \\.\ form stays as typed, and is
+        // refused naming its prefix as typed.
+        CHECK(root(R"(\\?\C:\Photos\..\Music)") == R"(\\?\C:\Photos\..\Music)");
+        CHECK(root("//?/C:/Photos") == "//?/C:/Photos");
+        CHECK(root(R"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos\..)") ==
+              R"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos\..)");
     } else {
         CHECK(root("/vol/photos/./2026/../2025/") == "/vol/photos/2025");
         CHECK(root("/vol/photos//") == "/vol/photos");
         CHECK(root("/vol/..") == "/");
         CHECK(root("/") == "/");
         CHECK(root(R"(/vol/name\)") == R"(/vol/name\)");
+        // A backslash is no separator (R-40): such a name is one name.
+        CHECK(root(R"(/vol/\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\a\..\b)") ==
+              R"(/vol/\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\a\..\b)");
     }
 }
 

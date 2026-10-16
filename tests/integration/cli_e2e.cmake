@@ -221,6 +221,33 @@ if(CMAKE_HOST_WIN32)
         if(found EQUAL -1)
             message(FATAL_ERROR "verify of a GUID path in the \\\\.\\ form in zh-TW:\n${last_errors}")
         endif()
+        # Written with "..", "." or two separators in a row after its GUID, a
+        # GUID path names the folder they resolve to, as a path through a
+        # drive letter does: ROOT is verified as the archive it is, read and
+        # named without them, and a sample folder is registered through "..",
+        # its root_hint the folder (Windows reads a \\?\ path as given). No
+        # spelling ends with a backslash, which would escape the ';' after it
+        # in run_cli's list of arguments.
+        file(TO_NATIVE_PATH "${WORK}" work_native)
+        string(SUBSTRING "${work_native}" 3 -1 work_below)
+        foreach(spelling "${GUID_ROOT}\\..\\archive" "${GUID_ROOT}\\." "${volume_name}${work_below}\\\\archive"
+                "${volume_name}\\${root_below}")
+            run_cli("0;2" verify --full "${spelling}" --json)
+            string(JSON spelled_uuid GET "${last_output}" archive_uuid)
+            string(JSON spelled_root GET "${last_output}" root)
+            string(JSON spelled_result GET "${last_output}" result)
+            if(NOT spelled_uuid STREQUAL archive_uuid OR NOT spelled_root STREQUAL GUID_ROOT
+                    OR NOT spelled_result MATCHES "^PASSED")
+                message(FATAL_ERROR "verify of ${spelling}:\n${last_output}")
+            endif()
+        endforeach()
+        file(WRITE "${WORK}/guid-dots/sample.txt" "GUID path sample, registered through ..\n")
+        run_cli("0" register "${GUID_ROOT}\\..\\guid-dots" --json)
+        string(JSON dots_manifest GET "${last_output}" manifest)
+        read_root_hint("${dots_manifest}" dots_hint)
+        if(NOT dots_hint STREQUAL "${volume_name}${work_below}\\guid-dots")
+            message(FATAL_ERROR "root_hint of a registration through a GUID path with .. in it is ${dots_hint}")
+        endif()
     endif()
 endif()
 # Pinning the repository kept the language in the config file.

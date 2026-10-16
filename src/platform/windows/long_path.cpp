@@ -1,5 +1,7 @@
 #include "platform/windows/long_path.h"
 
+#include "platform/windows/root_kind.h"
+
 #include <algorithm>
 #include <vector>
 
@@ -57,6 +59,20 @@ std::wstring normal_rest(std::wstring_view rest)
 }
 
 } // namespace
+
+std::optional<std::wstring> normal_volume_guid_path(std::wstring_view path)
+{
+    if (path.size() < 4 || !is_separator(path[0]) || !is_separator(path[1]) || path[2] != L'?' ||
+        !is_separator(path[3])) {
+        return std::nullopt;
+    }
+    const auto rest = path.substr(4);
+    if (!names_volume_guid(rest)) {
+        return std::nullopt;
+    }
+    return LR"(\\?\)" + std::wstring(rest.substr(0, volume_guid_name_length)) +
+           normal_rest(rest.substr(volume_guid_name_length));
+}
 
 std::wstring long_path(std::wstring_view path)
 {

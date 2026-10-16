@@ -128,6 +128,12 @@ std::filesystem::path resolve_subst_drive(const std::filesystem::path& path)
     return std::filesystem::path(windows::resolve_subst(path.native(), query));
 }
 
+std::filesystem::path normal_volume_guid_path(const std::filesystem::path& path)
+{
+    const auto normal = windows::normal_volume_guid_path(path.native());
+    return normal ? std::filesystem::path(*normal) : path;
+}
+
 RootKind archive_root_kind(const std::filesystem::path& root)
 {
     // GetDriveTypeW tells a drive letter mapped to a network share

@@ -34,6 +34,18 @@ bool is_hex(wchar_t character)
            (character >= L'a' && character <= L'f');
 }
 
+// A path from the root of a drive letter ("Z:\...", or "Z:" alone) whose
+// letter is a network drive.
+bool on_network_drive(std::wstring_view path, const NetworkDriveQuery& network_drive)
+{
+    if (path.size() < 2 || !is_letter(path[0]) || path[1] != L':' || (path.size() > 2 && !is_separator(path[2]))) {
+        return false;
+    }
+    return network_drive(std::wstring{upper(path[0]), L':'});
+}
+
+} // namespace
+
 // "Volume{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}" followed by a separator or
 // nothing, "Volume" in any case: a volume's GUID path behind "\\?\", as
 // mountvol lists it, the only name of a volume that has no drive letter or
@@ -42,6 +54,7 @@ bool names_volume_guid(std::wstring_view path)
 {
     constexpr std::wstring_view volume = L"VOLUME{";
     constexpr std::size_t guid_length = 36;  // 32 hex digits and 4 dashes
+    static_assert(volume.size() + guid_length + 1 == volume_guid_name_length);
     const auto end = volume.size() + guid_length;
     if (path.size() <= end || path[end] != L'}' || (path.size() > end + 1 && !is_separator(path[end + 1]))) {
         return false;
@@ -60,18 +73,6 @@ bool names_volume_guid(std::wstring_view path)
     }
     return true;
 }
-
-// A path from the root of a drive letter ("Z:\...", or "Z:" alone) whose
-// letter is a network drive.
-bool on_network_drive(std::wstring_view path, const NetworkDriveQuery& network_drive)
-{
-    if (path.size() < 2 || !is_letter(path[0]) || path[1] != L':' || (path.size() > 2 && !is_separator(path[2]))) {
-        return false;
-    }
-    return network_drive(std::wstring{upper(path[0]), L':'});
-}
-
-} // namespace
 
 RootKind root_kind(std::wstring_view root, const NetworkDriveQuery& network_drive)
 {
