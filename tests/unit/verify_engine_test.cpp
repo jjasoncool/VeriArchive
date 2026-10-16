@@ -323,7 +323,8 @@ void interrupted_run_resumes_without_rehashing()
 
     // A finished run cannot be resumed again.
     const auto again = fixture.verify(request);
-    CHECK(!again && again.error().kind == va::VerifyStop::Kind::NotFound);
+    CHECK(!again && again.error().kind == va::VerifyStop::Kind::NotFound &&
+          again.error().message == "run " + interrupted->run_id + " is not an interrupted run");
 }
 
 void resume_refused_after_new_revision()

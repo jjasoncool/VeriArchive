@@ -366,6 +366,15 @@ void translation_tests()
           "錯誤：封存 " + uuid + " 未完成的搬移（至「Z:\\範例」）發現新載體上的內容與記錄不符，無法繼續；請以 `archive "
           "abandon-relocation " + uuid + "` 放棄它，再重新搬移");
     CHECK(chinese("new carrier differs; abandon it") == "新載體上的內容不符；請放棄它");
+    // `verify --resume` of an interrupted attempt of a relocation (decision 0026).
+    const std::string run = "5d0f3c1e-8b7a-4c69-9e21-3a4b5c6d7e8f";
+    CHECK(chinese("error: run " + run + " is an interrupted attempt of the unfinished relocation of archive " + uuid +
+                  "; continue it with `archive relocate " + uuid + " <root_path> --resume`") ==
+          "錯誤：執行 " + run + " 是封存 " + uuid + " 未完成的搬移中斷時留下的紀錄；請以 `archive relocate " + uuid +
+              " <root_path> --resume` 繼續");
+    CHECK(chinese("error: run " + run + " is an interrupted attempt of a relocation of archive " + uuid +
+                  " that has ended; nothing is left to resume") ==
+          "錯誤：執行 " + run + " 是封存 " + uuid + " 某次搬移中斷時留下的紀錄，該搬移已結束；沒有可繼續的作業");
     // A cause that a hint follows is translated too, and the uuid after it is
     // carried over.
     CHECK(chinese.format("RELOCATION REFUSED: {}",

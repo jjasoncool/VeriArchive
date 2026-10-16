@@ -113,6 +113,18 @@ struct ResumePoint {
     std::uint32_t revision = 0;
 };
 
+// The relocation (its run_id) that a run is an interrupted attempt of, as the
+// run's counts name it (decision 0026); empty for any other run.
+std::string relocation_of(const VerifyRunRecord& run)
+{
+    const auto counts = nlohmann::json::parse(run.counts_json, nullptr, false);
+    if (!counts.is_object()) {
+        return {};
+    }
+    const auto found = counts.find("relocation");
+    return found != counts.end() && found->is_string() ? found->get<std::string>() : std::string{};
+}
+
 std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, const std::string& run_id)
 {
     const auto setting = store.setting(run_setting(run_id));
@@ -120,6 +132,31 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
         return stop(VerifyStop::Kind::Repository, setting.error().message);
     }
     if (setting->empty()) {
+        // An interrupted attempt of a relocation is recorded INCOMPLETE under
+        // a run of its own, with no "run:<id>" record: the relocation's own
+        // record and checkpoints carry it on, and `archive relocate --resume`
+        // continues it while the relocation is unfinished (decision 0026).
+        const auto run = store.verify_run(run_id);
+        if (!run) {
+            return stop(VerifyStop::Kind::Repository, run.error().message);
+        }
+        const auto relocation = *run ? relocation_of(**run) : std::string{};
+        if (!relocation.empty()) {
+            const auto& archive_uuid = (*run)->archive_uuid;
+            const auto unfinished = store.relocation_recorded(archive_uuid, relocation);
+            if (!unfinished) {
+                return stop(VerifyStop::Kind::Repository, unfinished.error().message);
+            }
+            if (*unfinished) {
+                return stop(VerifyStop::Kind::NotFound,
+                    "run " + run_id + " is an interrupted attempt of the unfinished relocation of archive " +
+                        archive_uuid + "; continue it with `archive relocate " + archive_uuid +
+                        " <root_path> --resume`");
+            }
+            return stop(VerifyStop::Kind::NotFound, "run " + run_id +
+                                                        " is an interrupted attempt of a relocation of archive " +
+                                                        archive_uuid + " that has ended; nothing is left to resume");
+        }
         return stop(VerifyStop::Kind::NotFound, "run " + run_id + " is not an interrupted run");
     }
     const auto json = nlohmann::json::parse(*setting, nullptr, false);

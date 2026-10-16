@@ -907,12 +907,14 @@ void a_resumed_relocation_names_where_it_reads_and_keeps_its_start()
 // of the revision it verifies against, under a run of its own that names the
 // relocation, from when the attempt started, with what it had matched, the
 // items found so far (a photo whose time the copy changed, sample data) and
-// the new carrier's evidence. It is no run for `verify --resume`, and it
-// makes no claim: the archive still has no last verify. A verification of
-// the old carrier stopped before it is no longer listed, as a later
-// verification of the same archive supersedes it (decision 0022); the
-// relocation is. Resumed, it reads only the rest and records the FULL
-// verification of revision 2. The hash chain holds.
+// the new carrier's evidence. It is no run for `verify --resume`, which
+// names `archive relocate --resume` instead, and it makes no claim: the
+// archive still has no last verify. A verification of the old carrier stopped
+// before it is no longer listed, as a later verification of the same archive
+// supersedes it (decision 0022); the relocation is. Resumed, it reads only
+// the rest and records the FULL verification of revision 2. The hash chain
+// holds, and `verify --resume` of the run then says that nothing is left to
+// resume.
 void an_interrupted_attempt_is_recorded_incomplete()
 {
     RelocationFixture fixture(true);
@@ -975,12 +977,17 @@ void an_interrupted_attempt_is_recorded_incomplete()
           items->front().status == "MetadataMismatch");
     CHECK(count_rows(fixture, "media_evidence") == evidence_before + 1);
 
-    // No verification to resume, and no claim about the archive.
+    // No verification to resume: `verify --resume` names the relocation's
+    // resume instead. And no claim about the archive.
     va::VerifyRequest resume_it;
     resume_it.root = fixture.archive.root() / "new";
     resume_it.resume_run = attempt.run_id;
     const auto refused = fixture.verify(resume_it);
-    CHECK(!refused && refused.error().message == "run " + attempt.run_id + " is not an interrupted run");
+    CHECK(!refused && refused.error().kind == va::VerifyStop::Kind::NotFound &&
+          refused.error().message == "run " + attempt.run_id +
+                                         " is an interrupted attempt of the unfinished relocation of archive " +
+                                         fixture.archive_uuid + "; continue it with `archive relocate " +
+                                         fixture.archive_uuid + " <root_path> --resume`");
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     const auto statuses = va::archive_statuses(fixture.store, va::Policy{}, now);
     CHECK(statuses && statuses->size() == 1 && !statuses->front().last_any && !statuses->front().last_full);
@@ -996,6 +1003,11 @@ void an_interrupted_attempt_is_recorded_incomplete()
           all->back().started == attempt.started && all->back().coverage_bytes == sample_bytes);
     const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
     CHECK(chain && chain->runs == 3 && !chain->first_broken_run);
+    // The relocation has ended: nothing is left to resume.
+    const auto ended = fixture.verify(resume_it);
+    CHECK(!ended && ended.error().kind == va::VerifyStop::Kind::NotFound &&
+          ended.error().message == "run " + attempt.run_id + " is an interrupted attempt of a relocation of archive " +
+                                       fixture.archive_uuid + " that has ended; nothing is left to resume");
 }
 
 // R-104: a relocation resumes only while its archive is at the revision it

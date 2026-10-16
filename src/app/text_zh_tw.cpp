@@ -618,6 +618,12 @@ constexpr CatalogEntry entries[] = {
     {"cannot list volumes: {}", "無法列出磁碟區：{}", Match::Cause},
     {"archive {} is not on any attached volume", "封存 {} 不在任何已連接的磁碟區上"},
     {"run {} is not an interrupted run", "執行 {} 不是中斷的執行"},
+    // An interrupted attempt of a relocation, which `verify --resume` does not continue (decision 0026).
+    {"run {} is an interrupted attempt of the unfinished relocation of archive {}; continue it with `archive "
+        "relocate {} <root_path> --resume`",
+        "執行 {} 是封存 {} 未完成的搬移中斷時留下的紀錄；請以 `archive relocate {} <root_path> --resume` 繼續"},
+    {"run {} is an interrupted attempt of a relocation of archive {} that has ended; nothing is left to resume",
+        "執行 {} 是封存 {} 某次搬移中斷時留下的紀錄，該搬移已結束；沒有可繼續的作業"},
     {"run {} has an invalid resume record", "執行 {} 的繼續紀錄無效"},
     {"media copy {} differs from the repository copy", "媒體副本 {} 與儲存庫中的副本不同"},
     {"the media holds revision {}, newer than the repository's {}: "

@@ -966,6 +966,23 @@ std::expected<std::vector<VerifyRunRecord>, IoError> ArchiveStore::verify_runs(c
     }
 }
 
+std::expected<std::optional<VerifyRunRecord>, IoError> ArchiveStore::verify_run(const std::string& run_id)
+{
+    auto statement = database_.prepare(std::string("SELECT ") + run_columns + " FROM verify_runs WHERE run_id = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, run_id);
+    const auto row = statement->step();
+    if (!row) {
+        return std::unexpected(row.error());
+    }
+    if (!*row) {
+        return std::optional<VerifyRunRecord>{};
+    }
+    return std::optional<VerifyRunRecord>(read_run(*statement));
+}
+
 std::expected<HistoryCheck, IoError> ArchiveStore::check_history(const std::string& repository_uuid)
 {
     auto statement = database_.prepare(std::string("SELECT ") + run_columns +

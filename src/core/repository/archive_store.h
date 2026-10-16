@@ -278,6 +278,8 @@ public:
     std::expected<VerifyRunRecord, IoError> append_verify_run(
         VerifyRunRecord run, const std::string& repository_uuid);
     std::expected<std::vector<VerifyRunRecord>, IoError> verify_runs(const Uuid& archive_uuid);
+    // The run recorded under `run_id`, or nothing when there is none.
+    std::expected<std::optional<VerifyRunRecord>, IoError> verify_run(const std::string& run_id);
     std::expected<HistoryCheck, IoError> check_history(const std::string& repository_uuid);
 
     std::expected<void, IoError> insert_verify_items(const std::vector<VerifyItemRecord>& items);
