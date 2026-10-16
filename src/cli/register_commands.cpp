@@ -108,7 +108,7 @@ int register_command(const Arguments& arguments)
     }
 
     RegisterRequest request;
-    request.root = root_path(words[1]);
+    request.root = app::typed_root(words[1]);
     request.resume = arguments.has("--resume") || arguments.value("--resume").has_value();
     request.write_media_copy = arguments.has("--write-media-copy");
     request.label = arguments.value("--label");

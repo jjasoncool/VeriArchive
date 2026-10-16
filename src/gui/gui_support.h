@@ -43,14 +43,10 @@ void set_text(GtkWidget* text_view, const std::string& text);
 void set_margins(GtkWidget* widget, int margin);
 void clear_grid(GtkWidget* grid);
 
-// Path typed in (or chosen into) an entry.
-std::filesystem::path entry_path(GtkWidget* entry);
-
 // The folder or volume root to register or verify, typed in (or chosen into)
-// an entry: without the separators it ends with ("D:\Photos\" is the folder
-// "D:\Photos", while "D:\" stays), through a drive letter made with subst
-// resolved to the folder that letter stands for, whose volume can be
-// identified (decision 0027).
+// an entry, made into a root exactly as the command line makes one
+// (app::typed_root): '/' and '\', "." and "..", the separators it ends with
+// and drive letters made with subst give the same root as there.
 std::filesystem::path entry_root(GtkWidget* entry);
 
 // The archive chosen in a drop-down whose item `offset + i` is uuids[i], or

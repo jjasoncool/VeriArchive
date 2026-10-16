@@ -631,8 +631,8 @@ int relocate(const Arguments& arguments, Opened& opened)
         return report_failure(arguments, status.error());
     }
     // `archive relocate <uuid> --resume <root_path>` reads the root as the option's value.
-    const auto typed_root = arguments.words.size() == 4 ? arguments.words[3] : arguments.value("--resume").value_or("");
-    RelocateRequest request{status->archive.archive_uuid, root_path(typed_root), std::nullopt};
+    const auto root_text = arguments.words.size() == 4 ? arguments.words[3] : arguments.value("--resume").value_or("");
+    RelocateRequest request{status->archive.archive_uuid, app::typed_root(root_text), std::nullopt};
     request.resume = arguments.has("--resume") || arguments.value("--resume").has_value();
     if (const auto io = arguments.value("--io")) {
         if (*io != "hdd" && *io != "ssd") {
@@ -643,7 +643,7 @@ int relocate(const Arguments& arguments, Opened& opened)
     // The error_code overload: a root that cannot be checked is reported, not thrown.
     std::error_code root_error;
     if (!std::filesystem::is_directory(request.root, root_error)) {
-        return report_failure(arguments, {exit_code::usage, "not a directory: " + typed_root});
+        return report_failure(arguments, {exit_code::usage, "not a directory: " + root_text});
     }
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();

@@ -4,6 +4,7 @@
 #include "app/app_context.h"
 #include "app/progress_estimate.h"
 #include "app/text.h"
+#include "app/typed_path.h" // paths and roots typed on the command line, as in the GUI
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
 #include "core/repository/archive_store.h"
@@ -74,17 +75,6 @@ std::expected<Session, Failure> open_session(const Arguments& arguments, bool in
 // A usage failure when the command received an option it does not accept.
 std::optional<Failure> check_options(const Arguments& arguments,
     std::initializer_list<std::string_view> flags, std::initializer_list<std::string_view> values);
-
-// A path typed by the user; relative paths are taken relative to the shell's
-// working directory, as users expect.
-std::filesystem::path user_path(const std::string& word);
-
-// A root path typed by the user (register, verify --full, archive relocate):
-// a user_path without the separators it ends with ("D:\Photos\" is the folder
-// "D:\Photos", while "D:\" stays), through a drive letter made with subst
-// resolved to the folder that letter stands for, whose volume can be
-// identified (decision 0027).
-std::filesystem::path root_path(const std::string& word);
 
 // Whether `word` on the command line names the archive `uuid`: the full uuid,
 // or a prefix of at least 8 characters.

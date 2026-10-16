@@ -49,7 +49,7 @@ int export_sha256sums_command(const Arguments& arguments)
     }
 
     const auto sums = sha256sums(manifest->entries);
-    const auto destination = user_path(*out);
+    const auto destination = app::typed_path(*out);
     if (auto written = write_file_atomically(*session->writer, destination, sums.text); !written) {
         return report_failure(arguments, {exit_code::repository, written.error().message});
     }
@@ -92,7 +92,7 @@ int export_command(const Arguments& arguments)
     }
     const auto files = platform::make_file_system_access();
     const auto exported = export_archive(*store, *files, *session->writer, session->context.repo,
-        *archive_uuid, user_path(*out));
+        *archive_uuid, app::typed_path(*out));
     if (!exported) {
         return report_failure(arguments, {exit_code::failed, exported.error()});
     }
@@ -125,7 +125,7 @@ int import_command(const Arguments& arguments)
     }
     const auto files = platform::make_file_system_access();
     const auto imported = import_manifest(*store, *files, *session->writer, session->context.repo,
-        user_path(arguments.words[1]), arguments.has("--force-rollback"));
+        app::typed_path(arguments.words[1]), arguments.has("--force-rollback"));
     if (!imported) {
         return report_failure(arguments, {exit_code::failed,
             imported.error().failure_class + ": " + imported.error().message});

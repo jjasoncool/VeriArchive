@@ -32,5 +32,6 @@ int main()
     progress_estimate_tests();
     unfinished_operations_tests();
     abandon_registration_tests();
+    typed_path_tests();
     return test_failures == 0 ? 0 : 1;
 }

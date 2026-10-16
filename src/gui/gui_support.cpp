@@ -1,8 +1,7 @@
 #include "gui/gui_support.h"
 
 #include "app/progress_estimate.h"
-#include "common/utf8.h"
-#include "core/engine/candidates.h"
+#include "app/typed_path.h"
 #include "platform/platform_services.h"
 
 #include <algorithm>
@@ -99,14 +98,9 @@ void clear_grid(GtkWidget* grid)
     }
 }
 
-std::filesystem::path entry_path(GtkWidget* entry)
-{
-    return path_from_utf8(gtk_editable_get_text(GTK_EDITABLE(entry)));
-}
-
 std::filesystem::path entry_root(GtkWidget* entry)
 {
-    return platform::resolve_subst_drive(without_trailing_separators(entry_path(entry)));
+    return app::typed_root(gtk_editable_get_text(GTK_EDITABLE(entry)));
 }
 
 std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset)

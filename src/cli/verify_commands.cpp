@@ -119,7 +119,7 @@ int verify_command(const Arguments& arguments)
     if (is_canonical_uuid(arguments.words[1])) {
         request.archive_uuid = arguments.words[1];
     } else {
-        request.root = root_path(arguments.words[1]);
+        request.root = app::typed_root(arguments.words[1]);
     }
     request.strict_metadata = arguments.has("--strict-metadata");
     request.resume_run = arguments.value("--resume");
