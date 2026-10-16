@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "engine_fixture.h"
+#include "manifest_samples.h"
 
 #include "core/engine/compare_archives.h"
 
@@ -337,6 +338,42 @@ void progress_and_cancel()
     fixture.cancel.reset();
 }
 
+// Decision 0032: a comparison compares whole-file hashes, never chunks. The
+// original registered without chunk lines (as V1 registered it) and its copy
+// registered with them, of the same content, are identical; a change in one
+// chunk of the copy is a difference (sample data).
+void a_chunked_and_an_unchunked_copy_are_identical()
+{
+    constexpr std::uint64_t chunk_size = 64 * 1024;
+    TwoArchives fixture;
+    fixture.add_to_both("video/big.bin", test::patterned(3 * chunk_size + 5, 7));
+    fixture.add_to_both("notes.txt", "notes (sample data)");
+    va::RegisterRequest original;
+    original.root = fixture.archive.root() / "a";
+    original.chunk_size = 0;
+    va::RegisterRequest copy;
+    copy.root = fixture.archive.root() / "b";
+    copy.chunk_size = chunk_size;
+    const auto a = fixture.register_root(original);
+    const auto b = fixture.register_root(copy);
+    CHECK(a && a->counts.chunks == 0 && b && b->counts.chunks == 4);
+    if (!a || !b) {
+        return;
+    }
+    const auto comparison = fixture.compare_ok(a->archive_uuid, b->archive_uuid);
+    CHECK(comparison.result == "IDENTICAL" && comparison.same == 2 && comparison.differences.empty());
+
+    auto changed = test::patterned(3 * chunk_size + 5, 7);
+    changed[2 * chunk_size + 1] ^= 0x01;
+    fixture.archive.node("b/video/big.bin").content = changed;
+    auto again = copy;
+    again.new_revision = true;
+    CHECK(fixture.register_root(again).has_value());
+    const auto changed_comparison = fixture.compare_ok(a->archive_uuid, b->archive_uuid);
+    CHECK(changed_comparison.result == "DIFFERENT" &&
+          (lines_of(changed_comparison) == std::vector<std::string>{"video/big.bin Modified content differs"}));
+}
+
 } // namespace
 
 void compare_archives_tests()
@@ -351,4 +388,5 @@ void compare_archives_tests()
     tampered_manifest_is_refused();
     unknown_archive_is_refused();
     progress_and_cancel();
+    a_chunked_and_an_unchunked_copy_are_identical();
 }

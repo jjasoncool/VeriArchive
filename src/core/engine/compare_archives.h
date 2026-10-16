@@ -17,6 +17,10 @@
 // "x" TypeChanged (f -> d) plus "x/a.txt" New; "x" as an empty directory in A
 // and "x/a.txt" in B is only "x/a.txt" New.
 //
+// Content is compared by the whole-file hashes, BLAKE3 and SHA-256, never by
+// chunk hashes (decision 0032): an original registered by V1, without chunk
+// lines, and its copy registered with them are identical when their content is.
+//
 // What is compared is what each registration read. Whether the disks still
 // hold it is what FULL verification of each archive proves.
 #include "core/interfaces.h"

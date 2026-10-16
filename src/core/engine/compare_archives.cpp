@@ -127,6 +127,9 @@ public:
         } else if (reason_b) {
             add(a, "Unbaselined", unreadable_detail('B', *reason_b));
         } else if (a.type == 'd' || (a.b3 == b.b3 && a.sha256 == b.sha256)) {
+            // The whole-file hashes, never chunk hashes (decision 0032): an
+            // archive registered by V1 has none, and the same content at
+            // another chunk size has others.
             ++result_.same; // an empty directory has no content: being there is all
         } else if (a.type == 'l') {
             // Decision 0008: a driver may translate an absolute target when the

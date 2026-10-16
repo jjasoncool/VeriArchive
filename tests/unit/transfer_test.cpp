@@ -838,6 +838,63 @@ void import_and_export_report_progress_and_stop_when_cancelled()
     CHECK(entries_read == 2 && copied != importing.reports.end());
 }
 
+// Decision 0032: a revision that registration wrote with chunk lines is
+// exported with them, and the repository that imports it indexes its chunk
+// rows and Merkle root as the one that registered it (sample data).
+void chunk_lines_travel_with_export_and_import()
+{
+    constexpr std::uint64_t chunk_size = 64 * 1024;
+    test::EngineFixture source;
+    const auto big = test::patterned(3 * chunk_size + 11, 5);
+    source.archive.add_file("video/big.bin", big);
+    source.archive.add_file("a.txt", "a (sample data)");
+    va::RegisterRequest request;
+    request.root = source.archive.root();
+    request.chunk_size = chunk_size;
+    const auto registered = source.register_root(request);
+    CHECK(registered && registered->counts.chunks == 4);
+    if (!registered) {
+        return;
+    }
+    const auto& layout = source.repository.context.repo;
+    const auto exported = va::export_archive(source.store, *source.repository.files, *source.repository.writer,
+        layout, registered->archive_uuid, out_directory(source, "export-chunked"), test::not_cancelled(),
+        test::no_progress());
+    CHECK(exported.has_value());
+    if (!exported) {
+        return;
+    }
+    CHECK(read_bytes(exported->manifest) == read_bytes(registered->manifest));
+
+    test::TestRepository target;
+    auto store = target.store();
+    const auto imported =
+        va::import_manifest(store, *target.files, *target.writer, target.context.repo, exported->manifest, false,
+            test::not_cancelled(), test::no_progress());
+    CHECK(imported && imported->revision == 1);
+    const auto rows_of = [](va::ArchiveStore& from, const va::Uuid& archive_uuid) {
+        std::map<std::string, std::vector<std::string>> chunks;
+        if (const auto rows = from.file_rows(archive_uuid, 1)) {
+            for (const auto& row : *rows) {
+                chunks[row.path.p] = row.chunks;
+            }
+        }
+        return chunks;
+    };
+    const auto source_rows = rows_of(source.store, registered->archive_uuid);
+    CHECK(source_rows.size() == 2 && source_rows.at("video/big.bin") == test::chunk_hashes(big, chunk_size));
+    CHECK(rows_of(store, registered->archive_uuid) == source_rows);
+    const auto source_revision = source.store.revision(registered->archive_uuid, 1);
+    const auto target_revision = store.revision(registered->archive_uuid, 1);
+    CHECK(source_revision && *source_revision && target_revision && *target_revision &&
+          (*source_revision)->merkle_root.size() == 64 &&
+          (*target_revision)->merkle_root == (*source_revision)->merkle_root);
+    const auto loaded = va::load_recorded_manifest(store, *target.files, target.context.repo,
+        registered->archive_uuid, 1);
+    CHECK(loaded && loaded->header.chunk_size == chunk_size && loaded->entries.size() == 2 &&
+          loaded->entries.back().chunks == test::chunk_hashes(big, chunk_size));
+}
+
 } // namespace
 
 void transfer_tests()
@@ -853,4 +910,5 @@ void transfer_tests()
     an_import_copies_the_bytes_it_validated();
     an_import_indexes_the_entries_it_validated();
     import_and_export_report_progress_and_stop_when_cancelled();
+    chunk_lines_travel_with_export_and_import();
 }
