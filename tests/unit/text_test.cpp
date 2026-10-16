@@ -398,6 +398,14 @@ void translation_tests()
           "完成該註冊，或以 `archive abandon-registration " + uuid + "` 放棄它後再匯入一次）");
     CHECK(chinese("ManifestHashMismatch: the manifest changed while it was imported; nothing was imported") ==
           "清單檔雜湊不符：清單檔在匯入期間被變更；未匯入任何內容");
+    // An import that puts back the manifest recorded, or finds its record
+    // changed meanwhile (decision 0028).
+    CHECK(chinese.format("Restored the manifest of {} ({}) revision {}: the file is the one the repository recorded.",
+              "ARCH-0007", uuid, 2) ==
+          "已還原 ARCH-0007（" + uuid + "）版次 2 的清單檔：此檔案就是儲存庫所記錄的那一份。");
+    CHECK(chinese("error: the repository's record of revision 2 of archive " + uuid +
+                  " changed while this import ran; nothing was imported (import it again)") ==
+          "錯誤：儲存庫中封存 " + uuid + " 版次 2 的紀錄已在這次匯入期間變更；未匯入任何內容（請再匯入一次）");
     // A registration or relocation made for an older revision never records
     // (decision 0030); the revisions and the root keep their places.
     CHECK(chinese("error: the unfinished registration of archive " + uuid + " (root \"Z:\\範例\") would create "

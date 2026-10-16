@@ -97,6 +97,71 @@ std::expected<std::unique_ptr<IOutputFile>, ImportFailure> stage_manifest(IFileS
     return std::move(*output);
 }
 
+// Whether the manifest that `reader` opened is the one the repository
+// recorded as `record`: its line 1 has the BLAKE3 recorded for it, as a
+// recorded manifest is told everywhere (decision 0028, point 1). The reader
+// validated the body against that line (R-62), which names the body's BLAKE3
+// and length, so the file's bytes are the recorded manifest's. The index's
+// copy of the header and its record of the body are the index's, not the
+// manifest's: where they differ from that line, the index differs (decision
+// 0028, point 2), which the manifest put back does not change and a rebuild
+// of the index repairs.
+bool is_the_one_recorded(const RevisionRecord& record, const ManifestReader& reader)
+{
+    return reader.header_blake3() == record.header_blake3;
+}
+
+// Puts the manifest recorded as `record` back at `destination`, its place in
+// the repository, from `source`, a file that is that manifest
+// (is_the_one_recorded), where the repository's copy is missing, cannot be
+// read or is not the one recorded (decision 0028). It is staged as an import
+// stages a manifest and named in a write transaction that finds the record
+// still naming its line 1, as decision 0030 names one; the record and the
+// index stay as they are.
+std::expected<ImportResult, ImportFailure> restore_manifest(ArchiveStore& store, IFileSystemAccess& files,
+    IFileWriter& writer, const std::filesystem::path& source, const std::filesystem::path& destination,
+    const RevisionRecord& record, const ManifestReader& reader, ImportResult result)
+{
+    std::error_code error;
+    std::filesystem::create_directories(destination.parent_path(), error);
+    auto staged = stage_manifest(files, writer, source, destination, reader.header_line(), reader.header());
+    if (!staged) {
+        return std::unexpected(staged.error());
+    }
+    bool changed = false; // the record is gone, or names another line 1, by now
+    const auto named = [&]() -> std::expected<void, IoError> {
+        // As an import's record: another operation's record of a large
+        // archive holds the write lock for seconds.
+        const CancelToken not_cancelled;
+        if (auto begun = store.begin_waiting(record_lock_wait, not_cancelled); !begun) {
+            return begun;
+        }
+        const auto now = store.revision(record.archive_uuid, record.revision);
+        if (!now) {
+            return std::unexpected(now.error());
+        }
+        if (!*now || !is_the_one_recorded(**now, reader)) {
+            changed = true;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the record changed"});
+        }
+        if (auto renamed = (*staged)->commit(); !renamed) {
+            return renamed;
+        }
+        return store.commit();
+    }();
+    if (!named) {
+        store.rollback(); // the staged copy goes with `staged`
+        if (changed) {
+            return refuse("the repository's record of revision " + std::to_string(record.revision) +
+                          " of archive " + record.archive_uuid +
+                          " changed while this import ran; nothing was imported (import it again)");
+        }
+        return fail("RepositoryError", named.error().message);
+    }
+    result.restored = true;
+    return result;
+}
+
 } // namespace
 
 std::string identity_file_json(const Uuid& archive_uuid, const std::string& label,
@@ -197,17 +262,25 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     const auto same = std::find_if(known->begin(), known->end(),
         [&](const RevisionRecord& record) { return record.revision == header.revision; });
     if (same != known->end()) {
-        const auto incoming = read_whole_file(files, manifest);
         const auto stored = read_whole_file(files, destination);
-        if (!incoming || !stored) {
-            return fail("RepositoryError", "cannot compare with the stored manifest");
+        if (stored) {
+            const auto incoming = read_whole_file(files, manifest);
+            if (!incoming) {
+                return fail("RepositoryError", "cannot compare with the stored manifest");
+            }
+            if (*incoming == *stored) {
+                result.already_present = true;
+                return result;
+            }
         }
-        if (*incoming != *stored) {
+        // The manifest that the repository holds is missing, cannot be read,
+        // or differs from this file. This file puts it back where it is the
+        // one recorded (decision 0028), as a backup of the repository would.
+        if (!is_the_one_recorded(*same, *reader)) {
             return fail("ManifestHashMismatch",
                 "revision " + std::to_string(header.revision) + " is already known with different bytes");
         }
-        result.already_present = true;
-        return result;
+        return restore_manifest(store, files, writer, manifest, destination, *same, *reader, result);
     }
 
     // R-15: never go back to an older revision without an explicit override.

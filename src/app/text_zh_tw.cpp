@@ -291,6 +291,9 @@ constexpr CatalogEntry entries[] = {
     {"Imported {} ({}) revision {} as a new archive.",
         "已匯入 {}（{}）版次 {}，並建立為新的封存。"},
     {"Imported {} ({}) revision {}.", "已匯入 {}（{}）版次 {}。"},
+    // A recorded revision's manifest put back by an import (decision 0028).
+    {"Restored the manifest of {} ({}) revision {}: the file is the one the repository recorded.",
+        "已還原 {}（{}）版次 {} 的清單檔：此檔案就是儲存庫所記錄的那一份。"},
     // src/app/progress_estimate.cpp: the progress of hashing, after "hashing: "
     // (CLI) or "Hashing: " (GUI), e.g.
     // "計算雜湊中：2.16 TiB / 9.44 TiB（23%）・每秒 240 MiB・約剩 8～9 小時".
@@ -866,6 +869,9 @@ constexpr CatalogEntry entries[] = {
         "and import again)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未匯入任何內容（請以 `register --resume` "
         "完成該註冊，或以 `archive abandon-registration {}` 放棄它後再匯入一次）"},
+    {"the repository's record of revision {} of archive {} changed while this import ran; nothing was imported "
+        "(import it again)",
+        "儲存庫中封存 {1} 版次 {0} 的紀錄已在這次匯入期間變更；未匯入任何內容（請再匯入一次）"},
     // src/core/engine/recorded_manifest.cpp
     {"revision {} is not recorded", "版次 {} 沒有紀錄"},
     {"the manifest differs from the repository record", "清單檔與儲存庫的紀錄不符"},

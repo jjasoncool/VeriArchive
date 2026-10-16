@@ -3,7 +3,10 @@
 //    revision (R-67); check it from the archive root with `sha256sum -c FILE`.
 //  - `export <uuid> --out DIR` and `import <file.vam> [--force-rollback]` (R-87;
 //    an import exits 12 when another operation records its revision first, or
-//    a registration with saved files creates it, decision 0030).
+//    a registration with saved files creates it, decision 0030; an import of a
+//    recorded revision whose manifest is missing, cannot be read or is not the
+//    one recorded restores it from a file that is the one recorded, decision
+//    0028).
 #include "cli/commands.h"
 
 #include "common/utf8.h"
@@ -141,7 +144,14 @@ int import_command(const Arguments& arguments)
     if (arguments.json) {
         print_json({{"archive_uuid", imported->archive_uuid}, {"label", imported->label},
             {"revision", imported->revision}, {"already_present", imported->already_present},
-            {"new_archive", imported->new_archive}});
+            {"new_archive", imported->new_archive}, {"restored", imported->restored}});
+    } else if (imported->restored) {
+        // Decision 0028: the repository's manifest of a recorded revision was
+        // missing, could not be read or was not the one recorded.
+        std::cout << arguments.text.format(
+                         "Restored the manifest of {} ({}) revision {}: the file is the one the repository recorded.",
+                         imported->label, imported->archive_uuid, imported->revision)
+                  << '\n';
     } else if (imported->already_present) {
         std::cout << arguments.text.format("Already present: {} ({}) revision {}, identical bytes.",
                          imported->label, imported->archive_uuid, imported->revision)

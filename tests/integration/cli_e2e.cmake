@@ -776,7 +776,9 @@ run_cli("0;2" verify --full "${ROOT}")
 # back to revision 1, and is handled as one whose manifest cannot be used:
 # listed with the problem (exit 2), FAILED by its uuid at revision 2 without
 # reading the media (exit 3), and its root stops (exit 11), naming it.
-# Restored, the manifest verifies at revision 2 with no other rebuild.
+# Restored from its export with `import`, which puts back a file that is the
+# one recorded and says so, the manifest verifies at revision 2 with no other
+# rebuild; imported again, it is already present.
 file(RENAME "${RECORDED}" "${RECORDED}.away")
 run_cli("2" repo rebuild-index --json)
 string(JSON rebuild_kept GET "${last_output}" revisions_kept)
@@ -794,7 +796,18 @@ string(JSON skipped_read GET "${last_output}" media_read)
 string(JSON skipped_verified_revision GET "${last_output}" revision)
 run_cli("11" --lang en verify --full "${ROOT}")
 string(FIND "${last_errors}" "this root may belong to archive ${archive_label} (${archive_uuid}), whose manifest cannot be used: the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing;" skipped_by_root)
-file(RENAME "${RECORDED}.away" "${RECORDED}")
+run_cli("0" --lang en import "${WORK}/export2/r0002.vam")
+string(FIND "${last_output}" "Restored the manifest of ${archive_label} (${archive_uuid}) revision 2: the file is the one the repository recorded." restored_said)
+run_cli("0" import "${WORK}/export2/r0002.vam" --json)
+string(JSON restored_again GET "${last_output}" restored)
+string(JSON present_again GET "${last_output}" already_present)
+file(READ "${RECORDED}" restored_bytes HEX)
+file(READ "${RECORDED}.away" away_bytes HEX)
+file(REMOVE "${RECORDED}.away")
+if(restored_said EQUAL -1 OR restored_again OR NOT present_again OR NOT restored_bytes STREQUAL away_bytes)
+    message(FATAL_ERROR "import of the export of a revision whose manifest is missing: said ${restored_said}, "
+        "again restored ${restored_again} and present ${present_again}")
+endif()
 if(NOT rebuild_kept EQUAL 1 OR kept_chinese EQUAL -1 OR kept_english EQUAL -1 OR NOT skipped_revision EQUAL 2
         OR NOT skipped_kind STREQUAL "missing"
         OR NOT skipped_message STREQUAL "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing; restore it from a backup of the repository"
@@ -892,5 +905,29 @@ if(last_output MATCHES "unfinished_")
     message(FATAL_ERROR "an abandoned registration or relocation is still unfinished:\n${last_output}")
 endif()
 set(GLOBAL --config "${WORK}/config.json")
+
+# A media copy restores a manifest as an export does (decision 0028): a folder
+# (sample data) registered twice with a media copy, whose manifest of
+# revision 2 is then gone from the repository and the index rebuilt. `import`
+# of the copy on the media puts it back, saying so in Chinese, and the
+# archive verifies at revision 2.
+set(MEDIA "${WORK}/media-sample")
+file(WRITE "${MEDIA}/a.txt" "media sample a\n")
+run_cli("0" register "${MEDIA}" --write-media-copy --json)
+string(JSON media_uuid GET "${last_output}" archive_uuid)
+string(JSON media_label GET "${last_output}" label)
+file(WRITE "${MEDIA}/b.txt" "media sample b\n")
+run_cli("0;2" register "${MEDIA}" --new-revision --write-media-copy)
+file(REMOVE "${WORK}/repo/manifests/${media_uuid}/r0002.vam")
+run_cli("2" repo rebuild-index)
+run_cli("0" import "${MEDIA}/.veriarchive/r0002.vam")
+string(FIND "${last_output}" "已還原 ${media_label}（${media_uuid}）版次 2 的清單檔：此檔案就是儲存庫所記錄的那一份。" media_restored)
+run_cli("0;2" verify --full "${media_uuid}" --json)
+string(JSON media_result GET "${last_output}" result)
+string(JSON media_revision GET "${last_output}" revision)
+if(media_restored EQUAL -1 OR NOT media_result MATCHES "^PASSED" OR NOT media_revision EQUAL 2)
+    message(FATAL_ERROR "import of a media copy of a revision whose manifest is missing: ${media_result} at "
+        "revision ${media_revision}")
+endif()
 
 message(STATUS "veriarchive-cli end-to-end test passed")

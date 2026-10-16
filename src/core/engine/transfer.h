@@ -28,13 +28,19 @@ struct ImportResult {
     std::uint32_t revision = 0;
     bool already_present = false;   // the same bytes were already in the repository
     bool new_archive = false;
+    // The revision was recorded, and its manifest in the repository was
+    // missing, could not be read or was not the one recorded: the file
+    // imported, which is the one recorded, was put back at its place
+    // (decision 0028). The record and the index stay as they were.
+    bool restored = false;
 };
 
 struct ImportFailure {
     // Failed: the manifest cannot be imported. Refused: another operation
     // recorded its revision while this import ran, or an unfinished
-    // registration with saved files creates it; nothing was imported
-    // (decision 0030, exit 12).
+    // registration with saved files creates it (decision 0030), or the record
+    // of the revision whose manifest it restores changed meanwhile (decision
+    // 0028); nothing was imported (exit 12).
     enum class Kind { Failed, Refused };
     std::string failure_class;      // ManifestHashMismatch | ManifestRevisionRollback | RepositoryError; empty when refused
     std::string message;
@@ -47,6 +53,14 @@ struct ImportFailure {
 // and the index, and names the manifest last: a recorded manifest is never
 // replaced. In the same transaction it removes the plan of a registration and
 // the record of a relocation that create the revision, as their own records do.
+//
+// A revision that is recorded already is compared with the manifest that the
+// repository holds (R-87): the same bytes are already present. Where that
+// manifest is missing, cannot be read or differs, the file restores it if it
+// is the one recorded (its line 1 has the BLAKE3 recorded for it, and its body
+// is the one that line names, decision 0028): staged the same way, it is
+// named in a write transaction that finds the record still naming that line,
+// and nothing else changes. Any other file is a ManifestHashMismatch.
 std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     IFileSystemAccess& files, IFileWriter& writer, const RepositoryLayout& layout,
     const std::filesystem::path& manifest, bool force_rollback);

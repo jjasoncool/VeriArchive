@@ -510,6 +510,163 @@ void the_archive_keeps_the_root_of_its_revision()
     CHECK(archive && *archive && (*archive)->current_revision == 2 && (*archive)->root_subpath == "new");
 }
 
+// The file names in `directory`.
+std::set<std::string> names_in(const std::filesystem::path& directory)
+{
+    std::set<std::string> names;
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
+        names.insert(va::path_to_utf8(entry.path().filename()));
+    }
+    return names;
+}
+
+// Decision 0028: `import` of an export or a media copy of a recorded
+// revision puts its manifest back where the repository's copy is missing,
+// cannot be read or is not the one recorded, as restoring it from a backup of
+// the repository does, so that the record that repo rebuild-index kept is
+// what the manifest is checked against. An archive registered twice (sample
+// data), exported at revision 2, whose manifest of revision 2 is then gone
+// and the index rebuilt: the export imported restores it (the record and its
+// index unchanged), the archive lists no problem and verifies at revision 2,
+// and the same export imported again is already present. Gone again, a copy
+// of it as the media holds one (sample) restores it without a rebuild; with
+// one byte of its body changed, the export restores it as well. A file that
+// is not the one recorded (its header line written otherwise, sample data)
+// is refused (ManifestHashMismatch) and changes nothing. Where the record
+// changes while the file is copied (sample damage: it is removed), nothing is
+// restored (refused, exit 12); imported again, the file records the revision
+// as any import does.
+void an_import_restores_the_manifest_recorded()
+{
+    test::EngineFixture fixture;
+    const auto archive_uuid = registered_twice(fixture);
+    const auto& layout = fixture.repository.context.repo;
+    auto& files = *fixture.repository.files;
+    auto& writer = *fixture.repository.writer;
+    const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+    const auto kept = read_file(second);
+    const auto exported =
+        va::export_archive(fixture.store, files, writer, layout, archive_uuid, layout.root.parent_path() / "export");
+    CHECK(exported.has_value());
+    if (!exported) {
+        return;
+    }
+    const auto media_copy = layout.root.parent_path() / "SAMPLE media" / ".veriarchive" / "r0002.vam";
+    std::filesystem::create_directories(media_copy.parent_path());
+    std::ofstream(media_copy, std::ios::binary) << kept;
+    const auto record_before = fixture.store.revision(archive_uuid, 2);
+    const auto rows_before = fixture.store.file_row_count(archive_uuid, 2);
+    CHECK(record_before && *record_before && rows_before && rows_before->files == 2);
+    const auto import = [&](const std::filesystem::path& source) {
+        return va::import_manifest(fixture.store, files, writer, layout, source, false);
+    };
+    const auto restored_as_recorded = [&](const char* what) {
+        CHECK(read_file(second) == kept);
+        CHECK((names_in(second.parent_path()) == std::set<std::string>{"r0001.vam", "r0002.vam"}));
+        const auto record = fixture.store.revision(archive_uuid, 2);
+        CHECK(record && *record && record_before && *record_before &&
+              (*record)->header_blake3 == (*record_before)->header_blake3 &&
+              (*record)->header_json == (*record_before)->header_json &&
+              (*record)->imported_from == (*record_before)->imported_from);
+        const auto rows = fixture.store.file_row_count(archive_uuid, 2);
+        CHECK(rows && rows_before && rows->files == rows_before->files);
+        const auto status = listed(fixture);
+        CHECK(status && status->header && !status->unusable_manifest);
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = archive_uuid;
+        const auto verified = fixture.verify(by_uuid);
+        const bool passed = verified && verified->result == "PASSED" && verified->revision == 2;
+        CHECK(passed);
+        if (!passed) {
+            std::cerr << "  verified after a restore from " << what << ": "
+                      << (verified ? verified->result : verified.error().message) << '\n';
+        }
+    };
+
+    std::filesystem::remove(second);
+    const auto report = va::rebuild_index(fixture.store, files, layout);
+    CHECK(report && report->revisions_kept == 1);
+    const auto from_export = import(exported->manifest);
+    CHECK(from_export && from_export->restored && !from_export->already_present && !from_export->new_archive &&
+          from_export->revision == 2);
+    if (!from_export) {
+        std::cerr << "  import of the export: " << from_export.error().message << '\n';
+    }
+    restored_as_recorded("the export");
+    const auto again = import(exported->manifest);
+    CHECK(again && again->already_present && !again->restored);
+
+    std::filesystem::remove(second);
+    const auto from_media = import(media_copy);
+    CHECK(from_media && from_media->restored);
+    restored_as_recorded("the media copy");
+
+    auto changed = kept;
+    changed[changed.size() - 5] ^= 0x01;
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << changed;
+    const auto over_changed = import(exported->manifest);
+    CHECK(over_changed && over_changed->restored);
+    restored_as_recorded("the export, over a changed manifest");
+
+    // Not the one recorded: refused, whether the repository's copy is gone
+    // or changed, and nothing is written.
+    auto other = kept;
+    const auto host = other.find("\"host\":\"");
+    CHECK(host != std::string::npos && host < other.find('\n'));
+    other.insert(host + 8, "another-");
+    const auto other_path = layout.root.parent_path() / "another export" / "r0002.vam";
+    std::filesystem::create_directories(other_path.parent_path());
+    std::ofstream(other_path, std::ios::binary) << other;
+    for (const bool gone : {true, false}) {
+        if (gone) {
+            std::filesystem::remove(second);
+        } else {
+            std::ofstream(second, std::ios::binary | std::ios::trunc) << changed;
+        }
+        const auto refused = import(other_path);
+        CHECK(!refused && refused.error().kind == va::ImportFailure::Kind::Failed &&
+              refused.error().failure_class == "ManifestHashMismatch" &&
+              refused.error().message == "revision 2 is already known with different bytes");
+        CHECK(gone ? !std::filesystem::exists(second) : read_file(second) == changed);
+        CHECK((names_in(second.parent_path()) ==
+               (gone ? std::set<std::string>{"r0001.vam"} : std::set<std::string>{"r0001.vam", "r0002.vam"})));
+    }
+
+    // The record changes while the file is copied.
+    std::filesystem::remove(second);
+    test::StagingHookWriter removes_the_record(writer, [&] {
+        fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2");
+    });
+    const auto lost =
+        va::import_manifest(fixture.store, files, removes_the_record, layout, exported->manifest, false);
+    CHECK(!lost && lost.error().kind == va::ImportFailure::Kind::Refused &&
+          lost.error().message == "the repository's record of revision 2 of archive " + archive_uuid +
+                                      " changed while this import ran; nothing was imported (import it again)");
+    CHECK(names_in(second.parent_path()) == std::set<std::string>{"r0001.vam"});
+    const auto recorded = import(exported->manifest);
+    CHECK(recorded && !recorded->restored && !recorded->already_present && recorded->revision == 2);
+    CHECK(read_file(second) == kept);
+
+    // Where only the index differs from the manifest (its copy of the header,
+    // sample damage), the file is still the one recorded, its line 1 having
+    // the BLAKE3 recorded for it: it is put back, the list then says to
+    // rebuild the index, and the rebuild repairs it.
+    std::filesystem::remove(second);
+    fixture.repository.execute(
+        "UPDATE archive_revisions SET header_json = 'not the header (sample damage)' WHERE revision = 2");
+    const auto despite_the_index = import(exported->manifest);
+    CHECK(despite_the_index && despite_the_index->restored);
+    CHECK(read_file(second) == kept);
+    auto status = listed(fixture);
+    CHECK(status && status->unusable_manifest &&
+          status->unusable_manifest->kind == va::UnusableManifest::Kind::IndexDiffers);
+    const auto repaired = va::rebuild_index(fixture.store, files, layout);
+    CHECK(repaired && repaired->skipped.empty() && repaired->revisions == 2);
+    status = listed(fixture);
+    CHECK(status && status->header && !status->unusable_manifest);
+}
+
 } // namespace
 
 void rebuild_index_tests()
@@ -520,4 +677,5 @@ void rebuild_index_tests()
     a_manifest_that_cannot_be_read_keeps_its_revision();
     an_archive_is_at_the_latest_manifest_its_folder_names();
     the_archive_keeps_the_root_of_its_revision();
+    an_import_restores_the_manifest_recorded();
 }
