@@ -627,6 +627,10 @@ endif()
 set(GLOBAL --config "${WORK}/config.json")
 run_cli("0" archive show "${archive_prefix}" --json)
 string(JSON archive_label GET "${last_output}" label)
+# How matching sees the copy's folder: MATCH where its volume shows a device
+# serial, MATCH_WEAK where it shows none (as in containers).
+run_cli("0;2" verify --full "${COPY}" --json)
+string(JSON copy_identity GET "${last_output}" identity result)
 set(RECORDED "${WORK}/repo/manifests/${archive_uuid}/r0002.vam")
 # Kept byte for byte: file(WRITE) may write other line ends.
 file(COPY_FILE "${RECORDED}" "${RECORDED}.kept")
@@ -643,6 +647,23 @@ run_cli("2" --lang en archive show "${archive_prefix}")
 set(shown "${last_output}")
 run_cli("11" --lang en verify --full "${ROOT}")
 set(verified "${last_errors}")
+# Decision 0028, point 4: the copy's folder, plainly the copy's (a MATCH of
+# it at its root), verifies meanwhile; with no device serial to compare
+# (MATCH_WEAK), a clone of its volume could be the archive's, and it stops,
+# naming the archive.
+if(copy_identity STREQUAL "MATCH")
+    run_cli("0;2" verify --full "${COPY}" --json)
+    string(JSON copy_verified GET "${last_output}" archive_uuid)
+    if(NOT copy_verified STREQUAL copy_uuid)
+        message(FATAL_ERROR "the copy's folder while another archive's manifest cannot be used:\n${last_output}")
+    endif()
+else()
+    run_cli("11" --lang en verify --full "${COPY}")
+    string(FIND "${last_errors}" "this root may belong to archive ${archive_label} (${archive_uuid})" copy_stopped)
+    if(copy_stopped EQUAL -1)
+        message(FATAL_ERROR "the copy's folder (${copy_identity}) while another archive's manifest cannot be used:\n${last_errors}")
+    endif()
+endif()
 run_cli("3" --lang en verify --full "${archive_uuid}" --json)
 set(failed_json "${last_output}")
 run_cli("3" verify --full "${archive_uuid}")

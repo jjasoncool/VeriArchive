@@ -1126,10 +1126,11 @@ void a_named_archive_is_never_the_one_that_may_be_at_a_root()
 // verifies, and its status reads with its header, as `archive show` reads it,
 // and every archive's label without one, as `history` and the GUI's archive
 // choices read them. A named by its uuid FAILS on its manifest, recorded
-// (decision 0028). By root, every archive's latest carrier is needed (A's
-// root, which only its manifest names, may be this one): B's verification by
-// root stops, naming A, what is wrong with its manifest, and to verify A by
-// its uuid, and records nothing.
+// (decision 0028). By root, every archive's latest carrier is needed where
+// the root could be A's, which only its manifest names: A's root stops,
+// naming A, what is wrong with its manifest, and to verify A by its uuid,
+// and records nothing; B's root, plainly B's (its MATCH at its root),
+// verifies (point 4).
 void a_named_archive_reads_no_other_manifest()
 {
     for (const bool gone : {true, false}) {
@@ -1175,14 +1176,120 @@ void a_named_archive_reads_no_other_manifest()
         const auto own = fixture.verify(a_by_uuid);
         CHECK(own && own->archive_uuid == a->archive_uuid && own->result == "FAILED" && !own->media_read &&
               own->warnings == std::vector<std::string>{"manifest: " + message});
-        const auto b_by_root = fixture.verify(fixture.archive.root() / "b");
-        CHECK(!b_by_root && b_by_root.error().kind == va::VerifyStop::Kind::Repository &&
-              b_by_root.error().message ==
+        const auto a_by_root = fixture.verify(fixture.archive.root() / "a");
+        CHECK(!a_by_root && a_by_root.error().kind == va::VerifyStop::Kind::Repository &&
+              a_by_root.error().message ==
                   root_may_belong_to(a->label, a->archive_uuid, manifest_of(a->archive_uuid) + " " + what));
+        const auto b_by_root = fixture.verify(fixture.archive.root() / "b");
+        CHECK(b_by_root && b_by_root->archive_uuid == b->archive_uuid && b_by_root->result == "PASSED");
         const auto a_runs = fixture.store.verify_runs(a->archive_uuid);
         const auto b_runs = fixture.store.verify_runs(b->archive_uuid);
-        CHECK(a_runs && a_runs->size() == 1 && a_runs->front().result == "FAILED" && b_runs && b_runs->size() == 1);
+        CHECK(a_runs && a_runs->size() == 1 && a_runs->front().result == "FAILED" && b_runs && b_runs->size() == 2);
     }
+}
+
+// Decision 0028, point 4: an archive whose latest manifest cannot be used
+// stops a verification by root only where the root could be its. Two
+// archives on one volume (sample data): A at /vol/a, whose manifest is gone,
+// and B at /vol/b. B's root, whose volume has the filesystem id and the
+// device that B's manifest records (MATCH), is B's: it verifies, also with B
+// retired, and with the index's record of A's manifest lost as well. Every
+// other root stops, naming A, recording nothing (no run, no media
+// evidence): A's own root and a folder that is no archive's root (UNKNOWN
+// among the others), and B's root with no device serial to compare
+// (MATCH_WEAK: a sector-by-sector clone reads the same), with no filesystem
+// id to compare (MATCH_WEAK by the device: a later filesystem on it reads the
+// same), on another device (MIGRATED), on another filesystem of its device
+// (MISMATCH), with an identity file that names A, and registered twice
+// (AMBIGUOUS). With A's manifest restored, A's root verifies.
+void a_damaged_archive_stops_only_a_root_that_could_be_its()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("a/one.txt", "a (sample data)");
+    fixture.archive.add_file("b/two.txt", "b (sample data)");
+    fixture.archive.add_file("c/three.txt", "c (sample data)");
+    const auto a = fixture.register_root(fixture.archive.root() / "a");
+    const auto b = fixture.register_root(fixture.archive.root() / "b");
+    CHECK(a && b);
+    if (!a || !b) {
+        return;
+    }
+    const auto& layout = fixture.repository.context.repo;
+    const auto path = va::manifest_path(layout.manifests(), a->archive_uuid, 1);
+    const auto kept = file_bytes(path);
+    std::filesystem::remove(path);
+    const auto stopped = root_may_belong_to(a->label, a->archive_uuid, manifest_of(a->archive_uuid) + " is missing");
+    const auto stops = [&](const std::filesystem::path& root, const char* what) {
+        const auto runs = count_rows(fixture, "verify_runs");
+        const auto evidence = count_rows(fixture, "media_evidence");
+        const auto verified = fixture.verify(root);
+        CHECK(!verified && verified.error().kind == va::VerifyStop::Kind::Repository &&
+              verified.error().message == stopped);
+        if (verified) {
+            std::cerr << "  " << what << ": verified, " << verified->result << '\n';
+        } else if (verified.error().message != stopped) {
+            std::cerr << "  " << what << ": " << verified.error().message << '\n';
+        }
+        CHECK(count_rows(fixture, "verify_runs") == runs && count_rows(fixture, "media_evidence") == evidence);
+    };
+    const auto verifies = [&](const char* what) {
+        const auto verified = fixture.verify(fixture.archive.root() / "b");
+        CHECK(verified && verified->archive_uuid == b->archive_uuid && verified->result.starts_with("PASSED") &&
+              verified->identity.result == va::MatchResult::Match);
+        if (!verified) {
+            std::cerr << "  " << what << ": " << verified.error().message << '\n';
+        }
+    };
+    const auto volume = fixture.media.volume;
+
+    verifies("B's root");
+    stops(fixture.archive.root() / "a", "A's root");
+    stops(fixture.archive.root() / "c", "no archive's root");
+    fixture.media.volume.devices.front().serial.clear();
+    stops(fixture.archive.root() / "b", "no device serial");
+    fixture.media.volume = volume;
+    fixture.media.volume.filesystem_uuid.clear();
+    fixture.media.volume.filesystem_uuid_short.clear();
+    stops(fixture.archive.root() / "b", "no filesystem id");
+    fixture.media.volume = volume;
+    fixture.media.volume.devices.front().serial = "OTHER-SERIAL";
+    stops(fixture.archive.root() / "b", "another device");
+    fixture.media.volume = volume;
+    fixture.media.volume.filesystem_uuid = "9999999999999999";
+    fixture.media.volume.filesystem_uuid_short = "99999999";
+    stops(fixture.archive.root() / "b", "another filesystem");
+    fixture.media.volume = volume;
+    fixture.archive.add_file("b/.veriarchive/identity.json", "{\"archive_uuid\":\"" + a->archive_uuid + "\"}");
+    stops(fixture.archive.root() / "b", "an identity file naming A");
+    fixture.archive.remove("b/.veriarchive/identity.json");
+
+    auto archive_b = fixture.store.find_archive(b->archive_uuid);
+    CHECK(archive_b && *archive_b);
+    if (archive_b && *archive_b) {
+        (*archive_b)->status = "RETIRED";
+        CHECK(fixture.store.update_archive(**archive_b));
+        verifies("B retired");
+        (*archive_b)->status = "REGISTERED";
+        CHECK(fixture.store.update_archive(**archive_b));
+    }
+    fixture.repository.execute(("DELETE FROM archive_revisions WHERE archive_uuid = '" + a->archive_uuid + "'").c_str());
+    verifies("A's manifest not indexed");
+
+    // A's manifest restored (and the index rebuilt): A's root verifies.
+    write_bytes(path, kept);
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(rebuilt && rebuilt->skipped.empty() && rebuilt->revisions == 2);
+    const auto a_verified = fixture.verify(fixture.archive.root() / "a");
+    CHECK(a_verified && a_verified->archive_uuid == a->archive_uuid && a_verified->result == "PASSED");
+
+    // B's root registered twice on purpose (sample data), then A's manifest
+    // gone again: AMBIGUOUS among the others, so the root could be A's too.
+    va::RegisterRequest twice;
+    twice.root = fixture.archive.root() / "b";
+    twice.force_new_archive = true;
+    CHECK(fixture.register_root(twice).has_value());
+    std::filesystem::remove(path);
+    stops(fixture.archive.root() / "b", "B's root registered twice");
 }
 
 // Decision 0028: line 1 of a recorded manifest is compared with the BLAKE3
@@ -1348,6 +1455,7 @@ void verify_engine_tests()
     a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run();
     a_named_archive_is_never_the_one_that_may_be_at_a_root();
     a_named_archive_reads_no_other_manifest();
+    a_damaged_archive_stops_only_a_root_that_could_be_its();
     a_first_line_that_no_longer_parses_has_changed();
     entries_read_otherwise_than_validated_fail();
     item_rules();

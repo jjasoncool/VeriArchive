@@ -251,8 +251,9 @@ std::expected<VerifyOutcome, VerifyStop> failed_on_its_manifest(VerifyServices& 
 // Decision 0028: by root, an archive whose latest manifest cannot be used
 // may be the archive at the root, as only that manifest records its carrier
 // and its root; matching without it could take the root for another
-// archive's, or for no archive's. The verification stops, saying which
-// archive, why, and how to go on: a verification of that archive by its uuid
+// archive's, or for no archive's. Unless the root is plainly another
+// archive's, the verification stops, saying which archive, why, and how to
+// go on: a verification of that archive by its uuid
 // records the failure, then its manifest is restored or the index rebuilt,
 // or, where the index has no record of the manifest, both, as the case is.
 std::string root_may_belong_to(const CandidatesFailure& failure)
@@ -355,27 +356,42 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             }
         }
     }
-    auto candidates = load_candidates(store, services.repository_files, services.layout, selected);
-    if (!candidates) {
-        return stop(VerifyStop::Kind::Repository, !selected && candidates.error().unusable
-                                                      ? root_may_belong_to(candidates.error())
-                                                      : candidates.error().message);
+    auto pool = load_candidate_pool(store, services.repository_files, services.layout, selected);
+    if (!pool) {
+        return stop(VerifyStop::Kind::Repository, pool.error().message);
     }
-    if (selected && candidates->empty()) {
+    // A named archive whose manifest passed the check above and then cannot
+    // be used stops with the plain message alone: it is no archive that may
+    // be at a root.
+    if (selected && !pool->unusable.empty()) {
+        return stop(VerifyStop::Kind::Repository, pool->unusable.front().message);
+    }
+    auto& candidates = pool->candidates;
+    if (selected && candidates.empty()) {
         return stop(VerifyStop::Kind::NotFound, "no registered archive " + *selected);
     }
 
-    const auto located = locate(services, request, *candidates);
+    const auto located = locate(services, request, candidates);
     if (!located) {
         return std::unexpected(located.error());
     }
     MediaEvidence evidence{current_timestamp(), located->volume,
         read_identity_claim(services.archive_files, located->root)};
+    // Decision 0028: by root, an archive whose latest manifest cannot be used
+    // may be the archive at the root, unless the root is plainly another
+    // archive's: a MATCH of one whose manifest can be used, at its root (the
+    // filesystem id and a device that its manifest records, and no identity
+    // file naming another archive). Roots of archives never overlap on one
+    // volume (decision 0001), so that archive's root cannot be there.
+    if (!pool->unusable.empty() &&
+        match_identity(evidence, located->root_subpath, candidates).result != MatchResult::Match) {
+        return stop(VerifyStop::Kind::Repository, root_may_belong_to(pool->unusable.front()));
+    }
     // Earlier revisions' carriers are read only when no latest carrier
     // matched: then they tell an earlier carrier (decision 0004) from media
     // that is no archive's.
     const auto matched =
-        match_recorded(store, services.repository_files, services.layout, evidence, located->root_subpath, *candidates);
+        match_recorded(store, services.repository_files, services.layout, evidence, located->root_subpath, candidates);
     if (!matched) {
         return stop(VerifyStop::Kind::Repository, matched.error().message);
     }

@@ -9,11 +9,24 @@ namespace va {
 std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const std::optional<Uuid>& only)
 {
+    auto pool = load_candidate_pool(store, repository_files, layout, only);
+    if (!pool) {
+        return std::unexpected(std::move(pool.error()));
+    }
+    if (!pool->unusable.empty()) {
+        return std::unexpected(std::move(pool->unusable.front()));
+    }
+    return std::move(pool->candidates);
+}
+
+std::expected<CandidatePool, CandidatesFailure> load_candidate_pool(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const std::optional<Uuid>& only)
+{
     const auto archives = store.archives();
     if (!archives) {
         return std::unexpected(CandidatesFailure{archives.error().message, std::nullopt, {}});
     }
-    std::vector<ArchiveCandidate> candidates;
+    CandidatePool pool;
     for (const auto& archive : *archives) {
         if (only && archive.archive_uuid != *only) {
             continue;
@@ -33,16 +46,17 @@ std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(
                                           manifest_not_indexed(repository_files, layout, archive.archive_uuid,
                                               archive.current_revision, false));
         if (!header) {
-            return std::unexpected(CandidatesFailure{plain_message(header.error()), header.error(), archive.label});
+            pool.unusable.push_back(CandidatesFailure{plain_message(header.error()), header.error(), archive.label});
+            continue;
         }
         ArchiveCandidate candidate;
         candidate.archive_uuid = archive.archive_uuid;
         candidate.retired = archive.status == "RETIRED";
         candidate.identity = header->identity;
         candidate.root_subpath = header->root_subpath;
-        candidates.push_back(std::move(candidate));
+        pool.candidates.push_back(std::move(candidate));
     }
-    return candidates;
+    return pool;
 }
 
 std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSystemAccess& repository_files,

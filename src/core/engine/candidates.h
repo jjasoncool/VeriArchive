@@ -40,6 +40,20 @@ std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(
     IFileSystemAccess& repository_files, const RepositoryLayout& layout,
     const std::optional<Uuid>& only = std::nullopt);
 
+// The candidates as load_candidates gives them, apart from the archives
+// whose latest manifest cannot be used, each with that manifest and its label
+// (in the order of the labels), rather than failing with the first of them.
+// For a verification by root, which goes on past those archives only where
+// the root is plainly another archive's (decision 0028, point 4). Fails only
+// where the database cannot be read.
+struct CandidatePool {
+    std::vector<ArchiveCandidate> candidates;   // the archives whose latest manifest can be used
+    std::vector<CandidatesFailure> unusable;    // the others
+};
+std::expected<CandidatePool, CandidatesFailure> load_candidate_pool(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout,
+    const std::optional<Uuid>& only = std::nullopt);
+
 // match_identity against `candidates` from load_candidates. The matcher looks
 // at previous carriers only when no latest carrier at `root_subpath` matched
 // or mismatched (previous_carriers_consulted): only then are they read, from
