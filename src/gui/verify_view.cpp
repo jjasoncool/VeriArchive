@@ -287,9 +287,20 @@ void run_verification(GuiState& state, VerifyRequest request)
                     };
                 }
                 // Refused while the archive's verification that adds chunk
-                // hashes is unfinished, it names the window's own ways on
-                // (decision 0033).
-                return [message = app::stop_message_in_window(outcome.error())](const app::Text& text) {
+                // hashes is unfinished, it names the window's own ways on, or
+                // says that that verification still runs, judged as the
+                // Archive List judges its row (decision 0033). The window's
+                // one operation is this verification, which wrote no record:
+                // a record that names this process is of an attempt that has
+                // ended. When it cannot be judged, the ways on are named.
+                bool stopped = true;
+                if (const auto& adding = outcome.error().adding) {
+                    const app::AttemptCheck attempts{processes.get(), state.host.host, [] { return false; }};
+                    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+                    const auto judged = app::adding_verification_stopped(*store, *adding, attempts, now);
+                    stopped = !judged || *judged;
+                }
+                return [message = app::stop_message_in_window(outcome.error(), stopped)](const app::Text& text) {
                     return text.format("Not verified: {}", text(message));
                 };
             }

@@ -465,6 +465,15 @@ void translation_tests()
           "未能驗證：封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
               "）正在建立版次 2；未做任何變更（請先在上方選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」按"
               "「放棄…」放棄它）");
+    // ... and while that verification still runs, to wait for it.
+    CHECK(chinese.format("Not verified: {}",
+              chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
+                      ") is creating revision 2 and is still running; nothing was changed (wait for it to finish; if it "
+                      "stops, finish it with Resume interrupted run once the archive is chosen above, or abandon it "
+                      "with Abandon... in the Archive List)")) ==
+          "未能驗證：封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
+              "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請在上方選擇該封存，再按"
+              "「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）");
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2; nothing was changed (finish it with `verify --full " + sample +
                   " --resume " + adding_run + "` first, or abandon it with `archive abandon-verification " + sample +

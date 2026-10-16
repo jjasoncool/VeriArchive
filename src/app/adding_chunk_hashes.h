@@ -66,8 +66,21 @@ nlohmann::json abandonable_verification_member(const AbandonableVerification& ve
 // the archive's verification that adds chunk hashes is unfinished (decision
 // 0033). There the window names its own ways on, Resume interrupted run once
 // the archive is chosen above and Abandon... in the Archive List, where the
-// command line names its commands.
-std::string stop_message_in_window(const VerifyStop& stop);
+// command line names its commands. Both are offered only once that
+// verification has stopped (`stopped`, adding_verification_stopped): while it
+// runs or is held up, the window says so, and to wait for it to finish.
+std::string stop_message_in_window(const VerifyStop& stop, bool stopped);
+
+// Whether the verification that adds chunk hashes `adding`, as the refusal of
+// another one found it (VerifyStop::adding), has stopped, as the Archive List
+// would show it from one read (state_of_one_read), its attempt judged as
+// `attempts` says (decision 0024): recorded INCOMPLETE, its record saying
+// that it stopped, the process its record names ended, or, where no process
+// can be checked, its record silent for minutes. False while it runs or is
+// held up, when Verify Archive's Resume and the Archive List's Abandon... are
+// not offered for it. Reads whether its run is recorded INCOMPLETE.
+std::expected<bool, IoError> adding_verification_stopped(ArchiveStore& store, const AddingVerification& adding,
+    const AttemptCheck& attempts, std::chrono::sys_seconds wall_now);
 
 // A run that Verify Archive's Resume continues (R-104): its id, the root it
 // was given, or none for an archive found by its uuid on the attached

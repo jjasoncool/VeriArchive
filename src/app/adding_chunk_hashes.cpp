@@ -14,6 +14,29 @@ nlohmann::json optional_text(const std::string& value)
     return value.empty() ? nlohmann::json(nullptr) : nlohmann::json(value);
 }
 
+// Whether the verification that adds chunk hashes `adding`, recorded
+// INCOMPLETE or not, has stopped, judged as the Archive List judges its row
+// from one read: from what its record and the history say, and the process
+// its record names; its progress plays no part.
+bool judged_stopped(const AddingVerification& adding, bool recorded_incomplete, const AttemptCheck& attempts,
+    std::chrono::sys_seconds wall_now)
+{
+    UnfinishedVerification verification;
+    verification.run_id = adding.run_id;
+    verification.archive_uuid = adding.archive_uuid;
+    verification.root = adding.root;
+    verification.revision = adding.revision;
+    verification.started = adding.started;
+    verification.recorded_incomplete = recorded_incomplete;
+    const auto updated = adding.record.find("updated");
+    if (updated != adding.record.end() && updated->is_string()) {
+        verification.updated = updated->get<std::string>();
+    }
+    verification.adds_chunk_hashes = adding.chunk_size;
+    verification.record = adding.record.dump();
+    return has_stopped(state_of_one_read(verification_operation(verification, attempts), wall_now));
+}
+
 } // namespace
 
 std::string chunk_hashes_line(const Text& text, const VerifyOutcome& outcome, bool sentence)
@@ -94,16 +117,33 @@ nlohmann::json abandonable_verification_member(const AbandonableVerification& ve
     return {{"verification", abandonable_verification_json(verification)}};
 }
 
-std::string stop_message_in_window(const VerifyStop& stop)
+std::string stop_message_in_window(const VerifyStop& stop, bool stopped)
 {
     if (!stop.adding) {
         return stop.message;
     }
     const auto& adding = *stop.adding;
-    return "an unfinished verification of archive " + adding.archive_uuid + " that adds chunk hashes (run " +
-           adding.run_id + ") is creating revision " + std::to_string(adding.revision + 1) +
+    const auto refusing = "an unfinished verification of archive " + adding.archive_uuid +
+                          " that adds chunk hashes (run " + adding.run_id + ") is creating revision " +
+                          std::to_string(adding.revision + 1);
+    if (!stopped) {
+        return refusing +
+               " and is still running; nothing was changed (wait for it to finish; if it stops, finish it with Resume "
+               "interrupted run once the archive is chosen above, or abandon it with Abandon... in the Archive List)";
+    }
+    return refusing +
            "; nothing was changed (finish it first with Resume interrupted run once the archive is chosen above, or "
            "abandon it with Abandon... in the Archive List)";
+}
+
+std::expected<bool, IoError> adding_verification_stopped(ArchiveStore& store, const AddingVerification& adding,
+    const AttemptCheck& attempts, std::chrono::sys_seconds wall_now)
+{
+    const auto recorded = store.verify_run(adding.run_id);
+    if (!recorded) {
+        return std::unexpected(recorded.error());
+    }
+    return judged_stopped(adding, *recorded && (*recorded)->result == "INCOMPLETE", attempts, wall_now);
 }
 
 std::expected<std::optional<RunToResume>, IoError> resumable_adding_verification(
@@ -130,25 +170,7 @@ std::expected<std::optional<RunToResume>, IoError> resumable_adding_verification
     if (!read) {
         return std::unexpected(read.error());
     }
-    if (!adding) {
-        return std::optional<RunToResume>{};
-    }
-    // Judged as the Archive List judges its row, from what its record and
-    // the history say; its progress plays no part.
-    UnfinishedVerification verification;
-    verification.run_id = adding->run_id;
-    verification.archive_uuid = archive_uuid;
-    verification.root = adding->root;
-    verification.revision = adding->revision;
-    verification.started = adding->started;
-    verification.recorded_incomplete = recorded_incomplete;
-    const auto updated = adding->record.find("updated");
-    if (updated != adding->record.end() && updated->is_string()) {
-        verification.updated = updated->get<std::string>();
-    }
-    verification.adds_chunk_hashes = adding->chunk_size;
-    verification.record = adding->record.dump();
-    if (!has_stopped(state_of_one_read(verification_operation(verification, attempts), wall_now))) {
+    if (!adding || !judged_stopped(*adding, recorded_incomplete, attempts, wall_now)) {
         return std::optional<RunToResume>{};
     }
     return std::optional<RunToResume>(RunToResume{adding->run_id, std::nullopt, archive_uuid});
