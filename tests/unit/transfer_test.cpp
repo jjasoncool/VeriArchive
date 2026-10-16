@@ -4,6 +4,7 @@
 #include "manifest_samples.h"
 
 #include "core/engine/abandon_registration.h"
+#include "core/engine/candidates.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/engine/transfer.h"
 #include "core/hash/hashers.h"
@@ -139,6 +140,48 @@ void chunked_manifests_import_and_load()
     std::ofstream(stored, std::ios::binary | std::ios::trunc) << test::assemble_manifest(changed_header);
     const auto changed_size = va::load_recorded_manifest(store, files, layout, header.archive_uuid, 1);
     CHECK(!changed_size && changed_size.error().failure_class == "ManifestHashMismatch");
+    // Or to a merkle_root that is not a string.
+    auto changed_root = test::split_manifest(bytes);
+    changed_root.merkle_root_json = "5";
+    std::ofstream(stored, std::ios::binary | std::ios::trunc) << test::assemble_manifest(changed_root);
+    const auto number_root = va::load_recorded_manifest(store, files, layout, header.archive_uuid, 1);
+    CHECK(!number_root && number_root.error().failure_class == "ManifestHashMismatch");
+}
+
+// Decision 0031: a manifest without a chunk size is read as V1 read it, and V1
+// never looked at merkle_root. `exported` (one without a chunk size) given a
+// merkle_root that is not a string still imports and loads, and its recorded
+// header does not stop the engines that read the recorded headers of every
+// archive.
+void merkle_root_is_ignored_without_a_chunk_size(const std::filesystem::path& exported)
+{
+    std::string bytes;
+    {
+        std::ifstream input(exported, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+    auto parts = test::split_manifest(bytes);
+    CHECK(parts.header.chunk_size == 0);
+    parts.merkle_root_json = "null";
+    test::TestRepository target;
+    auto store = target.store();
+    const auto& layout = target.context.repo;
+    const auto manifest = layout.root.parent_path() / "null-root" / exported.filename();
+    std::filesystem::create_directories(manifest.parent_path());
+    std::ofstream(manifest, std::ios::binary) << test::assemble_manifest(parts);
+
+    const auto imported = va::import_manifest(
+        store, *target.files, *target.writer, layout, manifest, false, test::not_cancelled(), test::no_progress());
+    CHECK(imported && imported->new_archive);
+    if (!imported) {
+        return;
+    }
+    const auto loaded =
+        va::load_recorded_manifest(store, *target.files, layout, imported->archive_uuid, imported->revision);
+    CHECK(loaded && loaded->header.merkle_root.empty() && loaded->entries.size() == parts.lines.size());
+    // As verification, registration and relocation do.
+    const auto candidates = va::load_candidates(store, *target.files, layout);
+    CHECK(candidates && candidates->size() == 1);
 }
 
 // M4: export -> import round trip, duplicate detection, rollback protection.
@@ -199,6 +242,7 @@ void export_import_round_trip()
     std::ofstream(tampered, std::ios::binary) << bytes;
     const auto rejected = va::import_manifest(store, *target.files, *target.writer, target_layout, tampered, false, test::not_cancelled(), test::no_progress());
     CHECK(!rejected && rejected.error().failure_class == "ManifestHashMismatch");
+    merkle_root_is_ignored_without_a_chunk_size(r2->manifest);
 }
 
 // ---- An imported manifest gets its name in the record's transaction (decision 0030)

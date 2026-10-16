@@ -96,6 +96,7 @@ std::string entry_to_json(const Entry& entry);
 std::string chunk_line_to_json(const ChunkLine& chunk);
 
 // Parsing; throws nlohmann::json::exception on malformed input (callers catch).
+// A merkle_root that is not a string is read as none.
 ManifestHeader header_from_json(const nlohmann::json& json);
 Entry entry_from_json(const nlohmann::json& json);
 // Also throws when b3 is not 64 lowercase hex digits.

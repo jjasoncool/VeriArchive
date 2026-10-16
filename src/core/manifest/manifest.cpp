@@ -254,7 +254,13 @@ ManifestHeader header_from_json(const nlohmann::json& json)
     header.counts.streams = counts.value("streams", std::uint64_t{0});
     header.counts.chunks = counts.value("chunks", std::uint64_t{0});
     header.counts.bytes = counts.value("bytes", std::uint64_t{0});
-    header.merkle_root = text_or(json, "merkle_root");
+    // Anything but a string is taken as no merkle_root, not as a header that
+    // cannot be read: V1 never read the key, so a manifest without a chunk
+    // size ignores it as before, and one with a chunk size fails its first
+    // entry, after the hash checks (decision 0031).
+    if (const auto root = json.find("merkle_root"); root != json.end() && root->is_string()) {
+        header.merkle_root = root->get<std::string>();
+    }
     const auto& body = json.at("body");
     header.body_blake3 = body.at("blake3").get<std::string>();
     header.body_length = body.at("length").get<std::uint64_t>();

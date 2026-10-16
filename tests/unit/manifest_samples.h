@@ -6,6 +6,7 @@
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,6 +54,9 @@ inline va::Entry sample_file(std::string p, const std::string& content, std::uin
 struct ManifestParts {
     va::ManifestHeader header;
     std::vector<std::string> lines;
+    // When set, the header's merkle_root as this JSON text, which need not be
+    // a string, in place of header.merkle_root: a header no writer gives.
+    std::optional<std::string> merkle_root_json;
 };
 
 inline ManifestParts split_manifest(const std::string& bytes)
@@ -79,7 +83,15 @@ inline std::string assemble_manifest(ManifestParts parts)
     parts.header.body_blake3 = va::blake3_hex(body);
     parts.header.body_length = body.size();
     parts.header.body_lines = parts.lines.size();
-    return va::header_to_json(parts.header) + '\n' + body;
+    if (!parts.merkle_root_json) {
+        return va::header_to_json(parts.header) + '\n' + body;
+    }
+    // header_to_json writes merkle_root, in its place, only when it is set.
+    parts.header.merkle_root = "-";
+    auto header = va::header_to_json(parts.header);
+    const std::string written = "\"merkle_root\":\"-\"";
+    header.replace(header.find(written), written.size(), "\"merkle_root\":" + *parts.merkle_root_json);
+    return header + '\n' + body;
 }
 
 } // namespace test

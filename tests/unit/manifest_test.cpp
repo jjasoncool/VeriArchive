@@ -1028,6 +1028,11 @@ void chunked_manifests_are_read_strictly()
     CHECK(reading.malformed(
         reading.changed([](Parts& parts) { parts.header.merkle_root = uppercase(parts.header.merkle_root); }),
         no_merkle_root));
+    // One that is not a string, found after the hash checks like the others.
+    for (const char* merkle_root : {"null", "5"}) {
+        CHECK(reading.malformed(reading.changed([&](Parts& parts) { parts.merkle_root_json = merkle_root; }),
+            no_merkle_root));
+    }
     CHECK(reading.malformed(reading.changed([](Parts& parts) { parts.header.counts.chunks = 18; }),
         "invalid manifest header: counts.chunks is larger than body.lines"));
 
@@ -1185,7 +1190,8 @@ void chunked_manifests_without_chunk_lines()
 }
 
 // A manifest without a chunk size, as every V1 manifest, is read as before:
-// chunk lines are skipped wherever they are, and merkle_root is ignored.
+// chunk lines are skipped wherever they are, and merkle_root is ignored,
+// whatever JSON it holds, since V1 never read it.
 void manifests_without_a_chunk_size_are_read_as_before()
 {
     const auto root = temporary_directory("va-manifest-v1-");
@@ -1199,15 +1205,19 @@ void manifests_without_a_chunk_size_are_read_as_before()
     auto parts = test::split_manifest(read_file(path));
     parts.lines.insert(parts.lines.begin() + 1, va::chunk_line_to_json({"a.txt", 0, 0, 5, va::blake3_hex("hello")}));
     parts.lines.push_back("{\"t\":\"c\"}");
-    parts.header.merkle_root = va::blake3_hex("anything");
-    std::ofstream(path, std::ios::binary | std::ios::trunc) << test::assemble_manifest(parts);
-    std::vector<va::Entry> read;
-    CHECK(!read_to_end(*files, path, &read));
     const auto entries = golden_entries();
-    CHECK(read.size() == entries.size());
-    for (std::size_t index = 0; index < read.size() && index < entries.size(); ++index) {
-        CHECK(va::entry_to_json(read[index]) == va::entry_to_json(entries[index]));
-        CHECK(read[index].chunks.empty());
+    const std::string merkle_roots[] = {'"' + va::blake3_hex("anything") + '"', "\"anything\"", "null", "5", "{}", "[]"};
+    for (const auto& merkle_root : merkle_roots) {
+        parts.merkle_root_json = merkle_root;
+        std::ofstream(path, std::ios::binary | std::ios::trunc) << test::assemble_manifest(parts);
+        CHECK(read_file(path).contains("\"merkle_root\":" + merkle_root + ",\"body\":"));
+        std::vector<va::Entry> read;
+        CHECK(!read_to_end(*files, path, &read));
+        CHECK(read.size() == entries.size());
+        for (std::size_t index = 0; index < read.size() && index < entries.size(); ++index) {
+            CHECK(va::entry_to_json(read[index]) == va::entry_to_json(entries[index]));
+            CHECK(read[index].chunks.empty());
+        }
     }
     std::error_code error;
     std::filesystem::remove_all(root, error);
