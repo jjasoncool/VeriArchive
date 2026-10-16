@@ -109,6 +109,10 @@ _Avoid_: cancelled relocation (a cancelled one can be resumed)
 Re-reading an archive and comparing it against a revision's manifest; its outcome is a run result qualified by its mode.
 _Avoid_: check, integrity status
 
+**Adding chunk hashes**:
+A FULL verification of an archive whose current revision has no chunk size, as V1 registered it, that also hashes the chunks of its files in the same read and, when every entry matched, records the next revision: the same entries, with their chunk hashes and Merkle root. Otherwise it records the verification alone. In the interface: 加入區塊雜湊 (`verify --full <uuid> --add-chunk-hashes`).
+_Avoid_: rechunking, upgrading (a repository's schema is upgraded), re-registration (a registration takes a new baseline from what it reads)
+
 **Comparison**:
 Confirming from their manifests alone that two archives' current revisions hold the same entries with the same content, such as a copy against its original; no media is read, so it says nothing about what the media hold now.
 _Avoid_: diff, verification
