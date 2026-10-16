@@ -112,8 +112,7 @@ std::string grouped(std::uint64_t value)
 // A file whose content differs, at its recorded size. A file with chunk lines
 // read by chunk names the chunks that differ and where the first begins
 // (decision 0032): "content differs: chunks 3 and 17 of 160 differ, the first
-// from byte 201,326,592". Any other file, or one whose chunks all match
-// though a file hash does not, says only that its content differs.
+// from byte 201,326,592". Any other file says only that its content differs.
 VerifyItemRecord content_differs(const Entry& recorded, std::vector<std::uint64_t> differing, std::uint64_t chunk_size)
 {
     auto item = item_of(recorded, "Modified", "content differs");
