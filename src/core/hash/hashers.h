@@ -5,6 +5,7 @@
 //  - BLAKE3: fast primary hash, also used for manifest bodies and history rows.
 //  - SHA-256: second, widely available hash so archives can be checked with
 //    standard tools (`sha256sum -c`, R-67).
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -12,6 +13,9 @@
 #include <string_view>
 
 namespace va {
+
+// A BLAKE3 hash as its 32 bytes (manifests write it as 64 lowercase hex digits).
+using Blake3Digest = std::array<std::byte, 32>;
 
 class Blake3Hasher {
 public:
@@ -47,5 +51,8 @@ private:
 // One-shot helpers.
 std::string blake3_hex(std::string_view data);
 std::string sha256_hex(std::string_view data);
+// The BLAKE3 of a few bytes, without a hasher object on the heap (Merkle
+// tree nodes, §B6).
+Blake3Digest blake3_digest(std::span<const std::byte> data);
 
 } // namespace va

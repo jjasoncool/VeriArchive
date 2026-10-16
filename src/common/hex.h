@@ -15,4 +15,8 @@ std::string to_hex(std::string_view bytes);
 // Accepts lowercase or uppercase digits; returns nullopt for odd length or a non-hex digit.
 std::optional<std::vector<std::byte>> from_hex(std::string_view text);
 
+// True for a 32-byte hash as manifests write it (R-64): exactly 64 lowercase
+// hex digits.
+bool is_hash_hex(std::string_view text);
+
 } // namespace va

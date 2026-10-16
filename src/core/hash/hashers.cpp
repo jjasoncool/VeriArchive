@@ -28,10 +28,22 @@ void Blake3Hasher::update(std::span<const std::byte> data)
 
 std::string Blake3Hasher::finish_hex()
 {
-    std::array<std::byte, BLAKE3_OUT_LEN> digest{};
+    Blake3Digest digest{};
     blake3_hasher_finalize(&state_->hasher, reinterpret_cast<std::uint8_t*>(digest.data()),
         digest.size());
     return to_hex(digest);
+}
+
+static_assert(std::tuple_size_v<Blake3Digest> == BLAKE3_OUT_LEN);
+
+Blake3Digest blake3_digest(std::span<const std::byte> data)
+{
+    blake3_hasher hasher;
+    blake3_hasher_init(&hasher);
+    blake3_hasher_update(&hasher, data.data(), data.size());
+    Blake3Digest digest{};
+    blake3_hasher_finalize(&hasher, reinterpret_cast<std::uint8_t*>(digest.data()), digest.size());
+    return digest;
 }
 
 // OpenSSL's EVP interface uses the SHA-NI CPU instructions when available, which

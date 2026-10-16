@@ -23,6 +23,7 @@ void unicode_tests();
 void identity_tests();
 void displayed_identity_tests();
 void hash_tests();
+void merkle_tests();
 void fs_access_tests();
 void scanner_tests();
 void manifest_tests();

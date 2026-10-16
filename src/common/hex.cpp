@@ -56,4 +56,17 @@ std::optional<std::vector<std::byte>> from_hex(std::string_view text)
     return bytes;
 }
 
+bool is_hash_hex(std::string_view text)
+{
+    if (text.size() != 64) {
+        return false;
+    }
+    for (const char digit : text) {
+        if (!((digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace va

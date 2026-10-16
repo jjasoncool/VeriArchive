@@ -95,6 +95,7 @@ add_library(veriarchive_core
     src/core/manifest/manifest.cpp
     src/core/manifest/manifest_reader.cpp
     src/core/manifest/manifest_writer.cpp
+    src/core/merkle/merkle.cpp
     src/core/repository/archive_store.cpp
     src/core/repository/repository.cpp
     src/core/repository/sqlite_raii.cpp
@@ -287,6 +288,7 @@ if(BUILD_TESTING)
         tests/unit/local_time_test.cpp
         tests/unit/progress_estimate_test.cpp
         tests/unit/manifest_test.cpp
+        tests/unit/merkle_test.cpp
         tests/unit/plain_words_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp

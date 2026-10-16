@@ -13,6 +13,7 @@ int main()
     identity_tests();
     displayed_identity_tests();
     hash_tests();
+    merkle_tests();
     fs_access_tests();
     scanner_tests();
     manifest_tests();
