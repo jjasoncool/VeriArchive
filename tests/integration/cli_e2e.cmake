@@ -1267,18 +1267,20 @@ if(earlier_shown EQUAL -1 OR NOT earlier_kind STREQUAL "missing" OR NOT earlier_
 endif()
 
 # Chunk lines (decision 0032), in a repository of their own. A new archive
-# gets 64 MiB chunks: a file of 64 MiB and 16 bytes (sample data) has two
-# chunk lines, which `register --json` counts and `archive show` gives with
-# the chunk size and the Merkle root of each revision, as its manifest says.
-# The golden manifests (sample data) are a revision without a chunk size, as
-# V1 wrote them, and one with 64 KiB chunks.
+# gets 64 MiB chunks: a pattern file a little over two of them, 128 MiB and 16
+# bytes (sample data), has three chunk lines, which `register --json` counts
+# and `archive show` gives with the chunk size and the Merkle root of each
+# revision, as its manifest says. The golden manifests (sample data) are a
+# revision without a chunk size, as V1 wrote them, and one with 64 KiB chunks.
 file(WRITE "${WORK}/config4.json" "{\"language\": \"zh-TW\"}\n")
 set(GLOBAL --config "${WORK}/config4.json")
 run_cli("0" --repository "${WORK}/repo4" repo init)
 set(LARGE "${WORK}/large")
-string(REPEAT "0123456789abcdef" 4194305 large_content)
-file(WRITE "${LARGE}/sample.bin" "${large_content}")
-unset(large_content)
+# Written a chunk at a time, so that the test holds at most two in memory.
+string(REPEAT "0123456789abcdef" 4194304 chunk_content)
+file(WRITE "${LARGE}/sample.bin" "${chunk_content}")
+file(APPEND "${LARGE}/sample.bin" "${chunk_content}")
+file(APPEND "${LARGE}/sample.bin" "0123456789abcdef")
 run_cli("0" register "${LARGE}" --json)
 string(JSON large_uuid GET "${last_output}" archive_uuid)
 string(JSON large_chunks GET "${last_output}" counts chunks)
@@ -1287,15 +1289,53 @@ string(JSON large_chunk_size GET "${last_output}" revisions 0 chunk_size)
 string(JSON large_chunk_count GET "${last_output}" revisions 0 chunks)
 string(JSON large_root GET "${last_output}" revisions 0 merkle_root)
 string(LENGTH "${large_root}" large_root_length)
-if(NOT large_chunks EQUAL 2 OR NOT large_chunk_size EQUAL 67108864 OR NOT large_chunk_count EQUAL 2
+if(NOT large_chunks EQUAL 3 OR NOT large_chunk_size EQUAL 67108864 OR NOT large_chunk_count EQUAL 3
         OR NOT large_root MATCHES "^[0-9a-f]+$" OR NOT large_root_length EQUAL 64)
     message(FATAL_ERROR "chunk lines of a file larger than 64 MiB:\n${last_output}")
 endif()
 run_cli("0" archive show "${large_uuid}")
-if(NOT last_output MATCHES "\n    r1  [^\n]*r0001\\.vam\n      區塊大小 64 MiB，2 個區塊，總碼 ${large_root}\n")
+if(NOT last_output MATCHES "\n    r1  [^\n]*r0001\\.vam\n      區塊大小 64 MiB，3 個區塊，總碼 ${large_root}\n")
     message(FATAL_ERROR "archive show of a revision with chunk lines:\n${last_output}")
 endif()
 run_cli("0;2" verify --full "${large_uuid}")
+
+# One byte changed in chunk 1, 16000 bytes into it (sample data): a FULL
+# verify fails (exit 3) and names that chunk of the three and the byte where
+# it begins, in --json and in either language (decision 0032).
+string(REPEAT "0123456789abcdef" 1000 before_change)
+string(REPEAT "0123456789abcdef" 4193303 after_change)
+file(WRITE "${LARGE}/sample.bin" "${chunk_content}")
+unset(chunk_content)
+file(APPEND "${LARGE}/sample.bin" "${before_change}X123456789abcdef${after_change}")
+unset(after_change)
+file(APPEND "${LARGE}/sample.bin" "0123456789abcdef")
+file(SIZE "${LARGE}/sample.bin" changed_size)
+if(NOT changed_size EQUAL 134217744)
+    message(FATAL_ERROR "the changed sample is ${changed_size} bytes long")
+endif()
+run_cli("3" verify --full "${large_uuid}" --json)
+string(JSON item_count LENGTH "${last_output}" items)
+string(JSON changed_path GET "${last_output}" items 0 p)
+string(JSON changed_status GET "${last_output}" items 0 status)
+string(JSON changed_detail GET "${last_output}" items 0 detail)
+string(JSON differing_count LENGTH "${last_output}" items 0 differing_chunks)
+string(JSON differing_chunk GET "${last_output}" items 0 differing_chunks 0)
+string(JSON file_chunks GET "${last_output}" items 0 chunks)
+string(JSON differing_offset GET "${last_output}" items 0 first_differing_offset)
+if(NOT item_count EQUAL 1 OR NOT changed_path STREQUAL "sample.bin" OR NOT changed_status STREQUAL "Modified"
+        OR NOT changed_detail STREQUAL "content differs: chunk 1 of 3 differs, from byte 67,108,864"
+        OR NOT differing_count EQUAL 1 OR NOT differing_chunk EQUAL 1 OR NOT file_chunks EQUAL 3
+        OR NOT differing_offset EQUAL 67108864)
+    message(FATAL_ERROR "verify --json of a file with one changed chunk:\n${last_output}")
+endif()
+run_cli("3" --lang en verify --full "${large_uuid}")
+if(NOT last_output MATCHES "\n  Modified  sample\\.bin  \\(content differs: chunk 1 of 3 differs, from byte 67,108,864\\)\n")
+    message(FATAL_ERROR "verify of a file with one changed chunk, in English:\n${last_output}")
+endif()
+run_cli("3" verify --full "${large_uuid}")
+if(NOT last_output MATCHES "\n  已修改  sample\\.bin  （內容不同：共 3 個區塊，其中區塊 1 不同，從位元組 67,108,864 開始）\n")
+    message(FATAL_ERROR "verify of a file with one changed chunk, in Chinese:\n${last_output}")
+endif()
 file(REMOVE_RECURSE "${LARGE}")
 
 set(GOLDEN "${CMAKE_CURRENT_LIST_DIR}/../golden")

@@ -40,6 +40,97 @@ std::string unreadable_status(const std::string& reason)
     return "Unreadable(" + reason + ")";
 }
 
+VerifyItemRecord item_of(const Entry& entry, const std::string& status, const std::string& detail)
+{
+    VerifyItemRecord item;
+    item.path = entry.path;
+    item.stream = entry.stream;
+    item.status = status;
+    item.detail = detail;
+    return item;
+}
+
+// The idx of each chunk of a file with chunk lines whose recorded hash
+// differs from the one just read, ascending (decision 0032). Empty for a file
+// without chunk lines, and for one not read by chunk: its read gave no chunk
+// hashes.
+std::vector<std::uint64_t> differing_chunks(const Entry& recorded, const HashResult& read)
+{
+    std::vector<std::uint64_t> differing;
+    if (recorded.chunks.empty() || read.chunks.size() != recorded.chunks.size()) {
+        return differing;
+    }
+    for (std::size_t idx = 0; idx < recorded.chunks.size(); ++idx) {
+        if (read.chunks[idx] != recorded.chunks[idx]) {
+            differing.push_back(idx);
+        }
+    }
+    return differing;
+}
+
+// The chunks `idx` (ascending) as an item's detail names them: "3", "3 and
+// 17", "3, 5 and 17", a run of consecutive chunks as "3-5"; after the tenth
+// run, "and N more" counts the chunks left.
+std::string chunk_list(const std::vector<std::uint64_t>& idx)
+{
+    constexpr std::size_t named_runs = 10;
+    std::vector<std::string> runs;
+    std::uint64_t unnamed = 0;
+    for (std::size_t start = 0; start < idx.size();) {
+        auto end = start;
+        while (end + 1 < idx.size() && idx[end + 1] == idx[end] + 1) {
+            ++end;
+        }
+        if (runs.size() < named_runs) {
+            runs.push_back(std::to_string(idx[start]) + (end > start ? "-" + std::to_string(idx[end]) : ""));
+        } else {
+            unnamed += end - start + 1;
+        }
+        start = end + 1;
+    }
+    std::string text;
+    for (std::size_t index = 0; index < runs.size(); ++index) {
+        if (index > 0) {
+            text += index + 1 == runs.size() && unnamed == 0 ? " and " : ", ";
+        }
+        text += runs[index];
+    }
+    return unnamed > 0 ? text + " and " + std::to_string(unnamed) + " more" : text;
+}
+
+// A byte offset as people read it: "201,326,592".
+std::string grouped(std::uint64_t value)
+{
+    auto digits = std::to_string(value);
+    for (auto at = digits.size(); at > 3; at -= 3) {
+        digits.insert(at - 3, ",");
+    }
+    return digits;
+}
+
+// A file whose content differs, at its recorded size. A file with chunk lines
+// read by chunk names the chunks that differ and where the first begins
+// (decision 0032): "content differs: chunks 3 and 17 of 160 differ, the first
+// from byte 201,326,592". Any other file, or one whose chunks all match
+// though a file hash does not, says only that its content differs.
+VerifyItemRecord content_differs(const Entry& recorded, std::vector<std::uint64_t> differing, std::uint64_t chunk_size)
+{
+    auto item = item_of(recorded, "Modified", "content differs");
+    if (differing.empty()) {
+        return item;
+    }
+    item.chunks = recorded.chunks.size();
+    item.first_differing_offset = differing.front() * chunk_size;
+    const auto of = " of " + std::to_string(item.chunks);
+    item.detail = differing.size() == 1
+                      ? "content differs: chunk " + std::to_string(differing.front()) + of + " differs, from byte " +
+                            grouped(item.first_differing_offset)
+                      : "content differs: chunks " + chunk_list(differing) + of + " differ, the first from byte " +
+                            grouped(item.first_differing_offset);
+    item.differing_chunks = std::move(differing);
+    return item;
+}
+
 class Classifier {
 public:
     Classifier(ComparisonResult& result, const ComparisonInput& input)
@@ -49,14 +140,19 @@ public:
 
     void add(const Entry& entry, const std::string& status, const std::string& detail, Severity severity)
     {
-        ++result_.counts[status];
+        add(item_of(entry, status, detail), severity);
+    }
+
+    void add(VerifyItemRecord item, Severity severity)
+    {
+        ++result_.counts[item.status];
         if (severity == Severity::Failure) {
             result_.content_failure = true;
         } else if (severity == Severity::Warning) {
             result_.warning = true;
         }
-        if (status != "Verified") {
-            result_.items.push_back({"", entry.path, entry.stream, status, detail});
+        if (item.status != "Verified") {
+            result_.items.push_back(std::move(item));
             if (input_.on_item) {
                 input_.on_item(result_.items.back(), severity == Severity::Failure);
             }
@@ -321,6 +417,11 @@ ComparisonResult compare_with_manifest(
     }
     HashPipelineOptions hash_options;
     hash_options.readers = default_reader_count(input.rotational);
+    // Compared by chunk, a file's chunk hashes come from the read that hashes
+    // it whole (R-101), at the revision's chunk size: there is no other read.
+    // A revision without a chunk size gives no chunk hashes (decision 0032).
+    const auto chunk_size = input.compare_chunks ? input.header->chunk_size : 0;
+    hash_options.chunk_size = chunk_size;
 
     std::vector<std::string> pending_checkpoint;
     auto last_checkpoint = std::chrono::steady_clock::now();
@@ -391,9 +492,13 @@ ComparisonResult compare_with_manifest(
             result.current_entries.push_back(was);
             return true;
         }
-        if (hash.b3 != was.b3 || hash.sha256 != was.sha256 || !was.size || hash.size != *was.size) {
-            classify.add(was, "Modified",
-                was.size && hash.size != *was.size ? "size differs" : "content differs", Severity::Failure);
+        if (was.size && hash.size != *was.size) {
+            // A size change stays one, whatever its chunks.
+            classify.add(was, "Modified", "size differs", Severity::Failure);
+            return true;
+        }
+        if (hash.b3 != was.b3 || hash.sha256 != was.sha256 || !was.size) {
+            classify.add(content_differs(was, differing_chunks(was, hash), chunk_size), Severity::Failure);
             return true;
         }
         result.coverage_bytes += hash.size; // read and matched

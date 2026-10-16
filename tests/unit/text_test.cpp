@@ -383,6 +383,23 @@ void translation_tests()
     CHECK(chinese.format("chunk size {}, {} chunks, Merkle root {}", "64 MiB", 160, "4f3f") ==
           "區塊大小 64 MiB，160 個區塊，總碼 4f3f");
     CHECK(chinese("chunk size 0: whole-file hashes only") == "區塊大小 0：只有整個檔案的雜湊");
+    // A file whose content differs names the chunks that differ (decision
+    // 0032): the chunks, their number and the byte are values, the word that
+    // joins the last of a list is translated.
+    CHECK(chinese("content differs: chunk 1 of 3 differs, from byte 65,536") ==
+          "內容不同：共 3 個區塊，其中區塊 1 不同，從位元組 65,536 開始");
+    CHECK(chinese("content differs: chunks 3 and 17 of 160 differ, the first from byte 201,326,592") ==
+          "內容不同：共 160 個區塊，其中區塊 3 和 17 不同，第一個從位元組 201,326,592 開始");
+    CHECK(chinese("content differs: chunks 3, 5 and 17 of 160 differ, the first from byte 201,326,592") ==
+          "內容不同：共 160 個區塊，其中區塊 3, 5 和 17 不同，第一個從位元組 201,326,592 開始");
+    CHECK(chinese("content differs: chunks 20-21 of 40 differ, the first from byte 1,310,720") ==
+          "內容不同：共 40 個區塊，其中區塊 20-21 不同，第一個從位元組 1,310,720 開始");
+    CHECK(chinese("content differs: chunks 1-3, 5, 8-9, 12, 14, 16, 18, 20, 22, 24 and 4 more of 40 differ, the first "
+                  "from byte 65,536") ==
+          "內容不同：共 40 個區塊，其中區塊 1-3, 5, 8-9, 12, 14, 16, 18, 20, 22, 24 及另外 4 個區塊不同，第一個從位元組 "
+          "65,536 開始");
+    CHECK(english("content differs: chunk 1 of 3 differs, from byte 65,536") ==
+          "content differs: chunk 1 of 3 differs, from byte 65,536");
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==

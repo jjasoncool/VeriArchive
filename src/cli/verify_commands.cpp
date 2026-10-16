@@ -96,7 +96,15 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
 {
     auto items = nlohmann::json::array();
     for (const auto& item : outcome.items) {
-        items.push_back({{"p", item.path.p}, {"status", item.status}, {"detail", item.detail}});
+        nlohmann::json entry{{"p", item.path.p}, {"status", item.status}, {"detail", item.detail}};
+        // A file whose content differs, by chunk (decision 0032): the idx of
+        // each chunk that differs, of how many, and where the first begins.
+        if (!item.differing_chunks.empty()) {
+            entry["differing_chunks"] = item.differing_chunks;
+            entry["chunks"] = item.chunks;
+            entry["first_differing_offset"] = item.first_differing_offset;
+        }
+        items.push_back(std::move(entry));
     }
     // Decision 0028: a run that read no media has no root and no identity.
     const auto root = outcome.media_read ? nlohmann::json(path_to_utf8(outcome.root)) : nlohmann::json(nullptr);

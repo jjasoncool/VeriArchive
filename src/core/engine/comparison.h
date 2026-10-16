@@ -24,6 +24,14 @@ struct ComparisonInput {
     const ManifestHeader* header = nullptr;
     const std::vector<Entry>* recorded = nullptr;
     bool strict_metadata = false;
+    // Decision 0032: whether a file with chunk lines is compared by chunk as
+    // well. Its chunk hashes come from the read that hashes the whole file
+    // (R-101), at the revision's chunk size, so a revision without one (0, as
+    // V1 registered) does no chunk work. A file whose content differs names
+    // the chunks that differ. A FULL verify compares by chunk; a relocation
+    // compares whole files, and carries the chunk hashes of the revision it
+    // verifies (decision 0032, point 5).
+    bool compare_chunks = false;
     // R-104 resume: entry keys whose content already matched in the run being resumed.
     std::set<std::string> content_verified;
     // Called with keys of entries whose content matched, in batches

@@ -651,6 +651,9 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         input.header = &manifest->header;
         input.recorded = &manifest->entries;
         input.strict_metadata = request.strict_metadata;
+        // By chunk as well, in the same read (decision 0032): a file whose
+        // content differs names the chunks that differ.
+        input.compare_chunks = true;
         input.content_verified = std::move(content_verified);
         // A checkpoint that cannot be saved is rolled back, so its open
         // transaction cannot swallow the next checkpoints and the run's

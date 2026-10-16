@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "engine_fixture.h"
+#include "manifest_samples.h"
 #include "sparse_file.h"
 
 #include "app/typed_path.h"
@@ -2433,6 +2434,139 @@ void entries_read_otherwise_than_validated_fail()
     }
 }
 
+// ---- Verifying by chunk (decision 0032) -------------------------------------
+
+constexpr std::uint64_t test_chunk_size = 64 * 1024;
+
+// An archive registered with 64 KiB chunks, or with `chunk_size` (0: none, as
+// V1 registered): big.bin of three chunks, the last 100 bytes long, and a
+// small file (sample data).
+struct Chunked : EngineFixture {
+    va::Uuid archive_uuid;
+    std::string big = test::patterned(2 * test_chunk_size + 100, 1);
+
+    explicit Chunked(std::uint64_t chunk_size = test_chunk_size)
+    {
+        archive.add_file("big.bin", big);
+        archive.add_file("notes.txt", "notes (sample data)");
+        va::RegisterRequest request;
+        request.root = archive.root();
+        request.chunk_size = chunk_size;
+        const auto registered = register_root(request);
+        CHECK(registered.has_value());
+        archive_uuid = registered ? registered->archive_uuid : va::Uuid{};
+    }
+
+    // big.bin as registered, but for the byte at each of `offsets`.
+    void change_big(std::initializer_list<std::uint64_t> offsets)
+    {
+        auto content = big;
+        for (const auto offset : offsets) {
+            content[offset] = static_cast<char>(content[offset] ^ 0x01);
+        }
+        archive.node("big.bin").content = content;
+    }
+};
+
+// The item of `p`, if it is not Verified.
+const va::VerifyItemRecord* item_of(const va::VerifyOutcome& outcome, const std::string& p)
+{
+    const auto found = std::ranges::find_if(outcome.items, [&](const auto& item) { return item.path.p == p; });
+    return found == outcome.items.end() ? nullptr : &*found;
+}
+
+// A file whose content changed names the chunks that differ, from the read
+// that hashes it whole (R-101): each file is read once. The detail says which
+// chunks of how many differ and from which byte the first begins; the item
+// gives their idx, their number and that offset.
+void a_modified_file_names_the_chunks_that_differ()
+{
+    Chunked fixture;
+    fixture.change_big({test_chunk_size + 1000}); // one byte in chunk 1
+    fixture.archive.bytes_read = 0;
+    auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "FAILED");
+    const auto* item = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    CHECK(item && item->status == "Modified" &&
+          item->detail == "content differs: chunk 1 of 3 differs, from byte 65,536" &&
+          item->differing_chunks == std::vector<std::uint64_t>{1} && item->chunks == 3 &&
+          item->first_differing_offset == test_chunk_size);
+    if (item && item->detail != "content differs: chunk 1 of 3 differs, from byte 65,536") {
+        std::cerr << "  detail: " << item->detail << '\n';
+    }
+    CHECK(outcome && outcome->items.size() == 1);
+    CHECK(fixture.archive.bytes_read == fixture.big.size() + std::string("notes (sample data)").size());
+
+    // Two chunks, the first and the last, shorter one.
+    fixture.change_big({10, 2 * test_chunk_size + 50});
+    outcome = fixture.verify(fixture.archive.root());
+    item = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    CHECK(item && item->detail == "content differs: chunks 0 and 2 of 3 differ, the first from byte 0" &&
+          item->differing_chunks == (std::vector<std::uint64_t>{0, 2}) && item->first_differing_offset == 0);
+    fixture.change_big({2 * test_chunk_size + 99});
+    outcome = fixture.verify(fixture.archive.root());
+    item = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    CHECK(item && item->detail == "content differs: chunk 2 of 3 differs, from byte 131,072" &&
+          item->first_differing_offset == 2 * test_chunk_size);
+}
+
+// The chunks that differ are named in runs of consecutive chunks, at most ten
+// runs, and the item holds every one of them (sample data: a file of 40
+// chunks).
+void the_chunks_that_differ_are_named_in_runs()
+{
+    EngineFixture fixture;
+    const auto original = test::patterned(40 * test_chunk_size, 2);
+    fixture.archive.add_file("disk.img", original);
+    va::RegisterRequest request;
+    request.root = fixture.archive.root();
+    request.chunk_size = test_chunk_size;
+    CHECK(fixture.register_root(request).has_value());
+    const auto modified = [&](std::initializer_list<std::uint64_t> chunks) {
+        auto content = original;
+        for (const auto chunk : chunks) {
+            content[chunk * test_chunk_size + 7] = static_cast<char>(content[chunk * test_chunk_size + 7] ^ 0x01);
+        }
+        fixture.archive.node("disk.img").content = content;
+        const auto outcome = fixture.verify(fixture.archive.root());
+        const auto* item = outcome ? item_of(*outcome, "disk.img") : nullptr;
+        const bool all_named = item && item->differing_chunks == std::vector<std::uint64_t>(chunks) && item->chunks == 40;
+        CHECK(all_named);
+        return item ? item->detail : std::string{};
+    };
+    CHECK(modified({1, 3, 5}) == "content differs: chunks 1, 3 and 5 of 40 differ, the first from byte 65,536");
+    CHECK(modified({1, 2, 3, 5}) == "content differs: chunks 1-3 and 5 of 40 differ, the first from byte 65,536");
+    CHECK(modified({20, 21}) == "content differs: chunks 20-21 of 40 differ, the first from byte 1,310,720");
+    const auto eleven_runs = modified({1, 2, 3, 5, 8, 9, 12, 14, 16, 18, 20, 22, 24, 26, 27, 28, 29});
+    CHECK(eleven_runs == "content differs: chunks 1-3, 5, 8-9, 12, 14, 16, 18, 20, 22, 24 and 4 more of 40 differ, "
+                         "the first from byte 65,536");
+    if (eleven_runs.find("and 4 more") == std::string::npos) {
+        std::cerr << "  detail: " << eleven_runs << '\n';
+    }
+}
+
+// What a change of size, a small file, and a revision without a chunk size
+// (as V1 registered it) say: their content is compared whole, as before.
+void whole_files_are_compared_as_before()
+{
+    Chunked fixture;
+    fixture.archive.node("big.bin").content = fixture.big + "x";
+    fixture.archive.node("notes.txt").content = "notes (sample data!";
+    auto outcome = fixture.verify(fixture.archive.root());
+    const auto* big = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    const auto* notes = outcome ? item_of(*outcome, "notes.txt") : nullptr;
+    CHECK(big && big->detail == "size differs" && big->differing_chunks.empty() && big->chunks == 0);
+    CHECK(notes && notes->detail == "content differs" && notes->differing_chunks.empty());
+
+    Chunked unchunked(0);
+    unchunked.change_big({test_chunk_size + 1000});
+    unchunked.archive.bytes_read = 0;
+    outcome = unchunked.verify(unchunked.archive.root());
+    big = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    CHECK(big && big->status == "Modified" && big->detail == "content differs" && big->differing_chunks.empty());
+    CHECK(unchunked.archive.bytes_read == unchunked.big.size() + std::string("notes (sample data)").size());
+}
+
 void item_rules()
 {
     CHECK(va::mtime_matches("ntfs", 1'000'000'000, 1'900'000'000));
@@ -2535,5 +2669,8 @@ void verify_engine_tests()
     a_damaged_archive_stops_only_a_root_that_could_be_its();
     a_first_line_that_no_longer_parses_has_changed();
     entries_read_otherwise_than_validated_fail();
+    a_modified_file_names_the_chunks_that_differ();
+    the_chunks_that_differ_are_named_in_runs();
+    whole_files_are_compared_as_before();
     item_rules();
 }

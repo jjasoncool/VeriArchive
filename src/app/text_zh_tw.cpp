@@ -1036,6 +1036,17 @@ constexpr CatalogEntry entries[] = {
     {"readable now, unreadable at registration", "現在可讀取，註冊時無法讀取"},
     {"size differs", "大小不同"},
     {"content differs", "內容不同"},
+    // A file whose content differs, compared by chunk (decision 0032): which
+    // chunks differ, and the byte where the first begins. The chunks are one
+    // value ("3", "3, 5", "1-3"); the word joining the last of a list has an
+    // entry of its own.
+    {"content differs: chunk {} of {} differs, from byte {}", "內容不同：共 {1} 個區塊，其中區塊 {0} 不同，從位元組 {2} 開始"},
+    {"content differs: chunks {} of {} differ, the first from byte {}",
+        "內容不同：共 {1} 個區塊，其中區塊 {0} 不同，第一個從位元組 {2} 開始"},
+    {"content differs: chunks {} and {} of {} differ, the first from byte {}",
+        "內容不同：共 {2} 個區塊，其中區塊 {0} 和 {1} 不同，第一個從位元組 {3} 開始"},
+    {"content differs: chunks {} and {} more of {} differ, the first from byte {}",
+        "內容不同：共 {2} 個區塊，其中區塊 {0} 及另外 {1} 個區塊不同，第一個從位元組 {3} 開始"},
     // src/core/engine/compare_archives.cpp: its failures, and the item details
     // that verification does not use (it shares the others above). Each
     // "unreadable in A (<reason>)" is an entry of its own: a template would

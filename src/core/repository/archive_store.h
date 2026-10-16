@@ -87,6 +87,14 @@ struct VerifyItemRecord {
     std::string stream;
     std::string status;                 // Modified, Missing, New, Unreadable(media), ...
     std::string detail;
+    // A file with chunk lines whose content differs, compared by chunk
+    // (decision 0032): the idx of each chunk whose hash differs, ascending,
+    // the file's number of chunks, and the offset of the first chunk that
+    // differs. Empty and 0 for every other item. Not stored: verify_items
+    // keeps the detail, which names them.
+    std::vector<std::uint64_t> differing_chunks{};
+    std::uint64_t chunks = 0;
+    std::uint64_t first_differing_offset = 0;
 };
 
 // Result of recomputing the history chain (repo verify-history).

@@ -2810,6 +2810,28 @@ void an_unchunked_revision_is_relocated_unchunked()
     CHECK(fixture.repository.query("SELECT COUNT(*) FROM chunks") == "0");
 }
 
+// A relocation compares whole files (decision 0032, point 5), and its read
+// gives no chunk hashes: a copy whose content differs in one chunk (sample
+// data) is refused as Modified, its content differing, with no chunk named.
+void a_relocation_compares_whole_files()
+{
+    ChunkedRelocation fixture;
+    if (!fixture.register_old()) {
+        return;
+    }
+    fixture.copy_to_new_disk();
+    auto& copied = fixture.archive.node("new/big1.bin").content;
+    copied[test_chunk_size + 10] = static_cast<char>(copied[test_chunk_size + 10] ^ 0x01);
+    const auto relocated = fixture.relocate();
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Differs);
+    if (relocated) {
+        return;
+    }
+    const auto& items = relocated.error().items;
+    CHECK(items.size() == 1 && items.front().path.p == "big1.bin" && items.front().status == "Modified" &&
+          items.front().detail == "content differs" && items.front().differing_chunks.empty());
+}
+
 // Decision 0008: a link whose absolute target a driver translated is carried
 // with the new carrier's target, whose hash is its leaf: the Merkle root of
 // the new revision differs from the one before only there, its chunk lines
@@ -2898,5 +2920,6 @@ void relocate_tests()
     a_relocation_carries_chunk_lines();
     a_resumed_relocation_carries_chunk_lines_of_earlier_attempts();
     an_unchunked_revision_is_relocated_unchunked();
+    a_relocation_compares_whole_files();
     a_translated_link_changes_the_merkle_root();
 }
