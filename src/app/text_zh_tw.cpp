@@ -1298,6 +1298,7 @@ constexpr CatalogEntry entries[] = {
     {"the repository's index has no record of the manifest of revision {} ({}); rebuild the index with "
         "`repo rebuild-index`",
         "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄；請以 `repo rebuild-index` 重建索引"},
+    {"its content hashes do not match its merkle_root", "其內容雜湊與其 Merkle 根雜湊不符"},
     // What is wrong alone, inside a verification by root that stops (decision 0028).
     {"the manifest of revision {} ({}) is missing", "版次 {} 的清單檔（{}）已遺失"},
     {"the manifest of revision {} ({}) cannot be read: {}", "無法讀取版次 {} 的清單檔（{}）：{}", Match::Cause},
@@ -1430,6 +1431,9 @@ constexpr CatalogEntry entries[] = {
     // src/core/manifest/manifest.cpp
     {"not a version 1 .vam manifest", "不是格式版本 1 的 .vam 清單檔"},
     {"unknown entry type {}", "未知的項目類型 {}"},
+    {"not a chunk line", "不是區塊行"},
+    {"b3 is not 64 lowercase hex digits", "b3 不是 64 個小寫十六進位數字"},
+    {"chunk_size {} is not 0 or a multiple of {} up to {}", "chunk_size {} 不是 0，也不是 {} 的倍數（上限 {}）"},
     // src/core/manifest/manifest_reader.cpp
     {"manifest does not end with a newline", "清單檔未以換行字元結尾"},
     {"empty manifest", "清單檔是空的"},
@@ -1438,6 +1442,17 @@ constexpr CatalogEntry entries[] = {
     {"the manifest changed while it was read", "清單檔在讀取期間被變更"},
     {"invalid manifest entry: {}", "清單檔項目無效：{}", Match::Cause},
     {"manifest entries out of canonical order", "清單檔項目未依標準順序排列"},
+    // Chunk lines and the Merkle root (decision 0031): a technical message
+    // says Merkle 根雜湊, where the interface says 總碼.
+    {"merkle_root is missing or not 64 lowercase hex digits", "merkle_root 缺少或不是 64 個小寫十六進位數字"},
+    {"counts.chunks is larger than body.lines", "counts.chunks 大於 body.lines"},
+    {"chunk line among the manifest entries", "清單檔項目之間出現區塊行"},
+    {"manifest entry among the chunk lines", "區塊行之間出現清單檔項目"},
+    {"invalid chunk line: {}", "區塊行無效：{}", Match::Cause},
+    {"not canonical JSON", "不是標準格式的 JSON"},
+    {"chunk {} of {} is missing or does not match the file", "{1} 的區塊 {0} 遺失或與檔案不符"},
+    {"chunk {} of {} belongs to no file", "{1} 的區塊 {0} 不屬於任何檔案"},
+    {"manifest content hashes do not match its merkle_root", "清單檔的內容雜湊與其 Merkle 根雜湊不符"},
     // nlohmann::json's sentences (common/json_error.h removes the library's tag),
     // the cause in the config and manifest messages above. Type names (string,
     // number, object, array) and key names are JSON terms and stay as they are.
@@ -1452,6 +1467,7 @@ constexpr CatalogEntry entries[] = {
     // src/core/manifest/manifest_writer.cpp
     {"manifest entries out of canonical order at {}", "清單檔項目在 {} 處未依標準順序排列"},
     {"manifest body changed while writing", "清單檔主體在寫入期間發生變更"},
+    {"chunk hashes of {}: {} given, {} expected", "{} 的區塊雜湊：提供 {} 個，應為 {} 個"},
     // src/core/identity/matcher.cpp
     // What matching noted, in plain words in the warning "identity: ..."
     // (src/core/engine/verify_engine.cpp); --json keeps the codes.

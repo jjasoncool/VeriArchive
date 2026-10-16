@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "engine_fixture.h"
+#include "manifest_samples.h"
 
 #include "core/engine/abandon_registration.h"
 #include "core/engine/recorded_manifest.h"
@@ -42,6 +43,102 @@ std::set<std::string> names_in(const std::filesystem::path& directory)
         names.insert(va::path_to_utf8(entry.path().filename()));
     }
     return names;
+}
+
+// Decision 0031: a manifest with chunk lines imports, and loads with the
+// chunk hashes of its files. One whose content hashes do not give its
+// merkle_root, though its body matches its header, is a ManifestHashMismatch:
+// at import, which then records nothing, and when a recorded revision with
+// such bytes is loaded.
+void chunked_manifests_import_and_load()
+{
+    constexpr std::uint64_t chunk_size = 64 * 1024;
+    test::TestRepository target;
+    auto store = target.store();
+    const auto& layout = target.context.repo;
+    auto& files = *target.files;
+    auto& writer = *target.writer;
+    const auto outside = layout.root.parent_path() / "outside";
+    std::filesystem::create_directories(outside / "changed");
+
+    va::ManifestHeader header;
+    header.archive_uuid = "5b0e1d3c-7a1f-4c2e-9d6a-0f1e2d3c4b5a";
+    header.label = "ARCH-0001";
+    header.revision = 1;
+    header.created = "2026-10-16T00:00:00Z";
+    header.app_version = "0.1.0";
+    header.os = "windows";
+    header.host = "test-host";
+    header.exclusions = va::default_exclusions();
+    const std::vector<va::Entry> entries{
+        test::sample_file("big.bin", test::patterned(2 * chunk_size + 7, 1), chunk_size),
+        test::sample_file("small.txt", "small", chunk_size)};
+    const auto good = outside / "r0001.vam";
+    {
+        va::ManifestWriter manifest(writer, files, good, chunk_size);
+        for (const auto& entry : entries) {
+            CHECK(manifest.add(entry));
+        }
+        auto written = manifest.finish(header);
+        CHECK(written && written->file->commit());
+    }
+
+    // The same manifest with one chunk hash changed and a header that
+    // describes its body: only the Merkle root disagrees.
+    std::string bytes;
+    {
+        std::ifstream input(good, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+    auto parts = test::split_manifest(bytes);
+    CHECK(parts.lines.size() == 5); // two entries, three chunk lines
+    if (parts.lines.size() != 5) {
+        return;
+    }
+    auto chunk = va::chunk_line_from_json(nlohmann::json::parse(parts.lines[3]));
+    chunk.b3 = va::blake3_hex("other");
+    parts.lines[3] = va::chunk_line_to_json(chunk);
+    const auto changed = outside / "changed" / "r0001.vam";
+    std::ofstream(changed, std::ios::binary) << test::assemble_manifest(parts);
+
+    const auto rejected =
+        va::import_manifest(store, files, writer, layout, changed, false, test::not_cancelled(), test::no_progress());
+    CHECK(!rejected && rejected.error().failure_class == "ManifestHashMismatch");
+    const auto nothing = store.revisions(header.archive_uuid);
+    CHECK(nothing && nothing->empty());
+
+    const auto imported =
+        va::import_manifest(store, files, writer, layout, good, false, test::not_cancelled(), test::no_progress());
+    CHECK(imported && imported->new_archive && imported->revision == 1);
+    const auto loaded = va::load_recorded_manifest(store, files, layout, header.archive_uuid, 1);
+    CHECK(loaded && loaded->header.chunk_size == chunk_size && loaded->entries.size() == 2);
+    if (loaded && loaded->entries.size() == 2) {
+        CHECK(loaded->entries[0].chunks == entries[0].chunks && loaded->entries[0].chunks.size() == 3);
+        CHECK(loaded->entries[1].chunks.empty());
+    }
+
+    // Revision 2 recorded with such bytes, as a faulty writer would leave
+    // them: loading it is a hash mismatch, not a repository error.
+    parts.header.revision = 2;
+    parts.header.supersedes = 1;
+    const auto second = test::assemble_manifest(parts);
+    const auto line = second.substr(0, second.find('\n'));
+    std::ofstream(va::manifest_path(layout.manifests(), header.archive_uuid, 2), std::ios::binary) << second;
+    const auto recorded = va::header_from_json(nlohmann::json::parse(line));
+    CHECK(store.insert_revision({header.archive_uuid, 2, "manifests/" + header.archive_uuid + "/r0002.vam", line,
+        va::blake3_hex(line), recorded.body_blake3, "", header.created}));
+    const auto mismatched = va::load_recorded_manifest(store, files, layout, header.archive_uuid, 2);
+    CHECK(!mismatched && mismatched.error().failure_class == "ManifestHashMismatch");
+
+    // Revision 1 changed in the repository to a chunk size no manifest may
+    // have, its body as recorded: a changed manifest (the hashes come first),
+    // not a malformed one.
+    const auto stored = va::manifest_path(layout.manifests(), header.archive_uuid, 1);
+    auto changed_header = test::split_manifest(bytes);
+    changed_header.header.chunk_size = 1000;
+    std::ofstream(stored, std::ios::binary | std::ios::trunc) << test::assemble_manifest(changed_header);
+    const auto changed_size = va::load_recorded_manifest(store, files, layout, header.archive_uuid, 1);
+    CHECK(!changed_size && changed_size.error().failure_class == "ManifestHashMismatch");
 }
 
 // M4: export -> import round trip, duplicate detection, rollback protection.
@@ -117,7 +214,7 @@ std::filesystem::path sample_manifest(test::TestRepository& repository, const st
 {
     std::filesystem::create_directories(directory);
     const auto path = directory / std::format("r{:04}.vam", revision);
-    va::ManifestWriter writer(*repository.writer, *repository.files, path);
+    va::ManifestWriter writer(*repository.writer, *repository.files, path, 0);
     const std::pair<const char*, const char*> files[] = {
         {"a.txt", "a (sample data)"}, {"b.txt", "b (sample data)"}, {"photos/c.jpg", "c (sample data)"}};
     for (const auto& [name, content] : files) {
@@ -667,6 +764,7 @@ void import_and_export_report_progress_and_stop_when_cancelled()
 void transfer_tests()
 {
     export_import_round_trip();
+    chunked_manifests_import_and_load();
     imports_of_one_revision_record_it_once(true);
     imports_of_one_revision_record_it_once(false);
     an_import_waits_for_the_record_of_another();

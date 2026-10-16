@@ -1308,7 +1308,9 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     outcome.manifest = manifest_path(services.layout.manifests(), plan.archive_uuid, plan.revision);
     std::error_code directory_error;
     std::filesystem::create_directories(outcome.manifest.parent_path(), directory_error);
-    ManifestWriter manifest(services.writer, services.repository_files, outcome.manifest);
+    // No chunk lines yet: registration switches them on in a later stage
+    // (decision 0031).
+    ManifestWriter manifest(services.writer, services.repository_files, outcome.manifest, 0);
     std::vector<Entry> entries;
     entries.reserve(scanned->entries.size());
     for (auto& scanned_entry : scanned->entries) {

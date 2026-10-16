@@ -218,7 +218,7 @@ inline void import_later_revision(
     const auto directory = fixture.repository.context.repo.root.parent_path() / "exports" / std::to_string(revision);
     std::filesystem::create_directories(directory);
     const auto path = directory / std::format("r{:04}.vam", revision);
-    va::ManifestWriter writer(*fixture.repository.writer, *fixture.repository.files, path);
+    va::ManifestWriter writer(*fixture.repository.writer, *fixture.repository.files, path, 0);
     for (const auto& entry : current->entries) {
         CHECK(writer.add(entry).has_value());
     }

@@ -683,14 +683,16 @@ private:
 };
 
 // Passes everything to `inner`, except that the `nth` opening of a file named
-// `name` reads other bytes the second time it reads from `offset`, as
-// removable media read again may give them: there `from` is replaced by `to`
-// (of the same length) in what the read returns. The file is not changed.
+// `name` reads other bytes the second time it reads from `offset` (or the
+// `read`th time), as removable media read again may give them: there `from` is
+// replaced by `to` (of the same length) in what the read returns. The file is
+// not changed.
 class SecondReadDiffers final : public va::IFileSystemAccess {
 public:
     SecondReadDiffers(va::IFileSystemAccess& inner, std::string name, int nth, std::uint64_t offset, std::string from,
-        std::string to)
-        : inner_(inner), name_(std::move(name)), nth_(nth), offset_(offset), from_(std::move(from)), to_(std::move(to))
+        std::string to, int read = 2)
+        : inner_(inner), name_(std::move(name)), nth_(nth), offset_(offset), from_(std::move(from)), to_(std::move(to)),
+          read_(read)
     {
     }
     // Whether a read gave the other bytes.
@@ -728,7 +730,7 @@ private:
         std::expected<std::size_t, va::IoError> read(std::uint64_t offset, std::span<std::byte> output) override
         {
             const auto count = inner_->read(offset, output);
-            if (count && offset == owner_.offset_ && ++reads_at_offset_ == 2) {
+            if (count && offset == owner_.offset_ && ++reads_at_offset_ == owner_.read_) {
                 const std::string_view read(reinterpret_cast<const char*>(output.data()), *count);
                 if (const auto at = read.find(owner_.from_); at != std::string_view::npos) {
                     std::memcpy(output.data() + at, owner_.to_.data(), owner_.to_.size());
@@ -752,6 +754,7 @@ private:
     std::uint64_t offset_;
     std::string from_;
     std::string to_;
+    int read_;
     int opened_ = 0;
     bool differed_ = false;
 };

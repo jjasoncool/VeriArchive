@@ -1,6 +1,10 @@
 #include "core/manifest/manifest.h"
 
 #include "common/canonical_json.h"
+#include "common/hex.h"
+
+#include <algorithm>
+#include <format>
 
 namespace va {
 namespace {
@@ -48,6 +52,51 @@ std::string text_or(const nlohmann::json& json, const char* key)
 
 } // namespace
 
+bool valid_chunk_size(std::uint64_t chunk_size)
+{
+    return chunk_size % chunk_size_unit == 0 && chunk_size <= max_chunk_size;
+}
+
+std::string invalid_chunk_size(std::uint64_t chunk_size)
+{
+    return std::format("chunk_size {} is not 0 or a multiple of {} up to {}", chunk_size, chunk_size_unit,
+        max_chunk_size);
+}
+
+bool has_chunk_lines(const Entry& entry, std::uint64_t chunk_size)
+{
+    return chunk_size > 0 && entry.type == 'f' && !entry.b3.empty() && entry.size && *entry.size > chunk_size;
+}
+
+std::uint64_t chunk_line_count(std::uint64_t size, std::uint64_t chunk_size)
+{
+    return size / chunk_size + (size % chunk_size != 0 ? 1 : 0);
+}
+
+ChunkLine chunk_of(const std::string& p, std::uint64_t size, std::uint64_t idx, std::uint64_t chunk_size)
+{
+    const auto offset = idx * chunk_size;
+    return {p, idx, offset, std::min(chunk_size, size - offset), {}};
+}
+
+bool add_merkle_leaves(MerkleTreeBuilder& tree, const Entry& entry, std::uint64_t chunk_size)
+{
+    if (has_chunk_lines(entry, chunk_size)) {
+        if (!std::all_of(entry.chunks.begin(), entry.chunks.end(),
+                [](const std::string& chunk) { return is_hash_hex(chunk); })) {
+            return false;
+        }
+        for (const auto& chunk : entry.chunks) {
+            tree.add_hex(chunk);
+        }
+        return true;
+    }
+    if (entry.type == 'd' || entry.b3.empty()) {
+        return true; // no content hash, no leaf
+    }
+    return tree.add_hex(entry.b3);
+}
+
 // Key order is fixed by §B4.3 (copy_of: decision 0005).
 std::string header_to_json(const ManifestHeader& header)
 {
@@ -86,12 +135,16 @@ std::string header_to_json(const ManifestHeader& header)
                                .add_unsigned("streams", header.counts.streams)
                                .add_unsigned("chunks", header.counts.chunks)
                                .add_unsigned("bytes", header.counts.bytes)
-                               .str())
-        .add_raw("body", ObjectWriter{}
-                             .add_string("blake3", header.body_blake3)
-                             .add_unsigned("length", header.body_length)
-                             .add_unsigned("lines", header.body_lines)
-                             .str());
+                               .str());
+    // Omitted when the chunk size is 0 (§B4.3), so V1 headers keep their bytes.
+    if (!header.merkle_root.empty()) {
+        object.add_string("merkle_root", header.merkle_root);
+    }
+    object.add_raw("body", ObjectWriter{}
+                               .add_string("blake3", header.body_blake3)
+                               .add_unsigned("length", header.body_length)
+                               .add_unsigned("lines", header.body_lines)
+                               .str());
     return object.str();
 }
 
@@ -132,6 +185,20 @@ std::string entry_to_json(const Entry& entry)
         object.add_string("stream", entry.stream);
     }
     return object.str();
+}
+
+// Key order is fixed by §B4.4. A chunk line names its file by p alone; the
+// reader matches it to its file by position (decision 0031).
+std::string chunk_line_to_json(const ChunkLine& chunk)
+{
+    return ObjectWriter{}
+        .add_string("t", "c")
+        .add_string("p", chunk.p)
+        .add_unsigned("idx", chunk.idx)
+        .add_unsigned("offset", chunk.offset)
+        .add_unsigned("length", chunk.length)
+        .add_string("b3", chunk.b3)
+        .str();
 }
 
 ManifestHeader header_from_json(const nlohmann::json& json)
@@ -183,6 +250,7 @@ ManifestHeader header_from_json(const nlohmann::json& json)
     header.counts.streams = counts.value("streams", std::uint64_t{0});
     header.counts.chunks = counts.value("chunks", std::uint64_t{0});
     header.counts.bytes = counts.value("bytes", std::uint64_t{0});
+    header.merkle_root = text_or(json, "merkle_root");
     const auto& body = json.at("body");
     header.body_blake3 = body.at("blake3").get<std::string>();
     header.body_length = body.at("length").get<std::uint64_t>();
@@ -221,6 +289,23 @@ Entry entry_from_json(const nlohmann::json& json)
     }
     entry.stream = text_or(json, "stream");
     return entry;
+}
+
+ChunkLine chunk_line_from_json(const nlohmann::json& json)
+{
+    if (json.at("t").get<std::string>() != "c") {
+        throw nlohmann::json::other_error::create(501, "not a chunk line", &json);
+    }
+    ChunkLine chunk;
+    chunk.p = json.at("p").get<std::string>();
+    chunk.idx = json.at("idx").get<std::uint64_t>();
+    chunk.offset = json.at("offset").get<std::uint64_t>();
+    chunk.length = json.at("length").get<std::uint64_t>();
+    chunk.b3 = json.at("b3").get<std::string>();
+    if (!is_hash_hex(chunk.b3)) {
+        throw nlohmann::json::other_error::create(501, "b3 is not 64 lowercase hex digits", &json);
+    }
+    return chunk;
 }
 
 } // namespace va

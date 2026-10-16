@@ -28,6 +28,7 @@ std::unexpected<ManifestLoadFailure> fail(const UnusableManifest& unusable)
 constexpr const char* first_line_differs = "its first line differs from what the repository recorded";
 constexpr const char* body_differs = "its body does not match its header";
 constexpr const char* read_otherwise = "it gave other bytes when it was read again";
+constexpr const char* merkle_differs = "its content hashes do not match its merkle_root";
 
 UnusableManifest unusable_manifest(const RevisionRecord& record, UnusableManifest::Kind kind, std::string cause = {})
 {
@@ -47,6 +48,8 @@ UnusableManifest unusable_manifest(const RevisionRecord& record, const ManifestF
         return unusable_manifest(record, Kind::Changed, first_line_differs);
     case ManifestFailure::Kind::BodyMismatch:
         return unusable_manifest(record, Kind::Changed, entries ? read_otherwise : body_differs);
+    case ManifestFailure::Kind::MerkleMismatch:
+        return unusable_manifest(record, Kind::Changed, merkle_differs); // decision 0031
     case ManifestFailure::Kind::Malformed:
         break;
     }

@@ -755,7 +755,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     outcome.manifest = manifest_path(services.layout.manifests(), uuid, outcome.revision);
     std::error_code directory_error;
     std::filesystem::create_directories(outcome.manifest.parent_path(), directory_error);
-    ManifestWriter writer(services.writer, services.repository_files, outcome.manifest);
+    // No chunk lines yet: relocation switches them on in a later stage
+    // (decision 0031). The writer fills in the chunk size and Merkle root.
+    ManifestWriter writer(services.writer, services.repository_files, outcome.manifest, 0);
     for (const auto& entry : comparison.current_entries) {
         if (auto added = writer.add(entry); !added) {
             return stopped_by(Kind::Repository, "cannot write the manifest: " + added.error().message);

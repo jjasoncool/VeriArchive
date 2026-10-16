@@ -293,8 +293,7 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
 {
     auto reader = ManifestReader::open(files, manifest);
     if (!reader) {
-        return fail(reader.error().kind == ManifestFailure::Kind::BodyMismatch ? "ManifestHashMismatch"
-                                                                              : "RepositoryError",
+        return fail(reader.error().hash_mismatch() ? "ManifestHashMismatch" : "RepositoryError",
             reader.error().message);
     }
     const auto header = reader->header();
@@ -354,7 +353,8 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
             if (next.error().kind == ManifestFailure::Kind::BodyMismatch) {
                 return fail("ManifestHashMismatch", changed_while_imported);
             }
-            return fail("RepositoryError", next.error().message);
+            return fail(next.error().hash_mismatch() ? "ManifestHashMismatch" : "RepositoryError",
+                next.error().message);
         }
         if (!*next) {
             break;

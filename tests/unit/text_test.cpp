@@ -361,6 +361,18 @@ void translation_tests()
                   "object key - unexpected end of input; expected string literal") ==
           "清單檔標頭無效：JSON 語法錯誤（第 1 行，第 2 欄）：syntax error while parsing "
           "object key - unexpected end of input; expected string literal");
+    // Chunk lines and the Merkle root (decision 0031).
+    CHECK(chinese("invalid manifest header: chunk_size 1000 is not 0 or a multiple of 65536 up to 1073741824") ==
+          "清單檔標頭無效：chunk_size 1000 不是 0，也不是 65536 的倍數（上限 1073741824）");
+    CHECK(chinese("invalid manifest header: merkle_root is missing or not 64 lowercase hex digits") ==
+          "清單檔標頭無效：merkle_root 缺少或不是 64 個小寫十六進位數字");
+    CHECK(chinese("chunk 1 of big.bin is missing or does not match the file") == "big.bin 的區塊 1 遺失或與檔案不符");
+    CHECK(chinese("chunk 0 of locked.bin belongs to no file") == "locked.bin 的區塊 0 不屬於任何檔案");
+    CHECK(chinese("invalid chunk line: key 'idx' not found") == "區塊行無效：找不到欄位「idx」");
+    CHECK(chinese("invalid chunk line: b3 is not 64 lowercase hex digits") ==
+          "區塊行無效：b3 不是 64 個小寫十六進位數字");
+    CHECK(chinese("cannot write the manifest: chunk hashes of big.bin: 2 given, 3 expected") ==
+          "無法寫入清單檔：big.bin 的區塊雜湊：提供 2 個，應為 3 個");
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==
@@ -378,6 +390,9 @@ void translation_tests()
           "已略過：無法讀取清單檔 " + uuid + "/r0001.vam：清單檔是空的");
     CHECK(chinese.format("unfinished registrations whose saved progress was kept: {}", 2) ==
           "保留了已儲存進度的未完成註冊：2 個"); // decision 0026
+    CHECK(chinese("cannot read manifest " + uuid + "/r0004.vam: manifest content hashes do not match its "
+                  "merkle_root") ==
+          "無法讀取清單檔 " + uuid + "/r0004.vam：清單檔的內容雜湊與其 Merkle 根雜湊不符");
 
     // Which process runs a registration (decision 0024) and abandoning one
     // (decision 0025): the process id, the program and the uuid are values.
@@ -684,6 +699,9 @@ void translation_tests()
                   "2 (" + manifest + ") has changed: it gave other bytes when it was read again" + restore) ==
           "無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 的清單檔（" + manifest +
               "）已被變更：再次讀取時得到不同的內容" + restore_chinese);
+    CHECK(chinese("manifest: the manifest of revision 2 (" + manifest +
+                  ") has changed: its content hashes do not match its merkle_root" + restore) ==
+          "清單檔：版次 2 的清單檔（" + manifest + "）已被變更：其內容雜湊與其 Merkle 根雜湊不符" + restore_chinese);
     // A verification by root stops naming the archive that may be at the root
     // (decision 0028): what is wrong with its manifest, then to verify it by
     // its uuid to record the failure, then to fix the manifest as the plain

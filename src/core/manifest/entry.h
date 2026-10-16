@@ -23,6 +23,10 @@ struct Entry {
     std::vector<std::string> warn;          // portability warnings, e.g. "case-collision"
     std::string stream;                     // ADS name, 's' only (V1.1)
     std::string unreadable;                 // "", "permission", "media" or "other"
+    // BLAKE3 hex of each chunk, in idx order, for a file that has chunk lines
+    // (decision 0031, has_chunk_lines() in manifest.h); empty for any other
+    // entry. Not part of the entry line: the chunk lines follow the entries.
+    std::vector<std::string> chunks;
 };
 
 // Canonical order (R-43): bytewise on p, then raw, then type (f, d, l before s),
