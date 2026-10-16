@@ -499,6 +499,54 @@ void a_resume_by_uuid_stops_where_several_volumes_hold_the_archive()
     CHECK(verified && verified->identity.result == va::MatchResult::MatchWeak && fixture.archive.bytes_read == 8000);
 }
 
+// §B10 and decision 0022, point 7: a device and a sector-by-sector clone of
+// it, registered as two archives (decision 0005), both behind bridges that
+// give no serial (sample volumes): A on the device, B on the clone, registered
+// with --force-new-archive. Attached together, the device's root matches both
+// (AMBIGUOUS), and the message says to select one by its uuid and, where
+// their volumes are attached together, to detach all but the volume of the one
+// to verify first, as a verification by A's uuid finds A on both volumes and
+// stops too. With the clone detached, A verifies by its uuid on the device.
+// (Sample volumes, sample files.)
+void clones_registered_as_two_archives_say_to_detach_the_other_volumes()
+{
+    EngineFixture fixture;
+    const auto original = fixture.archive.root() / "SAMPLE-source";
+    const auto clone = fixture.archive.root() / "SAMPLE-cloned";
+    fixture.media.volume = serial_less_volume(original);
+    fixture.media.extra_volumes = {serial_less_volume(clone)};
+    fixture.archive.add_file("SAMPLE-source/SAMPLE-one.txt", "one (sample data)");
+    fixture.archive.add_file("SAMPLE-cloned/SAMPLE-one.txt", "one (sample data)");
+    const auto a = fixture.register_root(original);
+    va::RegisterRequest separately;
+    separately.root = clone;
+    separately.force_new_archive = true;
+    const auto b = fixture.register_root(separately);
+    CHECK(a && b && a->archive_uuid != b->archive_uuid);
+    if (!a || !b) {
+        return;
+    }
+    const auto by_root = fixture.verify(original);
+    CHECK(!by_root && by_root.error().kind == va::VerifyStop::Kind::Decision &&
+          by_root.error().identity.result == va::MatchResult::Ambiguous &&
+          by_root.error().message ==
+              "AMBIGUOUS: the media matches several archives (cloned media); select one with `verify --full "
+              "<archive_uuid>`; where the volumes of those archives are attached together, detach all but the volume "
+              "of the one to verify, then verify it");
+    if (!by_root) {
+        std::cerr << "  by root: " << by_root.error().message << '\n';
+    }
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = a->archive_uuid;
+    const auto selected = fixture.verify(by_uuid);
+    CHECK(!selected && selected.error().kind == va::VerifyStop::Kind::Decision &&
+          selected.error().roots_found == (std::vector<std::filesystem::path>{original, clone}));
+    fixture.media.extra_volumes.clear();
+    const auto detached = fixture.verify(by_uuid);
+    CHECK(detached && detached->archive_uuid == a->archive_uuid && detached->root == original &&
+          detached->result == "PASSED_WITH_WARNINGS" && detached->identity.result == va::MatchResult::MatchWeak);
+}
+
 // Reads the run's record whenever hashing reports progress, as the GUI's
 // Archive List would read it from another process.
 class RunWatcher final : public va::IProgressSink {
@@ -1644,6 +1692,7 @@ void verify_engine_tests()
     interrupted_run_resumes_without_rehashing();
     resume_refused_after_new_revision();
     a_resume_by_uuid_stops_where_several_volumes_hold_the_archive();
+    clones_registered_as_two_archives_say_to_detach_the_other_volumes();
     run_record_says_where_and_how_much();
     archive_found_by_uuid_is_read_at_its_folder();
     an_archive_on_a_volume_known_by_its_guid_path_verifies_by_uuid();

@@ -444,9 +444,13 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         for (const auto& archive_uuid : identity.archives) {
             (void)record_evidence(archive_uuid, "");
         }
+        // Selected by its uuid, an archive whose volume and a clone of it are
+        // attached together stops as well, finding it on both (decision 0022,
+        // point 7): only the volume of the one to verify may stay attached.
         return stop(VerifyStop::Kind::Decision,
             "AMBIGUOUS: the media matches several archives (cloned media); select one with "
-            "`verify --full <archive_uuid>`",
+            "`verify --full <archive_uuid>`; where the volumes of those archives are attached together, detach all "
+            "but the volume of the one to verify, then verify it",
             identity);
     case MatchResult::Migrated:
         (void)record_evidence(identity.archives.front(), "");

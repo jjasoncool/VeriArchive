@@ -498,6 +498,16 @@ void translation_tests()
           "progress could not be removed: CreateFileW failed (Win32 error 5); abandon the relocation with `archive "
           "abandon-relocation " + uuid + "` before relocating again");
 
+    // A root that matches several archives (§B10): select one by its uuid,
+    // and where their volumes are attached together, detach all but the one to
+    // verify, as the verification by uuid then finds it on each (decision
+    // 0022, point 7).
+    CHECK(chinese("error: AMBIGUOUS: the media matches several archives (cloned media); select one with `verify "
+                  "--full <archive_uuid>`; where the volumes of those archives are attached together, detach all but "
+                  "the volume of the one to verify, then verify it") ==
+          "錯誤：無法確定：此媒體符合多個封存（複製的媒體）；請以 `verify --full <archive_uuid>` 選擇其中一個；若這些封存的"
+          "磁碟區同時連接著，請讓要驗證的那個封存以外的磁碟區都中斷連線，再驗證它");
+
     // Comparing archives (CLI `archive compare`, GUI Compare Archives). The
     // result line keeps its mode word in every language, as verification's does.
     const std::string uuid_b = "94bbff52-39fa-458a-8831-9b30fb0cadf1";

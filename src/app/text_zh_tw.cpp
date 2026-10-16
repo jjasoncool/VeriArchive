@@ -753,10 +753,11 @@ constexpr CatalogEntry entries[] = {
     {"no registered archive {}", "找不到已註冊的封存 {}"},
     {"UNKNOWN: this is not a registered archive; use `register` to create one",
         "未知：這不是已註冊的封存；請使用 `register` 建立封存"},
-    {"AMBIGUOUS: the media matches several archives (cloned media); "
-        "select one with `verify --full <archive_uuid>`",
-        "無法確定：此媒體符合多個封存（複製的媒體）；"
-        "請以 `verify --full <archive_uuid>` 選擇其中一個"},
+    {"AMBIGUOUS: the media matches several archives (cloned media); select one with `verify --full <archive_uuid>`; "
+        "where the volumes of those archives are attached together, detach all but the volume of the one to verify, "
+        "then verify it",
+        "無法確定：此媒體符合多個封存（複製的媒體）；請以 `verify --full <archive_uuid>` 選擇其中一個；若這些封存的"
+        "磁碟區同時連接著，請讓要驗證的那個封存以外的磁碟區都中斷連線，再驗證它"},
     {"MIGRATED: the filesystem matches archive {} but the device differs; "
         "confirm with `archive relocate {} <root_path>`",
         "已遷移：檔案系統符合封存 {}，但裝置不同；請以 `archive relocate {} <root_path>` 確認"},
