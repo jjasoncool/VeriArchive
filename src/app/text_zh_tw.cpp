@@ -638,6 +638,12 @@ constexpr CatalogEntry entries[] = {
         "執行 {} 是封存 {} 未完成的搬移中斷時留下的紀錄；請以 `archive relocate {} <root_path> --resume` 繼續"},
     {"run {} is an interrupted attempt of a relocation of archive {} that has ended; nothing is left to resume",
         "執行 {} 是封存 {} 某次搬移中斷時留下的紀錄，該搬移已結束；沒有可繼續的作業"},
+    // A relocation made for an older revision never records (decision 0030).
+    {"run {} is an interrupted attempt of the unfinished relocation of archive {}, which verifies revision {}, but "
+        "the archive now has a later revision ({}); the relocation can no longer finish: abandon it with `archive "
+        "abandon-relocation {}`, then relocate again",
+        "執行 {} 是封存 {} 未完成的搬移中斷時留下的紀錄，該搬移驗證的是版次 {}，但封存現在已有較新的版次（{}）；"
+        "該搬移再也無法完成：請以 `archive abandon-relocation {}` 放棄它，再重新搬移"},
     {"run {} has an invalid resume record", "執行 {} 的繼續紀錄無效"},
     {"media copy {} differs from the repository copy", "媒體副本 {} 與儲存庫中的副本不同"},
     {"the media holds revision {}, newer than the repository's {}: "

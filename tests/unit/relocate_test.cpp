@@ -2130,9 +2130,11 @@ void an_attempt_stops_when_its_relocation_is_abandoned()
 // data). The relocation can no longer finish: revision 2 would set the
 // archive back (R-15). Its resume is refused before it reads anything, saying
 // so and naming the abandon, and so is a relocation without --resume, which
-// would otherwise be told to resume it. Its record and saved progress stay,
-// and the archive stays at revision 3. Abandoned, the archive takes a
-// relocation against revision 3, which reads the whole carrier.
+// would otherwise be told to resume it, and `verify --resume` of the
+// INCOMPLETE run of the interrupted attempt, which names the relocation's
+// resume while it can finish. Its record and saved progress stay, and the
+// archive stays at revision 3. Abandoned, the archive takes a relocation
+// against revision 3, which reads the whole carrier.
 void a_relocation_made_for_an_older_revision_never_records()
 {
     RelocationFixture fixture(true);
@@ -2140,8 +2142,25 @@ void a_relocation_made_for_an_older_revision_never_records()
     const auto record = fixture.record();
     const auto matched = fixture.saved(run_id);
     CHECK(matched.files == 20);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->front().result == "INCOMPLETE");
+    va::VerifyRequest resume_run;
+    resume_run.root = fixture.archive.root() / "new";
+    resume_run.resume_run = runs && !runs->empty() ? runs->front().run_id : std::string{};
+    const auto attempt = "run " + *resume_run.resume_run + " is an interrupted attempt of the unfinished relocation of "
+                         "archive " + fixture.archive_uuid;
+    const auto continued = fixture.verify(resume_run);
+    CHECK(!continued && continued.error().message == attempt + "; continue it with `archive relocate " +
+                                                         fixture.archive_uuid + " <root_path> --resume`");
     test::import_later_revision(fixture, fixture.store, fixture.archive_uuid, 3);
     const auto refusal = made_for_an_older_revision(fixture, 1, 3);
+    const auto older = fixture.verify(resume_run);
+    CHECK(!older && older.error().kind == va::VerifyStop::Kind::NotFound &&
+          older.error().message == attempt +
+                                       ", which verifies revision 1, but the archive now has a later revision (3); "
+                                       "the relocation can no longer finish: abandon it with `archive "
+                                       "abandon-relocation " +
+                                       fixture.archive_uuid + "`, then relocate again");
 
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);

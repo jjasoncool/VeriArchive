@@ -125,6 +125,38 @@ std::string relocation_of(const VerifyRunRecord& run)
     return found != counts.end() && found->is_string() ? found->get<std::string>() : std::string{};
 }
 
+// An unfinished relocation made for an older revision (decision 0030): the
+// revision it verifies, and the later one its archive has now.
+struct MadeForOlder {
+    std::uint32_t verifies = 0;
+    std::uint32_t archive_revision = 0;
+};
+
+// Whether the archive's unfinished relocation was made for an older revision
+// than the archive has now (ArchiveStore::later_revision), as its record says
+// the revision it verifies; nothing for a record that says none.
+std::expected<std::optional<MadeForOlder>, IoError> made_for_older(ArchiveStore& store, const Uuid& archive_uuid)
+{
+    const auto stored = store.setting(relocation_key(archive_uuid));
+    if (!stored) {
+        return std::unexpected(stored.error());
+    }
+    const auto record = nlohmann::json::parse(*stored, nullptr, false);
+    const auto revision = record.is_object() ? record.find("revision") : record.end();
+    if (!record.is_object() || revision == record.end() || !revision->is_number_unsigned()) {
+        return std::optional<MadeForOlder>{};
+    }
+    const auto verifies = revision->get<std::uint32_t>();
+    const auto later = store.later_revision(archive_uuid, verifies);
+    if (!later) {
+        return std::unexpected(later.error());
+    }
+    if (!*later) {
+        return std::optional<MadeForOlder>{};
+    }
+    return std::optional<MadeForOlder>(MadeForOlder{verifies, **later});
+}
+
 std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, const std::string& run_id)
 {
     const auto setting = store.setting(run_setting(run_id));
@@ -148,6 +180,21 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
                 return stop(VerifyStop::Kind::Repository, unfinished.error().message);
             }
             if (*unfinished) {
+                // Made for an older revision (decision 0030), it can no
+                // longer finish: its resume would be refused.
+                const auto older = made_for_older(store, archive_uuid);
+                if (!older) {
+                    return stop(VerifyStop::Kind::Repository, older.error().message);
+                }
+                if (*older) {
+                    return stop(VerifyStop::Kind::NotFound,
+                        "run " + run_id + " is an interrupted attempt of the unfinished relocation of archive " +
+                            archive_uuid + ", which verifies revision " + std::to_string((*older)->verifies) +
+                            ", but the archive now has a later revision (" +
+                            std::to_string((*older)->archive_revision) +
+                            "); the relocation can no longer finish: abandon it with `archive abandon-relocation " +
+                            archive_uuid + "`, then relocate again");
+                }
                 return stop(VerifyStop::Kind::NotFound,
                     "run " + run_id + " is an interrupted attempt of the unfinished relocation of archive " +
                         archive_uuid + "; continue it with `archive relocate " + archive_uuid +

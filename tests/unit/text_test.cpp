@@ -403,6 +403,11 @@ void translation_tests()
                   "`archive abandon-relocation " + uuid + "`, then relocate again") ==
           "封存 " + uuid + " 未完成的搬移（至「Y:\\範例」）驗證的是版次 1，但封存現在已有較新的版次（3）；"
           "這次搬移再也無法完成：請以 `archive abandon-relocation " + uuid + "` 放棄它，再重新搬移");
+    CHECK(chinese("error: run " + run + " is an interrupted attempt of the unfinished relocation of archive " + uuid +
+                  ", which verifies revision 1, but the archive now has a later revision (3); the relocation can no "
+                  "longer finish: abandon it with `archive abandon-relocation " + uuid + "`, then relocate again") ==
+          "錯誤：執行 " + run + " 是封存 " + uuid + " 未完成的搬移中斷時留下的紀錄，該搬移驗證的是版次 1，但封存現在已有"
+          "較新的版次（3）；該搬移再也無法完成：請以 `archive abandon-relocation " + uuid + "` 放棄它，再重新搬移");
     // A cause that a hint follows is translated too, and the uuid after it is
     // carried over.
     CHECK(chinese.format("RELOCATION REFUSED: {}",
