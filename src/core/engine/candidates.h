@@ -2,8 +2,9 @@
 // Builds the identity-matching candidates (§B10) from the repository: each
 // archive with the carrier of its latest revision and of earlier revisions
 // (decision 0004), and whether it is retired (decision 0003).
+#include "common/repository_layout.h"
 #include "core/identity/matcher.h"
-#include "core/manifest/manifest.h"
+#include "core/interfaces.h"
 #include "core/repository/archive_store.h"
 
 #include <filesystem>
