@@ -2,7 +2,9 @@
 // Loads a revision's manifest and accepts it only when its bytes are the ones
 // the repository recorded (R-14): header and body BLAKE3 equal the database
 // record, the body matches its own header (R-62), and it is not older than the
-// highest known revision (R-15).
+// highest known revision (R-15). Line 1 is compared with the BLAKE3 recorded
+// for it before it is parsed (decision 0028): a manifest whose line 1 is not
+// the one recorded fails with ManifestHashMismatch, whatever that line holds.
 //
 // The index also holds a copy of each revision's header (header_json). The
 // validated manifest bytes are the truth and the database is an index

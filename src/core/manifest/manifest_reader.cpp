@@ -59,7 +59,7 @@ std::expected<bool, ManifestFailure> ManifestReader::read_line(std::string& line
 }
 
 std::expected<ManifestReader, ManifestFailure> ManifestReader::open(
-    IFileSystemAccess& files, const std::filesystem::path& path)
+    IFileSystemAccess& files, const std::filesystem::path& path, std::optional<std::string_view> recorded_header_blake3)
 {
     ManifestReader reader;
     reader.buffer_.resize(1 << 20);
@@ -70,6 +70,14 @@ std::expected<ManifestReader, ManifestFailure> ManifestReader::open(
     reader.source_ = std::move(*source);
 
     auto has_header = reader.read_line(reader.header_line_);
+    // Decision 0028: the bytes of line 1 before their structure. Whatever a
+    // line 1 that is not the one recorded holds, the manifest has changed; a
+    // read that failed is no answer either way.
+    if (recorded_header_blake3 && (has_header || has_header.error().kind != ManifestFailure::Kind::Io) &&
+        (!has_header || !*has_header || blake3_hex(reader.header_line_) != *recorded_header_blake3)) {
+        return std::unexpected(
+            ManifestFailure{ManifestFailure::Kind::HeaderMismatch, "the manifest differs from the repository record"});
+    }
     if (!has_header) {
         return std::unexpected(has_header.error());
     }

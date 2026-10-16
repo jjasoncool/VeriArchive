@@ -52,9 +52,11 @@ ManifestHeader header_from_json(const nlohmann::json& json);
 Entry entry_from_json(const nlohmann::json& json);
 
 // What went wrong while reading a manifest. BodyMismatch means the bytes do not
-// match the header's body hash: the run fails with ManifestHashMismatch (§A6).
+// match the header's body hash, HeaderMismatch that line 1 is not the one the
+// repository recorded (decision 0028): either fails the run with
+// ManifestHashMismatch (§A6).
 struct ManifestFailure {
-    enum class Kind { Io, Malformed, BodyMismatch };
+    enum class Kind { Io, Malformed, BodyMismatch, HeaderMismatch };
     Kind kind;
     std::string message;
 };

@@ -51,10 +51,14 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
     }
 
     const auto path = layout.root / path_from_utf8((*record)->manifest_relpath);
-    auto reader = ManifestReader::open(repository_files, path);
+    // Line 1 is compared with the record before it is parsed (decision 0028):
+    // a header changed into text that no longer parses has changed as well.
+    auto reader = ManifestReader::open(repository_files, path, (*record)->header_blake3);
     if (!reader) {
-        return fail(reader.error().kind == ManifestFailure::Kind::BodyMismatch ? "ManifestHashMismatch"
-                                                                              : "RepositoryError",
+        const auto kind = reader.error().kind;
+        return fail(kind == ManifestFailure::Kind::BodyMismatch || kind == ManifestFailure::Kind::HeaderMismatch
+                        ? "ManifestHashMismatch"
+                        : "RepositoryError",
             reader.error().message);
     }
     if (!recorded_as(**record, reader->header_blake3(), reader->header())) {
@@ -104,7 +108,9 @@ std::expected<ManifestHeader, IoError> load_recorded_header(
     const auto line =
         ManifestReader::read_header_line(repository_files, layout.root / path_from_utf8(revision.manifest_relpath));
     if (!line) {
-        return cannot_use(line.error().message);
+        // A line 1 that ends without a newline, or an empty file, is not the
+        // line recorded either (decision 0028).
+        return cannot_use(line.error().kind == ManifestFailure::Kind::Io ? line.error().message : differs_from_record);
     }
     // The record's hash first: line 1 of a changed manifest may not parse.
     const auto line_blake3 = blake3_hex(*line);

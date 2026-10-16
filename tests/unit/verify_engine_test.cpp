@@ -4,9 +4,11 @@
 
 #include "common/time.h"
 #include "core/engine/archive_status.h"
+#include "core/engine/compare_archives.h"
 #include "core/engine/item_rules.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/engine/transfer.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_writer.h"
 
@@ -622,6 +624,68 @@ void a_named_archive_reads_no_other_manifest()
     }
 }
 
+std::string file_bytes(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+void write_bytes(const std::filesystem::path& path, const std::string& bytes)
+{
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+}
+
+// Decision 0028: line 1 of a recorded manifest is compared with the BLAKE3
+// recorded for it before it is parsed. A header changed into text that no
+// longer parses (sample data: its opening brace made a bracket), one cut off
+// before its newline, and an empty manifest are changed manifests: wherever
+// a whole manifest is loaded (verification, comparison, export) they fail
+// with ManifestHashMismatch, never as a malformed manifest or with a
+// RepositoryError, and line 1 alone (the archive lists, identity matching)
+// says that the manifest differs from its record, not why it does not parse.
+void a_first_line_that_no_longer_parses_has_changed()
+{
+    enum class Case { Unparseable, CutOff, Empty };
+    for (const auto what : {Case::Unparseable, Case::CutOff, Case::Empty}) {
+        Registered fixture;
+        const auto& layout = fixture.repository.context.repo;
+        const auto path = va::manifest_path(layout.manifests(), fixture.archive_uuid, 1);
+        auto bytes = file_bytes(path);
+        if (what == Case::Unparseable) {
+            bytes[0] = '[';
+        } else if (what == Case::CutOff) {
+            bytes.resize(bytes.find('\n') / 2);
+        } else {
+            bytes.clear();
+        }
+        write_bytes(path, bytes);
+
+        const auto loaded =
+            va::load_recorded_manifest(fixture.store, *fixture.repository.files, layout, fixture.archive_uuid, 1);
+        CHECK(!loaded && loaded.error().failure_class == "ManifestHashMismatch" &&
+              loaded.error().message == "the manifest differs from the repository record");
+        if (!loaded && loaded.error().failure_class != "ManifestHashMismatch") {
+            std::cerr << "  loaded: " << loaded.error().failure_class << ": " << loaded.error().message << '\n';
+        }
+        const auto compared = va::compare_archives(fixture.store, *fixture.repository.files, layout,
+            fixture.archive_uuid, fixture.archive_uuid, fixture.cancel, fixture.progress);
+        CHECK(!compared && compared.error().failure_class == "ManifestHashMismatch");
+        const auto exported = va::export_archive(fixture.store, *fixture.repository.files,
+            *fixture.repository.writer, layout, fixture.archive_uuid, layout.root.parent_path() / "export");
+        CHECK(!exported && exported.error() == "ManifestHashMismatch: the manifest differs from the repository record");
+
+        const auto revision = fixture.store.revision(fixture.archive_uuid, 1);
+        CHECK(revision && *revision);
+        if (revision && *revision) {
+            const auto header = va::load_recorded_header(*fixture.repository.files, layout, **revision);
+            CHECK(!header && header.error().message == "cannot use the manifest of revision 1 of archive " +
+                                                           fixture.archive_uuid +
+                                                           ": the manifest differs from the repository record; "
+                                                           "restore it from a backup of the repository");
+        }
+    }
+}
+
 // R-14: the archive is compared with the entries of the manifest validated.
 // They come from a second read of the recorded manifest; when that read gives
 // other bytes (sample data: one hex digit of the first entry's BLAKE3), the
@@ -709,6 +773,7 @@ void verify_engine_tests()
     an_index_that_differs_from_its_manifest_stops_every_use();
     a_manifest_that_is_not_the_one_recorded_stops_every_use();
     a_named_archive_reads_no_other_manifest();
+    a_first_line_that_no_longer_parses_has_changed();
     entries_read_otherwise_than_validated_fail();
     item_rules();
 }

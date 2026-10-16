@@ -16,6 +16,8 @@
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <optional>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -373,6 +375,59 @@ void entries_are_read_from_the_body_validated()
     std::filesystem::remove_all(root, error);
 }
 
+// Decision 0028: given the BLAKE3 that a repository recorded for line 1, the
+// reader compares line 1 with it before it parses it. The line recorded
+// opens; a line 1 that differs fails with HeaderMismatch, also one that no
+// longer parses, one cut off, the line recorded without its newline (the
+// body gone with it), and an empty file; a file that cannot be opened stays
+// an I/O failure. Without the hash (an import's source, rebuild-index), a
+// line 1 that does not parse is a malformed manifest, as before.
+void line_one_is_compared_before_it_is_parsed()
+{
+    using Kind = va::ManifestFailure::Kind;
+    const auto root = temporary_directory("va-manifest-recorded-");
+    const auto writer = va::platform::make_file_writer();
+    const auto files = va::platform::make_file_system_access();
+    const auto path = root / "r0001.vam";
+    va::ManifestWriter manifest(*writer, *files, path);
+    CHECK(manifest.add(file("a.txt", "one")));
+    auto written = manifest.finish(golden_header());
+    CHECK(written && written->file->commit());
+    const auto bytes = read_file(path);
+    const auto newline = bytes.find('\n');
+    const auto recorded = va::blake3_hex(bytes.substr(0, newline));
+    CHECK(va::ManifestReader::open(*files, path, recorded).has_value());
+
+    const auto failure = [&](const std::string& changed,
+                             std::optional<std::string_view> hash) -> std::optional<va::ManifestFailure> {
+        std::ofstream(path, std::ios::binary | std::ios::trunc) << changed;
+        const auto reader = va::ManifestReader::open(*files, path, hash);
+        return reader ? std::nullopt : std::optional(reader.error());
+    };
+    const auto kind = [&](const std::string& changed, std::optional<std::string_view> hash) {
+        const auto failed = failure(changed, hash);
+        return failed ? std::optional(failed->kind) : std::nullopt;
+    };
+    auto unparseable = bytes;
+    unparseable[0] = '[';
+    const auto mismatch = failure(unparseable, recorded);
+    CHECK(mismatch && mismatch->kind == Kind::HeaderMismatch &&
+          mismatch->message == "the manifest differs from the repository record");
+    CHECK(kind(unparseable, std::nullopt) == Kind::Malformed);
+    CHECK(kind(bytes.substr(0, newline / 2), recorded) == Kind::HeaderMismatch);
+    CHECK(kind(bytes.substr(0, newline), recorded) == Kind::HeaderMismatch);
+    CHECK(kind("", recorded) == Kind::HeaderMismatch);
+    auto relabelled = bytes;
+    relabelled[relabelled.find("ARCHIVE-07")] = 'B';  // still a header, just another one
+    CHECK(kind(relabelled, recorded) == Kind::HeaderMismatch);
+    CHECK(!kind(relabelled, std::nullopt));
+    const auto gone = va::ManifestReader::open(*files, root / "r0002.vam", recorded);
+    CHECK(!gone && gone.error().kind == Kind::Io);
+
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 } // namespace
 
 void manifest_tests()
@@ -382,4 +437,5 @@ void manifest_tests()
     out_of_order_entries_are_rejected();
     malformed_manifests_say_why();
     entries_are_read_from_the_body_validated();
+    line_one_is_compared_before_it_is_parsed();
 }

@@ -15,13 +15,20 @@
 #include "core/manifest/manifest.h"
 
 #include <memory>
+#include <optional>
+#include <string_view>
 
 namespace va {
 
 class ManifestReader {
 public:
-    static std::expected<ManifestReader, ManifestFailure> open(
-        IFileSystemAccess& files, const std::filesystem::path& path);
+    // With `recorded_header_blake3`, the BLAKE3 that a repository recorded
+    // for the manifest's line 1, line 1 is compared with it before it is
+    // parsed (decision 0028): a line 1 that is not the one recorded, also one
+    // that no longer parses, ends without a newline or is empty, fails with
+    // HeaderMismatch, never as a malformed manifest.
+    static std::expected<ManifestReader, ManifestFailure> open(IFileSystemAccess& files,
+        const std::filesystem::path& path, std::optional<std::string_view> recorded_header_blake3 = std::nullopt);
     // Line 1 of the manifest at `path` without its '\n', reading no further:
     // its header as the manifest holds it (what V1.1 signs, R-60). Nothing of
     // it is checked here; for a check of a recorded revision that needs no
