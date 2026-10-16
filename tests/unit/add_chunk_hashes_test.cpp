@@ -9,6 +9,7 @@
 #include "engine_fixture.h"
 #include "manifest_samples.h"
 
+#include "app/unfinished_operations.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_verification.h"
 #include "core/engine/add_chunk_hashes.h"
@@ -600,8 +601,11 @@ void an_interrupted_run_resumes_adding()
     if (!interrupted) {
         return;
     }
-    const auto record = fixture.store.setting("run:" + interrupted->run_id);
-    CHECK(record && va::adding_chunk_size(nlohmann::json::parse(*record, nullptr, false)) == test_chunk_size);
+    // Its row in the history says that it stopped; its record, as the run
+    // left it, carries no stop mark.
+    const auto record = nlohmann::json::parse(fixture.store.setting("run:" + interrupted->run_id).value_or(""),
+        nullptr, false);
+    CHECK(va::adding_chunk_size(record) == test_chunk_size && !record.contains("stopped"));
     const auto saved = fixture.store.progress(interrupted->run_id);
     CHECK(saved && saved->size() == 3);
     va::Entry a;
@@ -1390,6 +1394,107 @@ void a_run_abandoned_while_it_reads_saves_no_checkpoint()
     CHECK(!run.empty() && saved_later == "0");
 }
 
+// Writes the repository through `inner`, except the files of a manifest,
+// which cannot be created (a sample failure, as a full disk would be).
+class UnwritableManifests final : public va::IFileWriter {
+public:
+    explicit UnwritableManifests(va::IFileWriter& inner) : inner_(inner) {}
+
+    std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
+        const std::filesystem::path& destination) override
+    {
+        if (va::path_to_utf8(destination.filename()).contains(".vam")) {
+            return std::unexpected(va::IoError{va::IoErrorKind::Other, 0, "disk full (sample)"});
+        }
+        return inner_.create(destination);
+    }
+    std::expected<void, va::IoError> remove(const std::filesystem::path& file) override
+    {
+        return inner_.remove(file);
+    }
+    std::expected<void, va::IoError> create_directories(const std::filesystem::path& directory) override
+    {
+        return inner_.create_directories(directory);
+    }
+
+private:
+    va::IFileWriter& inner_;
+};
+
+// A run that adds chunk hashes and cannot record itself, as its revision's
+// manifest or its record cannot be written (decision 0033), says last in its
+// record that it stopped, as a registration's plan does (decisions 0022,
+// 0024): its process may go on, as the GUI's window does, and another
+// process, which sees that process running, takes the run for stopped. There
+// the Archive List shows it stopped, with Abandon..., abandoning it would go
+// ahead, and its resume records revision 2 reading nothing again. The run is
+// in no row of the history. Here the run's process is this fixture's, which
+// the other process sees running; the record fails at a trigger (sample data).
+void a_run_that_cannot_record_itself_says_that_it_stopped()
+{
+    for (const bool manifest_fails : {true, false}) {
+        RegisteredWithout fixture;
+        UnwritableManifests unwritable(*fixture.repository.writer);
+        if (!manifest_fails) {
+            fixture.repository.execute("CREATE TRIGGER sample_failure BEFORE INSERT ON archive_revisions "
+                                       "BEGIN SELECT RAISE(ABORT, 'sample failure'); END;");
+        }
+        va::IFileWriter& writer = manifest_fails ? static_cast<va::IFileWriter&>(unwritable)
+                                                 : *fixture.repository.writer;
+        va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host, writer,
+            fixture.processes};
+        va::VerifyRequest request;
+        request.archive_uuid = fixture.archive_uuid;
+        request.add_chunk_hashes = true;
+        request.chunk_size = test_chunk_size;
+        const auto failed = va::verify_full(services, request, fixture.cancel, fixture.progress);
+        if (!manifest_fails) {
+            fixture.repository.execute("DROP TRIGGER sample_failure;");
+        }
+        const auto run = fixture.repository.query("SELECT substr(key, 5) FROM settings WHERE key LIKE 'run:%'");
+        const auto resume = "; resume the run with `verify --full " + fixture.archive_uuid + " --resume " + run +
+                            "` to record it";
+        CHECK(!failed && failed.error().kind == va::VerifyStop::Kind::Repository &&
+              failed.error().message ==
+                  (manifest_fails ? "verification finished as PASSED but its revision with chunk hashes could not be "
+                                    "written: disk full (sample)"
+                                  : "verification finished as PASSED but could not be recorded: cannot run SQL: "
+                                    "sample failure") +
+                      resume);
+        const auto record =
+            nlohmann::json::parse(fixture.store.setting("run:" + run).value_or(""), nullptr, false);
+        CHECK(record.is_object() && record.contains("stopped") && va::recorded_attempt(record).has_value());
+        const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+        CHECK(runs && runs->empty() && fixture.current_revision() == 1);
+
+        OtherProcess other(fixture);
+        const va::app::AttemptCheck attempts{&other.processes, fixture.host.host, {}};
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+        CHECK(read && read->operations.size() == 1);
+        if (read && read->operations.size() == 1) {
+            const auto& operation = read->operations.front();
+            const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+            const va::app::OperationWatch::Clock::time_point start{};
+            va::app::OperationWatch watch;
+            watch.update(operation, start, now);
+            const auto row = va::app::describe_operation(va::app::Text{}, watch, start, now);
+            CHECK(operation.run_id == run && row.state == "stopped; it can be resumed" && row.abandonable);
+        }
+        va::AbandonServices elsewhere{other.store, other.processes, fixture.host.host};
+        const auto abandonable = va::abandonable_verification(elsewhere, {fixture.archive_uuid, run});
+        CHECK(abandonable && abandonable->run_id == run);
+
+        fixture.archive.bytes_read = 0;
+        const auto resumed = other.add(fixture, fixture.archive, run);
+        CHECK(resumed && resumed->added_revision == 2 && fixture.archive.bytes_read == 0);
+        if (!resumed) {
+            std::cerr << "  stopped: " << resumed.error().message << '\n';
+        }
+    }
+}
+
 // A registration plan whose revision is recorded, and the record of a
 // relocation whose next revision is recorded, can never finish (decisions
 // 0023, 0026): they refuse nothing (sample records written by hand, as an
@@ -1541,6 +1646,7 @@ void add_chunk_hashes_tests()
     a_verification_that_adds_chunk_hashes_is_not_abandoned_while_it_runs();
     a_verification_of_an_earlier_revision_is_not_unfinished();
     a_run_abandoned_while_it_reads_saves_no_checkpoint();
+    a_run_that_cannot_record_itself_says_that_it_stopped();
     what_can_no_longer_finish_refuses_nothing();
     two_resumes_that_found_the_run_at_once();
 }

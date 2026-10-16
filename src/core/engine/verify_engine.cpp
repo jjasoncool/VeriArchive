@@ -781,6 +781,26 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         }
     }
     Heartbeat heartbeat(store, run_setting(outcome.run_id), std::move(run_record), progress);
+    // However a run that adds chunk hashes returns without recording itself
+    // (its revision's manifest or its record could not be written), its
+    // record says last that it stopped ("stopped"), as a registration's plan
+    // does (decisions 0022, 0024): judged by the process it names, it would
+    // otherwise read as running for as long as that process goes on, as the
+    // GUI's does, and its resume and abandoning would be refused. The write is
+    // in a destructor, which runs on every way out of this function, so no
+    // return below can forget it. Once the run is recorded the mark is off: a
+    // run recorded INCOMPLETE has stopped by its row in the history, and a
+    // finished one has no record.
+    struct StopMark {
+        Heartbeat& heartbeat;
+        bool on = false;
+        ~StopMark()
+        {
+            if (on) {
+                heartbeat.stop();
+            }
+        }
+    } stop_mark{heartbeat, adding > 0};
 
     const bool no_filesystem_id = std::ranges::find(identity.details, "filesystem-id-unavailable") !=
                                   identity.details.end();
@@ -1159,6 +1179,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             "verification finished as " + outcome.result + " but could not be recorded: " +
                 recorded_run.error().message + (added ? resume_hint : std::string{}));
     }
+    stop_mark.on = false;
     if (added && not_recorded.empty()) {
         outcome.revision = creates;
         outcome.added_revision = creates;
