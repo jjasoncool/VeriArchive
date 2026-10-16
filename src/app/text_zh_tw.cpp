@@ -128,7 +128,11 @@ constexpr CatalogEntry entries[] = {
     {"Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
         "已從清單檔重建索引：{} 個封存、{} 個版次、{} 個項目。"},
     {"unfinished registrations whose saved progress was kept: {}", "保留了已儲存進度的未完成註冊：{} 個"},
-    {"revisions whose manifest could not be read, kept as recorded: {}", "因清單檔無法讀取而保留原紀錄的版次：{} 個"},
+    // Each revision whose manifest the rebuild could not read, by what became
+    // of its record (decision 0028): the archive, then what is wrong.
+    {"kept as recorded: {} ({}): {}", "保留原紀錄：{}（{}）：{}", Match::Cause},
+    {"left out of the index: {} ({}): {}", "已從索引移除：{}（{}）：{}", Match::Cause},
+    {"not in the index: {} ({}): {}", "不在索引中：{}（{}）：{}", Match::Cause},
     {"skipped: {}", "已略過：{}"},
     {"usage: repo init | info | rebuild-index | verify-history",
         "用法：repo init | info | rebuild-index | verify-history"},

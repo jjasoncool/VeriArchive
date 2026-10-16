@@ -19,6 +19,10 @@ struct ArchiveStatus {
     // The latest revision's manifest cannot be used (decision 0028): the
     // archive is listed with this problem, and without a header.
     std::optional<UnusableManifest> unusable_manifest;
+    // Every other recorded revision whose manifest cannot be used, read as
+    // matching reads them for the earlier carriers (decision 0004): line 1
+    // alone. Only where `StatusSelection::earlier_revisions` asks for them.
+    std::vector<UnusableManifest> earlier_unusable;
     std::optional<VerifyRunRecord> last_full; // last FULL run that reached a result
     std::optional<VerifyRunRecord> last_any;  // last run of any mode that reached a result
     std::optional<VerifyRunRecord> last_run;  // last run, INCOMPLETE included
@@ -35,6 +39,9 @@ struct ArchiveStatus {
 struct StatusSelection {
     std::optional<Uuid> only;
     bool headers = true;
+    // Also the manifests of the archive's other revisions (`archive show`),
+    // which only matching reads otherwise (decision 0028).
+    bool earlier_revisions = false;
 };
 
 // INCOMPLETE runs make no claim, so they never reset the overdue clock. A never

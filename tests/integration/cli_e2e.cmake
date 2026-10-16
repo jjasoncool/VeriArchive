@@ -771,8 +771,8 @@ run_cli("0;2" verify --full "${ROOT}")
 # `repo rebuild-index` keeps the record of a revision whose manifest it cannot
 # read, and the archive at that revision (decision 0028): the manifest of
 # revision 2 of the archive is moved away while that of revision 1 is intact
-# (sample data). The rebuild exits 2, saying that it kept one revision as
-# recorded, in either language. The archive stays at revision 2, never taken
+# (sample data). The rebuild exits 2, naming the revision it kept as
+# recorded, in either language and in --json. The archive stays at revision 2, never taken
 # back to revision 1, and is handled as one whose manifest cannot be used:
 # listed with the problem (exit 2), FAILED by its uuid at revision 2 without
 # reading the media (exit 3), and its root stops (exit 11), naming it.
@@ -781,11 +781,15 @@ run_cli("0;2" verify --full "${ROOT}")
 # rebuild; imported again, it is already present.
 file(RENAME "${RECORDED}" "${RECORDED}.away")
 run_cli("2" repo rebuild-index --json)
-string(JSON rebuild_kept GET "${last_output}" revisions_kept)
+string(JSON rebuild_kept LENGTH "${last_output}" revisions_kept)
+string(JSON kept_revision GET "${last_output}" revisions_kept 0 revision)
+string(JSON kept_place GET "${last_output}" revisions_kept 0 manifest)
+string(JSON kept_missing GET "${last_output}" revisions_kept 0 missing)
+string(JSON kept_left_out LENGTH "${last_output}" revisions_left_out)
 run_cli("2" repo rebuild-index)
-string(FIND "${last_output}" "因清單檔無法讀取而保留原紀錄的版次：1 個" kept_chinese)
+string(FIND "${last_output}" "\n  保留原紀錄：${archive_label}（${archive_uuid}）：版次 2 的清單檔（manifests/${archive_uuid}/r0002.vam）已遺失\n" kept_chinese)
 run_cli("2" --lang en repo rebuild-index)
-string(FIND "${last_output}" "revisions whose manifest could not be read, kept as recorded: 1" kept_english)
+string(FIND "${last_output}" "\n  kept as recorded: ${archive_label} (${archive_uuid}): the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing\n" kept_english)
 run_cli("2" archive show "${archive_prefix}" --json)
 string(JSON skipped_revision GET "${last_output}" revision)
 string(JSON skipped_kind GET "${last_output}" manifest_problem kind)
@@ -808,7 +812,9 @@ if(restored_said EQUAL -1 OR restored_again OR NOT present_again OR NOT restored
     message(FATAL_ERROR "import of the export of a revision whose manifest is missing: said ${restored_said}, "
         "again restored ${restored_again} and present ${present_again}")
 endif()
-if(NOT rebuild_kept EQUAL 1 OR kept_chinese EQUAL -1 OR kept_english EQUAL -1 OR NOT skipped_revision EQUAL 2
+if(NOT rebuild_kept EQUAL 1 OR NOT kept_revision EQUAL 2 OR NOT kept_place STREQUAL "manifests/${archive_uuid}/r0002.vam"
+        OR NOT kept_missing OR NOT kept_left_out EQUAL 0
+        OR kept_chinese EQUAL -1 OR kept_english EQUAL -1 OR NOT skipped_revision EQUAL 2
         OR NOT skipped_kind STREQUAL "missing"
         OR NOT skipped_message STREQUAL "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing; restore it from a backup of the repository"
         OR NOT skipped_result STREQUAL "FAILED" OR skipped_read OR NOT skipped_verified_revision EQUAL 2
@@ -827,12 +833,47 @@ endif()
 # The manifest of an earlier revision is read only where matching looks at
 # the earlier carriers (decision 0004): with the first manifest of the
 # relocated archive moved away (sample data), the archive verifies by its
-# uuid and by its root, where its latest carrier matches.
+# uuid and by its root, where its latest carrier matches. `archive show`
+# reads the manifests of the earlier revisions too, and marks the one that
+# is gone (exit 2), in text and in --json. `repo rebuild-index` leaves the
+# record of that earlier revision out of the index, naming it (exit 2), in
+# text and in --json; `archive show` then lists the other revisions alone.
+# Put back, the manifest is indexed again by the next rebuild.
 set(EARLIER "${WORK}/repo/manifests/${moving_uuid}/r0001.vam")
+set(earlier_place "manifests/${moving_uuid}/r0001.vam")
 file(RENAME "${EARLIER}" "${EARLIER}.away")
 run_cli("0;2" verify --full "${moving_uuid}")
 run_cli("0;2" verify --full "${MOVE_FROM}")
+run_cli("2" --lang en archive show "${moving_prefix}")
+string(FIND "${last_output}" "\n      problem: the manifest of revision 1 (${earlier_place}) is missing; restore it from a backup of the repository\n" earlier_shown)
+run_cli("2" archive show "${moving_prefix}" --json)
+string(JSON earlier_kind GET "${last_output}" revisions 0 manifest_problem kind)
+string(JSON earlier_problem_revision GET "${last_output}" revisions 0 manifest_problem revision)
+run_cli("2" --lang en repo rebuild-index)
+string(REGEX MATCH "\n  left out of the index: ARCH-[0-9]+ \\(${moving_uuid}\\): the manifest of revision 1 \\(${earlier_place}\\) is missing\n" left_out_said "${last_output}")
 file(RENAME "${EARLIER}.away" "${EARLIER}")
+run_cli("0" repo rebuild-index)
+file(RENAME "${EARLIER}" "${EARLIER}.away")
+run_cli("2" repo rebuild-index --json)
+string(JSON left_out_count LENGTH "${last_output}" revisions_left_out)
+string(JSON left_out_uuid GET "${last_output}" revisions_left_out 0 archive_uuid)
+string(JSON left_out_revision GET "${last_output}" revisions_left_out 0 revision)
+string(JSON left_out_missing GET "${last_output}" revisions_left_out 0 missing)
+string(JSON left_out_kept LENGTH "${last_output}" revisions_kept)
+run_cli("0" archive show "${moving_prefix}" --json)
+string(JSON moving_revisions LENGTH "${last_output}" revisions)
+file(RENAME "${EARLIER}.away" "${EARLIER}")
+run_cli("0" repo rebuild-index)
+run_cli("0" archive show "${moving_prefix}" --json)
+string(JSON moving_revisions_back LENGTH "${last_output}" revisions)
+if(earlier_shown EQUAL -1 OR NOT earlier_kind STREQUAL "missing" OR NOT earlier_problem_revision EQUAL 1
+        OR NOT left_out_said OR NOT left_out_count EQUAL 1 OR NOT left_out_uuid STREQUAL moving_uuid
+        OR NOT left_out_revision EQUAL 1 OR NOT left_out_missing OR NOT left_out_kept EQUAL 0
+        OR NOT moving_revisions EQUAL 2 OR NOT moving_revisions_back EQUAL 3)
+    message(FATAL_ERROR "an earlier revision whose manifest is gone: shown ${earlier_shown} (${earlier_kind}), "
+        "left out ${left_out_count} (r${left_out_revision}, ${left_out_uuid}), revisions ${moving_revisions} then "
+        "${moving_revisions_back}")
+endif()
 
 # A registration or relocation made for an older revision never records
 # (decision 0030). The archive of a folder (sample data) is registered in the

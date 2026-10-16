@@ -962,7 +962,7 @@ void an_archive_at_a_revision_the_index_has_no_record_of()
             write_bytes(second, kept);
         }
         const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
-        CHECK(rebuilt && rebuilt->skipped.empty() && rebuilt->revisions == 2 && rebuilt->revisions_kept == 0);
+        CHECK(rebuilt && rebuilt->skipped.empty() && rebuilt->revisions == 2 && rebuilt->revisions_kept.empty());
         const auto verified = fixture.verify(by_uuid);
         CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
     }

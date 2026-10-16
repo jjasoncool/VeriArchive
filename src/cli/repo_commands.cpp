@@ -5,6 +5,7 @@
 #include "app/history.h"
 #include "common/utf8.h"
 #include "core/engine/rebuild_index.h"
+#include "core/engine/recorded_manifest.h"
 #include "platform/file_system.h"
 
 #include <iostream>
@@ -64,6 +65,26 @@ int verify_history(const Arguments& arguments, const Session& session)
     return intact ? exit_code::passed : exit_code::failed;
 }
 
+// A revision whose manifest the rebuild could not read, as --json gives it.
+nlohmann::json unread_json(const std::vector<UnreadRevision>& revisions)
+{
+    auto list = nlohmann::json::array();
+    for (const auto& revision : revisions) {
+        list.push_back({{"archive_uuid", revision.archive_uuid}, {"label", revision.label},
+            {"revision", revision.revision}, {"manifest", revision.manifest}, {"missing", !revision.cause}});
+    }
+    return list;
+}
+
+// What is wrong with the manifest of a revision that the rebuild could not
+// read: "the manifest of revision 2 (manifests/<uuid>/r0002.vam) is missing",
+// or "... cannot be read: <cause>" (decision 0028).
+std::string what_was_unread(const UnreadRevision& revision)
+{
+    return what_is_wrong_with({revision.cause ? UnusableManifest::Kind::Unreadable : UnusableManifest::Kind::Missing,
+        revision.archive_uuid, revision.revision, revision.manifest, revision.cause.value_or("")});
+}
+
 // R-80: rebuild index tables from manifests/.
 int rebuild(const Arguments& arguments, const Session& session)
 {
@@ -79,7 +100,10 @@ int rebuild(const Arguments& arguments, const Session& session)
     if (arguments.json) {
         print_json({{"archives", report->archives}, {"revisions", report->revisions},
             {"entries", report->entries}, {"skipped", report->skipped},
-            {"saved_progress_kept", report->saved_progress_kept}, {"revisions_kept", report->revisions_kept}});
+            {"saved_progress_kept", report->saved_progress_kept},
+            {"revisions_kept", unread_json(report->revisions_kept)},
+            {"revisions_left_out", unread_json(report->revisions_left_out)},
+            {"revisions_not_indexed", unread_json(report->revisions_not_indexed)}});
     } else {
         const auto& text = arguments.text;
         std::cout << text.format(
@@ -93,12 +117,25 @@ int rebuild(const Arguments& arguments, const Session& session)
                              report->saved_progress_kept)
                       << '\n';
         }
-        // Decision 0028: so do the records of revisions whose manifest it
-        // could not read; `archive list` shows what is wrong with each.
-        if (report->revisions_kept > 0) {
+        // Decision 0028: each revision whose manifest it could not read, by
+        // what became of its record; `archive list` says how to fix the
+        // archive's own.
+        for (const auto& kept : report->revisions_kept) {
             std::cout << "  "
-                      << text.format("revisions whose manifest could not be read, kept as recorded: {}",
-                             report->revisions_kept)
+                      << text.format("kept as recorded: {} ({}): {}", kept.label, kept.archive_uuid,
+                             text(what_was_unread(kept)))
+                      << '\n';
+        }
+        for (const auto& left_out : report->revisions_left_out) {
+            std::cout << "  "
+                      << text.format("left out of the index: {} ({}): {}", left_out.label, left_out.archive_uuid,
+                             text(what_was_unread(left_out)))
+                      << '\n';
+        }
+        for (const auto& not_indexed : report->revisions_not_indexed) {
+            std::cout << "  "
+                      << text.format("not in the index: {} ({}): {}", not_indexed.label, not_indexed.archive_uuid,
+                             text(what_was_unread(not_indexed)))
                       << '\n';
         }
         for (const auto& skipped : report->skipped) {
@@ -106,9 +143,10 @@ int rebuild(const Arguments& arguments, const Session& session)
         }
     }
     // Decision 0028: an archive needs the operator while a manifest could not
-    // be read, also one that is missing, whose record was kept.
-    return report->skipped.empty() && report->revisions_kept == 0 ? exit_code::passed
-                                                                   : exit_code::passed_with_warnings;
+    // be read, also one that is missing, whatever became of its record.
+    const bool all_read = report->skipped.empty() && report->revisions_kept.empty() &&
+                          report->revisions_left_out.empty() && report->revisions_not_indexed.empty();
+    return all_read ? exit_code::passed : exit_code::passed_with_warnings;
 }
 
 } // namespace

@@ -58,6 +58,23 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
                     repository_files, layout, archive.archive_uuid, archive.current_revision, false);
             }
         }
+        if (selection.earlier_revisions) {
+            // The other revisions' manifests, which matching reads where the
+            // archive's latest carrier does not decide (decision 0004): one
+            // that cannot be used stops it (decision 0028, point 4).
+            const auto revisions = store.revisions(archive.archive_uuid);
+            if (!revisions) {
+                return std::unexpected(revisions.error());
+            }
+            for (const auto& revision : *revisions) {
+                if (revision.revision == archive.current_revision) {
+                    continue;
+                }
+                if (auto header = load_recorded_header(repository_files, layout, revision); !header) {
+                    status.earlier_unusable.push_back(std::move(header.error()));
+                }
+            }
+        }
 
         const auto runs = store.verify_runs(archive.archive_uuid);
         if (!runs) {

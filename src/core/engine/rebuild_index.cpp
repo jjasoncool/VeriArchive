@@ -44,8 +44,8 @@ std::expected<RebuildReport, IoError> rebuild_index(
     RebuildReport report;
     std::map<Uuid, std::vector<FoundRevision>> found;
     // The revisions that a manifest in the archive's folder names by its file
-    // name, which this rebuild could not read (decision 0028).
-    std::map<Uuid, std::set<std::uint32_t>> unread;
+    // name, which this rebuild could not read, and why (decision 0028).
+    std::map<Uuid, std::map<std::uint32_t, std::string>> unread;
 
     const auto archives = repository_files.list(layout.manifests());
     if (!archives) {
@@ -77,7 +77,7 @@ std::expected<RebuildReport, IoError> rebuild_index(
                 report.skipped.push_back(cannot_read + cause);
                 // Revisions start at 1 (§B4.3): "r0000.vam" names none.
                 if (*revision > 0) {
-                    unread[archive_uuid].insert(*revision);
+                    unread[archive_uuid][*revision] = cause;
                 }
             };
             auto reader = ManifestReader::open(repository_files, path);
@@ -126,21 +126,15 @@ std::expected<RebuildReport, IoError> rebuild_index(
                    std::ranges::any_of(manifests->second,
                        [&](const FoundRevision& manifest) { return manifest.record.revision == revision; });
         };
-        // Decision 0028: a revision whose manifest this rebuild could not
-        // read, as it is missing or was skipped, keeps its record and its
-        // index as they were. No manifest can rebuild them, and the record is
-        // what the manifest is checked against once it is restored (R-14):
-        // dropped, the index would no longer know the revision, and would
-        // take an earlier one for the archive's. Only a record that names the
-        // manifest at its revision's own place (R-63): one that names another
-        // place is the index differing, and is rebuilt from the manifests.
-        // Read in this transaction, as the plans below.
+        // Read in this transaction, as the plans below: the archives' records,
+        // and the records of the revisions whose manifest this rebuild could
+        // not read, as it is missing or was skipped (decision 0028).
         const auto archives = store.archives();
         if (!archives) {
             return std::unexpected(archives.error());
         }
         std::map<Uuid, ArchiveRecord> existing;
-        std::set<std::pair<Uuid, std::uint32_t>> kept;
+        std::map<Uuid, std::vector<RevisionRecord>> unread_records;
         for (const auto& archive : *archives) {
             existing.emplace(archive.archive_uuid, archive);
             const auto records = store.revisions(archive.archive_uuid);
@@ -148,13 +142,88 @@ std::expected<RebuildReport, IoError> rebuild_index(
                 return std::unexpected(records.error());
             }
             for (const auto& record : *records) {
-                if (record.manifest_relpath == manifest_relpath_of(record.archive_uuid, record.revision) &&
-                    !read_here(record.archive_uuid, record.revision)) {
-                    kept.emplace(record.archive_uuid, record.revision);
+                if (!read_here(record.archive_uuid, record.revision)) {
+                    unread_records[record.archive_uuid].push_back(record);
                 }
             }
         }
-        report.revisions_kept = kept.size();
+        // A record that names the manifest at its revision's own place (R-63).
+        // One that names another place is the index differing, which the
+        // manifests rebuild (decision 0028, point 2).
+        const auto at_its_place = [](const RevisionRecord& record) {
+            return record.manifest_relpath == manifest_relpath_of(record.archive_uuid, record.revision);
+        };
+        // Each archive is at the latest revision that a manifest in its folder
+        // names by its file name, whether this rebuild could read it or not,
+        // or that a record of a revision whose manifest it could not read
+        // names (decision 0028): never at an earlier revision for want of the
+        // manifest of the latest. An archive that has no record is made one
+        // only from a manifest read here; one of which nothing is left keeps
+        // its record as it is.
+        std::map<Uuid, std::uint32_t> latest;
+        for (auto& [archive_uuid, revisions] : found) {
+            std::sort(revisions.begin(), revisions.end(), [](const FoundRevision& a, const FoundRevision& b) {
+                return a.record.revision < b.record.revision;
+            });
+            latest[archive_uuid] = revisions.back().record.revision;
+        }
+        for (const auto& [archive_uuid, names] : unread) {
+            latest[archive_uuid] = std::max(latest[archive_uuid], names.rbegin()->first);
+        }
+        for (const auto& [archive_uuid, records] : unread_records) {
+            for (const auto& record : records) {
+                if (at_its_place(record)) {
+                    latest[archive_uuid] = std::max(latest[archive_uuid], record.revision);
+                }
+            }
+        }
+        // What the report says of a revision whose manifest this rebuild
+        // could not read: the archive, the revision, its manifest's place, and
+        // why the file there could not be read, unless it is missing.
+        const auto unread_revision = [&](const Uuid& archive_uuid, std::uint32_t revision, std::string manifest) {
+            UnreadRevision item{archive_uuid, "", revision, std::move(manifest), std::nullopt};
+            if (const auto archive = existing.find(archive_uuid); archive != existing.end()) {
+                item.label = archive->second.label;
+            }
+            if (const auto names = unread.find(archive_uuid); names != unread.end()) {
+                if (const auto cause = names->second.find(revision); cause != names->second.end()) {
+                    item.cause = cause->second;
+                }
+            }
+            return item;
+        };
+        // The archive's revision whose manifest this rebuild could not read
+        // keeps its record and its index as they were: no manifest can
+        // rebuild them, and the record is what the manifest is checked
+        // against once it is restored (R-14); dropped, the index would no
+        // longer know the revision, and would take an earlier one for the
+        // archive's. The record of an earlier revision whose manifest this
+        // rebuild could not read goes with its index, as every record that no
+        // manifest rebuilds: kept, its manifest that cannot be used would stop
+        // every verification and registration whose matching reads the
+        // earlier carriers (decision 0004), for good where no backup holds it.
+        std::set<std::pair<Uuid, std::uint32_t>> kept;
+        for (const auto& [archive_uuid, records] : unread_records) {
+            for (const auto& record : records) {
+                auto item = unread_revision(archive_uuid, record.revision, record.manifest_relpath);
+                if (at_its_place(record) && record.revision == latest[archive_uuid]) {
+                    kept.emplace(archive_uuid, record.revision);
+                    report.revisions_kept.push_back(std::move(item));
+                } else {
+                    report.revisions_left_out.push_back(std::move(item));
+                }
+            }
+        }
+        // The archive's revision that a file names, which this rebuild could
+        // not read, and of which no record is left: the index has no record of
+        // its manifest (decision 0028, point 2).
+        for (const auto& [archive_uuid, revision] : latest) {
+            if (existing.contains(archive_uuid) && !read_here(archive_uuid, revision) &&
+                !kept.contains({archive_uuid, revision})) {
+                report.revisions_not_indexed.push_back(
+                    unread_revision(archive_uuid, revision, manifest_relpath_of(archive_uuid, revision)));
+            }
+        }
         // The saved progress of the unfinished registrations stays (decision
         // 0026): the rows under the revision each plan creates, which are no
         // index and which no manifest holds. Unless a manifest read here
@@ -182,40 +251,9 @@ std::expected<RebuildReport, IoError> rebuild_index(
         if (auto cleared = store.clear_index(kept, saved_progress); !cleared) {
             return cleared;
         }
-        // Each archive is at the latest revision that a manifest in its folder
-        // names by its file name, whether this rebuild could read it or not,
-        // or that a record kept names (decision 0028): never at an earlier
-        // revision for want of the manifest of the latest. An archive that
-        // has no record is made one only from a manifest read here; one of
-        // which nothing is left keeps its record as it is.
-        std::set<Uuid> archive_uuids;
-        for (const auto& [archive_uuid, revisions] : found) {
-            archive_uuids.insert(archive_uuid);
-        }
-        for (const auto& [archive_uuid, revision] : kept) {
-            archive_uuids.insert(archive_uuid);
-        }
-        for (const auto& [archive_uuid, revisions] : unread) {
-            archive_uuids.insert(archive_uuid);
-        }
-        for (const auto& archive_uuid : archive_uuids) {
+        for (const auto& [archive_uuid, revision] : latest) {
             auto read = found.find(archive_uuid);
             std::vector<FoundRevision>* revisions = read == found.end() ? nullptr : &read->second;
-            std::uint32_t latest = 0;
-            if (revisions) {
-                std::sort(revisions->begin(), revisions->end(), [](const FoundRevision& a, const FoundRevision& b) {
-                    return a.record.revision < b.record.revision;
-                });
-                latest = revisions->back().record.revision;
-            }
-            for (const auto& [kept_uuid, revision] : kept) {
-                if (kept_uuid == archive_uuid) {
-                    latest = std::max(latest, revision);
-                }
-            }
-            if (const auto names = unread.find(archive_uuid); names != unread.end()) {
-                latest = std::max(latest, *names->second.rbegin());
-            }
             const auto record = existing.find(archive_uuid);
             if (record == existing.end() && !revisions) {
                 continue;
@@ -228,10 +266,10 @@ std::expected<RebuildReport, IoError> rebuild_index(
                 archive = {archive_uuid, newest.label, revisions->front().header.created, 0, "REGISTERED",
                     newest.root_subpath, ""};
             }
-            archive.current_revision = latest;
+            archive.current_revision = revision;
             // The root as the manifest of the archive's revision records it,
             // where this rebuild read that manifest.
-            if (revisions && revisions->back().record.revision == latest) {
+            if (revisions && revisions->back().record.revision == revision) {
                 archive.root_subpath = revisions->back().header.root_subpath;
             }
             if (auto saved = record != existing.end() ? store.update_archive(archive) : store.insert_archive(archive);
@@ -241,16 +279,17 @@ std::expected<RebuildReport, IoError> rebuild_index(
             if (!revisions) {
                 continue;
             }
-            for (const auto& revision : *revisions) {
-                if (auto inserted = store.insert_revision(revision.record); !inserted) {
+            for (const auto& found_revision : *revisions) {
+                if (auto inserted = store.insert_revision(found_revision.record); !inserted) {
                     return inserted;
                 }
-                if (auto indexed = store.insert_file_rows(archive_uuid, revision.record.revision, revision.entries);
+                if (auto indexed =
+                        store.insert_file_rows(archive_uuid, found_revision.record.revision, found_revision.entries);
                     !indexed) {
                     return indexed;
                 }
                 ++report.revisions;
-                report.entries += revision.entries.size();
+                report.entries += found_revision.entries.size();
             }
             ++report.archives;
         }

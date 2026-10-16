@@ -204,6 +204,22 @@ void print_manifest_problem(const app::Text& text, const ArchiveStatus& status, 
     }
 }
 
+// A manifest that cannot be used, as --json gives it (decision 0028).
+nlohmann::json manifest_problem_json(const UnusableManifest& unusable)
+{
+    return {{"kind", kind_code(unusable.kind)}, {"revision", unusable.revision}, {"manifest", unusable.manifest},
+        {"message", plain_message(unusable)}};
+}
+
+// The problem of the manifest of an earlier revision of the archive, where
+// `archive show` read one that cannot be used.
+const UnusableManifest* earlier_problem(const ArchiveStatus& status, std::uint32_t revision)
+{
+    const auto found = std::ranges::find_if(
+        status.earlier_unusable, [&](const UnusableManifest& unusable) { return unusable.revision == revision; });
+    return found == status.earlier_unusable.end() ? nullptr : &*found;
+}
+
 nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchive& unfinished)
 {
     nlohmann::json json{
@@ -229,9 +245,7 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
         }
     }
     if (status.unusable_manifest) {
-        const auto& unusable = *status.unusable_manifest;
-        json["manifest_problem"] = {{"kind", kind_code(unusable.kind)}, {"revision", unusable.revision},
-            {"manifest", unusable.manifest}, {"message", plain_message(unusable)}};
+        json["manifest_problem"] = manifest_problem_json(*status.unusable_manifest);
     }
     if (const auto found = unfinished.find(status.archive.archive_uuid); found != unfinished.end()) {
         if (!found->second.registration_json.is_null()) {
@@ -273,9 +287,11 @@ struct Opened {
 // Every archive's status, or only that of the archive `named` (a uuid or a
 // unique prefix, as find_archive_uuid takes it): a command about one archive
 // reads no other archive's manifest. `headers`: whether the command shows
-// what the latest revision's header holds, which is read from its manifest.
-std::expected<Opened, Failure> open_statuses(
-    const Arguments& arguments, const std::optional<std::string>& named = std::nullopt, bool headers = true)
+// what the latest revision's header holds, which is read from its manifest;
+// `earlier`: whether it shows the problem of an earlier revision's manifest
+// that cannot be used (`archive show`, decision 0028).
+std::expected<Opened, Failure> open_statuses(const Arguments& arguments,
+    const std::optional<std::string>& named = std::nullopt, bool headers = true, bool earlier = false)
 {
     auto session = open_session(arguments, false);
     if (!session) {
@@ -285,7 +301,7 @@ std::expected<Opened, Failure> open_statuses(
     if (!store) {
         return std::unexpected(Failure{exit_code::repository, store.error().message});
     }
-    StatusSelection selection{std::nullopt, headers};
+    StatusSelection selection{std::nullopt, headers, earlier};
     if (named) {
         auto uuid = find_archive_uuid(*store, *named);
         if (!uuid) {
@@ -304,12 +320,13 @@ std::expected<Opened, Failure> open_statuses(
 }
 
 // Decision 0028: the listing worked, but an archive's latest manifest cannot
-// be used, which the operator must fix: exit 2, as rebuild-index exits after
-// skipping a manifest.
+// be used, or (in `archive show`) an earlier one, which the operator must
+// fix: exit 2, as rebuild-index exits after skipping a manifest.
 int listed_code(const std::vector<ArchiveStatus>& statuses)
 {
-    const bool problem = std::ranges::any_of(
-        statuses, [](const ArchiveStatus& status) { return status.unusable_manifest.has_value(); });
+    const bool problem = std::ranges::any_of(statuses, [](const ArchiveStatus& status) {
+        return status.unusable_manifest.has_value() || !status.earlier_unusable.empty();
+    });
     return problem ? exit_code::passed_with_warnings : exit_code::passed;
 }
 
@@ -367,8 +384,12 @@ int show(const Arguments& arguments, Opened& opened)
         auto json = status_json(*status, *unfinished);
         auto list = nlohmann::json::array();
         for (const auto& revision : *revisions) {
-            list.push_back({{"revision", revision.revision}, {"created", revision.created},
-                {"manifest", revision.manifest_relpath}});
+            nlohmann::json item{{"revision", revision.revision}, {"created", revision.created},
+                {"manifest", revision.manifest_relpath}};
+            if (const auto* problem = earlier_problem(*status, revision.revision)) {
+                item["manifest_problem"] = manifest_problem_json(*problem);
+            }
+            list.push_back(std::move(item));
         }
         json["revisions"] = std::move(list);
         if (status->header) {
@@ -416,6 +437,11 @@ int show(const Arguments& arguments, Opened& opened)
     for (const auto& revision : *revisions) {
         std::cout << "    r" << revision.revision << "  " << app::local_time(revision.created, text) << "  "
                   << revision.manifest_relpath << '\n';
+        // An earlier revision's manifest that cannot be used stops the
+        // matching that reads the earlier carriers (decision 0028).
+        if (const auto* problem = earlier_problem(*status, revision.revision)) {
+            std::cout << "      " << text.format("problem: {}", text(plain_message(*problem))) << '\n';
+        }
     }
     return listed_code({*status});
 }
@@ -872,7 +898,8 @@ int archive_command(const Arguments& arguments)
     // `list` shows every archive's latest header; `show` the named archive's;
     // `retire` and `relocate` none (a relocation reads what it matches itself).
     auto opened = list_command ? open_statuses(arguments)
-                               : open_statuses(arguments, arguments.words[2], arguments.words[1] == "show");
+                               : open_statuses(arguments, arguments.words[2], arguments.words[1] == "show",
+                                     arguments.words[1] == "show");
     if (!opened) {
         return report_failure(arguments, opened.error());
     }

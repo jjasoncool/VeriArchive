@@ -584,8 +584,23 @@ void translation_tests()
                   restore_and_rebuild) ==
           may_be_chinese + no_record_chinese + "，而且無法讀取該清單檔：CreateFileW 失敗（Win32 錯誤 5）" +
               record_it_chinese + restore_and_rebuild_chinese);
-    CHECK(chinese.format("revisions whose manifest could not be read, kept as recorded: {}", 1) ==
-          "因清單檔無法讀取而保留原紀錄的版次：1 個");
+    // Each revision whose manifest `repo rebuild-index` could not read, by
+    // what became of its record (decision 0028), the archive's words carried
+    // over and what is wrong translated.
+    const auto r1 = "manifests/" + uuid + "/r0001.vam";
+    CHECK(chinese.format("kept as recorded: {} ({}): {}", "ARCH-0007", uuid,
+              chinese("the manifest of revision 2 (" + manifest + ") is missing")) ==
+          "保留原紀錄：ARCH-0007（" + uuid + "）：版次 2 的清單檔（" + manifest + "）已遺失");
+    CHECK(chinese("kept as recorded: ARCH-0007 (" + uuid + "): the manifest of revision 2 (" + manifest +
+                  ") cannot be read: manifest body does not match its header (ManifestHashMismatch)") ==
+          "保留原紀錄：ARCH-0007（" + uuid + "）：無法讀取版次 2 的清單檔（" + manifest +
+              "）：清單檔主體與其標頭不符（清單檔雜湊不符）");
+    CHECK(chinese("left out of the index: ARCH-0007 (" + uuid + "): the manifest of revision 1 (" + r1 +
+                  ") is missing") ==
+          "已從索引移除：ARCH-0007（" + uuid + "）：版次 1 的清單檔（" + r1 + "）已遺失");
+    CHECK(chinese("not in the index: ARCH-0007 (" + uuid + "): the manifest of revision 2 (" + manifest +
+                  ") is missing") ==
+          "不在索引中：ARCH-0007（" + uuid + "）：版次 2 的清單檔（" + manifest + "）已遺失");
     // An archive listed with the problem of its manifest (decision 0028): the
     // CLI's line and the GUI's row, the message worded as everywhere else.
     const auto missing = "the manifest of revision 2 (" + manifest + ") is missing" + restore;
