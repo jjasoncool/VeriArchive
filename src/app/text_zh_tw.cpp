@@ -988,23 +988,31 @@ constexpr CatalogEntry entries[] = {
         "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
         "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
         Match::Cause},
-    // The same of an earlier revision, which has a later revision already.
+    // The same of an earlier revision, which has a later revision already:
+    // where nothing holds its manifest, `repo rebuild-index` leaves it out of
+    // the index (point 6).
     {"the manifest of revision {} ({}) is missing; put it back with `import <folder>/{}` from a backup of the "
         "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
-        "registration wrote one",
+        "registration wrote one; if none of these holds it, leave revision {} out of the index with `repo "
+        "rebuild-index`",
         "版次 {} 的清單檔（{}）已遺失；請以 `import <folder>/{}` 從儲存庫的備份、版次 {} 的匯出檔，或封存 "
-        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔"},
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `repo rebuild-index` 將版次 {} "
+        "從索引移除"},
     {"the manifest of revision {} ({}) cannot be read: {}; put it back with `import <folder>/{}` from a backup of "
         "the repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
-        "registration wrote one",
+        "registration wrote one; if none of these holds it, leave revision {} out of the index with `repo "
+        "rebuild-index`",
         "無法讀取版次 {} 的清單檔（{}）：{}；請以 `import <folder>/{}` 從儲存庫的備份、版次 {} 的匯出檔，或封存 "
-        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔",
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `repo rebuild-index` 將版次 {} "
+        "從索引移除",
         Match::Cause},
     {"the manifest of revision {} ({}) has changed: {}; put it back with `import <folder>/{}` from a backup of the "
         "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
-        "registration wrote one",
+        "registration wrote one; if none of these holds it, leave revision {} out of the index with `repo "
+        "rebuild-index`",
         "版次 {} 的清單檔（{}）已被變更：{}；請以 `import <folder>/{}` 從儲存庫的備份、版次 {} 的匯出檔，或封存 "
-        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔",
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `repo rebuild-index` 將版次 {} "
+        "從索引移除",
         Match::Cause},
     {"the repository's index differs from the manifest of revision {} ({}); rebuild the index with "
         "`repo rebuild-index`",

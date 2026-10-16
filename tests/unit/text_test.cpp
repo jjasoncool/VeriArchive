@@ -657,12 +657,15 @@ void translation_tests()
                   ") is missing") ==
           "不在索引中：ARCH-0007（" + uuid + "）：版次 2 的清單檔（" + manifest + "）已遺失");
     // The manifest of an earlier revision, put back as the latest's is, with
-    // no last resort: the archive has a later revision already (decision 0028).
+    // no last resort: the archive has a later revision already; where nothing
+    // holds it, `repo rebuild-index` leaves that revision out (decision 0028).
     const auto earlier_put_back = "; put it back with `import <folder>/r0001.vam` from a backup of the repository, an "
                                   "export of revision 1, or the media copy in the archive's .veriarchive folder, where "
-                                  "registration wrote one";
+                                  "registration wrote one; if none of these holds it, leave revision 1 out of the index "
+                                  "with `repo rebuild-index`";
     const auto earlier_put_back_chinese = "；請以 `import <folder>/r0001.vam` 從儲存庫的備份、版次 1 的匯出檔，或封存 "
-                                          ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔";
+                                          ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 "
+                                          "`repo rebuild-index` 將版次 1 從索引移除";
     CHECK(chinese("problem: the manifest of revision 1 (" + r1 + ") is missing" + earlier_put_back) ==
           "問題：版次 1 的清單檔（" + r1 + "）已遺失" + earlier_put_back_chinese);
     CHECK(chinese("problem: the manifest of revision 1 (" + r1 + ") cannot be read: CreateFileW failed (Win32 error 5)" +

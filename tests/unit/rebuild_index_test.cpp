@@ -806,6 +806,66 @@ void an_earlier_revision_whose_manifest_is_gone_is_left_out()
     CHECK(!by_old_root && by_old_root.error().identity.result == va::MatchResult::PreviousCarrier);
 }
 
+// Decision 0028, point 2: the message of an earlier revision's manifest that
+// cannot be used names the way out where nothing holds it, `repo
+// rebuild-index`, which leaves that revision out of the index (point 6). An
+// archive at /vol/old relocated to the root of a second volume (sample data),
+// whose manifest of revision 1 is gone and held nowhere: a registration of a
+// new folder of the first volume reads the earlier carriers and stops with
+// that message, and a registration over a lost manifest is refused, as the
+// manifest of the archive's revision 2 can be used. Once the rebuild has left
+// revision 1 out, the same registration goes ahead.
+void an_earlier_revision_whose_manifest_is_lost_is_left_out_by_the_rebuild_it_names()
+{
+    test::EngineFixture fixture;
+    auto second_volume = test::fake_volume(fixture.archive.root() / "new");
+    second_volume.filesystem_uuid = "5555666677778888";
+    second_volume.filesystem_uuid_short = "77778888";
+    second_volume.devices.front().serial = "SAMPLE-NEW-DISK";
+    fixture.media.extra_volumes.push_back(second_volume);
+    fixture.archive.add_file("old/a.txt", "a (sample data)");
+    fixture.archive.add_file("new/a.txt", "a (sample data)");
+    fixture.archive.add_file("other/SAMPLE-other.txt", "other (sample data)");
+    const auto registered = fixture.register_root(fixture.archive.root() / "old");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    const auto& archive_uuid = registered->archive_uuid;
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto relocated = va::relocate_archive(
+        services, {archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(relocated && relocated->revision == 2);
+    const auto& layout = fixture.repository.context.repo;
+    std::filesystem::remove(va::manifest_path(layout.manifests(), archive_uuid, 1));
+    const auto first_lost = "the manifest of revision 1 (manifests/" + archive_uuid + "/r0001.vam) is missing" +
+                            test::put_back(archive_uuid, 1, false);
+    CHECK(first_lost.ends_with("; if none of these holds it, leave revision 1 out of the index with `repo "
+                               "rebuild-index`"));
+
+    const auto stopped = fixture.register_root(fixture.archive.root() / "other");
+    CHECK(!stopped && stopped.error().kind == va::RegisterFailure::Kind::Repository &&
+          stopped.error().message == first_lost);
+    va::RegisterRequest over_it;
+    over_it.root = fixture.archive.root() / "new";
+    over_it.lost_manifest_of = archive_uuid;
+    const auto refused = fixture.register_root(over_it);
+    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+          refused.error().message == "the manifest of revision 2 of archive " + archive_uuid +
+                                         " can be used: register its next revision with `register <root_path> "
+                                         "--new-revision`");
+
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(rebuilt && rebuilt->revisions_left_out.size() == 1 && rebuilt->revisions_kept.empty());
+    const auto other = fixture.register_root(fixture.archive.root() / "other");
+    CHECK(other && other->revision == 1 && other->archive_uuid != archive_uuid);
+    if (!other) {
+        std::cerr << "  the new folder after the rebuild: " << other.error().message << '\n';
+    }
+}
+
 // Decision 0028: repo rebuild-index never sets an archive below the latest
 // revision that a verification of it which read its media names; the
 // verification history is no index, so it keeps that revision where an older
@@ -1060,6 +1120,7 @@ void rebuild_index_tests()
     the_archive_keeps_the_root_of_its_revision();
     an_import_restores_the_manifest_recorded();
     an_earlier_revision_whose_manifest_is_gone_is_left_out();
+    an_earlier_revision_whose_manifest_is_lost_is_left_out_by_the_rebuild_it_names();
     the_history_keeps_an_archive_from_an_earlier_revision();
     a_manifest_without_a_record_is_read_to_its_last_entry();
     a_recorded_manifest_that_the_rebuild_skipped_is_listed_with_its_entry();

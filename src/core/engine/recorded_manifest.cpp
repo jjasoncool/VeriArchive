@@ -206,11 +206,17 @@ std::string how_to_fix(const UnusableManifest& unusable, std::string_view it)
                  revision + ", or the media copy in the archive's .veriarchive folder, where registration wrote one";
     // Of the latest revision, the last resort where none of these holds it
     // (decision 0028, point 8). An earlier revision has another revision
-    // after it already.
+    // after it already, and its record serves matching alone, for the
+    // earlier carriers (decision 0004): where none of these holds its
+    // manifest, `repo rebuild-index` leaves that record out (point 6), and
+    // matching no longer stops on it.
     if (unusable.latest) {
         steps += "; if none of these holds it, register revision " + std::to_string(unusable.revision + 1) +
                  " from what the archive's root holds now with `register <root_path> --lost-manifest " +
                  unusable.archive_uuid + "`";
+    } else {
+        steps += "; if none of these holds it, leave revision " + revision +
+                 " out of the index with `repo rebuild-index`";
     }
     return steps;
 }

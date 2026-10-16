@@ -61,7 +61,8 @@ struct UnusableManifest {
     // for the earlier carriers (decision 0004). Only a latest manifest that
     // nothing puts back has the last resort of a lost manifest: the archive's
     // next revision, registered from what its root holds now (decision 0028,
-    // point 8).
+    // point 8); an earlier one is left out of the index by `repo
+    // rebuild-index` (point 6).
     bool latest = true;
 };
 
@@ -93,13 +94,16 @@ std::string what_is_wrong_with(const UnusableManifest& unusable);
 // 0028, point 7). For the latest revision (`latest`) the message ends with
 // the last resort where none of these holds it: the archive's next revision,
 // registered from what its root holds now with `register <root_path>
-// --lost-manifest <archive_uuid>` (decision 0028, point 8).
+// --lost-manifest <archive_uuid>` (decision 0028, point 8); for an earlier
+// revision, with `repo rebuild-index`, which leaves that revision out of the
+// index (point 6).
 std::string plain_message(const UnusableManifest& unusable);
 
 // How to fix it, as the plain message ends after what is wrong: "rebuild the
 // index with `repo rebuild-index`", or "put `it` back with `import
 // <folder>/r0002.vam` from a backup of the repository, ..." and the last
-// resort for the latest revision. `it` names the manifest: "it" in the plain
+// resort for the latest revision, or the rebuild that leaves an earlier
+// revision out of the index. `it` names the manifest: "it" in the plain
 // message, "its manifest" where the sentence before names the archive, as a
 // verification by root that stops on it (decision 0028, point 4).
 std::string how_to_fix(const UnusableManifest& unusable, std::string_view it);
