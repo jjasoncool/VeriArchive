@@ -276,7 +276,7 @@ endif()
 # subst is registered and verified through the letter, and recorded by its
 # real path on its real volume. The probe takes a free letter from S: to V:
 # and removes it right after the two commands, before anything is checked;
-# then `subst` must no longer list it.
+# then `subst` must no longer list the probe's mapping.
 if(CMAKE_HOST_WIN32)
     set(SUBSTITUTED "${WORK}/subst")
     file(WRITE "${SUBSTITUTED}/photos/sample.txt" "subst sample\n")
@@ -309,7 +309,13 @@ if(CMAKE_HOST_WIN32)
         probe_cli(through_verify verify --full "${letter}:\\photos" --json)
         execute_process(COMMAND subst "${letter}:" /D RESULT_VARIABLE removed OUTPUT_QUIET ERROR_QUIET)
         execute_process(COMMAND subst OUTPUT_VARIABLE substs ERROR_QUIET)
-        string(FIND "${substs}" "${letter}:\\: =>" left_behind)
+        # This probe's mapping must be gone, line for line. The letter itself
+        # may be listed again: another test run in this logon session (another
+        # build tree) may make it for a folder of its own as soon as it is free.
+        string(REPLACE "\r" "" listed "\n${substs}\n")
+        string(TOLOWER "${listed}" listed)
+        string(TOLOWER "\n${letter}:\\: => ${substituted_native}\n" own_mapping)
+        string(FIND "${listed}" "${own_mapping}" left_behind)
         if(NOT removed EQUAL 0 OR NOT left_behind EQUAL -1)
             message(FATAL_ERROR "the subst probe could not remove ${letter}: (exit ${removed}):\n${substs}")
         endif()
