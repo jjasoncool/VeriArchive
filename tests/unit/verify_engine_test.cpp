@@ -973,7 +973,10 @@ void an_archive_at_a_revision_the_index_has_no_record_of()
 // (decision 0028): A at /vol/a is registered, B's first registration at
 // /vol/b is interrupted (sample data). B is listed without a problem, and A
 // verifies by its root, which matching against every archive's latest carrier
-// would not let it do were B taken for one whose manifest cannot be used.
+// would not let it do were B taken for one whose manifest cannot be used. A
+// whole load of B's revision, as `export` and `export-sha256sums` make one,
+// finds revision 0 not recorded, never a manifest of it that the index has no
+// record of (which would say to restore r0000.vam).
 void an_unfinished_first_registration_is_no_manifest_that_cannot_be_used()
 {
     EngineFixture fixture;
@@ -995,6 +998,26 @@ void an_unfinished_first_registration_is_no_manifest_that_cannot_be_used()
     CHECK(verified && verified->result == "PASSED" && a && verified->archive_uuid == a->archive_uuid);
     if (!verified) {
         std::cerr << "  A by root: " << verified.error().message << '\n';
+    }
+
+    va::Uuid b_uuid;
+    if (statuses) {
+        for (const auto& status : *statuses) {
+            if (status.archive.current_revision == 0) {
+                b_uuid = status.archive.archive_uuid;
+            }
+        }
+    }
+    const auto& layout = fixture.repository.context.repo;
+    const auto loaded = va::load_recorded_manifest(fixture.store, *fixture.repository.files, layout, b_uuid, 0);
+    CHECK(!loaded && loaded.error().failure_class == "RepositoryError" &&
+          loaded.error().message == "revision 0 is not recorded" && !loaded.error().unusable);
+    const auto exported = va::export_archive(fixture.store, *fixture.repository.files, *fixture.repository.writer,
+        layout, b_uuid, layout.root.parent_path() / "export-b");
+    const bool not_recorded = !exported && exported.error() == "RepositoryError: revision 0 is not recorded";
+    CHECK(not_recorded);
+    if (!not_recorded && !exported) {
+        std::cerr << "  B exported: " << exported.error() << '\n';
     }
 }
 
