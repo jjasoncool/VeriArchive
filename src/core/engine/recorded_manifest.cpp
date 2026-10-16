@@ -303,10 +303,32 @@ std::expected<ManifestHeader, ManifestLoadFailure> check_recorded_manifest(
     return opened->reader.header();
 }
 
-std::expected<ManifestHeader, UnusableManifest> load_recorded_header(
-    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const RevisionRecord& revision)
+std::expected<ManifestHeader, UnusableManifest> load_recorded_header(IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const RevisionRecord& revision, bool whole)
 {
     using Kind = UnusableManifest::Kind;
+    if (whole) {
+        // As open_recorded and load_recorded_manifest read it, without the
+        // rollback check (R-15), which the lists do not make, and without
+        // keeping the entries.
+        auto reader = ManifestReader::open(
+            repository_files, layout.root / path_from_utf8(revision.manifest_relpath), revision.header_blake3);
+        if (!reader) {
+            return std::unexpected(unusable_manifest(revision, reader.error(), false));
+        }
+        if (!names_what_was_recorded(revision, reader->header()) || reader->header_line() != revision.header_json) {
+            return std::unexpected(unusable_manifest(revision, Kind::IndexDiffers));
+        }
+        for (;;) {
+            auto next = reader->next();
+            if (!next) {
+                return std::unexpected(unusable_manifest(revision, next.error(), true));
+            }
+            if (!*next) {
+                return reader->header();
+            }
+        }
+    }
     const auto line =
         ManifestReader::read_header_line(repository_files, layout.root / path_from_utf8(revision.manifest_relpath));
     if (!line) {

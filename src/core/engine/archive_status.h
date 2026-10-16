@@ -48,9 +48,11 @@ struct StatusSelection {
 // verified archive is overdue once its registration is older than the limit.
 // Retired archives are never overdue (decision 0003). Each header is read from
 // the latest revision's manifest (load_recorded_header), never taken from the
-// index's copy (R-14). An archive whose latest manifest cannot be used (it is
-// missing, cannot be read, has changed, or the index says otherwise of it or
-// has no record of it) is listed with that problem (unusable_manifest) and
+// index's copy (R-14): line 1 alone, or the whole manifest, read as `repo
+// rebuild-index` reads one, where the last rebuild skipped it (its mark,
+// skipped_manifest_key). An archive whose latest manifest cannot be used (it
+// is missing, cannot be read, has changed, or the index says otherwise of it
+// or has no record of it) is listed with that problem (unusable_manifest) and
 // without a header, like every other archive: one damaged archive never stops
 // the list (decision 0028). Only the database's failures fail it. Whether a
 // label is shared (R-88) is judged among every archive, whatever `selection`

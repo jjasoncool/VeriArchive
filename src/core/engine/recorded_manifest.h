@@ -136,7 +136,11 @@ std::expected<ManifestHeader, ManifestLoadFailure> check_recorded_manifest(
 // index's copy must be the same bytes. Otherwise the manifest cannot be used
 // (decision 0028): it is missing, cannot be read, has changed (its line 1),
 // or the index says otherwise of it (the record, or its copy of the header).
-std::expected<ManifestHeader, UnusableManifest> load_recorded_header(
-    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const RevisionRecord& revision);
+// `whole`: the manifest read as `repo rebuild-index` reads one, its body
+// against its hash and every entry to the end of the body as well, for the
+// archive lists where the last rebuild skipped it (decision 0028); its body
+// that has changed, or an entry that does not parse, cannot be used either.
+std::expected<ManifestHeader, UnusableManifest> load_recorded_header(IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const RevisionRecord& revision, bool whole = false);
 
 } // namespace va

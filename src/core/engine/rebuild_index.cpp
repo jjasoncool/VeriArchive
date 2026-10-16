@@ -323,6 +323,33 @@ std::expected<RebuildReport, IoError> rebuild_index(
             }
             ++report.archives;
         }
+        // The lists read line 1 of an archive's manifest alone, which says
+        // nothing of a body or an entry that this rebuild could not read. So
+        // each archive whose revision's manifest it skipped is marked, and
+        // the lists read that manifest as this rebuild did, whole, until a
+        // rebuild reads it (decision 0028). The marks of the rebuild before
+        // go, also those of a manifest restored since.
+        const auto marks = store.settings_with_prefix(skipped_manifest_prefix);
+        if (!marks) {
+            return std::unexpected(marks.error());
+        }
+        for (const auto& [key, value] : *marks) {
+            if (auto removed = store.remove_setting(key); !removed) {
+                return removed;
+            }
+        }
+        for (const auto* revisions : {&report.revisions_kept, &report.revisions_not_indexed}) {
+            for (const auto& skipped : *revisions) {
+                if (!skipped.cause) {
+                    continue; // missing: line 1 alone says so
+                }
+                if (auto marked = store.set_setting(skipped_manifest_key(skipped.archive_uuid),
+                        nlohmann::json{{"revision", skipped.revision}}.dump());
+                    !marked) {
+                    return marked;
+                }
+            }
+        }
         return store.commit();
     }();
     if (!rebuilt) {

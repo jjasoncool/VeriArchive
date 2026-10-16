@@ -152,6 +152,17 @@ inline std::string relocation_key(const Uuid& archive_uuid)
     return "relocation:" + archive_uuid;
 }
 
+// The setting that marks an archive whose revision's manifest the last `repo
+// rebuild-index` skipped, as one it could not read (decision 0028): its value
+// names that revision ({"revision":N}). While it exists, the archive lists
+// read the archive's manifest as the rebuild reads one, whole; each rebuild
+// replaces the marks of the one before.
+inline const std::string skipped_manifest_prefix = "rebuild-skipped:";
+inline std::string skipped_manifest_key(const Uuid& archive_uuid)
+{
+    return skipped_manifest_prefix + archive_uuid;
+}
+
 // A relocation that has not finished (decision 0026): running now, in this or
 // another process, or interrupted and waiting for `archive relocate --resume`.
 // Its record is the setting relocation_key(archive_uuid); the entries of the

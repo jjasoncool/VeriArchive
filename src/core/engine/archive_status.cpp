@@ -4,6 +4,7 @@
 #include "core/engine/recorded_manifest.h"
 
 #include <map>
+#include <set>
 
 namespace va {
 namespace {
@@ -28,6 +29,20 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
     for (const auto& archive : *archives) {
         ++label_uses[archive.label];
     }
+    // The archives whose revision's manifest the last `repo rebuild-index`
+    // skipped (decision 0028): their manifest is read as the rebuild reads
+    // it, whole, as line 1 alone says nothing of a body or an entry that it
+    // could not read, until a rebuild reads it and so removes the mark.
+    std::set<Uuid> skipped;
+    if (selection.headers) {
+        const auto marks = store.settings_with_prefix(skipped_manifest_prefix);
+        if (!marks) {
+            return std::unexpected(marks.error());
+        }
+        for (const auto& [key, value] : *marks) {
+            skipped.insert(key.substr(skipped_manifest_prefix.size()));
+        }
+    }
 
     std::vector<ArchiveStatus> statuses;
     for (const auto& archive : *archives) {
@@ -43,8 +58,9 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
             if (!revision) {
                 return std::unexpected(revision.error());
             }
+            const bool whole = skipped.contains(archive.archive_uuid);
             if (*revision) {
-                auto header = load_recorded_header(repository_files, layout, **revision);
+                auto header = load_recorded_header(repository_files, layout, **revision, whole);
                 if (header) {
                     status.header = std::move(*header);
                 } else {
@@ -55,7 +71,7 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
                 // no record, as where `repo rebuild-index` could not read its
                 // manifest: that manifest cannot be used either (decision 0028).
                 status.unusable_manifest = manifest_not_indexed(
-                    repository_files, layout, archive.archive_uuid, archive.current_revision, false);
+                    repository_files, layout, archive.archive_uuid, archive.current_revision, whole);
             }
         }
         if (selection.earlier_revisions) {
