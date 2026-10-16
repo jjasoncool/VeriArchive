@@ -130,7 +130,7 @@ Every result is prefixed by its mode. Only `FULL VERIFY PASSED` means "100 % of 
 
 ### Run-level failure classes
 
-> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: a manifest that cannot be used fails its verification with `ManifestHashMismatch` when it has changed (its line 1 or its body is not the one recorded) and with `RepositoryError` when it is missing or cannot be read, or the index's copy of its header differs; a verification of an archive named by its uuid or by the run it resumes fails so before it looks for the media, `FAILED` without reading it, and says so.
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: a manifest that cannot be used fails its verification with `ManifestHashMismatch` when it has changed (its line 1 or its body is not the one recorded) and with `RepositoryError` when it is missing or cannot be read, or the index says otherwise of a manifest whose line 1 is the one recorded (its copy of the header, or a record that names another body, archive or revision than that line); a verification of an archive named by its uuid or by the run it resumes fails so before it looks for the media, `FAILED` without reading it, and says so.
 
 `MediaIdentityMismatch`, `MediaIdentityAmbiguous`, `ManifestSignatureFailure`, `ManifestHashMismatch`, `ManifestRevisionRollback`, `ChangeTrackerContinuityLost`, `FilesystemAccessError`, `RepositoryError`.
 

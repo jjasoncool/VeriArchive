@@ -10,9 +10,11 @@
 // validated manifest bytes are the truth and the database is an index
 // (CLAUDE.md rule 3): wherever a recorded revision is loaded, that copy must
 // be the manifest's line 1, byte for byte, and neither is ever taken in place
-// of the other. Where only the copy differs from a manifest that is the one
-// recorded, the index is wrong: `repo rebuild-index` rebuilds it from the
-// manifests (R-80).
+// of the other. Where only the index differs from a manifest that is the one
+// recorded (its line 1 has the BLAKE3 recorded for it), as a copy that is not
+// that line or a record that names another archive, revision or body than it,
+// the index is wrong: `repo rebuild-index` rebuilds it from the manifests
+// (R-80).
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
 #include "core/repository/archive_store.h"
@@ -35,7 +37,9 @@ struct UnusableManifest {
         Missing,      // the file is gone
         Unreadable,   // it cannot be read: `cause`
         Changed,      // its line 1 or its body is not the one recorded: `cause` says which
-        IndexDiffers, // it is the one recorded, but the index's copy of its header is not its line 1
+        IndexDiffers, // it is the one recorded (its line 1 has the BLAKE3 recorded for it), but the
+                      // index says otherwise: its copy of the header is not that line, or the record
+                      // names another archive, revision or body than that line does
     };
     Kind kind = Kind::Unreadable;
     Uuid archive_uuid;
@@ -92,10 +96,11 @@ std::expected<ManifestHeader, ManifestLoadFailure> check_recorded_manifest(
 // The header of a recorded revision as its manifest holds it, reading only
 // the manifest's first line: for what uses a recorded revision without its
 // entries (identity matching, a new revision's header, the archive lists).
-// Line 1 must be the one the revision was recorded with (its BLAKE3, and the
-// archive, revision and body it names), and the index's copy the same bytes.
-// Otherwise the manifest cannot be used (decision 0028): it is missing,
-// cannot be read, has changed, or the index holds its header otherwise.
+// Line 1 must be the one the revision was recorded with (its BLAKE3), the
+// record must name the archive, revision and body that line names, and the
+// index's copy must be the same bytes. Otherwise the manifest cannot be used
+// (decision 0028): it is missing, cannot be read, has changed (its line 1),
+// or the index says otherwise of it (the record, or its copy of the header).
 std::expected<ManifestHeader, UnusableManifest> load_recorded_header(
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const RevisionRecord& revision);
 

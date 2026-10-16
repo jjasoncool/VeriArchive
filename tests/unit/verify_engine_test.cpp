@@ -531,10 +531,17 @@ std::string restore_message(const va::Uuid& archive_uuid, const std::string& wha
            "; restore it from a backup of the repository";
 }
 
-std::string rebuild_message(const va::Uuid& archive_uuid)
+// What is wrong when the index differs from the manifest at the place of
+// revision 1's, `revision` being the revision as the index has it.
+std::string index_differs(const va::Uuid& archive_uuid, std::uint32_t revision = 1)
 {
-    return "the repository's index differs from the manifest of revision 1 (manifests/" + archive_uuid +
-           "/r0001.vam); rebuild the index with `repo rebuild-index`";
+    return "the repository's index differs from the manifest of revision " + std::to_string(revision) +
+           " (manifests/" + archive_uuid + "/r0001.vam)";
+}
+
+std::string rebuild_message(const va::Uuid& archive_uuid, std::uint32_t revision = 1)
+{
+    return index_differs(archive_uuid, revision) + "; rebuild the index with `repo rebuild-index`";
 }
 
 constexpr const char* first_line_changed = "has changed: its first line differs from what the repository recorded";
@@ -558,94 +565,109 @@ std::string manifest_of(const va::Uuid& archive_uuid)
 }
 
 // CLAUDE.md rule 3: validated manifest bytes are the truth, the database is
-// an index. Here the index's copy of the header of revision 1 names another
-// volume label than the manifest (sample data), while the record's hashes
-// still name the manifest. Neither header is taken. Named by its uuid, the
-// archive is known, and its verification FAILS with a RepositoryError whose
-// message says to rebuild the index, recorded without reading the media
-// (decision 0028); by root it stops, naming the archive and saying to verify
-// it by its uuid, then to rebuild the index; a new revision of the archive
-// and loading the manifest stop with the plain message, and the archive list
-// lists the archive with it. Rebuilt from the manifests, the index holds the
-// manifest's header again, and the archive verifies.
+// an index. Here the manifest of revision 1 is the one recorded (its line 1
+// has the BLAKE3 recorded for it, and its body is the one that line names),
+// and the index says otherwise of it (sample data): its copy of the header
+// names another volume label, or the record names another body, or another
+// revision (2, as the index then has the archive) than that line names.
+// Neither header is taken, and as the manifest is intact, the fix is to
+// rebuild the index (decision 0028). Named by its uuid, the archive is known,
+// and its verification FAILS with a RepositoryError whose message says to
+// rebuild the index, recorded without reading the media; by root it stops,
+// naming the archive and saying to verify it by its uuid, then to rebuild the
+// index; a new revision of the archive and loading the manifest stop with
+// the plain message, and the archive list lists the archive with it. Rebuilt
+// from the manifests, the index holds the manifest's record again, and the
+// archive verifies.
 void an_index_that_differs_from_its_manifest_is_never_taken()
 {
-    Registered fixture;
-    const auto message = rebuild_message(fixture.archive_uuid);
-    fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
-                               "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"')");
-    const auto record = fixture.store.revision(fixture.archive_uuid, 1);
-    CHECK(record && *record && (*record)->header_json.contains("\"volume_label\":\"OTHER\""));
+    enum class Case { CopyDiffers, RecordNamesAnotherBody, RecordNamesAnotherRevision };
+    for (const auto what : {Case::CopyDiffers, Case::RecordNamesAnotherBody, Case::RecordNamesAnotherRevision}) {
+        Registered fixture;
+        std::uint32_t revision = 1; // as the index has it
+        if (what == Case::CopyDiffers) {
+            fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
+                                       "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"')");
+            const auto record = fixture.store.revision(fixture.archive_uuid, 1);
+            CHECK(record && *record && (*record)->header_json.contains("\"volume_label\":\"OTHER\""));
+        } else if (what == Case::RecordNamesAnotherBody) {
+            fixture.repository.execute("UPDATE archive_revisions SET body_blake3 = "
+                                       "'0000000000000000000000000000000000000000000000000000000000000000'");
+        } else {
+            revision = 2;
+            fixture.repository.execute("UPDATE archive_revisions SET revision = 2");
+            fixture.repository.execute("UPDATE archives SET current_revision = 2");
+        }
+        const auto message = rebuild_message(fixture.archive_uuid, revision);
 
-    const auto by_root = fixture.verify(fixture.archive.root());
-    CHECK(!by_root && by_root.error().kind == va::VerifyStop::Kind::Repository &&
-          by_root.error().message == root_may_belong_to("ARCH-0001", fixture.archive_uuid,
-                                         "the repository's index differs from the manifest of revision 1 "
-                                         "(manifests/" + fixture.archive_uuid + "/r0001.vam)",
-                                         true));
-    va::VerifyRequest by_uuid;
-    by_uuid.archive_uuid = fixture.archive_uuid;
-    const auto named = fixture.verify(by_uuid);
-    CHECK(named && named->result == "FAILED" && !named->media_read &&
-          named->failure_classes == std::vector<std::string>{"RepositoryError"} &&
-          named->warnings == std::vector<std::string>{"manifest: " + message});
-    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
-    CHECK(runs && runs->size() == 1 && runs->front().result == "FAILED" &&
-          runs->front().failure_classes == "RepositoryError");
+        const auto by_root = fixture.verify(fixture.archive.root());
+        CHECK(!by_root && by_root.error().kind == va::VerifyStop::Kind::Repository &&
+              by_root.error().message ==
+                  root_may_belong_to("ARCH-0001", fixture.archive_uuid, index_differs(fixture.archive_uuid, revision),
+                      true));
+        if (!by_root) {
+            std::cerr << "  by root: " << by_root.error().message << '\n';
+        }
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = fixture.archive_uuid;
+        const auto named = fixture.verify(by_uuid);
+        CHECK(named && named->result == "FAILED" && !named->media_read &&
+              named->failure_classes == std::vector<std::string>{"RepositoryError"} &&
+              named->warnings == std::vector<std::string>{"manifest: " + message});
+        const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+        CHECK(runs && runs->size() == 1 && runs->front().result == "FAILED" &&
+              runs->front().failure_classes == "RepositoryError");
 
-    va::RegisterRequest next;
-    next.root = fixture.archive.root();
-    next.new_revision = true;
-    const auto registered = fixture.register_root(next);
-    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
-          registered.error().message == message);
+        va::RegisterRequest next;
+        next.root = fixture.archive.root();
+        next.new_revision = true;
+        const auto registered = fixture.register_root(next);
+        CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
+              registered.error().message == message);
 
-    // Listed with the problem, not stopping the list (decision 0028).
-    const auto statuses = statuses_of(fixture);
-    CHECK(statuses && statuses->size() == 1 && !statuses->front().header &&
-          statuses->front().unusable_manifest &&
-          statuses->front().unusable_manifest->kind == va::UnusableManifest::Kind::IndexDiffers &&
-          va::plain_message(*statuses->front().unusable_manifest) == message);
-    const auto loaded = va::load_recorded_manifest(
-        fixture.store, *fixture.repository.files, fixture.repository.context.repo, fixture.archive_uuid, 1);
-    CHECK(!loaded && loaded.error().failure_class == "RepositoryError" && loaded.error().message == message &&
-          loaded.error().unusable && loaded.error().unusable->kind == va::UnusableManifest::Kind::IndexDiffers);
+        // Listed with the problem, not stopping the list (decision 0028).
+        const auto statuses = statuses_of(fixture);
+        CHECK(statuses && statuses->size() == 1 && !statuses->front().header &&
+              statuses->front().unusable_manifest &&
+              statuses->front().unusable_manifest->kind == va::UnusableManifest::Kind::IndexDiffers &&
+              va::plain_message(*statuses->front().unusable_manifest) == message);
+        const auto loaded = va::load_recorded_manifest(fixture.store, *fixture.repository.files,
+            fixture.repository.context.repo, fixture.archive_uuid, revision);
+        CHECK(!loaded && loaded.error().failure_class == "RepositoryError" && loaded.error().message == message &&
+              loaded.error().unusable && loaded.error().unusable->kind == va::UnusableManifest::Kind::IndexDiffers);
 
-    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
-    CHECK(rebuilt && rebuilt->revisions == 1 && rebuilt->skipped.empty());
-    const auto verified = fixture.verify(fixture.archive.root());
-    CHECK(verified && verified->result == "PASSED");
-    const auto listed = statuses_of(fixture);
-    CHECK(listed && listed->size() == 1 && listed->front().header &&
-          listed->front().header->identity.volume_label == "ARCHIVE");
+        const auto rebuilt =
+            va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
+        CHECK(rebuilt && rebuilt->revisions == 1 && rebuilt->skipped.empty());
+        const auto verified = fixture.verify(fixture.archive.root());
+        CHECK(verified && verified->result == "PASSED" && verified->revision == 1);
+        const auto listed = statuses_of(fixture);
+        CHECK(listed && listed->size() == 1 && listed->front().header && !listed->front().unusable_manifest &&
+              listed->front().header->identity.volume_label == "ARCHIVE");
+    }
 }
 
 // The manifest is not the one recorded: one byte of its header line changed
-// (sample data), it is gone, or its record names another body. The record no
-// longer vouches for the manifest, and the index's copy of its header is no
-// manifest. Verification by root stops (decision 0028): the root may be this
-// archive's, whose carrier only that manifest records. It names the archive
-// and what is wrong, and says to verify it by its uuid to record the failure,
-// then to restore its manifest from a backup of the repository, never to
-// rebuild the index, which would take a changed manifest for the truth. A new
-// revision stops with the plain message, and the archive list lists the
-// archive with it. Nothing is recorded.
+// (sample data), or it is gone. The record no longer vouches for the
+// manifest, and the index's copy of its header is no manifest. Verification
+// by root stops (decision 0028): the root may be this archive's, whose
+// carrier only that manifest records. It names the archive and what is
+// wrong, and says to verify it by its uuid to record the failure, then to
+// restore its manifest from a backup of the repository, never to rebuild the
+// index, which would take a changed manifest for the truth. A new revision
+// stops with the plain message, and the archive list lists the archive with
+// it. Nothing is recorded.
 void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
 {
-    enum class Case { HeaderChanged, Gone, RecordNamesAnotherBody };
-    for (const auto what : {Case::HeaderChanged, Case::Gone, Case::RecordNamesAnotherBody}) {
+    for (const bool gone : {false, true}) {
         Registered fixture;
-        const bool gone = what == Case::Gone;
         const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
         if (gone) {
             std::filesystem::remove(path);
-        } else if (what == Case::HeaderChanged) {
+        } else {
             auto bytes = file_bytes(path);
             bytes[bytes.find("\"volume_label\":\"ARCHIVE\"") + 16] ^= 0x01; // "ARCHIVE" -> "@RCHIVE"
             write_bytes(path, bytes);
-        } else {
-            fixture.repository.execute("UPDATE archive_revisions SET body_blake3 = "
-                                       "'0000000000000000000000000000000000000000000000000000000000000000'");
         }
         const std::string wrong = gone ? "is missing" : first_line_changed;
         const auto message = restore_message(fixture.archive_uuid, wrong);

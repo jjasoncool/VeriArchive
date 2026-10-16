@@ -53,13 +53,17 @@ UnusableManifest unusable_manifest(const RevisionRecord& record, const ManifestF
     return unusable_manifest(record, Kind::Unreadable, failure.message);
 }
 
-// Whether a manifest's line 1, by its BLAKE3, and the header parsed from it
-// are the ones `record` was recorded with: the same bytes, naming the same
-// archive, revision and body (R-14).
-bool recorded_as(const RevisionRecord& record, const std::string& header_blake3, const ManifestHeader& header)
+// Whether the header parsed from a manifest's line 1 names the archive,
+// revision and body that `record` was recorded with (R-14). Asked once that
+// line has the BLAKE3 recorded for it: the line is then the one recorded, and
+// it vouches for its body (R-60). A record that names another archive,
+// revision or body contradicts the line it vouches for itself, so it is the
+// index that differs from the manifest (decision 0028), and rebuilding the
+// index from the manifest gives back the record written with it.
+bool names_what_was_recorded(const RevisionRecord& record, const ManifestHeader& header)
 {
-    return header_blake3 == record.header_blake3 && header.body_blake3 == record.body_blake3 &&
-           header.archive_uuid == record.archive_uuid && header.revision == record.revision;
+    return header.body_blake3 == record.body_blake3 && header.archive_uuid == record.archive_uuid &&
+           header.revision == record.revision;
 }
 
 // The recorded manifest of `revision`, opened and checked against its record
@@ -86,8 +90,10 @@ std::expected<OpenedManifest, ManifestLoadFailure> open_recorded(ArchiveStore& s
     if (!reader) {
         return fail(unusable_manifest(**record, reader.error(), false));
     }
-    if (!recorded_as(**record, reader->header_blake3(), reader->header())) {
-        return fail(unusable_manifest(**record, UnusableManifest::Kind::Changed, first_line_differs));
+    // Line 1 is the one recorded, and the body the one it names (R-62): the
+    // manifest is intact, and what still differs is the index.
+    if (!names_what_was_recorded(**record, reader->header())) {
+        return fail(unusable_manifest(**record, UnusableManifest::Kind::IndexDiffers));
     }
     // The index's copy of the header is the manifest's own (CLAUDE.md rule 3).
     if (reader->header_line() != (*record)->header_json) {
@@ -202,8 +208,11 @@ std::expected<ManifestHeader, UnusableManifest> load_recorded_header(
         return std::unexpected(
             unusable_manifest(revision, Kind::Unreadable, "invalid manifest header: " + json_error_text(error)));
     }
-    if (!recorded_as(revision, line_blake3, header)) {
-        return std::unexpected(unusable_manifest(revision, Kind::Changed, first_line_differs));
+    // Line 1 is the one recorded: a record that names another archive,
+    // revision or body, or a copy of the header that is not that line, is
+    // the index differing from the manifest.
+    if (!names_what_was_recorded(revision, header)) {
+        return std::unexpected(unusable_manifest(revision, Kind::IndexDiffers));
     }
     if (*line != revision.header_json) {
         return std::unexpected(unusable_manifest(revision, Kind::IndexDiffers));
