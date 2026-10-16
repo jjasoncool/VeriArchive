@@ -2567,6 +2567,82 @@ void whole_files_are_compared_as_before()
     CHECK(unchunked.archive.bytes_read == unchunked.big.size() + std::string("notes (sample data)").size());
 }
 
+// Writes revision 1 of `fixture`'s archive again with the hash of each chunk
+// of big.bin in `wrong` replaced, and rebuilds the index from it: a manifest
+// valid in itself, its body hash and Merkle root those of what it holds, but
+// written wrong, as by a fault of the computer that registered it (sample
+// data).
+void write_wrong_chunk_hashes(Chunked& fixture, std::initializer_list<std::size_t> wrong)
+{
+    auto loaded = va::load_recorded_manifest(
+        fixture.store, *fixture.repository.files, fixture.repository.context.repo, fixture.archive_uuid, 1);
+    CHECK(loaded.has_value());
+    if (!loaded) {
+        return;
+    }
+    for (auto& entry : loaded->entries) {
+        if (entry.path.p == "big.bin") {
+            entry.chunks = test::chunk_hashes(fixture.big, test_chunk_size);
+            for (const auto idx : wrong) {
+                entry.chunks.at(idx) = va::blake3_hex("not chunk " + std::to_string(idx) + " (sample data)");
+            }
+        }
+    }
+    const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
+    va::ManifestWriter writer(*fixture.repository.writer, *fixture.repository.files, path, loaded->header.chunk_size);
+    for (const auto& entry : loaded->entries) {
+        CHECK(writer.add(entry).has_value());
+    }
+    auto written = writer.finish(loaded->header);
+    CHECK(written && written->file->commit());
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo,
+        test::not_cancelled(), test::no_progress());
+    CHECK(rebuilt && rebuilt->revisions == 1 && rebuilt->skipped.empty());
+}
+
+// A file whose content matches both its file hashes while a chunk hash of it
+// does not is fine: its manifest was written wrong (decision 0032). It is
+// Verified, its bytes read and matched, and the run warns that its chunk
+// hashes cannot be relied on and that a new revision fixes them, which makes
+// it PASSED_WITH_WARNINGS, also beside a difference of its metadata. A new
+// revision reads the file again and records chunk hashes that match it.
+void chunk_hashes_that_do_not_match_a_file_that_matches_warn()
+{
+    Chunked fixture;
+    write_wrong_chunk_hashes(fixture, {1});
+    auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "PASSED_WITH_WARNINGS" && outcome->items.empty() &&
+          outcome->counts.at("Verified") == 2 && outcome->coverage_bytes == outcome->registered_bytes);
+    const std::vector<std::string> one{"the chunk hashes of big.bin cannot be relied on: chunk 1 of 3 does not match, "
+                                       "while the whole file matches its hashes; the file is fine, and a new revision "
+                                       "fixes them"};
+    CHECK(outcome && outcome->warnings == one);
+    if (outcome && outcome->warnings != one) {
+        for (const auto& warning : outcome->warnings) {
+            std::cerr << "  warning: " << warning << '\n';
+        }
+    }
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->back().result == "PASSED_WITH_WARNINGS");
+
+    write_wrong_chunk_hashes(fixture, {0, 2});
+    fixture.archive.node("big.bin").mtime_ns += 5'000'000'000;
+    outcome = fixture.verify(fixture.archive.root());
+    const auto* big = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    CHECK(outcome && outcome->result == "PASSED_WITH_WARNINGS" && big && big->status == "MetadataMismatch");
+    CHECK(outcome && outcome->warnings == std::vector<std::string>{"the chunk hashes of big.bin cannot be relied on: "
+                                                                   "chunks 0 and 2 of 3 do not match, while the whole "
+                                                                   "file matches its hashes; the file is fine, and a "
+                                                                   "new revision fixes them"});
+
+    va::RegisterRequest next;
+    next.root = fixture.archive.root();
+    next.new_revision = true;
+    CHECK(fixture.register_root(next).has_value());
+    outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->revision == 2 && outcome->result == "PASSED" && outcome->warnings.empty());
+}
+
 void item_rules()
 {
     CHECK(va::mtime_matches("ntfs", 1'000'000'000, 1'900'000'000));
@@ -2672,5 +2748,6 @@ void verify_engine_tests()
     a_modified_file_names_the_chunks_that_differ();
     the_chunks_that_differ_are_named_in_runs();
     whole_files_are_compared_as_before();
+    chunk_hashes_that_do_not_match_a_file_that_matches_warn();
     item_rules();
 }

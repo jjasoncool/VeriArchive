@@ -1047,6 +1047,24 @@ constexpr CatalogEntry entries[] = {
         "內容不同：共 {2} 個區塊，其中區塊 {0} 和 {1} 不同，第一個從位元組 {3} 開始"},
     {"content differs: chunks {} and {} more of {} differ, the first from byte {}",
         "內容不同：共 {2} 個區塊，其中區塊 {0} 及另外 {1} 個區塊不同，第一個從位元組 {3} 開始"},
+    // A warning of the run: a file whose content matches both its file hashes
+    // while a chunk hash of it does not (decision 0032). The chunks as above.
+    {"the chunk hashes of {} cannot be relied on: chunk {} of {} does not match, while the whole file matches its "
+        "hashes; the file is fine, and a new revision fixes them",
+        "{0} 的區塊雜湊不可靠：共 {2} 個區塊，其中區塊 {1} 不符，但整個檔案與其雜湊相符；"
+        "檔案本身沒有問題，建立新版次即可修正"},
+    {"the chunk hashes of {} cannot be relied on: chunks {} of {} do not match, while the whole file matches its "
+        "hashes; the file is fine, and a new revision fixes them",
+        "{0} 的區塊雜湊不可靠：共 {2} 個區塊，其中區塊 {1} 不符，但整個檔案與其雜湊相符；"
+        "檔案本身沒有問題，建立新版次即可修正"},
+    {"the chunk hashes of {} cannot be relied on: chunks {} and {} of {} do not match, while the whole file matches "
+        "its hashes; the file is fine, and a new revision fixes them",
+        "{0} 的區塊雜湊不可靠：共 {3} 個區塊，其中區塊 {1} 和 {2} 不符，但整個檔案與其雜湊相符；"
+        "檔案本身沒有問題，建立新版次即可修正"},
+    {"the chunk hashes of {} cannot be relied on: chunks {} and {} more of {} do not match, while the whole file "
+        "matches its hashes; the file is fine, and a new revision fixes them",
+        "{0} 的區塊雜湊不可靠：共 {3} 個區塊，其中區塊 {1} 及另外 {2} 個區塊不符，但整個檔案與其雜湊相符；"
+        "檔案本身沒有問題，建立新版次即可修正"},
     // src/core/engine/compare_archives.cpp: its failures, and the item details
     // that verification does not use (it shares the others above). Each
     // "unreadable in A (<reason>)" is an entry of its own: a template would

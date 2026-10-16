@@ -400,6 +400,22 @@ void translation_tests()
           "65,536 開始");
     CHECK(english("content differs: chunk 1 of 3 differs, from byte 65,536") ==
           "content differs: chunk 1 of 3 differs, from byte 65,536");
+    // A warning of the run for chunk hashes that do not match a file that
+    // matches (decision 0032): the file's name is a value, as are the chunks.
+    const std::string whole = ", while the whole file matches its hashes; the file is fine, and a new revision fixes them";
+    const std::string whole_chinese = "，但整個檔案與其雜湊相符；檔案本身沒有問題，建立新版次即可修正";
+    CHECK(chinese("the chunk hashes of big.bin cannot be relied on: chunk 1 of 3 does not match" + whole) ==
+          "big.bin 的區塊雜湊不可靠：共 3 個區塊，其中區塊 1 不符" + whole_chinese);
+    CHECK(chinese.format("warning: {}",
+              chinese("the chunk hashes of 影片/raw of 2026.mov cannot be relied on: chunks 0 and 2 of 3 do not match" +
+                      whole)) == "警告：影片/raw of 2026.mov 的區塊雜湊不可靠：共 3 個區塊，其中區塊 0 和 2 不符" +
+                                     whole_chinese);
+    CHECK(chinese("the chunk hashes of big.bin cannot be relied on: chunks 1-3 of 40 do not match" + whole) ==
+          "big.bin 的區塊雜湊不可靠：共 40 個區塊，其中區塊 1-3 不符" + whole_chinese);
+    CHECK(chinese("the chunk hashes of big.bin cannot be relied on: chunks 1-3, 5, 8-9, 12, 14, 16, 18, 20, 22, 24 and "
+                  "4 more of 40 do not match" + whole) ==
+          "big.bin 的區塊雜湊不可靠：共 40 個區塊，其中區塊 1-3, 5, 8-9, 12, 14, 16, 18, 20, 22, 24 及另外 4 個區塊不符" +
+              whole_chinese);
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==

@@ -691,6 +691,8 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         if (records_name_collisions(manifest->entries)) {
             outcome.warnings.push_back(name_collision_warning);
         }
+        // Files whose chunk hashes cannot be relied on (decision 0032).
+        outcome.warnings.insert(outcome.warnings.end(), comparison.warnings.begin(), comparison.warnings.end());
         outcome.counts = comparison.counts;
         outcome.items = comparison.items;
         outcome.coverage_bytes = comparison.coverage_bytes;

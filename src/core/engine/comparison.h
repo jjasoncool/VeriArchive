@@ -28,9 +28,10 @@ struct ComparisonInput {
     // well. Its chunk hashes come from the read that hashes the whole file
     // (R-101), at the revision's chunk size, so a revision without one (0, as
     // V1 registered) does no chunk work. A file whose content differs names
-    // the chunks that differ. A FULL verify compares by chunk; a relocation
-    // compares whole files, and carries the chunk hashes of the revision it
-    // verifies (decision 0032, point 5).
+    // the chunks that differ; one whose content matches while a chunk hash
+    // does not gives a warning (ComparisonResult::warnings). A FULL verify
+    // compares by chunk; a relocation compares whole files, and carries the
+    // chunk hashes of the revision it verifies (decision 0032, point 5).
     bool compare_chunks = false;
     // R-104 resume: entry keys whose content already matched in the run being resumed.
     std::set<std::string> content_verified;
@@ -63,6 +64,11 @@ struct ComparisonResult {
     std::string scan_error;                 // root could not be scanned (FilesystemAccessError)
     std::map<std::string, std::uint64_t> counts;
     std::vector<VerifyItemRecord> items;    // non-Verified items (run_id left empty)
+    // Warnings of the run, in the canonical order of the files they name:
+    // compared by chunk, each file whose content matches both its file hashes
+    // while a chunk hash of it does not (decision 0032). The file is fine
+    // and counts as Verified; its chunk hashes cannot be relied on.
+    std::vector<std::string> warnings;
     std::uint64_t coverage_bytes = 0;       // bytes whose content matched
     // The media as it is now, with recorded hashes (chunk hashes included)
     // for matched content and known-unreadable entries carried over unchanged

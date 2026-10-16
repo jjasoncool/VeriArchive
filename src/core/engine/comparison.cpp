@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <tuple>
+#include <utility>
 
 namespace va {
 namespace {
@@ -129,6 +130,20 @@ VerifyItemRecord content_differs(const Entry& recorded, std::vector<std::uint64_
                             grouped(item.first_differing_offset);
     item.differing_chunks = std::move(differing);
     return item;
+}
+
+// A file whose content matches both its file hashes while chunks `differing`
+// do not match their recorded hashes (decision 0032): the file is fine, and
+// its manifest was wrong when it was written. Its chunk hashes cannot be
+// relied on to say where it differs, or to sample it; a new revision, which
+// reads it again, records them right.
+std::string unreliable_chunk_hashes(const Entry& recorded, const std::vector<std::uint64_t>& differing)
+{
+    const auto of = " of " + std::to_string(recorded.chunks.size());
+    return "the chunk hashes of " + recorded.path.p + " cannot be relied on: " +
+           (differing.size() == 1 ? "chunk " + std::to_string(differing.front()) + of + " does not match"
+                                  : "chunks " + chunk_list(differing) + of + " do not match") +
+           ", while the whole file matches its hashes; the file is fine, and a new revision fixes them";
 }
 
 class Classifier {
@@ -423,6 +438,9 @@ ComparisonResult compare_with_manifest(
     const auto chunk_size = input.compare_chunks ? input.header->chunk_size : 0;
     hash_options.chunk_size = chunk_size;
 
+    // The files whose chunk hashes cannot be relied on, with their warning.
+    std::vector<std::pair<const Entry*, std::string>> unreliable;
+
     std::vector<std::string> pending_checkpoint;
     auto last_checkpoint = std::chrono::steady_clock::now();
     // False when the caller stops the comparison.
@@ -504,6 +522,11 @@ ComparisonResult compare_with_manifest(
         result.coverage_bytes += hash.size; // read and matched
         classify.verified_or_metadata(was, is);
         result.current_entries.push_back(carried_entry(was, is));
+        // Both file hashes match, so the content does: a chunk hash that does
+        // not proves the manifest wrong, not the file (decision 0032).
+        if (const auto differing = differing_chunks(was, hash); !differing.empty()) {
+            unreliable.emplace_back(&was, unreliable_chunk_hashes(was, differing));
+        }
         // R-104: checkpoint every 1000 items or 60 seconds.
         pending_checkpoint.push_back(entry_key(was));
         if (pending_checkpoint.size() >= 1000 ||
@@ -533,6 +556,12 @@ ComparisonResult compare_with_manifest(
             return std::tie(left.path.p, left.path.raw, left.stream) <
                    std::tie(right.path.p, right.path.raw, right.stream);
         });
+    // The warnings likewise, by the canonical order of their files.
+    std::sort(unreliable.begin(), unreliable.end(),
+        [](const auto& left, const auto& right) { return canonical_less(*left.first, *right.first); });
+    for (auto& file : unreliable) {
+        result.warnings.push_back(std::move(file.second));
+    }
     return result;
 }
 
