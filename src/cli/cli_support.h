@@ -4,7 +4,7 @@
 #include "app/app_context.h"
 #include "app/progress_estimate.h"
 #include "app/text.h"
-#include "app/typed_path.h" // paths and roots typed on the command line, as in the GUI
+#include "app/typed_path.h" // IWYU pragma: export (paths and roots typed on the command line, as in the GUI)
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
 #include "core/repository/archive_store.h"
