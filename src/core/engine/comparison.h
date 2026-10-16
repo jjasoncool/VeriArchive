@@ -31,8 +31,9 @@ struct ComparisonInput {
     // the chunks that differ; one whose content matches its file hashes
     // while a chunk hash does not, or every chunk hash while a file hash
     // does not, gives a warning (ComparisonResult::warnings). A FULL verify
-    // compares by chunk; a relocation compares whole files, and carries the
-    // chunk hashes of the revision it verifies (decision 0032, point 5).
+    // and a relocation compare by chunk (decision 0032, points 10 and 11); a
+    // relocation carries the hashes of the revision it verifies, a hash that
+    // cannot be relied on included (point 5).
     bool compare_chunks = false;
     // Adding chunk hashes (decision 0033): the chunk size at which a FULL
     // verify hashes the chunks of a revision that has none (chunk size 0, as
