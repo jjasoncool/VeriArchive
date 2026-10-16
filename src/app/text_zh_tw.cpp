@@ -734,6 +734,15 @@ constexpr CatalogEntry entries[] = {
         "可能是複本：此根目錄與封存 {}（{}）的根目錄重疊，而此磁碟區與該封存的磁碟區比對只得到「{}」：此磁碟區可能是"
         "該封存的磁碟區逐磁區複製出來的複本，也可能就是該封存自己的磁碟區；請只在此根目錄不是該封存的根目錄時才確認",
         Match::FormatOnly},
+    // An archive whose very root the root of a registration over a lost
+    // manifest is, of which the archive named may be the twin (decision 0028,
+    // point 8).
+    {"the same root as archive {} ({}): this root is that archive's, on the volume and the device that its latest "
+        "manifest records; confirm only where this very folder was registered on purpose as both that archive and "
+        "this one (--force-new-archive)",
+        "與封存 {}（{}）的根目錄相同：此根目錄是該封存的根目錄，位於它最新的清單檔所記錄的磁碟區與裝置上；請只在這個"
+        "資料夾當初刻意同時註冊為該封存與此封存（--force-new-archive）時才確認",
+        Match::FormatOnly},
     // src/core/engine/abandon_registration.cpp
     {"archive {} has no unfinished registration", "封存 {} 沒有未完成的註冊"},
     {"the unfinished registration of archive {} is no longer the one shown (it was resumed, finished or "

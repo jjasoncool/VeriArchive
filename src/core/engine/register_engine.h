@@ -72,6 +72,18 @@ struct PossibleClone {
     MatchResult match = MatchResult::MatchWeak;  // MIGRATED or MATCH_WEAK
 };
 
+// An archive whose very root the root of a registration over a lost manifest
+// is, on a volume that is plainly that archive's: a MATCH of it (the
+// filesystem id and a device that its latest manifest records) at its own
+// folder. The same folder registered on purpose as two archives (R-97,
+// --force-new-archive) gives each of these twins that volume and folder, so
+// the archive named may be that archive's twin (decision 0028, point 8).
+// Named before the operator confirms.
+struct SameRoot {
+    Uuid archive_uuid;
+    std::string label;
+};
+
 // What a registration over a lost manifest registers (decision 0028, point
 // 8), as it says before the operator confirms it.
 struct LostManifestRegistration {
@@ -82,6 +94,7 @@ struct LostManifestRegistration {
     std::string root;                       // UTF-8, as the root is given
     UnusableManifest manifest;              // what is wrong with the lost revision's manifest
     std::vector<PossibleClone> possible_clones;  // in the order of the archives' labels
+    std::vector<SameRoot> same_root;             // in the order of the archives' labels
 };
 
 struct RegisterFailure {

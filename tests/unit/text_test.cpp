@@ -717,6 +717,15 @@ void translation_tests()
                   code_chinese + "」：此磁碟區可能是該封存的磁碟區逐磁區複製出來的複本，也可能就是該封存自己的磁碟區；"
                   "請只在此根目錄不是該封存的根目錄時才確認");
     }
+    // An archive whose very root the root given is, of which the archive named
+    // may be the twin, named before the operator confirms.
+    CHECK(chinese.format("the same root as archive {} ({}): this root is that archive's, on the volume and the device "
+                         "that its latest manifest records; confirm only where this very folder was registered on "
+                         "purpose as both that archive and this one (--force-new-archive)",
+              "ARCH-0002", uuid_b) ==
+          "與封存 ARCH-0002（" + uuid_b + "）的根目錄相同：此根目錄是該封存的根目錄，位於它最新的清單檔所記錄的磁碟區與"
+                                        "裝置上；請只在這個資料夾當初刻意同時註冊為該封存與此封存（--force-new-archive）"
+                                        "時才確認");
     CHECK(chinese("error: --lost-manifest takes none of --label, --new-revision, --force-new-archive and --resume") ==
           "錯誤：--lost-manifest 不能與 --label、--new-revision、--force-new-archive 或 --resume 一起使用");
     CHECK(chinese("error: --confirm is used only with --lost-manifest") == "錯誤：--confirm 只能與 --lost-manifest 一起使用");

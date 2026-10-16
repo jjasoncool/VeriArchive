@@ -1102,8 +1102,10 @@ run_cli("12" register "${MEDIA}" --lost-manifest "${media_prefix}" --json)
 string(JSON asked_revision GET "${last_output}" registration revision)
 string(JSON asked_lost GET "${last_output}" registration lost_revision)
 string(JSON asked_kind GET "${last_output}" registration manifest_problem kind)
-# No other archive's root overlaps this one on a volume that may be a clone.
+# No other archive's root overlaps this one on a volume that may be a clone,
+# nor is this one another archive's very root.
 string(JSON asked_clones LENGTH "${last_output}" registration possible_clones)
+string(JSON asked_same LENGTH "${last_output}" registration same_root)
 run_cli("2" archive show "${media_prefix}" --json)
 string(JSON asked_unchanged GET "${last_output}" revision)
 run_cli("0" register "${MEDIA}" --lost-manifest "${media_prefix}" --confirm --json)
@@ -1125,7 +1127,7 @@ if(media_usable EQUAL -1 OR media_last_resort EQUAL -1 OR media_import_named EQU
         OR NOT media_asked_chinese MATCHES "^無法取回的清單檔：ARCH-[0-9]+（${media_uuid}），版次 2\n"
         OR NOT media_asked_chinese MATCHES "錯誤：若要註冊版次 3，請加上 --confirm 再執行一次\n$"
         OR NOT asked_revision EQUAL 3 OR NOT asked_lost EQUAL 2 OR NOT asked_kind STREQUAL "missing"
-        OR NOT asked_clones EQUAL 0 OR NOT asked_unchanged EQUAL 2 OR NOT over_revision EQUAL 3 OR NOT over_lost EQUAL 2 OR NOT over_left_out
+        OR NOT asked_clones EQUAL 0 OR NOT asked_same EQUAL 0 OR NOT asked_unchanged EQUAL 2 OR NOT over_revision EQUAL 3 OR NOT over_lost EQUAL 2 OR NOT over_left_out
         OR NOT media_revisions EQUAL 2 OR NOT media_first EQUAL 1 OR NOT media_latest EQUAL 3
         OR NOT over_verified MATCHES "^PASSED" OR NOT over_verified_revision EQUAL 3)
     message(FATAL_ERROR "a registration over a lost manifest: usable ${media_usable}, last resort ${media_last_resort}, "
@@ -1198,6 +1200,51 @@ if(NOT retire_asked MATCHES "^Lost manifest of ${gone_label} \\(${gone_uuid}\\),
         "shown ${shown_status} (lost ${shown_lost}), line ${lost_line} / ${lost_line_chinese}"
         "\n${retire_asked}\n${retire_asked_error}\n${retire_asked_chinese}\n${retired_listed}\n"
         "${retired_listed_chinese}\n${retired_refused}")
+endif()
+
+# Decision 0028, point 8 (operator, 2026-10-17): the same sample folder
+# registered on purpose as two archives (--force-new-archive), A and its twin
+# B. With A's manifest gone, the registration over it takes the folder, B's
+# root: not confirmed, it names B, as the archive whose root it is where
+# matching sees the folder as a MATCH of B (`same_root`, and its line in
+# either language), or as possibly a clone where it sees a MATCH_WEAK, as on
+# a volume that shows no device serial (in containers). Confirmed, it
+# registers A's revision 2 from the folder, after which a verification of the
+# folder by its root matches both archives (exit 12).
+set(TWIN "${WORK}/twin-sample")
+file(WRITE "${TWIN}/a.txt" "twin sample a\n")
+run_cli("0" register "${TWIN}" --json)
+string(JSON twin_a GET "${last_output}" archive_uuid)
+run_cli("0" register "${TWIN}" --force-new-archive --json)
+string(JSON twin_b GET "${last_output}" archive_uuid)
+string(JSON twin_b_label GET "${last_output}" label)
+file(REMOVE "${WORK}/repo/manifests/${twin_a}/r0001.vam")
+run_cli("12" register "${TWIN}" --lost-manifest "${twin_a}" --json)
+string(JSON twin_same LENGTH "${last_output}" registration same_root)
+string(JSON twin_clones LENGTH "${last_output}" registration possible_clones)
+set(twin_named "")
+if(twin_same EQUAL 1)
+    string(JSON twin_named GET "${last_output}" registration same_root 0 archive_uuid)
+elseif(twin_clones EQUAL 1)
+    string(JSON twin_named GET "${last_output}" registration possible_clones 0 archive_uuid)
+endif()
+run_cli("12" --lang en register "${TWIN}" --lost-manifest "${twin_a}")
+set(twin_asked "${last_output}")
+run_cli("12" register "${TWIN}" --lost-manifest "${twin_a}")
+set(twin_asked_chinese "${last_output}")
+string(FIND "${twin_asked}" "\n  the same root as archive ${twin_b_label} (${twin_b}): this root is that archive's, on the volume and the device that its latest manifest records; confirm only where this very folder was registered on purpose as both that archive and this one (--force-new-archive)\n" twin_line)
+string(FIND "${twin_asked_chinese}" "\n  與封存 ${twin_b_label}（${twin_b}）的根目錄相同：此根目錄是該封存的根目錄，位於它最新的清單檔所記錄的磁碟區與裝置上；請只在這個資料夾當初刻意同時註冊為該封存與此封存（--force-new-archive）時才確認\n" twin_line_chinese)
+run_cli("0" register "${TWIN}" --lost-manifest "${twin_a}" --confirm --json)
+string(JSON twin_revision GET "${last_output}" revision)
+string(JSON twin_registered GET "${last_output}" archive_uuid)
+run_cli("12" verify --full "${TWIN}" --json)
+string(JSON twin_match GET "${last_output}" error)
+if(NOT twin_named STREQUAL twin_b OR NOT twin_revision EQUAL 2 OR NOT twin_registered STREQUAL twin_a
+        OR NOT twin_match MATCHES "^AMBIGUOUS: the media matches several archives"
+        OR (twin_same EQUAL 1 AND (twin_line EQUAL -1 OR twin_line_chinese EQUAL -1)))
+    message(FATAL_ERROR "a registration over the lost manifest of a twin: same root ${twin_same}, clones "
+        "${twin_clones}, named ${twin_named} (B ${twin_b}); registered ${twin_registered} r${twin_revision}; by root "
+        "${twin_match}\n${twin_asked}\n${twin_asked_chinese}")
 endif()
 
 message(STATUS "veriarchive-cli end-to-end test passed")

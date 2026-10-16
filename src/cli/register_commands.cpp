@@ -42,6 +42,10 @@ nlohmann::json lost_manifest_json(const LostManifestRegistration& registration)
         clones.push_back({{"archive_uuid", clone.archive_uuid}, {"label", clone.label},
             {"match", std::string(to_string(clone.match))}});
     }
+    auto same_root = nlohmann::json::array();
+    for (const auto& same : registration.same_root) {
+        same_root.push_back({{"archive_uuid", same.archive_uuid}, {"label", same.label}});
+    }
     return {
         {"archive_uuid", registration.archive_uuid},
         {"label", registration.label},
@@ -51,6 +55,7 @@ nlohmann::json lost_manifest_json(const LostManifestRegistration& registration)
         {"manifest_problem", {{"kind", kind_code(manifest.kind)}, {"revision", manifest.revision},
                                  {"manifest", manifest.manifest}, {"message", plain_message(manifest)}}},
         {"possible_clones", std::move(clones)},
+        {"same_root", std::move(same_root)},
     };
 }
 
@@ -81,6 +86,17 @@ int unconfirmed(const Arguments& arguments, const RegisterFailure& failure)
                                  "archive's, or that archive's own; confirm only where this root is not that "
                                  "archive's",
                          clone.label, clone.archive_uuid, text(to_string(clone.match)))
+                  << '\n';
+    }
+    // An archive whose very root this root is: the archive named may be its
+    // twin, the same folder registered on purpose as both; the operator, who
+    // named the archive, confirms only where it is.
+    for (const auto& same : registration.same_root) {
+        std::cout << "  "
+                  << text.format("the same root as archive {} ({}): this root is that archive's, on the volume and the "
+                                 "device that its latest manifest records; confirm only where this very folder was "
+                                 "registered on purpose as both that archive and this one (--force-new-archive)",
+                         same.label, same.archive_uuid)
                   << '\n';
     }
     std::cout << text.format("Registering revision {} from this root takes what it holds now as the archive's new "

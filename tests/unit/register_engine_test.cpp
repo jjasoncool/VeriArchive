@@ -2293,10 +2293,13 @@ std::string overlaps_the_root_of(const va::Uuid& other)
 
 // Decision 0028, point 8: the root of a registration over a lost manifest is
 // the operator's word, as only the lost manifest recorded the archive's root,
-// and it is refused where it is plainly not the archive's: where it overlaps
-// the root of an archive whose manifest can be used on a volume that is
-// plainly that archive's (here B at /vol/b, a MATCH of B), and where its
-// identity file names another archive. Where the
+// and it is refused where it is plainly not the archive's: where it contains
+// or lies in the root of an archive whose manifest can be used on a volume
+// that is plainly that archive's (here B at /vol/b, a MATCH of B), and where
+// its identity file names another archive than one whose very root it is.
+// B's very root is taken, naming B, as the archive named may be its twin,
+// also where its identity file names B, but not where it names a third
+// archive. Where the
 // root holds the lost manifest as a media copy that `import` puts back, the
 // registration says to import it instead; imported, the manifest can be used
 // again. A media copy that is not the one recorded, as one with a byte of its
@@ -2333,8 +2336,30 @@ void a_registration_over_a_lost_manifest_needs_the_archives_own_root()
         }
     };
     const auto overlaps_b = overlaps_the_root_of(b->archive_uuid);
-    refused("/vol/b", overlaps_b);
     refused("/vol", overlaps_b);
+    fixture.archive.add_directory("b/sub");
+    refused("/vol/b/sub", overlaps_b);
+    // B's very root: the same root as B's, named before the confirmation.
+    const auto asks_naming_b = [&](const char* what) {
+        const auto registered = fixture.run(over_lost_manifest("/vol/b", archive_uuid, false));
+        CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Unconfirmed &&
+              registered.error().lost_manifest && registered.error().lost_manifest->possible_clones.empty() &&
+              registered.error().lost_manifest->same_root.size() == 1 &&
+              registered.error().lost_manifest->same_root.front().archive_uuid == b->archive_uuid &&
+              registered.error().lost_manifest->same_root.front().label == "ARCH-0002");
+        if (!registered && registered.error().kind != va::RegisterFailure::Kind::Unconfirmed) {
+            std::cerr << "  B's root, " << what << ": " << registered.error().message << '\n';
+        }
+    };
+    asks_naming_b("no identity file");
+    const auto b_identity = std::filesystem::path("/vol/b") / ".veriarchive" / "identity.json";
+    fixture.archive.put(b_identity, "{\"archive_uuid\":\"" + b->archive_uuid + "\"}");
+    asks_naming_b("its identity file naming B");
+    const va::Uuid third = "c0ffee00-0000-4000-8000-0000000000bb"; // sample data
+    fixture.archive.put(b_identity, "{\"archive_uuid\":\"" + third + "\"}");
+    refused("/vol/b", "the identity file of this root (.veriarchive/identity.json) names archive " + third +
+                          ", not archive " + archive_uuid);
+    fixture.archive.remove("b/.veriarchive");
 
     // The media copy that the registration of revision 2 wrote on A.
     const auto copy = std::filesystem::path("/vol/a") / ".veriarchive" / "r0002.vam";
@@ -2381,10 +2406,11 @@ void a_registration_over_a_lost_manifest_needs_the_archives_own_root()
 // serial to compare), which a clone reads as, so it is not plainly B's. Not
 // confirmed, it names B as possibly a clone, and changes nothing; confirmed, it
 // registers A's revision 2 from the device, and a new folder registers after
-// it. B's own volume, a MATCH of B (its filesystem id and its serial), stays
-// refused; without serials it reads as the device does, MATCH_WEAK, and is
-// taken, naming B. So is a root that overlaps the root of the twin registered
-// at the very same folder on purpose (R-97), a MATCH of it. Sample data.
+// it. B's own volume, a MATCH of B (its filesystem id and its serial), is B's
+// very root, which the registration takes only as the root of a twin of B,
+// naming B as the archive whose root it is; without serials it reads as the
+// device does, MATCH_WEAK, and is taken, naming B as possibly a clone. Sample
+// data.
 void a_registration_over_a_lost_manifest_takes_its_own_volume_beside_a_registered_clone()
 {
     for (const bool serials : {true, false}) {
@@ -2430,12 +2456,15 @@ void a_registration_over_a_lost_manifest_takes_its_own_volume_beside_a_registere
             asks_naming_b(device);
             asks_naming_b(device / "sub");
             if (clone_attached) {
-                // B's own volume: a MATCH of B where each device has its
-                // serial; without serials it reads as the device does.
+                // B's own volume: a MATCH of B at its very root where each
+                // device has its serial; without serials it reads as the
+                // device does.
                 if (serials) {
-                    const auto refused = fixture.run(over_lost_manifest(clone, a->archive_uuid, false));
-                    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
-                          refused.error().message == overlaps_the_root_of(b->archive_uuid));
+                    const auto asked = fixture.run(over_lost_manifest(clone, a->archive_uuid, false));
+                    CHECK(!asked && asked.error().kind == va::RegisterFailure::Kind::Unconfirmed &&
+                          asked.error().lost_manifest && asked.error().lost_manifest->possible_clones.empty() &&
+                          asked.error().lost_manifest->same_root.size() == 1 &&
+                          asked.error().lost_manifest->same_root.front().archive_uuid == b->archive_uuid);
                 } else {
                     asks_naming_b(clone);
                 }
@@ -2464,24 +2493,79 @@ void a_registration_over_a_lost_manifest_takes_its_own_volume_beside_a_registere
                   other->archive_uuid != b->archive_uuid);
         }
     }
+}
 
-    // The same folder registered twice on purpose (R-97), A and its twin B on
-    // one volume: A's own root is a MATCH of B, and stays refused.
+// Decision 0028, point 8 (operator, 2026-10-17): the same folder, /vol/a
+// (sample data), registered on purpose as two archives, A and its twin B
+// (R-97, --force-new-archive), each with a media copy, so that the identity
+// file on it names B, the last one written. A's manifest is lost: the
+// registration over it takes the folder, B's very root, naming B as the
+// archive whose root it is, as A is named by its uuid and the operator
+// confirms; a folder in it, or one that contains it, stays refused as
+// overlapping B's root, and an identity file that names a third archive
+// refuses the folder. Not confirmed, nothing is written; confirmed, A's
+// revision 2 is registered from the folder, B is left as it was, and the
+// folder, both archives' root again, matches both (AMBIGUOUS).
+void a_registration_over_a_lost_manifest_takes_the_root_of_its_twin()
+{
     Fixture fixture;
     fixture.archive.add_file("a/SAMPLE-one.txt", "one (sample data)");
-    const auto a = fixture.run(at("/vol/a"));
+    fixture.archive.add_file("a/sub/SAMPLE-two.txt", "two (sample data)");
+    auto first = at("/vol/a");
+    first.write_media_copy = true;
+    const auto a = fixture.run(first);
     auto twice = at("/vol/a");
     twice.force_new_archive = true;
+    twice.write_media_copy = true;
     const auto b = fixture.run(twice);
     CHECK(a && b && a->archive_uuid != b->archive_uuid);
     if (!a || !b) {
         return;
     }
+    const auto identity = std::filesystem::path("/vol/a") / ".veriarchive" / "identity.json";
+    CHECK(fixture.archive.content_at(identity).contains(b->archive_uuid));
+    const auto b_manifest = read_bytes(va::manifest_path(fixture.repository.context.repo.manifests(), b->archive_uuid, 1));
     std::filesystem::remove(va::manifest_path(fixture.repository.context.repo.manifests(), a->archive_uuid, 1));
-    const auto refused = fixture.run(over_lost_manifest("/vol/a", a->archive_uuid, true));
-    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
-          refused.error().message == overlaps_the_root_of(b->archive_uuid));
+
+    const auto asked = fixture.run(over_lost_manifest("/vol/a", a->archive_uuid, false));
+    CHECK(!asked && asked.error().kind == va::RegisterFailure::Kind::Unconfirmed && asked.error().lost_manifest &&
+          asked.error().lost_manifest->possible_clones.empty() && asked.error().lost_manifest->same_root.size() == 1 &&
+          asked.error().lost_manifest->same_root.front().archive_uuid == b->archive_uuid &&
+          asked.error().lost_manifest->same_root.front().label == "ARCH-0002");
+    if (!asked && asked.error().kind != va::RegisterFailure::Kind::Unconfirmed) {
+        std::cerr << "  the root of its twin: " << asked.error().message << '\n';
+    }
+    CHECK(fixture.store.setting("registration:" + a->archive_uuid).value_or("x").empty());
+    for (const auto* folder : {"/vol/a/sub", "/vol"}) {
+        const auto refused = fixture.run(over_lost_manifest(folder, a->archive_uuid, false));
+        CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+              refused.error().message == overlaps_the_root_of(b->archive_uuid));
+    }
+    const auto b_identity = fixture.archive.content_at(identity);
+    const va::Uuid third = "c0ffee00-0000-4000-8000-0000000000cc"; // sample data
+    fixture.archive.put(identity, "{\"archive_uuid\":\"" + third + "\"}");
+    const auto third_named = fixture.run(over_lost_manifest("/vol/a", a->archive_uuid, true));
+    CHECK(!third_named && third_named.error().kind == va::RegisterFailure::Kind::Refused &&
+          third_named.error().message == "the identity file of this root (.veriarchive/identity.json) names archive " +
+                                             third + ", not archive " + a->archive_uuid);
+    fixture.archive.put(identity, b_identity);
     CHECK(revisions_of(fixture, a->archive_uuid) == std::vector<std::uint32_t>{1});
+
+    const auto registered = fixture.run(over_lost_manifest("/vol/a", a->archive_uuid, true));
+    CHECK(registered && registered->archive_uuid == a->archive_uuid && registered->revision == 2 &&
+          registered->lost_revision == std::optional<std::uint32_t>(1) && registered->lost_revision_left_out &&
+          registered->counts.files == 2);
+    if (!registered) {
+        std::cerr << "  over the lost manifest at its twin's root: " << registered.error().message << '\n';
+        return;
+    }
+    const auto archive = fixture.store.find_archive(a->archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2 && (*archive)->root_subpath == "a");
+    CHECK(revisions_of(fixture, b->archive_uuid) == std::vector<std::uint32_t>{1});
+    CHECK(read_bytes(va::manifest_path(fixture.repository.context.repo.manifests(), b->archive_uuid, 1)) == b_manifest);
+    const auto both = fixture.verify("/vol/a");
+    CHECK(!both && both.error().identity.result == va::MatchResult::Ambiguous &&
+          both.error().identity.archives.size() == 2);
 }
 
 // Decision 0028, point 8: a registration over a lost manifest resumes as any
@@ -2777,6 +2861,7 @@ void register_engine_tests()
     a_registration_over_a_manifest_that_is_not_lost_is_refused();
     a_registration_over_a_lost_manifest_needs_the_archives_own_root();
     a_registration_over_a_lost_manifest_takes_its_own_volume_beside_a_registered_clone();
+    a_registration_over_a_lost_manifest_takes_the_root_of_its_twin();
     a_registration_over_a_lost_manifest_resumes();
     a_retired_archive_takes_no_registration_over_its_lost_manifest();
     a_new_revision_of_another_archives_root_goes_ahead_beside_a_damaged_archive();
