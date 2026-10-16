@@ -37,7 +37,7 @@ inline va::VolumeInfo fake_volume(const std::filesystem::path& mount_point)
 
 struct EngineFixture {
     TestRepository repository;
-    FakeFileSystem archive{"/vol"};
+    FakeFileSystem archive;
     FakeMediaEnumerator media;
     va::ArchiveStore store = repository.store();
     va::CancelToken cancel;
@@ -46,7 +46,11 @@ struct EngineFixture {
     FakeMediaWriter media_writer{archive};
     FakeProcessTable processes;  // the engines run in its `self` (decision 0024)
 
-    EngineFixture() { media.volume = fake_volume(archive.root()); }
+    // An archive volume whose root, and mount point, is `root`.
+    explicit EngineFixture(std::filesystem::path root = "/vol") : archive(std::move(root))
+    {
+        media.volume = fake_volume(archive.root());
+    }
 
     std::expected<va::RegisterOutcome, va::RegisterFailure> register_root(va::RegisterRequest request)
     {

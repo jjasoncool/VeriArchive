@@ -68,7 +68,12 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
         if (!relative) {
             continue;
         }
-        const auto root = relative->empty() ? volume.mount_point : volume.mount_point / *relative;
+        // The root is a folder as the user interfaces make one: the mount
+        // point of a volume mounted in a folder ends with a separator on
+        // Windows ("C:\mnt\vol\"), which a root at that volume's root drops,
+        // while "X:\" and "/" keep theirs.
+        const auto root = without_trailing_separators(
+            relative->empty() ? volume.mount_point : volume.mount_point / *relative);
         if (services.archive_files.list(root)) {
             return Located{root, volume, candidate.root_subpath};
         }

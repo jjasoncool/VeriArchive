@@ -399,6 +399,42 @@ void run_record_says_where_and_how_much()
     CHECK(left && left->empty());
 }
 
+// The mount point of a volume mounted in a folder ends with a separator on
+// Windows ("C:\mnt\vol\"). An archive at that volume's root, verified by its
+// uuid, is read at the folder without it, as the user interfaces make a typed
+// root, and the run's record and outcome name that folder; the root of a
+// volume at a drive letter keeps its own separator ("K:\", sample letter).
+void archive_found_by_uuid_is_read_at_its_folder()
+{
+    Registered fixture;
+    fixture.media.volume.mount_point = fixture.archive.root() / ""; // "/vol/"
+    RunWatcher watcher(fixture.store);
+    va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+    va::VerifyRequest request;
+    request.archive_uuid = fixture.archive_uuid;
+    const auto outcome = va::verify_full(services, request, fixture.cancel, watcher);
+    const auto folder = va::path_to_utf8(fixture.archive.root());
+    CHECK(outcome && outcome->result == "PASSED" && va::path_to_utf8(outcome->root) == folder);
+    CHECK(!watcher.records_seen.empty());
+    for (const auto& record : watcher.records_seen) {
+        CHECK(record.value("root", std::string{}) == folder);
+    }
+
+    if (std::filesystem::path::preferred_separator == '\\') {
+        EngineFixture drive(R"(K:\)");
+        drive.archive.add_file("a.txt", "a (sample data)");
+        const auto registered = drive.register_root(drive.archive.root());
+        CHECK(registered.has_value());
+        if (registered) {
+            va::VerifyRequest by_uuid;
+            by_uuid.archive_uuid = registered->archive_uuid;
+            const auto verified = drive.verify(by_uuid);
+            CHECK(verified && verified->result == "PASSED" && va::path_to_utf8(verified->root) == R"(K:\)");
+        }
+    }
+}
+
 void item_rules()
 {
     CHECK(va::mtime_matches("ntfs", 1'000'000'000, 1'900'000'000));
@@ -450,5 +486,6 @@ void verify_engine_tests()
     interrupted_run_resumes_without_rehashing();
     resume_refused_after_new_revision();
     run_record_says_where_and_how_much();
+    archive_found_by_uuid_is_read_at_its_folder();
     item_rules();
 }
