@@ -379,6 +379,10 @@ void translation_tests()
     CHECK(chinese("cannot upgrade the repository database to schema version 2: cannot execute SQL: database is "
                   "locked") == "無法將儲存庫資料庫升級到結構描述版本 2：無法執行 SQL：資料庫已被鎖定");
     CHECK(chinese("chunk hashes of big.bin: 2 given, 3 expected") == "big.bin 的區塊雜湊：提供 2 個，應為 3 個");
+    // Each revision's chunks in archive show (decision 0032): the Merkle root is 總碼 there.
+    CHECK(chinese.format("chunk size {}, {} chunks, Merkle root {}", "64 MiB", 160, "4f3f") ==
+          "區塊大小 64 MiB，160 個區塊，總碼 4f3f");
+    CHECK(chinese("chunk size 0: whole-file hashes only") == "區塊大小 0：只有整個檔案的雜湊");
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==

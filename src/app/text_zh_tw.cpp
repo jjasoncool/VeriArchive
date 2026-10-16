@@ -317,6 +317,9 @@ constexpr CatalogEntry entries[] = {
     // glossary's term (a lost manifest: 無法取回的清單檔).
     {"problem: {}", "問題：{}", Match::Cause},
     {"manifest lost: {}", "清單檔無法取回：{}", Match::Cause},
+    // Each revision's chunks (decision 0032); the Merkle root is 總碼 in the interface.
+    {"chunk size 0: whole-file hashes only", "區塊大小 0：只有整個檔案的雜湊"},
+    {"chunk size {}, {} chunks, Merkle root {}", "區塊大小 {}，{} 個區塊，總碼 {}"},
     // The archive's unfinished registration and relocation in archive list and show (decision 0026), from
     // src/app/unfinished_operations.cpp; the progress and state are the Archive List's words.
     {"Unfinished registration of revision {} from \"{}\": {}; {}", "未完成的註冊（版次 {}，根目錄「{}」）：{}；{}",

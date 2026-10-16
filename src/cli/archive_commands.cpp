@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -255,6 +256,22 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
     return json;
 }
 
+// A revision's chunk size, chunk lines and Merkle root (總碼 in Chinese), as
+// `archive show` prints them under the revision (decision 0032): "chunk size
+// 64 MiB, 160 chunks, Merkle root <64 hex>", or for a revision without a
+// chunk size, as V1 registered it, that it has whole-file hashes only.
+std::string chunks_line(const app::Text& text, const ManifestHeader& header)
+{
+    if (header.chunk_size == 0) {
+        return text("chunk size 0: whole-file hashes only");
+    }
+    // A multiple of 64 KiB (decision 0031), in the largest unit that keeps it whole.
+    constexpr std::uint64_t mebibyte = 1024 * 1024;
+    const auto size = header.chunk_size % mebibyte == 0 ? std::format("{} MiB", header.chunk_size / mebibyte)
+                                                         : std::format("{} KiB", header.chunk_size / 1024);
+    return text.format("chunk size {}, {} chunks, Merkle root {}", size, header.counts.chunks, header.merkle_root);
+}
+
 // Accepts a full uuid or a unique prefix of at least 8 characters (names_archive).
 std::expected<ArchiveStatus, Failure> find_status(const std::vector<ArchiveStatus>& statuses,
     const std::string& word)
@@ -376,6 +393,16 @@ int show(const Arguments& arguments, Opened& opened)
     if (!revisions) {
         return report_failure(arguments, {exit_code::repository, revisions.error().message});
     }
+    // What each revision's header says of its chunks, read from its manifest
+    // as the latest revision's header is (R-14), never the index's copy. A
+    // revision whose manifest cannot be used has none to show; the archive's
+    // status says what is wrong with it (decision 0028).
+    std::vector<std::optional<ManifestHeader>> headers;
+    const auto repository_files = platform::make_file_system_access();
+    for (const auto& revision : *revisions) {
+        auto header = load_recorded_header(*repository_files, opened.session.context.repo, revision);
+        headers.push_back(header ? std::optional<ManifestHeader>(std::move(*header)) : std::nullopt);
+    }
     const auto unfinished = unfinished_by_archive(opened.store);
     if (!unfinished) {
         return report_failure(arguments, unfinished.error());
@@ -383,9 +410,18 @@ int show(const Arguments& arguments, Opened& opened)
     if (arguments.json) {
         auto json = status_json(*status, *unfinished);
         auto list = nlohmann::json::array();
-        for (const auto& revision : *revisions) {
+        for (std::size_t index = 0; index < revisions->size(); ++index) {
+            const auto& revision = (*revisions)[index];
+            const auto& header = headers[index];
             nlohmann::json item{{"revision", revision.revision}, {"created", revision.created},
-                {"manifest", revision.manifest_relpath}};
+                {"manifest", revision.manifest_relpath}, {"chunk_size", nullptr}, {"chunks", nullptr},
+                {"merkle_root", nullptr}};
+            if (header) {
+                const auto merkle_root = merkle_root_of(*header);
+                item["chunk_size"] = header->chunk_size;
+                item["chunks"] = header->counts.chunks;
+                item["merkle_root"] = merkle_root.empty() ? nlohmann::json(nullptr) : nlohmann::json(merkle_root);
+            }
             if (const auto* problem = earlier_problem(*status, revision.revision)) {
                 item["manifest_problem"] = manifest_problem_json(*problem);
             }
@@ -436,9 +472,13 @@ int show(const Arguments& arguments, Opened& opened)
               << last_verify_line(text, status->last_any, true, status->any_overdue) << '\n';
     print_unfinished(text, *unfinished, status->archive.archive_uuid, "  ");
     std::cout << "  " << text("revisions:") << '\n';
-    for (const auto& revision : *revisions) {
+    for (std::size_t index = 0; index < revisions->size(); ++index) {
+        const auto& revision = (*revisions)[index];
         std::cout << "    r" << revision.revision << "  " << app::local_time(revision.created, text) << "  "
                   << revision.manifest_relpath << '\n';
+        if (headers[index]) {
+            std::cout << "      " << chunks_line(text, *headers[index]) << '\n';
+        }
         // An earlier revision's manifest that cannot be used stops the
         // matching that reads the earlier carriers (decision 0028).
         if (const auto* problem = earlier_problem(*status, revision.revision)) {

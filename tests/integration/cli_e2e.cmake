@@ -1266,6 +1266,62 @@ if(earlier_shown EQUAL -1 OR NOT earlier_kind STREQUAL "missing" OR NOT earlier_
         "${moving_revisions_back}")
 endif()
 
+# Chunk lines (decision 0032), in a repository of their own. A new archive
+# gets 64 MiB chunks: a file of 64 MiB and 16 bytes (sample data) has two
+# chunk lines, which `register --json` counts and `archive show` gives with
+# the chunk size and the Merkle root of each revision, as its manifest says.
+# The golden manifests (sample data) are a revision without a chunk size, as
+# V1 wrote them, and one with 64 KiB chunks.
+file(WRITE "${WORK}/config4.json" "{\"language\": \"zh-TW\"}\n")
+set(GLOBAL --config "${WORK}/config4.json")
+run_cli("0" --repository "${WORK}/repo4" repo init)
+set(LARGE "${WORK}/large")
+string(REPEAT "0123456789abcdef" 4194305 large_content)
+file(WRITE "${LARGE}/sample.bin" "${large_content}")
+unset(large_content)
+run_cli("0" register "${LARGE}" --json)
+string(JSON large_uuid GET "${last_output}" archive_uuid)
+string(JSON large_chunks GET "${last_output}" counts chunks)
+run_cli("0" archive show "${large_uuid}" --json)
+string(JSON large_chunk_size GET "${last_output}" revisions 0 chunk_size)
+string(JSON large_chunk_count GET "${last_output}" revisions 0 chunks)
+string(JSON large_root GET "${last_output}" revisions 0 merkle_root)
+string(LENGTH "${large_root}" large_root_length)
+if(NOT large_chunks EQUAL 2 OR NOT large_chunk_size EQUAL 67108864 OR NOT large_chunk_count EQUAL 2
+        OR NOT large_root MATCHES "^[0-9a-f]+$" OR NOT large_root_length EQUAL 64)
+    message(FATAL_ERROR "chunk lines of a file larger than 64 MiB:\n${last_output}")
+endif()
+run_cli("0" archive show "${large_uuid}")
+if(NOT last_output MATCHES "\n    r1  [^\n]*r0001\\.vam\n      區塊大小 64 MiB，2 個區塊，總碼 ${large_root}\n")
+    message(FATAL_ERROR "archive show of a revision with chunk lines:\n${last_output}")
+endif()
+run_cli("0;2" verify --full "${large_uuid}")
+file(REMOVE_RECURSE "${LARGE}")
+
+set(GOLDEN "${CMAKE_CURRENT_LIST_DIR}/../golden")
+run_cli("0" import "${GOLDEN}/golden_r0002.vam")
+run_cli("0" import "${GOLDEN}/golden_chunks_r0003.vam")
+set(golden_uuid "28ff645e-a220-4aac-ae0b-6c328bf1a2b3")
+set(golden_root "4f3f8bde47f06d709c9cabfa80f703e95f895b071409fec0509f58d6fb1eccbc")
+run_cli("0" archive show "${golden_uuid}" --json)
+string(JSON v1_chunk_size GET "${last_output}" revisions 0 chunk_size)
+string(JSON v1_root_type TYPE "${last_output}" revisions 0 merkle_root)
+string(JSON chunked_size GET "${last_output}" revisions 1 chunk_size)
+string(JSON chunked_count GET "${last_output}" revisions 1 chunks)
+string(JSON chunked_root GET "${last_output}" revisions 1 merkle_root)
+if(NOT v1_chunk_size EQUAL 0 OR NOT v1_root_type STREQUAL "NULL" OR NOT chunked_size EQUAL 65536
+        OR NOT chunked_count EQUAL 8 OR NOT chunked_root STREQUAL golden_root)
+    message(FATAL_ERROR "archive show --json of revisions with and without chunk lines:\n${last_output}")
+endif()
+run_cli("0" archive show "${golden_uuid}")
+if(NOT last_output MATCHES "\n    r2  [^\n]*r0002\\.vam\n      區塊大小 0：只有整個檔案的雜湊\n    r3  [^\n]*r0003\\.vam\n      區塊大小 64 KiB，8 個區塊，總碼 ${golden_root}\n")
+    message(FATAL_ERROR "archive show of revisions with and without chunk lines:\n${last_output}")
+endif()
+run_cli("0" --lang en archive show "${golden_uuid}")
+if(NOT last_output MATCHES "\n      chunk size 0: whole-file hashes only\n    r3  [^\n]*\n      chunk size 64 KiB, 8 chunks, Merkle root ${golden_root}\n")
+    message(FATAL_ERROR "archive show in English of revisions with and without chunk lines:\n${last_output}")
+endif()
+
 # A registration or relocation made for an older revision never records
 # (decision 0030). The archive of a folder (sample data) is registered in the
 # first repository and imported into the second. In the second, a relocation
