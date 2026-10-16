@@ -49,6 +49,9 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0>=2.72)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/core/repository/schema.sql" VERIARCHIVE_SCHEMA_SQL)
 configure_file(src/core/repository/schema_sql.h.in generated/schema_sql.h @ONLY)
+# configure_file depends on its template only: CMake runs again, and the
+# header takes the schema, also when schema.sql alone changes.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/core/repository/schema.sql)
 
 add_library(veriarchive_common
     src/common/archive_path.cpp
