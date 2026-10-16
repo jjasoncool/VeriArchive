@@ -61,11 +61,12 @@ struct RegisterOutcome {
 };
 
 // An archive whose root the root of a registration over a lost manifest
-// overlaps, on a volume that the root's volume matches only as MIGRATED (the
-// filesystem id that archive's latest manifest records, on another device)
-// or MATCH_WEAK (no device, or no filesystem id, to compare): the root's
-// volume may be a sector-by-sector clone of that archive's volume, or that
-// volume itself (decision 0028, point 8). Named before the operator confirms.
+// contains or lies in, on a volume that the root's volume matches only as
+// MIGRATED (the filesystem id that archive's latest manifest records, on
+// another device) or MATCH_WEAK (no device, or no filesystem id, to compare):
+// the root's volume may be a sector-by-sector clone of that archive's
+// volume, or that volume itself (decision 0028, point 8). Named before the
+// operator confirms.
 struct PossibleClone {
     Uuid archive_uuid;
     std::string label;
@@ -73,15 +74,19 @@ struct PossibleClone {
 };
 
 // An archive whose very root the root of a registration over a lost manifest
-// is, on a volume that is plainly that archive's: a MATCH of it (the
-// filesystem id and a device that its latest manifest records) at its own
-// folder. The same folder registered on purpose as two archives (R-97,
+// is, at that archive's own folder (its root subpath), on a volume that is
+// plainly that archive's, a MATCH of it (the filesystem id and a device that
+// its latest manifest records), or that matches it only as MIGRATED or
+// MATCH_WEAK, which may be that archive's volume or a sector-by-sector clone
+// of it. The same folder registered on purpose as two archives (R-97,
 // --force-new-archive) gives each of these twins that volume and folder, so
-// the archive named may be that archive's twin (decision 0028, point 8).
-// Named before the operator confirms.
+// the archive named may be that archive's twin, whatever serial the volume's
+// device shows now (decision 0028, point 8). Named before the operator
+// confirms, with the match.
 struct SameRoot {
     Uuid archive_uuid;
     std::string label;
+    MatchResult match = MatchResult::Match;  // MATCH, MIGRATED or MATCH_WEAK
 };
 
 // What a registration over a lost manifest registers (decision 0028, point

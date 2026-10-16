@@ -449,25 +449,26 @@ std::optional<std::filesystem::path> media_copy_to_import(IFileSystemAccess& fil
 // in a way that only putting the manifest back fixes (missing, unreadable or
 // changed; an index that differs from an intact manifest is rebuilt instead),
 // from a root that is plainly no other archive's. The archive is named, as
-// matching cannot find it: only the lost manifest recorded its carrier and
-// its root. So the root is the operator's word, and refused only where it is
+// matching cannot find it: only the lost manifest recorded its carrier and its
+// root. So the root is the operator's word, and refused only where it is
 // plainly another archive's: a root that contains or lies in the root of an
 // archive whose manifest can be used, on a volume that is plainly that
 // archive's, a MATCH of it (the filesystem id and a device that its latest
 // manifest records), as plainly_another_archives_root tells one (decision
 // 0001), or an identity file on it that names another archive than one whose
-// very root it is. That very root, a MATCH of that archive at its own folder,
-// is taken: the same folder registered on purpose as two archives (R-97,
-// --force-new-archive) gives each twin that volume and folder, so the archive
-// named may be that archive's twin, whose identity file (one for both, the
-// last one written) may name that archive; it is named before the operator
-// confirms. A root that overlaps another archive's on a volume that it
-// matches only as MIGRATED or MATCH_WEAK may be a clone of that volume, as a
-// device and a sector-by-sector clone of it registered as two archives read
-// to each other, attached or not: it is taken, and that archive is named
-// before the operator confirms. And where the root still holds the lost
-// manifest as a media copy that `import` would put back, it says to import
-// that instead: the manifest is not lost.
+// very root it is. That very root, at that archive's own folder on a volume
+// that matches it (MATCH, or MIGRATED or MATCH_WEAK), is taken: the same folder
+// registered on purpose as two archives (R-97, --force-new-archive) gives each
+// twin that volume and folder, so the archive named may be that archive's twin,
+// whose identity file (one for both, the last one written) may name that
+// archive, whatever device serial the volume shows now; it is named before the
+// operator confirms, with the match. A root that contains or lies in another
+// archive's on a volume that it matches only as MIGRATED or MATCH_WEAK may be a
+// clone of that volume, as a device and a sector-by-sector clone of it
+// registered as two archives read to each other, attached or not: it is taken,
+// and that archive is named before the operator confirms. And where the root
+// still holds the lost manifest as a media copy that `import` would put back,
+// it says to import that instead: the manifest is not lost.
 std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServices& services,
     const RegisterRequest& request, const MediaEvidence& evidence, const std::string& root_subpath)
 {
@@ -537,13 +538,15 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
             return fail(Kind::Repository, other.error().message);
         }
         const auto label = *other ? (*other)->label : std::string{};
-        if (match.result != MatchResult::Match) {
-            lost.possible_clones.push_back(PossibleClone{candidate.archive_uuid, label, match.result});
-        } else if (unicode_fold(candidate.root_subpath) == unicode_fold(root_subpath)) {
+        if (unicode_fold(candidate.root_subpath) == unicode_fold(root_subpath)) {
             // That archive's very root: the same folder registered on
             // purpose as two archives (R-97), of which the archive named
-            // may be the other (operator, 2026-10-17).
-            lost.same_root.push_back(SameRoot{candidate.archive_uuid, label});
+            // may be the other (operator, 2026-10-17), also on a volume that
+            // matches it only as MIGRATED or MATCH_WEAK, as twins behind a
+            // bridge that gives no serial, or moved to another enclosure.
+            lost.same_root.push_back(SameRoot{candidate.archive_uuid, label, match.result});
+        } else if (match.result != MatchResult::Match) {
+            lost.possible_clones.push_back(PossibleClone{candidate.archive_uuid, label, match.result});
         } else if (!overlapping) {
             overlapping = RegisterFailure{Kind::Refused,
                 "the root overlaps the root of archive " + candidate.archive_uuid +

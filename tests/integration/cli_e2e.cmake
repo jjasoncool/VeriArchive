@@ -1337,12 +1337,12 @@ set(GLOBAL --config "${WORK}/config.json")
 # Decision 0028, point 8 (operator, 2026-10-17): the same sample folder
 # registered on purpose as two archives (--force-new-archive), A and its twin
 # B. With A's manifest gone, the registration over it takes the folder, B's
-# root: not confirmed, it names B, as the archive whose root it is where
-# matching sees the folder as a MATCH of B (`same_root`, and its line in
-# either language), or as possibly a clone where it sees a MATCH_WEAK, as on
-# a volume that shows no device serial (in containers). Confirmed, it
-# registers A's revision 2 from the folder, after which a verification of the
-# folder by its root matches both archives (exit 12).
+# root: not confirmed, it names B as the archive whose root it is
+# (`same_root`, and its line in either language), with the match: MATCH where
+# the volume shows a device serial, MATCH_WEAK where it shows none (in
+# containers). Confirmed, it registers A's revision 2 from the folder, after
+# which a verification of the folder by its root matches both archives (exit
+# 12).
 set(TWIN "${WORK}/twin-sample")
 file(WRITE "${TWIN}/a.txt" "twin sample a\n")
 run_cli("0" register "${TWIN}" --json)
@@ -1355,28 +1355,89 @@ run_cli("12" register "${TWIN}" --lost-manifest "${twin_a}" --json)
 string(JSON twin_same LENGTH "${last_output}" registration same_root)
 string(JSON twin_clones LENGTH "${last_output}" registration possible_clones)
 set(twin_named "")
+set(twin_same_match "")
 if(twin_same EQUAL 1)
     string(JSON twin_named GET "${last_output}" registration same_root 0 archive_uuid)
-elseif(twin_clones EQUAL 1)
-    string(JSON twin_named GET "${last_output}" registration possible_clones 0 archive_uuid)
+    string(JSON twin_same_match GET "${last_output}" registration same_root 0 match)
 endif()
 run_cli("12" --lang en register "${TWIN}" --lost-manifest "${twin_a}")
 set(twin_asked "${last_output}")
 run_cli("12" register "${TWIN}" --lost-manifest "${twin_a}")
 set(twin_asked_chinese "${last_output}")
-string(FIND "${twin_asked}" "\n  the same root as archive ${twin_b_label} (${twin_b}): this root is that archive's, on the volume and the device that its latest manifest records; confirm only where this very folder was registered on purpose as both that archive and this one (--force-new-archive)\n" twin_line)
-string(FIND "${twin_asked_chinese}" "\n  與封存 ${twin_b_label}（${twin_b}）的根目錄相同：此根目錄是該封存的根目錄，位於它最新的清單檔所記錄的磁碟區與裝置上；請只在這個資料夾當初刻意同時註冊為該封存與此封存（--force-new-archive）時才確認\n" twin_line_chinese)
+if(twin_same_match STREQUAL "MATCH")
+    string(FIND "${twin_asked}" "\n  the same root as archive ${twin_b_label} (${twin_b}): this root is that archive's, on the volume and the device that its latest manifest records; confirm only where this very folder was registered on purpose as both that archive and this one (--force-new-archive)\n" twin_line)
+    string(FIND "${twin_asked_chinese}" "\n  與封存 ${twin_b_label}（${twin_b}）的根目錄相同：此根目錄是該封存的根目錄，位於它最新的清單檔所記錄的磁碟區與裝置上；請只在這個資料夾當初刻意同時註冊為該封存與此封存（--force-new-archive）時才確認\n" twin_line_chinese)
+else()
+    string(FIND "${twin_asked}" "\n  the same root as archive ${twin_b_label} (${twin_b}) on a volume that this one matches only as MATCH_WEAK: this volume may be a sector-by-sector clone of that archive's, or that archive's own; confirm only where this very folder was registered on purpose as both that archive and this one (--force-new-archive), or where this volume is not that archive's\n" twin_line)
+    string(FIND "${twin_asked_chinese}" "\n  與封存 ${twin_b_label}（${twin_b}）的根目錄相同，而此磁碟區與該封存的磁碟區比對只得到「弱相符」：此磁碟區可能是該封存的磁碟區逐磁區複製出來的複本，也可能就是該封存自己的磁碟區；請只在這個資料夾當初刻意同時註冊為該封存與此封存（--force-new-archive），或此磁碟區不是該封存的磁碟區時才確認\n" twin_line_chinese)
+endif()
 run_cli("0" register "${TWIN}" --lost-manifest "${twin_a}" --confirm --json)
 string(JSON twin_revision GET "${last_output}" revision)
 string(JSON twin_registered GET "${last_output}" archive_uuid)
 run_cli("12" verify --full "${TWIN}" --json)
 string(JSON twin_match GET "${last_output}" error)
-if(NOT twin_named STREQUAL twin_b OR NOT twin_revision EQUAL 2 OR NOT twin_registered STREQUAL twin_a
-        OR NOT twin_match MATCHES "^AMBIGUOUS: the media matches several archives"
-        OR (twin_same EQUAL 1 AND (twin_line EQUAL -1 OR twin_line_chinese EQUAL -1)))
-    message(FATAL_ERROR "a registration over the lost manifest of a twin: same root ${twin_same}, clones "
-        "${twin_clones}, named ${twin_named} (B ${twin_b}); registered ${twin_registered} r${twin_revision}; by root "
-        "${twin_match}\n${twin_asked}\n${twin_asked_chinese}")
+if(NOT twin_same EQUAL 1 OR NOT twin_clones EQUAL 0 OR NOT twin_named STREQUAL twin_b
+        OR NOT twin_same_match MATCHES "^(MATCH|MATCH_WEAK)$" OR twin_line EQUAL -1 OR twin_line_chinese EQUAL -1
+        OR NOT twin_revision EQUAL 2 OR NOT twin_registered STREQUAL twin_a
+        OR NOT twin_match MATCHES "^AMBIGUOUS: the media matches several archives")
+    message(FATAL_ERROR "a registration over the lost manifest of a twin: same root ${twin_same} (${twin_same_match}), "
+        "clones ${twin_clones}, named ${twin_named} (B ${twin_b}); registered ${twin_registered} r${twin_revision}; by "
+        "root ${twin_match}\n${twin_asked}\n${twin_asked_chinese}")
 endif()
+
+# The same on a volume that matches the twins only weakly, in a repository of
+# its own (sample data): the same sample folder registered as A and its twin
+# B, whose manifest is then written as on a volume that shows no device serial
+# (its first line without the serial and the WWN of its devices, sample data)
+# and indexed again by `repo rebuild-index`. With A's manifest gone, the
+# registration over it takes the folder, naming B as the archive whose root it
+# is on a volume that this one matches only as MATCH_WEAK, in --json and in
+# its line in either language; confirmed, it registers A's revision 2.
+file(WRITE "${WORK}/config5.json" "{\"language\": \"zh-TW\"}\n")
+set(GLOBAL --config "${WORK}/config5.json")
+run_cli("0" --repository "${WORK}/repo5" repo init)
+set(WEAK_TWIN "${WORK}/weak-twin-sample")
+file(WRITE "${WEAK_TWIN}/a.txt" "weak twin sample a\n")
+run_cli("0" register "${WEAK_TWIN}" --json)
+string(JSON weak_a GET "${last_output}" archive_uuid)
+run_cli("0" register "${WEAK_TWIN}" --force-new-archive --json)
+string(JSON weak_b GET "${last_output}" archive_uuid)
+string(JSON weak_b_label GET "${last_output}" label)
+set(weak_b_file "${WORK}/repo5/manifests/${weak_b}/r0001.vam")
+file(READ "${weak_b_file}" weak_b_bytes)
+string(FIND "${weak_b_bytes}" "\n" weak_line_end)
+string(SUBSTRING "${weak_b_bytes}" 0 ${weak_line_end} weak_b_line)
+string(SUBSTRING "${weak_b_bytes}" ${weak_line_end} -1 weak_b_body)
+string(REGEX REPLACE "\"serial\":\"[^\"]*\"" "\"serial\":\"\"" weak_b_line "${weak_b_line}")
+string(REGEX REPLACE "\"wwn\":\"[^\"]*\"" "\"wwn\":\"\"" weak_b_line "${weak_b_line}")
+file(CONFIGURE OUTPUT "${weak_b_file}" CONTENT "${weak_b_line}${weak_b_body}" @ONLY NEWLINE_STYLE UNIX)
+file(REMOVE "${WORK}/repo5/manifests/${weak_a}/r0001.vam")
+run_cli("2" repo rebuild-index)
+run_cli("12" register "${WEAK_TWIN}" --lost-manifest "${weak_a}" --json)
+string(JSON weak_same LENGTH "${last_output}" registration same_root)
+string(JSON weak_clones LENGTH "${last_output}" registration possible_clones)
+set(weak_named "")
+set(weak_match "")
+if(weak_same EQUAL 1)
+    string(JSON weak_named GET "${last_output}" registration same_root 0 archive_uuid)
+    string(JSON weak_match GET "${last_output}" registration same_root 0 match)
+endif()
+run_cli("12" --lang en register "${WEAK_TWIN}" --lost-manifest "${weak_a}")
+set(weak_asked "${last_output}")
+run_cli("12" register "${WEAK_TWIN}" --lost-manifest "${weak_a}")
+set(weak_asked_chinese "${last_output}")
+string(FIND "${weak_asked}" "\n  the same root as archive ${weak_b_label} (${weak_b}) on a volume that this one matches only as MATCH_WEAK: this volume may be a sector-by-sector clone of that archive's, or that archive's own; confirm only where this very folder was registered on purpose as both that archive and this one (--force-new-archive), or where this volume is not that archive's\n" weak_line)
+string(FIND "${weak_asked_chinese}" "\n  與封存 ${weak_b_label}（${weak_b}）的根目錄相同，而此磁碟區與該封存的磁碟區比對只得到「弱相符」：此磁碟區可能是該封存的磁碟區逐磁區複製出來的複本，也可能就是該封存自己的磁碟區；請只在這個資料夾當初刻意同時註冊為該封存與此封存（--force-new-archive），或此磁碟區不是該封存的磁碟區時才確認\n" weak_line_chinese)
+run_cli("0" register "${WEAK_TWIN}" --lost-manifest "${weak_a}" --confirm --json)
+string(JSON weak_revision GET "${last_output}" revision)
+string(JSON weak_registered GET "${last_output}" archive_uuid)
+if(NOT weak_same EQUAL 1 OR NOT weak_clones EQUAL 0 OR NOT weak_named STREQUAL weak_b
+        OR NOT weak_match STREQUAL "MATCH_WEAK" OR weak_line EQUAL -1 OR weak_line_chinese EQUAL -1
+        OR NOT weak_revision EQUAL 2 OR NOT weak_registered STREQUAL weak_a)
+    message(FATAL_ERROR "a registration over the lost manifest of a twin on a volume matched weakly: same root "
+        "${weak_same} (${weak_match}), clones ${weak_clones}, named ${weak_named} (B ${weak_b}); registered "
+        "${weak_registered} r${weak_revision}\n${weak_asked}\n${weak_asked_chinese}")
+endif()
+set(GLOBAL --config "${WORK}/config.json")
 
 message(STATUS "veriarchive-cli end-to-end test passed")

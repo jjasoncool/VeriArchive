@@ -44,7 +44,8 @@ nlohmann::json lost_manifest_json(const LostManifestRegistration& registration)
     }
     auto same_root = nlohmann::json::array();
     for (const auto& same : registration.same_root) {
-        same_root.push_back({{"archive_uuid", same.archive_uuid}, {"label", same.label}});
+        same_root.push_back({{"archive_uuid", same.archive_uuid}, {"label", same.label},
+            {"match", std::string(to_string(same.match))}});
     }
     return {
         {"archive_uuid", registration.archive_uuid},
@@ -90,13 +91,24 @@ int unconfirmed(const Arguments& arguments, const RegisterFailure& failure)
     }
     // An archive whose very root this root is: the archive named may be its
     // twin, the same folder registered on purpose as both; the operator, who
-    // named the archive, confirms only where it is.
+    // named the archive, confirms only where it is. On a volume that this one
+    // matches only as MIGRATED or MATCH_WEAK, this volume may be a clone of
+    // that archive's as well, or that archive's own: the operator confirms
+    // where it is not that archive's too.
     for (const auto& same : registration.same_root) {
         std::cout << "  "
-                  << text.format("the same root as archive {} ({}): this root is that archive's, on the volume and the "
-                                 "device that its latest manifest records; confirm only where this very folder was "
-                                 "registered on purpose as both that archive and this one (--force-new-archive)",
-                         same.label, same.archive_uuid)
+                  << (same.match == MatchResult::Match
+                             ? text.format("the same root as archive {} ({}): this root is that archive's, on the volume "
+                                           "and the device that its latest manifest records; confirm only where this "
+                                           "very folder was registered on purpose as both that archive and this one "
+                                           "(--force-new-archive)",
+                                   same.label, same.archive_uuid)
+                             : text.format("the same root as archive {} ({}) on a volume that this one matches only as "
+                                           "{}: this volume may be a sector-by-sector clone of that archive's, or that "
+                                           "archive's own; confirm only where this very folder was registered on "
+                                           "purpose as both that archive and this one (--force-new-archive), or where "
+                                           "this volume is not that archive's",
+                                   same.label, same.archive_uuid, text(to_string(same.match))))
                   << '\n';
     }
     std::cout << text.format("Registering revision {} from this root takes what it holds now as the archive's new "
