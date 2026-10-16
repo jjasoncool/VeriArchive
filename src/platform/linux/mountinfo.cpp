@@ -154,9 +154,14 @@ bool is_network_filesystem_type(std::string_view type)
         "nfs", "nfs4", "cifs", "smb3", "smbfs", "ncpfs", "9p", "afs", "ceph", "glusterfs",
         "lustre", "davfs", "coda", "orangefs", "beegfs", "gpfs", "ocfs2",
     };
+    // gvfsd-fuse and kio-fuse: the one FUSE mount through which GNOME (GVFS,
+    // /run/user/<uid>/gvfs) and KDE (/run/user/<uid>/kio-fuse-XXXXXX) give
+    // other programs the shares they opened (SMB, SFTP, WebDAV, ...), such as
+    // a share chosen in the GTK file dialog. The phones and cameras they show
+    // there (MTP, PTP) are no volume of this computer either.
     constexpr std::string_view network_fuse_subtypes[] = {
         "sshfs", "rclone", "s3fs", "gcsfuse", "davfs2", "curlftpfs", "glusterfs", "cephfs",
-        "goofys", "blobfuse", "blobfuse2", "juicefs", "seaweedfs", "smbnetfs",
+        "goofys", "blobfuse", "blobfuse2", "juicefs", "seaweedfs", "smbnetfs", "gvfsd-fuse", "kio-fuse",
     };
     for (const auto candidate : network_types) {
         if (type == candidate) {

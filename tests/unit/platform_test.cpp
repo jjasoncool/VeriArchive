@@ -131,8 +131,9 @@ void windows_roots_on_shares_are_told()
 
 // Decision 0029: on Linux a root on a network filesystem, told by the type of
 // the mount that contains it (sample mountinfo: NFS, SMB and sshfs mounts, a
-// local volume mounted in a folder of the NFS share, and a local volume
-// through ntfs-3g).
+// local volume mounted in a folder of the NFS share, a local volume through
+// ntfs-3g, and the FUSE mounts through which GNOME (GVFS) and KDE (kio-fuse)
+// give the shares they opened, below the user's runtime folder, a tmpfs).
 // Plain C++, so it is tested on every OS although only Linux uses it.
 void linux_roots_on_network_filesystems_are_told()
 {
@@ -143,16 +144,26 @@ void linux_roots_on_network_filesystems_are_told()
         "42 22 0:51 / /media/sample-share rw,relatime shared:21 - cifs //sample-server/share rw\n"
         "43 22 0:52 / /home/sample/remote rw,nosuid,nodev - fuse.sshfs sample@sample-server:/data rw\n"
         "44 41 8:17 / /mnt/sample-nas/usb rw,relatime shared:23 - ext4 /dev/sdb1 rw\n"
-        "45 22 8:33 / /media/sample/SAMPLE rw,nosuid - fuseblk /dev/sdc1 rw\n");
-    CHECK(mounts.size() == 6);
+        "45 22 8:33 / /media/sample/SAMPLE rw,nosuid - fuseblk /dev/sdc1 rw\n"
+        "46 22 0:40 / /run/user/1000 rw,nosuid,nodev,relatime shared:30 - tmpfs tmpfs rw,mode=700,uid=1000\n"
+        "47 46 0:53 / /run/user/1000/gvfs rw,nosuid,nodev,relatime shared:31 - fuse.gvfsd-fuse gvfsd-fuse "
+        "rw,user_id=1000,group_id=1000\n"
+        "48 46 0:54 / /run/user/1000/kio-fuse-SAMPLE rw,nosuid,nodev,relatime shared:32 - fuse.kio-fuse "
+        "kio-fuse rw,user_id=1000,group_id=1000\n");
+    CHECK(mounts.size() == 9);
     CHECK(on_network_filesystem(mounts, "/mnt/sample-nas/photos") == true);
     CHECK(on_network_filesystem(mounts, "/mnt/sample-nas") == true);
     CHECK(on_network_filesystem(mounts, "/media/sample-share/2026") == true);
     CHECK(on_network_filesystem(mounts, "/home/sample/remote/photos") == true);
+    CHECK(on_network_filesystem(mounts, "/run/user/1000/gvfs/smb-share:server=sample-server,share=photos/2026") ==
+          true);
+    CHECK(on_network_filesystem(mounts, "/run/user/1000/gvfs/sftp:host=sample-server/home/sample/photos") == true);
+    CHECK(on_network_filesystem(mounts, "/run/user/1000/kio-fuse-SAMPLE/smb/sample-server/photos") == true);
     CHECK(on_network_filesystem(mounts, "/mnt/sample-nas/usb/photos") == false);
     CHECK(on_network_filesystem(mounts, "/media/sample/SAMPLE/photos") == false);
     CHECK(on_network_filesystem(mounts, "/home/sample/photos") == false);
     CHECK(on_network_filesystem(mounts, "/mnt/sample-nas-2") == false);
+    CHECK(on_network_filesystem(mounts, "/run/user/1000/SAMPLE") == false);
     CHECK(!on_network_filesystem({}, "/home/sample"));
 }
 
@@ -162,6 +173,8 @@ void network_types_are_recognised()
     CHECK(is_network_filesystem_type("nfs4"));
     CHECK(is_network_filesystem_type("cifs"));
     CHECK(is_network_filesystem_type("fuse.sshfs"));
+    CHECK(is_network_filesystem_type("fuse.gvfsd-fuse")); // GNOME's shares (GVFS)
+    CHECK(is_network_filesystem_type("fuse.kio-fuse"));   // KDE's shares
     CHECK(!is_network_filesystem_type("fuseblk"));     // ntfs-3g on a local disk
     CHECK(!is_network_filesystem_type("fuse.portal")); // unknown FUSE is not assumed remote here
     CHECK(!is_network_filesystem_type("ext4"));
