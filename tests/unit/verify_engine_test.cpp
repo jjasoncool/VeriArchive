@@ -486,10 +486,14 @@ std::int64_t count_rows(EngineFixture& fixture, const std::string& table)
 }
 
 // The repository's files, except that the file named `name` cannot be opened
-// (sample: access denied), as a manifest that this process may not read.
+// (sample: access denied), as a manifest that this process may not read:
+// every time, or only the `nth` time it is opened.
 class DeniedOpen final : public va::IFileSystemAccess {
 public:
-    DeniedOpen(va::IFileSystemAccess& inner, std::string name) : inner_(inner), name_(std::move(name)) {}
+    DeniedOpen(va::IFileSystemAccess& inner, std::string name, int nth = 0)
+        : inner_(inner), name_(std::move(name)), nth_(nth)
+    {
+    }
     std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
     {
         return inner_.list(directory);
@@ -497,7 +501,7 @@ public:
     std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
         const std::filesystem::path& file, va::ReadOptions options) override
     {
-        if (va::path_to_utf8(file.filename()) == name_) {
+        if (va::path_to_utf8(file.filename()) == name_ && (++opened_ == nth_ || nth_ == 0)) {
             return std::unexpected(va::IoError{va::IoErrorKind::PermissionDenied, 5, "access denied (sample)"});
         }
         return inner_.open(file, options);
@@ -514,6 +518,8 @@ public:
 private:
     va::IFileSystemAccess& inner_;
     std::string name_;
+    int nth_;
+    int opened_ = 0;
 };
 
 // Decision 0028: the plain message of the manifest of revision 1 of
@@ -533,16 +539,35 @@ std::string rebuild_message(const va::Uuid& archive_uuid)
 
 constexpr const char* first_line_changed = "has changed: its first line differs from what the repository recorded";
 
+// Decision 0028: how a verification by root stops when the latest manifest of
+// archive `label` (`archive_uuid`) cannot be used, `what` being wrong with it:
+// which archive, why, and to verify it by its uuid, then fix its manifest.
+std::string root_may_belong_to(const std::string& label, const va::Uuid& archive_uuid, const std::string& what,
+    bool rebuild = false)
+{
+    return "this root may belong to archive " + label + " (" + archive_uuid +
+           "), whose manifest cannot be used: " + what + "; verify that archive by its uuid (`verify --full " +
+           archive_uuid + "`) to record the failure, then " +
+           (rebuild ? "rebuild the index with `repo rebuild-index`"
+                    : "restore its manifest from a backup of the repository");
+}
+
+std::string manifest_of(const va::Uuid& archive_uuid)
+{
+    return "the manifest of revision 1 (manifests/" + archive_uuid + "/r0001.vam)";
+}
+
 // CLAUDE.md rule 3: validated manifest bytes are the truth, the database is
 // an index. Here the index's copy of the header of revision 1 names another
 // volume label than the manifest (sample data), while the record's hashes
 // still name the manifest. Neither header is taken. Named by its uuid, the
 // archive is known, and its verification FAILS with a RepositoryError whose
 // message says to rebuild the index, recorded without reading the media
-// (decision 0028); by root, a new revision of the archive, the archive list
-// and loading the manifest stop with that message. Rebuilt from the
-// manifests, the index holds the manifest's header again, and the archive
-// verifies.
+// (decision 0028); by root it stops, naming the archive and saying to verify
+// it by its uuid, then to rebuild the index; a new revision of the archive,
+// the archive list and loading the manifest stop with the plain message.
+// Rebuilt from the manifests, the index holds the manifest's header again,
+// and the archive verifies.
 void an_index_that_differs_from_its_manifest_is_never_taken()
 {
     Registered fixture;
@@ -553,7 +578,11 @@ void an_index_that_differs_from_its_manifest_is_never_taken()
     CHECK(record && *record && (*record)->header_json.contains("\"volume_label\":\"OTHER\""));
 
     const auto by_root = fixture.verify(fixture.archive.root());
-    CHECK(!by_root && by_root.error().kind == va::VerifyStop::Kind::Repository && by_root.error().message == message);
+    CHECK(!by_root && by_root.error().kind == va::VerifyStop::Kind::Repository &&
+          by_root.error().message == root_may_belong_to("ARCH-0001", fixture.archive_uuid,
+                                         "the repository's index differs from the manifest of revision 1 "
+                                         "(manifests/" + fixture.archive_uuid + "/r0001.vam)",
+                                         true));
     va::VerifyRequest by_uuid;
     by_uuid.archive_uuid = fixture.archive_uuid;
     const auto named = fixture.verify(by_uuid);
@@ -590,10 +619,13 @@ void an_index_that_differs_from_its_manifest_is_never_taken()
 // The manifest is not the one recorded: one byte of its header line changed
 // (sample data), it is gone, or its record names another body. The record no
 // longer vouches for the manifest, and the index's copy of its header is no
-// manifest: verification by root, the archive list and a new revision stop
-// with its plain message, which names the manifest and says to restore it
-// from a backup of the repository, never to rebuild the index, which would
-// take a changed manifest for the truth; and record nothing.
+// manifest. Verification by root stops (decision 0028): the root may be this
+// archive's, whose carrier only that manifest records. It names the archive
+// and what is wrong, and says to verify it by its uuid to record the failure,
+// then to restore its manifest from a backup of the repository, never to
+// rebuild the index, which would take a changed manifest for the truth. The
+// archive list and a new revision stop with the plain message. Nothing is
+// recorded.
 void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
 {
     enum class Case { HeaderChanged, Gone, RecordNamesAnotherBody };
@@ -611,11 +643,14 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
             fixture.repository.execute("UPDATE archive_revisions SET body_blake3 = "
                                        "'0000000000000000000000000000000000000000000000000000000000000000'");
         }
-        const auto message = restore_message(fixture.archive_uuid, gone ? "is missing" : first_line_changed);
+        const std::string wrong = gone ? "is missing" : first_line_changed;
+        const auto message = restore_message(fixture.archive_uuid, wrong);
+        const auto stopped = root_may_belong_to("ARCH-0001", fixture.archive_uuid,
+            manifest_of(fixture.archive_uuid) + " " + wrong);
         const auto verified = fixture.verify(fixture.archive.root());
         CHECK(!verified && verified.error().kind == va::VerifyStop::Kind::Repository &&
-              verified.error().message == message);
-        if (!verified && verified.error().message != message) {
+              verified.error().message == stopped);
+        if (!verified && verified.error().message != stopped) {
             std::cerr << "  verify: " << verified.error().message << '\n';
         }
         const auto statuses = statuses_of(fixture);
@@ -761,6 +796,25 @@ void a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run()
     CHECK(runs && runs->size() == 3);
 }
 
+// A named archive is never "the archive that may be at this root" (decision
+// 0028): when its manifest passes the check made before the media is looked
+// for, and then cannot be opened as its first line is read for matching (the
+// second opening, sample data), the verification stops with the plain message
+// alone.
+void a_named_archive_is_never_the_one_that_may_be_at_a_root()
+{
+    Registered fixture;
+    DeniedOpen second(*fixture.repository.files, "r0001.vam", 2);
+    va::VerifyServices services{fixture.archive, second, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = fixture.archive_uuid;
+    const auto stopped = va::verify_full(services, by_uuid, fixture.cancel, fixture.progress);
+    CHECK(!stopped && stopped.error().kind == va::VerifyStop::Kind::Repository &&
+          stopped.error().message ==
+              restore_message(fixture.archive_uuid, "cannot be read: access denied (sample)"));
+}
+
 // Two archives on one volume (sample data): A at /vol/a and B at /vol/b. A's
 // manifest is gone, or one byte of its header line changed. Named by its
 // uuid, B is the one candidate and no other archive's manifest is read: it
@@ -769,7 +823,8 @@ void a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run()
 // choices read them. A named by its uuid FAILS on its manifest, recorded
 // (decision 0028). By root, every archive's latest carrier is needed (A's
 // root, which only its manifest names, may be this one): B's verification by
-// root stops, naming A's manifest, and records nothing.
+// root stops, naming A, what is wrong with its manifest, and to verify A by
+// its uuid, and records nothing.
 void a_named_archive_reads_no_other_manifest()
 {
     for (const bool gone : {true, false}) {
@@ -808,7 +863,8 @@ void a_named_archive_reads_no_other_manifest()
         CHECK(labels && labels->size() == 2 &&
               std::ranges::none_of(*labels, [](const va::ArchiveStatus& status) { return status.header.has_value(); }));
 
-        const auto message = restore_message(a->archive_uuid, gone ? "is missing" : first_line_changed);
+        const std::string what = gone ? "is missing" : first_line_changed;
+        const auto message = restore_message(a->archive_uuid, what);
         va::VerifyRequest a_by_uuid;
         a_by_uuid.archive_uuid = a->archive_uuid;
         const auto own = fixture.verify(a_by_uuid);
@@ -816,7 +872,8 @@ void a_named_archive_reads_no_other_manifest()
               own->warnings == std::vector<std::string>{"manifest: " + message});
         const auto b_by_root = fixture.verify(fixture.archive.root() / "b");
         CHECK(!b_by_root && b_by_root.error().kind == va::VerifyStop::Kind::Repository &&
-              b_by_root.error().message == message);
+              b_by_root.error().message ==
+                  root_may_belong_to(a->label, a->archive_uuid, manifest_of(a->archive_uuid) + " " + what));
         const auto a_runs = fixture.store.verify_runs(a->archive_uuid);
         const auto b_runs = fixture.store.verify_runs(b->archive_uuid);
         CHECK(a_runs && a_runs->size() == 1 && a_runs->front().result == "FAILED" && b_runs && b_runs->size() == 1);
@@ -972,6 +1029,7 @@ void verify_engine_tests()
     a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root();
     a_known_archive_whose_manifest_cannot_be_used_fails_unread();
     a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run();
+    a_named_archive_is_never_the_one_that_may_be_at_a_root();
     a_named_archive_reads_no_other_manifest();
     a_first_line_that_no_longer_parses_has_changed();
     entries_read_otherwise_than_validated_fail();

@@ -210,6 +210,24 @@ std::expected<VerifyOutcome, VerifyStop> failed_on_its_manifest(VerifyServices& 
     return outcome;
 }
 
+// Decision 0028: by root, an archive whose latest manifest cannot be used
+// may be the archive at the root, as only that manifest records its carrier
+// and its root; matching without it could take the root for another
+// archive's, or for no archive's. The verification stops, saying which
+// archive, why, and how to go on: a verification of that archive by its uuid
+// records the failure, then its manifest is restored (or the index rebuilt).
+std::string root_may_belong_to(const CandidatesFailure& failure)
+{
+    const auto& unusable = *failure.unusable;
+    const auto what = "this root may belong to archive " + failure.label + " (" + unusable.archive_uuid +
+                      "), whose manifest cannot be used: " + what_is_wrong_with(unusable) +
+                      "; verify that archive by its uuid (`verify --full " + unusable.archive_uuid +
+                      "`) to record the failure, then ";
+    return what + (unusable.kind == UnusableManifest::Kind::IndexDiffers
+                          ? "rebuild the index with `repo rebuild-index`"
+                          : "restore its manifest from a backup of the repository");
+}
+
 // R-89: a manifest copy on the media is compared with the repository copy. A
 // different copy of the same revision is a warning; a valid copy of a *newer*
 // revision means the repository may have been rolled back, which fails the run.
@@ -292,7 +310,9 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     auto candidates = load_candidates(store, services.repository_files, services.layout, selected);
     if (!candidates) {
-        return stop(VerifyStop::Kind::Repository, candidates.error().message);
+        return stop(VerifyStop::Kind::Repository, !selected && candidates.error().unusable
+                                                      ? root_may_belong_to(candidates.error())
+                                                      : candidates.error().message);
     }
     if (selected && candidates->empty()) {
         return stop(VerifyStop::Kind::NotFound, "no registered archive " + *selected);

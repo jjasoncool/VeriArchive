@@ -628,7 +628,7 @@ class IEntropySource { public: virtual ~IEntropySource() = default;
 > Amended by `docs/decisions/0003-retired-archives.md`: retired archives remain match candidates.
 > Amended by `docs/decisions/0018-unreadable-filesystem-id.md`: a `filesystem_uuid` unavailable on either side with a matching device is `MATCH_WEAK` when the volume capacity agrees within 1 %, otherwise `MISMATCH`.
 > Amended by `docs/decisions/0021-linux-without-udev.md`: a kernel filesystem id (`fsid-…`, §B1.3) compared with a UUID or volume serial counts as unavailable, so decision 0018 applies; two `fsid-…` ids compare like UUIDs.
-> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: R-96: a verification that failed on its manifest before it looked for the media records no media evidence, as it observed none.
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: R-96: a verification that failed on its manifest before it looked for the media records no media evidence, as it observed none. Matching by root needs every archive's latest manifest: while one cannot be used, the root may be that archive's, and a verification by root stops (exit 11), naming the archive, what is wrong with its manifest, and to verify it by its uuid to record the failure, then to restore its manifest (or rebuild the index).
 
 Evidence at verify time (`MediaEvidence`) is compared against every registered archive's latest `identity` snapshot. Primary evidence: `filesystem_uuid` (per §B1.3) and device `serial`/`wwn` (either matching counts as a device match).
 

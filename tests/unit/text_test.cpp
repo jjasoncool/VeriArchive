@@ -489,6 +489,30 @@ void translation_tests()
                   "2 (" + manifest + ") has changed: it gave other bytes when it was read again" + restore) ==
           "清單檔雜湊不符：無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 的清單檔（" + manifest +
               "）已被變更：再次讀取時得到不同的內容" + restore_chinese);
+    // A verification by root stops naming the archive that may be at the root
+    // (decision 0028): what is wrong with its manifest, then to verify it by
+    // its uuid to record the failure, then to fix the manifest.
+    const auto may_be = "this root may belong to archive ARCH-0002 (" + uuid + "), whose manifest cannot be used: ";
+    const auto may_be_chinese = "此根目錄可能屬於封存 ARCH-0002（" + uuid + "），而它的清單檔無法使用：";
+    const auto record_it = "; verify that archive by its uuid (`verify --full " + uuid + "`) to record the failure, then ";
+    const auto record_it_chinese = "；請先以 uuid 驗證該封存（`verify --full " + uuid + "`）以記錄這次失敗，再";
+    const std::string restore_it = "restore its manifest from a backup of the repository";
+    const std::string restore_it_chinese = "從儲存庫的備份還原它的清單檔";
+    CHECK(chinese("error: " + may_be + "the manifest of revision 2 (" + manifest + ") is missing" + record_it +
+                  restore_it) ==
+          "錯誤：" + may_be_chinese + "版次 2 的清單檔（" + manifest + "）已遺失" + record_it_chinese + restore_it_chinese);
+    CHECK(chinese(may_be + "the manifest of revision 2 (" + manifest + ") cannot be read: CreateFileW failed (Win32 "
+                  "error 5)" + record_it + restore_it) ==
+          may_be_chinese + "無法讀取版次 2 的清單檔（" + manifest + "）：CreateFileW 失敗（Win32 錯誤 5）" +
+              record_it_chinese + restore_it_chinese);
+    CHECK(chinese(may_be + "the manifest of revision 2 (" + manifest +
+                  ") has changed: its first line differs from what the repository recorded" + record_it + restore_it) ==
+          may_be_chinese + "版次 2 的清單檔（" + manifest + "）已被變更：其第一行與儲存庫所記錄的不同" + record_it_chinese +
+              restore_it_chinese);
+    CHECK(chinese(may_be + "the repository's index differs from the manifest of revision 2 (" + manifest + ")" +
+                  record_it + "rebuild the index with `repo rebuild-index`") ==
+          may_be_chinese + "儲存庫的索引與版次 2 的清單檔（" + manifest + "）不符" + record_it_chinese +
+              "以 `repo rebuild-index` 重建索引");
     // A verification that failed on its manifest read no media (decision 0028).
     CHECK(chinese("media: not read, as the manifest of this revision cannot be used") ==
           "媒體：未讀取，因為這個版次的清單檔無法使用");

@@ -528,12 +528,17 @@ endif()
 # written otherwise, sample data). Named by its uuid, the archive is known:
 # its verification FAILS on its manifest (decision 0028, exit 3) without
 # reading the media, says why plainly in either language, and is recorded in
-# its history. The archive list and a verification by root stop with a
-# repository error (exit 11) that names the manifest and says how to fix it.
-# A command about another archive reads no manifest but that archive's: the
-# copy verifies by its uuid, and shows its status and history; so does the
-# damaged archive's history, which needs no manifest. Restored, all work again.
+# its history. A verification by root stops (exit 11): the root may be that
+# archive's, so it names the archive and what is wrong, and says to verify it
+# by its uuid to record the failure, then to restore the manifest. The
+# archive list stops with a repository error (exit 11) that names the
+# manifest and says how to fix it. A command about another archive reads no
+# manifest but that archive's: the copy verifies by its uuid, and shows its
+# status and history; so does the damaged archive's history, which needs no
+# manifest. Restored, all work again.
 set(GLOBAL --config "${WORK}/config.json")
+run_cli("0" archive show "${archive_prefix}" --json)
+string(JSON archive_label GET "${last_output}" label)
 set(RECORDED "${WORK}/repo/manifests/${archive_uuid}/r0002.vam")
 # Kept byte for byte: file(WRITE) may write other line ends.
 file(COPY_FILE "${RECORDED}" "${RECORDED}.kept")
@@ -556,8 +561,9 @@ set(history_json "${last_output}")
 file(RENAME "${RECORDED}.kept" "${RECORDED}")
 set(changed_manifest "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; restore it from a backup of the repository")
 set(changed_chinese "版次 2 的清單檔（manifests/${archive_uuid}/r0002.vam）已被變更：其第一行與儲存庫所記錄的不同；請從儲存庫的備份還原該清單檔")
+set(root_may_belong "this root may belong to archive ${archive_label} (${archive_uuid}), whose manifest cannot be used: the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; verify that archive by its uuid (`verify --full ${archive_uuid}`) to record the failure, then restore its manifest from a backup of the repository")
 string(FIND "${listed}" "${changed_manifest}" in_list)
-string(FIND "${verified}" "${changed_manifest}" in_verify)
+string(FIND "${verified}" "${root_may_belong}" in_verify)
 string(FIND "${failed_chinese}" "完整驗證 失敗" failed_line)
 string(FIND "${failed_chinese}" "媒體：未讀取，因為這個版次的清單檔無法使用" unread_line)
 string(FIND "${failed_chinese}" "${changed_chinese}" in_chinese)

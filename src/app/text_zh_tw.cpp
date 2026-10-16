@@ -844,6 +844,23 @@ constexpr CatalogEntry entries[] = {
     {"its first line differs from what the repository recorded", "其第一行與儲存庫所記錄的不同"},
     {"its body does not match its header", "其主體與標頭不符"},
     {"it gave other bytes when it was read again", "再次讀取時得到不同的內容"},
+    // What is wrong alone, inside a verification by root that stops (decision 0028).
+    {"the manifest of revision {} ({}) is missing", "版次 {} 的清單檔（{}）已遺失"},
+    {"the manifest of revision {} ({}) cannot be read: {}", "無法讀取版次 {} 的清單檔（{}）：{}", Match::Cause},
+    {"the manifest of revision {} ({}) has changed: {}", "版次 {} 的清單檔（{}）已被變更：{}", Match::Cause},
+    {"the repository's index differs from the manifest of revision {} ({})", "儲存庫的索引與版次 {} 的清單檔（{}）不符"},
+    // src/core/engine/verify_engine.cpp: by root, the archive whose manifest
+    // cannot be used may be the one at the root (decision 0028).
+    {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
+        "(`verify --full {}`) to record the failure, then restore its manifest from a backup of the repository",
+        "此根目錄可能屬於封存 {}（{}），而它的清單檔無法使用：{}；請先以 uuid 驗證該封存（`verify --full {}`）以記錄這次失敗，"
+        "再從儲存庫的備份還原它的清單檔",
+        Match::Cause},
+    {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
+        "(`verify --full {}`) to record the failure, then rebuild the index with `repo rebuild-index`",
+        "此根目錄可能屬於封存 {}（{}），而它的清單檔無法使用：{}；請先以 uuid 驗證該封存（`verify --full {}`）以記錄這次失敗，"
+        "再以 `repo rebuild-index` 重建索引",
+        Match::Cause},
     // src/core/engine/rebuild_index.cpp
     {"cannot list the manifests of archive {}: {}", "無法列出封存 {} 的清單檔：{}", Match::Cause},
     {"cannot read manifest {}/{}: {}", "無法讀取清單檔 {}/{}：{}", Match::Cause},

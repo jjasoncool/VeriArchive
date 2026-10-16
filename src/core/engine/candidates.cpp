@@ -8,12 +8,12 @@
 
 namespace va {
 
-std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveStore& store,
+std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const std::optional<Uuid>& only)
 {
     const auto archives = store.archives();
     if (!archives) {
-        return std::unexpected(archives.error());
+        return std::unexpected(CandidatesFailure{archives.error().message, std::nullopt, {}});
     }
     std::vector<ArchiveCandidate> candidates;
     for (const auto& archive : *archives) {
@@ -22,7 +22,7 @@ std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveSto
         }
         const auto revisions = store.revisions(archive.archive_uuid);
         if (!revisions) {
-            return std::unexpected(revisions.error());
+            return std::unexpected(CandidatesFailure{revisions.error().message, std::nullopt, {}});
         }
         if (revisions->empty()) {
             continue; // registration never finished
@@ -34,7 +34,7 @@ std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveSto
         if (latest != revisions->end()) {
             const auto header = load_recorded_header(repository_files, layout, *latest);
             if (!header) {
-                return std::unexpected(IoError{IoErrorKind::Other, 0, plain_message(header.error())});
+                return std::unexpected(CandidatesFailure{plain_message(header.error()), header.error(), archive.label});
             }
             candidate.identity = header->identity;
             candidate.root_subpath = header->root_subpath;

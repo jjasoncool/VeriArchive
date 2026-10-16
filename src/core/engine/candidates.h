@@ -3,6 +3,7 @@
 // archive with the carrier of its latest revision and of earlier revisions
 // (decision 0004), and whether it is retired (decision 0003).
 #include "common/repository_layout.h"
+#include "core/engine/recorded_manifest.h"
 #include "core/identity/matcher.h"
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
@@ -15,6 +16,14 @@
 
 namespace va {
 
+// Why load_candidates gives no candidates: the database could not be read,
+// or the latest manifest of an archive cannot be used (decision 0028).
+struct CandidatesFailure {
+    std::string message;                       // the database's error, or the manifest's plain message
+    std::optional<UnusableManifest> unusable;  // the manifest that cannot be used
+    std::string label;                         // the label of its archive
+};
+
 // Each archive with a recorded revision and the carrier of its latest
 // revision, or only the archive `only` when the operator names one (by its
 // uuid, or by the run of it to resume): a verification of a named archive
@@ -22,11 +31,11 @@ namespace va {
 // left out until matching looks at them (match_recorded).
 //
 // The carriers come from the manifests' headers (load_recorded_header), never
-// from the index's copies of them (R-14). Fails, naming the archive and the
-// revision, when the manifest of a latest revision read cannot be read, is
-// not the one recorded, or differs from the index: matching against what is
-// left would be matching without that archive.
-std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveStore& store,
+// from the index's copies of them (R-14). Fails with the first manifest of a
+// latest revision that cannot be used (the archives in the order of their
+// labels): matching against what is left would be matching without that
+// archive, whose carrier and root only that manifest records.
+std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout,
     const std::optional<Uuid>& only = std::nullopt);
 
