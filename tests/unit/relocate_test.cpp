@@ -169,6 +169,27 @@ std::int64_t count_rows(RelocationFixture& fixture, const std::string& table)
     return rows;
 }
 
+// The match result that the media evidence of the run `run_id` records (R-96).
+std::string match_result_of(RelocationFixture& fixture, const std::string& run_id)
+{
+    sqlite3* database = nullptr;
+    const auto name = fixture.repository.context.repo.database().u8string();
+    std::string result;
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY, nullptr) ==
+        SQLITE_OK) {
+        sqlite3_stmt* statement = nullptr;
+        if (sqlite3_prepare_v2(database, "SELECT match_result FROM media_evidence WHERE run_id = ?", -1, &statement,
+                nullptr) == SQLITE_OK &&
+            sqlite3_bind_text(statement, 1, run_id.c_str(), -1, SQLITE_TRANSIENT) == SQLITE_OK &&
+            sqlite3_step(statement) == SQLITE_ROW) {
+            result = reinterpret_cast<const char*>(sqlite3_column_text(statement, 0));
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return result;
+}
+
 // Each entry of a manifest: its type and hashes, by path.
 std::map<std::string, std::string> hashes_of(RelocationFixture& fixture, std::uint32_t revision)
 {
@@ -213,6 +234,117 @@ void relocation_keeps_identity_and_history()
     // Finished: its record and its checkpoints are gone (decision 0026).
     CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
     CHECK(fixture.saved(relocated->run_id).files == 0);
+}
+
+// Decision 0004: an earlier revision's manifest is read only where matching
+// looks at the earlier carriers, which is where they decide the outcome. The
+// archive is relocated from /vol/old to the folder sub of the new disk, so its
+// first revision names its earlier carrier, and another archive, B, is
+// registered at /vol/b (sample data); then the manifest of the first revision
+// is moved away. Where a latest carrier matches, none is read: the archive
+// verifies by its uuid and on its new carrier, and B by its uuid and by root.
+// A root that no archive's root overlaps registers, as no archive can refuse
+// it (decision 0001). Where no latest carrier matches, the earlier carriers
+// tell an earlier carrier from media that is no archive's: verifying the old
+// carrier, and registering /vol/sub (the archive's root, on another volume),
+// stop with a repository error that names the first revision and how to go
+// on, recording nothing. With the manifest back, the old carrier is
+// PREVIOUS_CARRIER, and /vol/sub registers.
+void an_earlier_revision_is_read_only_where_matching_needs_it()
+{
+    RelocationFixture fixture;
+    fixture.copy_to_new_disk("new/sub");
+    CHECK(fixture.relocate(fixture.archive.root() / "new" / "sub").has_value());
+    fixture.archive.add_file("b/two.txt", "b (sample data)");
+    const auto b = fixture.register_root(fixture.archive.root() / "b");
+    CHECK(b.has_value());
+    if (!b) {
+        return;
+    }
+    const auto first = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
+    auto away = first;
+    away += ".away";
+    std::filesystem::rename(first, away);
+
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = fixture.archive_uuid;
+    const auto named = fixture.verify(by_uuid);
+    CHECK(named && named->result == "PASSED");
+    const auto on_new = fixture.verify(fixture.archive.root() / "new" / "sub");
+    CHECK(on_new && on_new->archive_uuid == fixture.archive_uuid && on_new->result == "PASSED");
+    va::VerifyRequest b_by_uuid;
+    b_by_uuid.archive_uuid = b->archive_uuid;
+    const auto b_named = fixture.verify(b_by_uuid);
+    CHECK(b_named && b_named->result == "PASSED");
+    const auto b_by_root = fixture.verify(fixture.archive.root() / "b");
+    CHECK(b_by_root && b_by_root->archive_uuid == b->archive_uuid && b_by_root->result == "PASSED");
+    for (const auto* stopped : {&named, &on_new, &b_named, &b_by_root}) {
+        if (!*stopped) {
+            std::cerr << "  stopped: " << stopped->error().message << '\n';
+        }
+    }
+    fixture.archive.add_file("c/three.txt", "c (sample data)");
+    const auto c = fixture.register_root(fixture.archive.root() / "c");
+    CHECK(c.has_value());
+    if (!c) {
+        std::cerr << "  register /vol/c: " << c.error().message << '\n';
+    }
+    // A relocation of B looks at no earlier carrier of another archive: they
+    // never make a root overlap (decision 0001).
+    fixture.archive.add_file("b-copy/two.txt", "b (sample data)");
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto b_moved = va::relocate_archive(services,
+        va::RelocateRequest{b->archive_uuid, fixture.archive.root() / "b-copy", std::nullopt, false}, fixture.cancel,
+        fixture.progress);
+    CHECK(b_moved && b_moved->revision == 2);
+    if (!b_moved) {
+        std::cerr << "  relocate B: " << b_moved.error().message << '\n';
+    }
+
+    const std::string prefix = "cannot use the manifest of revision 1 of archive " + fixture.archive_uuid + ": ";
+    const auto names_first = [&](const std::string& message) {
+        return message.starts_with(prefix) && message.ends_with("; restore it from a backup of the repository");
+    };
+    const auto old = fixture.verify(fixture.archive.root() / "old");
+    CHECK(!old && old.error().kind == va::VerifyStop::Kind::Repository && names_first(old.error().message));
+    fixture.archive.add_file("sub/four.txt", "d (sample data)");
+    const auto refused = fixture.register_root(fixture.archive.root() / "sub");
+    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Repository &&
+          names_first(refused.error().message));
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 3); // the relocation's, by uuid, on the new carrier
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->size() == 3);
+
+    std::filesystem::rename(away, first);
+    const auto previous = fixture.verify(fixture.archive.root() / "old");
+    CHECK(!previous && previous.error().kind == va::VerifyStop::Kind::Decision &&
+          previous.error().identity.result == va::MatchResult::PreviousCarrier);
+    const auto registered = fixture.register_root(fixture.archive.root() / "sub");
+    CHECK(registered && registered->archive_uuid != fixture.archive_uuid);
+}
+
+// A relocation records the evidence of the new carrier as matching saw it
+// (R-96). Moved to the folder old of the new disk and then back onto the old
+// disk, the archive returns to a carrier it had, at the root it had there:
+// PREVIOUS_CARRIER, which only the manifest of its first revision tells
+// (decision 0004), read as the latest carrier does not match.
+void a_relocation_back_onto_an_earlier_carrier_records_it_so()
+{
+    RelocationFixture fixture;
+    fixture.copy_to_new_disk("new/old");
+    const auto moved = fixture.relocate(fixture.archive.root() / "new" / "old");
+    CHECK(moved && moved->revision == 2);
+    const auto back = fixture.relocate(fixture.archive.root() / "old");
+    CHECK(back && back->revision == 3);
+    if (!moved || !back) {
+        std::cerr << "  relocation: " << (moved ? back.error().message : moved.error().message) << '\n';
+        return;
+    }
+    CHECK(match_result_of(fixture, moved->run_id) == "UNKNOWN");
+    CHECK(match_result_of(fixture, back->run_id) == "PREVIOUS_CARRIER");
 }
 
 // Decision 0026: a copy that does not hold the recorded content ends the
@@ -1918,6 +2050,8 @@ void an_attempt_stops_when_its_relocation_is_abandoned()
 void relocate_tests()
 {
     relocation_keeps_identity_and_history();
+    an_earlier_revision_is_read_only_where_matching_needs_it();
+    a_relocation_back_onto_an_earlier_carrier_records_it_so();
     differing_copy_is_refused();
     a_differing_copy_ends_the_relocation_while_the_lock_is_held();
     a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it();

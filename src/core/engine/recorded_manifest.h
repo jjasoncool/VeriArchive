@@ -43,9 +43,10 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
 // Line 1 must be the one the revision was recorded with (its BLAKE3, and the
 // archive, revision and body it names), and the index's copy the same bytes.
 // Otherwise a failure that names the archive and the revision: "cannot use
-// the manifest of revision N of archive U: <cause>" when the manifest cannot
-// be read or is not the one recorded, and, when only the index's copy
-// differs, how to rebuild the index.
+// the manifest of revision N of archive U: <cause>; restore it from a backup
+// of the repository" when the manifest cannot be read or is not the one
+// recorded (R-86), and, when only the index's copy differs, how to rebuild
+// the index.
 std::expected<ManifestHeader, IoError> load_recorded_header(
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const RevisionRecord& revision);
 

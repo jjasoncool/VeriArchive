@@ -4,10 +4,12 @@
 #include "common/unicode.h"
 #include "core/engine/recorded_manifest.h"
 
+#include <algorithm>
+
 namespace va {
 
-std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(
-    ArchiveStore& store, IFileSystemAccess& repository_files, const RepositoryLayout& layout)
+std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const std::optional<Uuid>& only)
 {
     const auto archives = store.archives();
     if (!archives) {
@@ -15,6 +17,9 @@ std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(
     }
     std::vector<ArchiveCandidate> candidates;
     for (const auto& archive : *archives) {
+        if (only && archive.archive_uuid != *only) {
+            continue;
+        }
         const auto revisions = store.revisions(archive.archive_uuid);
         if (!revisions) {
             return std::unexpected(revisions.error());
@@ -25,21 +30,52 @@ std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(
         ArchiveCandidate candidate;
         candidate.archive_uuid = archive.archive_uuid;
         candidate.retired = archive.status == "RETIRED";
-        for (const auto& revision : *revisions) {
-            const auto header = load_recorded_header(repository_files, layout, revision);
+        const auto latest = std::ranges::find(*revisions, archive.current_revision, &RevisionRecord::revision);
+        if (latest != revisions->end()) {
+            const auto header = load_recorded_header(repository_files, layout, *latest);
             if (!header) {
                 return std::unexpected(header.error());
             }
-            if (revision.revision == archive.current_revision) {
-                candidate.identity = header->identity;
-                candidate.root_subpath = header->root_subpath;
-            } else {
-                candidate.previous_carriers.push_back({header->identity, header->root_subpath});
-            }
+            candidate.identity = header->identity;
+            candidate.root_subpath = header->root_subpath;
         }
         candidates.push_back(std::move(candidate));
     }
     return candidates;
+}
+
+std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const MediaEvidence& evidence, std::string_view root_subpath,
+    std::span<ArchiveCandidate> candidates)
+{
+    const auto outcome = match_identity(evidence, root_subpath, candidates);
+    if (!outcome.previous_carriers_consulted) {
+        return outcome;
+    }
+    // Decision 0004: the carriers of every revision but the latest, each as
+    // its manifest names it.
+    for (auto& candidate : candidates) {
+        const auto archive = store.find_archive(candidate.archive_uuid);
+        if (!archive) {
+            return std::unexpected(archive.error());
+        }
+        const auto revisions = store.revisions(candidate.archive_uuid);
+        if (!revisions) {
+            return std::unexpected(revisions.error());
+        }
+        candidate.previous_carriers.clear();
+        for (const auto& revision : *revisions) {
+            if (*archive && revision.revision == (*archive)->current_revision) {
+                continue;
+            }
+            const auto header = load_recorded_header(repository_files, layout, revision);
+            if (!header) {
+                return std::unexpected(header.error());
+            }
+            candidate.previous_carriers.push_back({header->identity, header->root_subpath});
+        }
+    }
+    return match_identity(evidence, root_subpath, candidates);
 }
 
 std::expected<std::string, IoError> root_subpath_of(

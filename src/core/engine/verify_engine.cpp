@@ -224,19 +224,16 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         resume = *point;
     }
 
-    auto candidates = load_candidates(store, services.repository_files, services.layout);
+    // Naming an archive (or resuming its run) is the operator's selection (§B10
+    // AMBIGUOUS): it is the one candidate, and no other archive's manifest is
+    // read. A root alone is matched against every archive's latest carrier.
+    const auto selected = resume ? std::optional(resume->archive_uuid) : request.archive_uuid;
+    auto candidates = load_candidates(store, services.repository_files, services.layout, selected);
     if (!candidates) {
         return stop(VerifyStop::Kind::Repository, candidates.error().message);
     }
-    // Naming an archive (or resuming its run) is the operator's selection (§B10 AMBIGUOUS).
-    const auto selected = resume ? std::optional(resume->archive_uuid) : request.archive_uuid;
-    if (selected) {
-        std::erase_if(*candidates, [&](const ArchiveCandidate& candidate) {
-            return candidate.archive_uuid != *selected;
-        });
-        if (candidates->empty()) {
-            return stop(VerifyStop::Kind::NotFound, "no registered archive " + *selected);
-        }
+    if (selected && candidates->empty()) {
+        return stop(VerifyStop::Kind::NotFound, "no registered archive " + *selected);
     }
 
     const auto located = locate(services, request, *candidates);
@@ -245,7 +242,15 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     MediaEvidence evidence{current_timestamp(), located->volume,
         read_identity_claim(services.archive_files, located->root)};
-    const auto identity = match_identity(evidence, located->root_subpath, *candidates);
+    // Earlier revisions' carriers are read only when no latest carrier
+    // matched: then they tell an earlier carrier (decision 0004) from media
+    // that is no archive's.
+    const auto matched =
+        match_recorded(store, services.repository_files, services.layout, evidence, located->root_subpath, *candidates);
+    if (!matched) {
+        return stop(VerifyStop::Kind::Repository, matched.error().message);
+    }
+    const auto& identity = *matched;
 
     const auto record_evidence = [&](const Uuid& archive_uuid, const std::string& run_id) {
         return store.insert_evidence({archive_uuid, run_id, evidence.seen_at,

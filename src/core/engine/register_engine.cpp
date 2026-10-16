@@ -253,17 +253,28 @@ std::expected<std::optional<Plan>, IoError> find_pending(ArchiveStore& store, co
 }
 
 std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_archives(
-    const std::vector<ArchiveCandidate>& candidates, const MediaEvidence& evidence,
+    RegisterServices& services, std::vector<ArchiveCandidate>& candidates, const MediaEvidence& evidence,
     const std::string& root_subpath, const RegisterRequest& request)
 {
     std::optional<ArchiveCandidate> target;
-    for (const auto& candidate : candidates) {
-        const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
+    for (auto& candidate : candidates) {
+        // Only an archive whose root overlaps this one can refuse it
+        // (decision 0001); its earlier carriers are read where its latest
+        // carrier does not match this volume (decision 0004).
+        if (!roots_overlap(candidate.root_subpath, root_subpath)) {
+            continue;
+        }
+        const auto matched = match_recorded(services.store, services.repository_files, services.layout, evidence,
+            candidate.root_subpath, std::span(&candidate, 1));
+        if (!matched) {
+            return fail(RegisterFailure::Kind::Repository, matched.error().message);
+        }
+        const auto& match = *matched;
         const bool same_volume = match.result == MatchResult::Match ||
                                  match.result == MatchResult::MatchWeak ||
                                  match.result == MatchResult::Migrated;
         const bool previous_carrier = match.result == MatchResult::PreviousCarrier;
-        if ((!same_volume && !previous_carrier) || !roots_overlap(candidate.root_subpath, root_subpath)) {
+        if (!same_volume && !previous_carrier) {
             continue;
         }
         if (unicode_fold(candidate.root_subpath) != unicode_fold(root_subpath)) {
@@ -466,11 +477,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                                            "`archive abandon-registration " +
                                            (*pending)->archive_uuid + "`");
         }
-        const auto candidates = load_candidates(store, services.repository_files, services.layout);
+        auto candidates = load_candidates(store, services.repository_files, services.layout);
         if (!candidates) {
             return fail(Kind::Repository, candidates.error().message);
         }
-        const auto checked = check_existing_archives(*candidates, evidence, *root_subpath, request);
+        const auto checked = check_existing_archives(services, *candidates, evidence, *root_subpath, request);
         if (!checked) {
             return std::unexpected(checked.error());
         }

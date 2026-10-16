@@ -525,8 +525,11 @@ endif()
 # R-14: what is known of a recorded revision comes from its manifest, never
 # from the index's copy of its header. A manifest whose header line is not
 # the one recorded (its revision written otherwise, sample data) stops the
-# archive list and a verification with a repository error (exit 11) that
-# names the archive and the revision; restored, both work again.
+# archive list and a verification of its archive with a repository error
+# (exit 11) that names the archive and the revision, and says how to go on.
+# A command about another archive reads no manifest but that archive's: the
+# copy verifies by its uuid, and shows its status and history; so does the
+# damaged archive's history, which needs no manifest. Restored, all work again.
 set(GLOBAL --config "${WORK}/config.json")
 set(RECORDED "${WORK}/repo/manifests/${archive_uuid}/r0002.vam")
 # Kept byte for byte: file(WRITE) may write other line ends.
@@ -538,13 +541,30 @@ run_cli("11" --lang en archive list)
 set(listed "${last_errors}")
 run_cli("11" --lang en verify --full "${ROOT}")
 set(verified "${last_errors}")
+run_cli("11" verify --full "${archive_uuid}")
+set(verified_chinese "${last_errors}")
+run_cli("0;2" verify --full "${copy_uuid}")
+run_cli("0" archive show "${copy_prefix}")
+run_cli("0" history "${copy_prefix}")
+run_cli("0" history "${archive_prefix}")
 file(RENAME "${RECORDED}.kept" "${RECORDED}")
-set(changed_manifest "cannot use the manifest of revision 2 of archive ${archive_uuid}: the manifest differs from the repository record")
+set(changed_manifest "cannot use the manifest of revision 2 of archive ${archive_uuid}: the manifest differs from the repository record; restore it from a backup of the repository")
 if(changed_bytes STREQUAL recorded_bytes OR NOT listed MATCHES "${changed_manifest}"
-        OR NOT verified MATCHES "${changed_manifest}")
-    message(FATAL_ERROR "a manifest that is not the one recorded:\n${listed}\n${verified}")
+        OR NOT verified MATCHES "${changed_manifest}"
+        OR NOT verified_chinese MATCHES "無法使用封存 ${archive_uuid} 版次 2 的清單檔：清單檔與儲存庫的紀錄不符；請從儲存庫的備份還原該清單檔")
+    message(FATAL_ERROR "a manifest that is not the one recorded:\n${listed}\n${verified}\n${verified_chinese}")
 endif()
 run_cli("0" archive list)
 run_cli("0;2" verify --full "${ROOT}")
+
+# The manifest of an earlier revision is read only where matching looks at
+# the earlier carriers (decision 0004): with the first manifest of the
+# relocated archive moved away (sample data), the archive verifies by its
+# uuid and by its root, where its latest carrier matches.
+set(EARLIER "${WORK}/repo/manifests/${moving_uuid}/r0001.vam")
+file(RENAME "${EARLIER}" "${EARLIER}.away")
+run_cli("0;2" verify --full "${moving_uuid}")
+run_cli("0;2" verify --full "${MOVE_FROM}")
+file(RENAME "${EARLIER}.away" "${EARLIER}")
 
 message(STATUS "veriarchive-cli end-to-end test passed")

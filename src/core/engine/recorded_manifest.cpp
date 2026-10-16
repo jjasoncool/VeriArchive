@@ -89,10 +89,13 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
 std::expected<ManifestHeader, IoError> load_recorded_header(
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const RevisionRecord& revision)
 {
+    // The manifest is gone, cannot be read, or is not the one recorded: only
+    // the repository's backup still holds it (R-86). Rebuilding the index
+    // would take whatever the file holds now for the truth.
     const auto cannot_use = [&](const std::string& cause) {
         return std::unexpected(IoError{IoErrorKind::Other, 0,
             "cannot use the manifest of revision " + std::to_string(revision.revision) + " of archive " +
-                revision.archive_uuid + ": " + cause});
+                revision.archive_uuid + ": " + cause + "; restore it from a backup of the repository"});
     };
     const auto line =
         ManifestReader::read_header_line(repository_files, layout.root / path_from_utf8(revision.manifest_relpath));

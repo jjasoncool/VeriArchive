@@ -12,7 +12,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
+#include <iterator>
 
 namespace {
 
@@ -527,9 +529,10 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use()
         }
         const std::string prefix =
             "cannot use the manifest of revision 1 of archive " + fixture.archive_uuid + ": ";
+        const std::string way_on = "; restore it from a backup of the repository";
         const auto names_it = [&](const std::string& message) {
-            return message.starts_with(prefix) && !message.contains("rebuild-index") &&
-                   (gone || message == prefix + "the manifest differs from the repository record");
+            return message.starts_with(prefix) && message.ends_with(way_on) && !message.contains("rebuild-index") &&
+                   (gone || message == prefix + "the manifest differs from the repository record" + way_on);
         };
         const auto verified = fixture.verify(fixture.archive.root());
         CHECK(!verified && verified.error().kind == va::VerifyStop::Kind::Repository &&
@@ -547,6 +550,74 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use()
               names_it(registered.error().message));
         const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
         CHECK(runs && runs->empty());
+    }
+}
+
+// Two archives on one volume (sample data): A at /vol/a and B at /vol/b. A's
+// manifest is gone, or one byte of its header line changed. Named by its
+// uuid, B is the one candidate and no other archive's manifest is read: it
+// verifies, and its status reads with its header, as `archive show` reads it,
+// and every archive's label without one, as `history` and the GUI's archive
+// choices read them. A named by its uuid stops, naming its revision and how
+// to go on, and records nothing. By root, every archive's latest carrier is
+// needed (A's root, which only its manifest names, may be this one): B's
+// verification by root stops the same way.
+void a_named_archive_reads_no_other_manifest()
+{
+    for (const bool gone : {true, false}) {
+        EngineFixture fixture;
+        fixture.archive.add_file("a/one.txt", "a (sample data)");
+        fixture.archive.add_file("b/two.txt", "b (sample data)");
+        const auto a = fixture.register_root(fixture.archive.root() / "a");
+        const auto b = fixture.register_root(fixture.archive.root() / "b");
+        CHECK(a && b);
+        if (!a || !b) {
+            return;
+        }
+        const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), a->archive_uuid, 1);
+        if (gone) {
+            std::filesystem::remove(path);
+        } else {
+            std::string bytes;
+            {
+                std::ifstream input(path, std::ios::binary);
+                bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+            }
+            bytes[bytes.find("\"volume_label\":\"ARCHIVE\"") + 16] ^= 0x01; // "ARCHIVE" -> "@RCHIVE"
+            std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+        }
+
+        va::VerifyRequest b_by_uuid;
+        b_by_uuid.archive_uuid = b->archive_uuid;
+        const auto named = fixture.verify(b_by_uuid);
+        CHECK(named && named->archive_uuid == b->archive_uuid && named->result == "PASSED");
+        if (!named) {
+            std::cerr << "  B by uuid: " << named.error().message << '\n';
+        }
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        const auto shown = va::archive_statuses(fixture.store, *fixture.repository.files,
+            fixture.repository.context.repo, va::Policy{}, now, {b->archive_uuid, true});
+        CHECK(shown && shown->size() == 1 && shown->front().header &&
+              shown->front().header->archive_uuid == b->archive_uuid);
+        const auto labels = va::archive_statuses(fixture.store, *fixture.repository.files,
+            fixture.repository.context.repo, va::Policy{}, now, {std::nullopt, false});
+        CHECK(labels && labels->size() == 2 &&
+              std::ranges::none_of(*labels, [](const va::ArchiveStatus& status) { return status.header.has_value(); }));
+
+        const std::string prefix = "cannot use the manifest of revision 1 of archive " + a->archive_uuid + ": ";
+        const auto names_a = [&](const std::string& message) {
+            return message.starts_with(prefix) && message.ends_with("; restore it from a backup of the repository");
+        };
+        va::VerifyRequest a_by_uuid;
+        a_by_uuid.archive_uuid = a->archive_uuid;
+        const auto own = fixture.verify(a_by_uuid);
+        CHECK(!own && own.error().kind == va::VerifyStop::Kind::Repository && names_a(own.error().message));
+        const auto b_by_root = fixture.verify(fixture.archive.root() / "b");
+        CHECK(!b_by_root && b_by_root.error().kind == va::VerifyStop::Kind::Repository &&
+              names_a(b_by_root.error().message));
+        const auto a_runs = fixture.store.verify_runs(a->archive_uuid);
+        const auto b_runs = fixture.store.verify_runs(b->archive_uuid);
+        CHECK(a_runs && a_runs->empty() && b_runs && b_runs->size() == 1);
     }
 }
 
@@ -604,5 +675,6 @@ void verify_engine_tests()
     archive_found_by_uuid_is_read_at_its_folder();
     an_index_that_differs_from_its_manifest_stops_every_use();
     a_manifest_that_is_not_the_one_recorded_stops_every_use();
+    a_named_archive_reads_no_other_manifest();
     item_rules();
 }

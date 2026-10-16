@@ -18,7 +18,7 @@ bool older_than(const std::string& timestamp, int days, std::chrono::sys_seconds
 
 std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Policy& policy,
-    std::chrono::sys_seconds now)
+    std::chrono::sys_seconds now, const StatusSelection& selection)
 {
     const auto archives = store.archives();
     if (!archives) {
@@ -31,20 +31,25 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
 
     std::vector<ArchiveStatus> statuses;
     for (const auto& archive : *archives) {
+        if (selection.only && archive.archive_uuid != *selection.only) {
+            continue;
+        }
         ArchiveStatus status;
         status.archive = archive;
         status.label_shared = label_uses[archive.label] > 1;
 
-        const auto revision = store.revision(archive.archive_uuid, archive.current_revision);
-        if (!revision) {
-            return std::unexpected(revision.error());
-        }
-        if (*revision) {
-            auto header = load_recorded_header(repository_files, layout, **revision);
-            if (!header) {
-                return std::unexpected(header.error());
+        if (selection.headers) {
+            const auto revision = store.revision(archive.archive_uuid, archive.current_revision);
+            if (!revision) {
+                return std::unexpected(revision.error());
             }
-            status.header = std::move(*header);
+            if (*revision) {
+                auto header = load_recorded_header(repository_files, layout, **revision);
+                if (!header) {
+                    return std::unexpected(header.error());
+                }
+                status.header = std::move(*header);
+            }
         }
 
         const auto runs = store.verify_runs(archive.archive_uuid);

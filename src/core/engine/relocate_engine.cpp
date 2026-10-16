@@ -147,17 +147,27 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     const MediaEvidence evidence{current_timestamp(), *volume, std::nullopt};
 
     // Decision 0001: the new root may not overlap another archive on its volume.
-    const auto candidates = load_candidates(store, services.repository_files, services.layout);
+    auto candidates = load_candidates(store, services.repository_files, services.layout);
     if (!candidates) {
         return fail(Kind::Repository, candidates.error().message);
     }
     MatchResult own_match = MatchResult::Unknown;
-    for (const auto& candidate : *candidates) {
-        const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
+    for (auto& candidate : *candidates) {
         if (candidate.archive_uuid == archive.archive_uuid) {
-            own_match = match.result;
+            // As the evidence records it: the new carrier may be one this
+            // archive had before (decision 0004), which only the manifests of
+            // its earlier revisions tell, read when its latest carrier does
+            // not match.
+            const auto own = match_recorded(store, services.repository_files, services.layout, evidence,
+                candidate.root_subpath, std::span(&candidate, 1));
+            if (!own) {
+                return fail(Kind::Repository, own.error().message);
+            }
+            own_match = own->result;
             continue;
         }
+        // Earlier carriers of another archive never make one overlap.
+        const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
         const bool same_volume = match.result == MatchResult::Match ||
                                  match.result == MatchResult::MatchWeak ||
                                  match.result == MatchResult::Migrated;

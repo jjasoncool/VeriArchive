@@ -827,8 +827,8 @@ constexpr CatalogEntry entries[] = {
     {"the manifest differs from the repository record", "清單檔與儲存庫的紀錄不符"},
     {"revision {} is older than the known revision {}", "版次 {} 比已知的版次 {} 舊"},
     // The index's copy of a header is never taken for the manifest's (R-14).
-    {"cannot use the manifest of revision {} of archive {}: {}", "無法使用封存 {1} 版次 {0} 的清單檔：{2}",
-        Match::Cause},
+    {"cannot use the manifest of revision {} of archive {}: {}; restore it from a backup of the repository",
+        "無法使用封存 {1} 版次 {0} 的清單檔：{2}；請從儲存庫的備份還原該清單檔", Match::Cause},
     {"the repository's index differs from the manifest of revision {} of archive {}; rebuild the index with "
         "`repo rebuild-index`",
         "儲存庫的索引與封存 {1} 版次 {0} 的清單檔不符；請以 `repo rebuild-index` 重建索引"},

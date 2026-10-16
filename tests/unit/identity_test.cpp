@@ -48,6 +48,7 @@ bool has_detail(const va::MatchOutcome& outcome, std::string_view detail)
 
 const std::string disk_a = "1111222233334444";
 const std::string disk_b = "5555666677778888";
+const std::string disk_c = "9999aaaabbbbcccc";
 
 void decision_table_rows()
 {
@@ -129,6 +130,17 @@ void retired_and_previous_carriers_are_recognised()
     outcome = va::match_identity(evidence(volume(disk_a, "OLD-DISK")), "", std::vector{relocated});
     CHECK(outcome.result == va::MatchResult::PreviousCarrier);
     CHECK(outcome.archives == std::vector<va::Uuid>{"A"});
+    CHECK(outcome.previous_carriers_consulted);
+
+    // The previous carriers are looked at only when no latest carrier at the
+    // root matches or mismatches: only then can they change the outcome, so
+    // only then are their manifests read (match_recorded).
+    outcome = va::match_identity(evidence(volume(disk_b, "NEW-DISK")), "", std::vector{relocated});
+    CHECK(outcome.result == va::MatchResult::Match && !outcome.previous_carriers_consulted);
+    outcome = va::match_identity(evidence(volume(disk_c, "NEW-DISK")), "", std::vector{relocated});
+    CHECK(outcome.result == va::MatchResult::Mismatch && !outcome.previous_carriers_consulted);
+    outcome = va::match_identity(evidence(volume(disk_c, "THIRD-DISK")), "", std::vector{relocated});
+    CHECK(outcome.result == va::MatchResult::Unknown && outcome.previous_carriers_consulted);
 }
 
 // R-95: secondary evidence adds details; a resized device behind the same serial

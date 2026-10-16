@@ -42,11 +42,17 @@ struct MatchOutcome {
     MatchResult result = MatchResult::Unknown;
     std::vector<Uuid> archives;             // selected archive(s); several only for Ambiguous
     std::vector<std::string> details;       // e.g. "volume-label-differs", "device-replaced"
+    // No latest carrier at the root matched or mismatched, so the previous
+    // carriers of every candidate were looked at (decision 0004): only then
+    // do they make a difference to the outcome.
+    bool previous_carriers_consulted = false;
 };
 
 // `root_subpath` is the verify target relative to the volume root. Candidates
 // are first narrowed to the same root_subpath, compared case-insensitively
-// (decision 0001), then the §B10 table is applied.
+// (decision 0001), then the §B10 table is applied. The candidates' previous
+// carriers are looked at only when none of their latest carriers at that root
+// matches or mismatches (previous_carriers_consulted).
 MatchOutcome match_identity(
     const MediaEvidence& evidence,
     std::string_view root_subpath,

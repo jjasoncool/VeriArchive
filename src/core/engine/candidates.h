@@ -7,17 +7,39 @@
 #include "core/repository/archive_store.h"
 
 #include <filesystem>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 
 namespace va {
 
+// Each archive with a recorded revision and the carrier of its latest
+// revision, or only the archive `only` when the operator names one (by its
+// uuid, or by the run of it to resume): a verification of a named archive
+// reads no other archive's manifest. The carriers of earlier revisions are
+// left out until matching looks at them (match_recorded).
+//
 // The carriers come from the manifests' headers (load_recorded_header), never
 // from the index's copies of them (R-14). Fails, naming the archive and the
-// revision, when a recorded revision's manifest cannot be read, is not the one
-// recorded, or differs from the index: matching against what is left would be
-// matching against the index.
-std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(
-    ArchiveStore& store, IFileSystemAccess& repository_files, const RepositoryLayout& layout);
+// revision, when the manifest of a latest revision read cannot be read, is
+// not the one recorded, or differs from the index: matching against what is
+// left would be matching without that archive.
+std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout,
+    const std::optional<Uuid>& only = std::nullopt);
+
+// match_identity against `candidates` from load_candidates. The matcher looks
+// at previous carriers only when no latest carrier at `root_subpath` matched
+// or mismatched (previous_carriers_consulted): only then are they read, from
+// the manifests of the earlier revisions of every archive in `candidates`, and
+// kept there, and the evidence matched again. So an earlier revision's
+// manifest is read only where it decides the outcome (PREVIOUS_CARRIER or
+// UNKNOWN), and there it fails as load_candidates does: without it, the media
+// may be the earlier carrier that it names.
+std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const MediaEvidence& evidence, std::string_view root_subpath,
+    std::span<ArchiveCandidate> candidates);
 
 // Path of the archive root relative to its volume's mount point, as an
 // ArchivePath string ("" for the volume root).

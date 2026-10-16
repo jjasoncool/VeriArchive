@@ -23,15 +23,27 @@ struct ArchiveStatus {
     bool label_shared = false;                // R-88: another archive has the same label
 };
 
+// Which statuses archive_statuses reads: every archive's, or only that of the
+// archive the operator named (`archive show <uuid>`, `history <uuid>`); and
+// each one's header, or none where nothing shown comes from a header (a
+// history, a list of labels to choose from). A manifest is read only for a
+// header that is shown.
+struct StatusSelection {
+    std::optional<Uuid> only;
+    bool headers = true;
+};
+
 // INCOMPLETE runs make no claim, so they never reset the overdue clock. A never
 // verified archive is overdue once its registration is older than the limit.
 // Retired archives are never overdue (decision 0003). Each header is read from
 // the latest revision's manifest (load_recorded_header): one that cannot be
 // read there, or that the index holds otherwise, fails the list, naming the
 // archive and the revision, rather than show the index's copy (R-14).
+// Whether a label is shared (R-88) is judged among every archive, whatever
+// `selection` reads.
 std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Policy& policy,
-    std::chrono::sys_seconds now);
+    std::chrono::sys_seconds now, const StatusSelection& selection = {});
 
 // "ARCH-0007", or "ARCH-0007 (28ff645e)" when the label is shared (R-88).
 std::string display_label(const ArchiveStatus& status);

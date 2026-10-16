@@ -463,12 +463,13 @@ void translation_tests()
     CHECK(chinese("error: " + index_differs) == "錯誤：" + index_differs_chinese);
     CHECK(chinese("cannot read the manifest of ARCH-0002 revision 2: " + index_differs) ==
           "無法讀取 ARCH-0002 版次 2 的清單檔：" + index_differs_chinese);
+    // A manifest gone or not the one recorded: the cause, then how to go on (R-86).
     CHECK(chinese("cannot use the manifest of revision 2 of archive " + uuid +
-                  ": the manifest differs from the repository record") ==
-          "無法使用封存 " + uuid + " 版次 2 的清單檔：清單檔與儲存庫的紀錄不符");
-    CHECK(chinese("cannot use the manifest of revision 2 of archive " + uuid +
-                  ": CreateFileW failed (Win32 error 2)") ==
-          "無法使用封存 " + uuid + " 版次 2 的清單檔：CreateFileW 失敗（Win32 錯誤 2）");
+                  ": the manifest differs from the repository record; restore it from a backup of the repository") ==
+          "無法使用封存 " + uuid + " 版次 2 的清單檔：清單檔與儲存庫的紀錄不符；請從儲存庫的備份還原該清單檔");
+    CHECK(chinese("error: cannot use the manifest of revision 2 of archive " + uuid +
+                  ": CreateFileW failed (Win32 error 2); restore it from a backup of the repository") ==
+          "錯誤：無法使用封存 " + uuid + " 版次 2 的清單檔：CreateFileW 失敗（Win32 錯誤 2）；請從儲存庫的備份還原該清單檔");
     // Wording fixes (findings 27, 29, 30, 31, 32).
     CHECK(chinese("warning: identity: retired") == "警告：媒體身分：封存已停用");
     CHECK(chinese("RETIRED") == "已停用");

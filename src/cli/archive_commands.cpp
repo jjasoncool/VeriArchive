@@ -253,7 +253,12 @@ struct Opened {
     std::vector<ArchiveStatus> statuses;
 };
 
-std::expected<Opened, Failure> open_statuses(const Arguments& arguments)
+// Every archive's status, or only that of the archive `named` (a uuid or a
+// unique prefix, as find_archive_uuid takes it): a command about one archive
+// reads no other archive's manifest. `headers`: whether the command shows
+// what the latest revision's header holds, which is read from its manifest.
+std::expected<Opened, Failure> open_statuses(
+    const Arguments& arguments, const std::optional<std::string>& named = std::nullopt, bool headers = true)
 {
     auto session = open_session(arguments, false);
     if (!session) {
@@ -263,10 +268,18 @@ std::expected<Opened, Failure> open_statuses(const Arguments& arguments)
     if (!store) {
         return std::unexpected(Failure{exit_code::repository, store.error().message});
     }
+    StatusSelection selection{std::nullopt, headers};
+    if (named) {
+        auto uuid = find_archive_uuid(*store, *named);
+        if (!uuid) {
+            return std::unexpected(uuid.error());
+        }
+        selection.only = std::move(*uuid);
+    }
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     const auto repository_files = platform::make_file_system_access();
-    auto statuses =
-        archive_statuses(*store, *repository_files, session->context.repo, session->context.config.policy, now);
+    auto statuses = archive_statuses(
+        *store, *repository_files, session->context.repo, session->context.config.policy, now, selection);
     if (!statuses) {
         return std::unexpected(Failure{exit_code::repository, statuses.error().message});
     }
@@ -821,7 +834,10 @@ int archive_command(const Arguments& arguments)
     if (relocation_abandon_command) {
         return abandon_relocation_command(arguments);
     }
-    auto opened = open_statuses(arguments);
+    // `list` shows every archive's latest header; `show` the named archive's;
+    // `retire` and `relocate` none (a relocation reads what it matches itself).
+    auto opened = list_command ? open_statuses(arguments)
+                               : open_statuses(arguments, arguments.words[2], arguments.words[1] == "show");
     if (!opened) {
         return report_failure(arguments, opened.error());
     }
@@ -842,7 +858,8 @@ int history_command(const Arguments& arguments)
     if (arguments.words.size() != 2) {
         return report_failure(arguments, {exit_code::usage, "usage: history <uuid>"});
     }
-    auto opened = open_statuses(arguments);
+    // The history is in the repository's records alone (R-18): no manifest is read.
+    auto opened = open_statuses(arguments, arguments.words[1], false);
     if (!opened) {
         return report_failure(arguments, opened.error());
     }

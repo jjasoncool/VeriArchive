@@ -259,6 +259,7 @@ MatchOutcome match_identity(
         outcome.result = MatchResult::Mismatch;
     } else {
         // An earlier carrier is recognised at the root it had then.
+        outcome.previous_carriers_consulted = true;
         for (const auto& candidate_value : candidates) {
             const auto* candidate = &candidate_value;
             for (const auto& previous : candidate->previous_carriers) {
