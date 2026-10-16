@@ -91,9 +91,10 @@ std::string manifest_relpath_of(const Uuid& archive_uuid, std::uint32_t revision
 // The manifest of `revision` of the archive, of which the index has no
 // record, though the archive's record says that revision (decision 0028):
 // it cannot be used (NotIndexed), and the file at its place is read as `repo
-// rebuild-index` reads a manifest, to say how to fix it. `whole`: up to its
-// body's hash, as before a verification; otherwise line 1 alone, as for the
-// archive lists and identity matching.
+// rebuild-index` reads a manifest, to say how to fix it. `whole`: its body
+// against its hash and every entry, as the rebuild reads it, as before a
+// verification; otherwise line 1 alone, as for the archive lists and
+// identity matching.
 UnusableManifest manifest_not_indexed(IFileSystemAccess& repository_files, const RepositoryLayout& layout,
     const Uuid& archive_uuid, std::uint32_t revision, bool whole);
 

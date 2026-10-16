@@ -221,8 +221,9 @@ UnusableManifest manifest_not_indexed(IFileSystemAccess& repository_files, const
         return unreadable(failure.message);
     };
     // No record vouches for it, so it is read as `repo rebuild-index` reads
-    // a manifest: one that parses, of this archive and revision, its body
-    // matching its header where the whole of it is read (R-62).
+    // a manifest: one that parses, of this archive and revision, and where
+    // the whole of it is read, its body matching its header (R-62) and every
+    // entry parsing, to the end of the body.
     const auto path = manifest_path(layout.manifests(), archive_uuid, revision);
     ManifestHeader header;
     if (whole) {
@@ -230,7 +231,20 @@ UnusableManifest manifest_not_indexed(IFileSystemAccess& repository_files, const
         if (!reader) {
             return from_failure(reader.error());
         }
-        header = reader->header();
+        if (reader->header().archive_uuid != archive_uuid || reader->header().revision != revision) {
+            return unreadable("header does not match its file name");
+        }
+        // A manifest whose entries the rebuild cannot all read is one it
+        // skips: rebuilding the index alone would not record it.
+        for (;;) {
+            auto next = reader->next();
+            if (!next) {
+                return unreadable(next.error().message);
+            }
+            if (!*next) {
+                return unusable;
+            }
+        }
     } else {
         const auto line = ManifestReader::read_header_line(repository_files, path);
         if (!line) {

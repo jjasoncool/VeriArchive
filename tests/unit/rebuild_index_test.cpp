@@ -902,6 +902,78 @@ void the_history_keeps_an_archive_from_an_earlier_revision()
     CHECK(archive && *archive && (*archive)->current_revision == 2);
 }
 
+// `manifest` with the type of its first file entry made "x", and the body's
+// BLAKE3 in its header made the one of the body so changed (sample bytes):
+// its body matches its header, and an entry does not parse.
+std::string with_an_entry_that_does_not_parse(const std::string& manifest)
+{
+    const auto newline = manifest.find('\n');
+    auto header = manifest.substr(0, newline + 1);
+    auto body = manifest.substr(newline + 1);
+    const auto body_hash = header.find(va::blake3_hex(body));
+    const auto entry_type = body.find("\"t\":\"f\"");
+    CHECK(body_hash != std::string::npos && entry_type != std::string::npos);
+    if (body_hash == std::string::npos || entry_type == std::string::npos) {
+        return manifest;
+    }
+    body[entry_type + 5] = 'x';
+    header.replace(body_hash, 64, va::blake3_hex(body));
+    return header + body;
+}
+
+// Decision 0028: a manifest that the index has no record of is read, where a
+// verification reads it whole, as `repo rebuild-index` reads a manifest:
+// every entry too. Sample damage: an archive registered twice whose index
+// lost the record of revision 2, while the manifest of revision 2 has an
+// entry that does not parse though its body matches its header. The rebuild
+// skips it, and the archive stays at revision 2, of which the index has no
+// record. A verification by its uuid says that the file cannot be read, why,
+// and to restore it before rebuilding the index, never only to rebuild the
+// index, which skips it again; so does every whole load. Restored and
+// rebuilt, the archive verifies at revision 2.
+void a_manifest_without_a_record_is_read_to_its_last_entry()
+{
+    test::EngineFixture fixture;
+    const auto archive_uuid = registered_twice(fixture);
+    const auto& layout = fixture.repository.context.repo;
+    const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+    const auto kept = read_file(second);
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << with_an_entry_that_does_not_parse(kept);
+    fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; DELETE FROM files WHERE revision = 2");
+
+    const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(report && report->revisions == 1 && report->skipped.size() == 1 && report->revisions_not_indexed.size() == 1);
+    if (report && report->skipped.size() == 1) {
+        CHECK(report->skipped.front() == "cannot read manifest " + archive_uuid +
+                                             "/r0002.vam: invalid manifest entry: unknown entry type x");
+    }
+    const auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+    const auto message = "the repository's index has no record of the manifest of revision 2 (manifests/" +
+                         archive_uuid +
+                         "/r0002.vam), which cannot be read: invalid manifest entry: unknown entry type x; restore "
+                         "it from a backup of the repository, then rebuild the index with `repo rebuild-index`";
+    fixture.media.error = va::IoError{va::IoErrorKind::Other, 0, "the media is not looked for (sample)"};
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = archive_uuid;
+    const auto failed = fixture.verify(by_uuid);
+    CHECK(failed && failed->result == "FAILED" && !failed->media_read && failed->revision == 2 &&
+          failed->warnings == std::vector<std::string>{"manifest: " + message});
+    if (failed && failed->warnings != std::vector<std::string>{"manifest: " + message} && !failed->warnings.empty()) {
+        std::cerr << "  by uuid: " << failed->warnings.front() << '\n';
+    }
+    fixture.media.error.reset();
+    const auto loaded = va::load_recorded_manifest(fixture.store, *fixture.repository.files, layout, archive_uuid, 2);
+    CHECK(!loaded && loaded.error().message == message && loaded.error().unusable &&
+          loaded.error().unusable->file == va::UnusableManifest::File::Unreadable);
+
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << kept;
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(rebuilt && rebuilt->revisions == 2 && rebuilt->skipped.empty() && rebuilt->revisions_not_indexed.empty());
+    const auto verified = fixture.verify(by_uuid);
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+}
+
 } // namespace
 
 void rebuild_index_tests()
@@ -915,4 +987,5 @@ void rebuild_index_tests()
     an_import_restores_the_manifest_recorded();
     an_earlier_revision_whose_manifest_is_gone_is_left_out();
     the_history_keeps_an_archive_from_an_earlier_revision();
+    a_manifest_without_a_record_is_read_to_its_last_entry();
 }
