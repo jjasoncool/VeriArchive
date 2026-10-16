@@ -245,6 +245,8 @@ The Archive List view, or `veriarchive-cli archive list`, shows for each archive
 
 Above the archives, the Archive List view also shows the registrations, verifications and relocations that have not finished, with their progress, also those started from the command line. A stopped registration that can never be finished, for example because its media failed, can be given up there with "Abandon..." (CLI: `veriarchive-cli archive abandon-registration <uuid> --confirm`): its saved progress is lost, while recorded revisions and history stay. A stopped relocation can be given up there the same way, for example when its new carrier failed (CLI: `veriarchive-cli archive abandon-relocation <uuid> --confirm`): its saved progress is lost, while the archive, its revisions and history stay.
 
+`archive list` and `archive show` print an archive's unfinished registration and its unfinished relocation as one more line each under the archive: the revision, the folder or volume it reads, what it has done so far and its state, in the words of the Archive List view (for example "stopped; it can be resumed" or "new carrier differs; abandon it").
+
 Times are shown in this computer's local time with the offset from UTC, for example `2026-10-14 08:13:53 (UTC+8)`. `--json` output and the history database always use UTC, for example `2026-10-14T00:13:53Z`.
 
 More archive commands:
@@ -256,13 +258,15 @@ veriarchive-cli archive relocate <uuid> <root>    # after moving an archive to a
 veriarchive-cli archive compare <uuid> <uuid>     # do two archives hold the same content? (see above)
 ```
 
-An interrupted `archive relocate` keeps what it has matched and is listed with the unfinished operations: continue it with `archive relocate <uuid> <root> --resume`, or give it up with `archive abandon-relocation <uuid> --confirm`.
+An interrupted `archive relocate` keeps what it has matched and is listed with the unfinished operations: continue it with `archive relocate <uuid> <root> --resume`, or give it up with `archive abandon-relocation <uuid> --confirm`. A relocation that finds an entry on the new carrier that differs from the archive, such as a modified or missing file, ends instead, also when it is interrupted after that, and its saved progress is removed: copy again, and the next relocation reads the whole new carrier. An entry that cannot be read ends it only once everything else has been read; if the new carrier is unplugged before that, the relocation is interrupted, and its resume reads that entry again. If the saved progress of a relocation that ended cannot be removed, the relocation stays listed as "new carrier differs; abandon it": abandon it, then relocate again.
 
 `archive show`, `retire`, `relocate`, `compare`, `history`, `export` and `export-sha256sums` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
 
 ## Verification history
 
 The Verification History view, or `veriarchive-cli history <uuid>`, lists every verification of an archive.
+
+An interrupted `archive relocate` is listed there too, as an INCOMPLETE FULL verification of the revision it compared the new carrier with. While the relocation is unfinished, continue it with `archive relocate <uuid> <root> --resume`; `verify --resume` does not continue it, and says so.
 
 The history is a hash chain, so edited or deleted rows are detected:
 

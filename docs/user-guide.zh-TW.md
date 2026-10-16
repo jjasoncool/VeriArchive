@@ -245,6 +245,8 @@ veriarchive-cli archive compare 0d0ce48d a82ebd4e
 
 「封存列表」頁還會在封存上方列出尚未完成的註冊、驗證與搬移及其進度，從命令列啟動的也包括在內。已停止、而且再也無法完成的註冊（例如硬碟壞了），可以在這裡按「放棄…」放棄它（命令列：`veriarchive-cli archive abandon-registration <uuid> --confirm`）：已儲存的進度會遺失，已記錄的版次與歷程不受影響。已停止的搬移也可以在這裡用同樣的方式放棄，例如新載體壞了（命令列：`veriarchive-cli archive abandon-relocation <uuid> --confirm`）：已儲存的進度會遺失，封存、它的版次與歷程不受影響。
 
+`archive list` 與 `archive show` 會在封存下方，為它未完成的註冊與未完成的搬移各多列一行：版次、正在讀取的資料夾或磁碟區、目前的進度和狀態，用語和「封存列表」頁相同（例如「已停止；可以繼續」或「新載體上的內容不符；請放棄它」）。
+
 畫面上的時間是這台電腦的本地時間，括號內是和 UTC 的時差，例如 `2026-10-14 08:13:53（UTC+8）`。`--json` 輸出和歷程資料庫一律記錄 UTC，例如 `2026-10-14T00:13:53Z`。
 
 其他封存相關指令：
@@ -256,13 +258,15 @@ veriarchive-cli archive relocate <uuid> <根目錄> # 封存搬到新磁碟後�
 veriarchive-cli archive compare <uuid> <uuid>    # 兩個封存的內容是否相同（見上文）
 ```
 
-中斷的 `archive relocate` 會保留已比對相符的進度，並列在未完成的作業中：以 `archive relocate <uuid> <根目錄> --resume` 繼續，或以 `archive abandon-relocation <uuid> --confirm` 放棄。
+中斷的 `archive relocate` 會保留已比對相符的進度，並列在未完成的作業中：以 `archive relocate <uuid> <根目錄> --resume` 繼續，或以 `archive abandon-relocation <uuid> --confirm` 放棄。如果搬移發現新載體上有項目和封存不符，例如檔案被修改或遺失，搬移就會結束（即使之後才被中斷也一樣），已儲存的進度也會刪除：請重新複製，下一次搬移會重讀整個新載體。讀不到的項目，要等其他項目都讀完才會結束搬移；如果新載體在那之前被拔除，搬移只是中斷，繼續時會重讀那個項目。結束的搬移若無法刪除已儲存的進度，會以「新載體上的內容不符；請放棄它」留在未完成的作業中：請先放棄它，再重新搬移。
 
 `archive show`、`retire`、`relocate`、`compare`、`history`、`export` 與 `export-sha256sums` 的 uuid 可以只打前 8 個以上的字元，只要不會和其他封存混淆。
 
 ## 驗證歷程
 
 圖形介面「驗證歷程」頁，或 `veriarchive-cli history <uuid>`，列出某個封存的每次驗證。
+
+中斷的 `archive relocate` 也會列在這裡，是一次「未完成」的完整驗證，版次是它拿來和新載體比對的版次。搬移尚未完成時，請以 `archive relocate <uuid> <根目錄> --resume` 繼續；`verify --resume` 不會繼續它，並會這樣告訴你。
 
 歷程是用雜湊串成的鏈，被修改或刪除的紀錄都會被發現：
 
