@@ -361,8 +361,14 @@ endif()
 # subst is registered and verified through the letter, and recorded by its
 # real path on its real volume. The probe takes a free letter from S: to V:
 # and removes it right after the two commands, before anything is checked;
-# then `subst` must no longer list the probe's mapping.
-if(CMAKE_HOST_WIN32)
+# then `subst` must no longer list the probe's mapping. The letter appears in
+# the logon session that runs the test, a person's own on a workstation, so
+# the probe runs only when VERIARCHIVE_TEST_SUBST is 1, as in the GitLab
+# Windows job.
+if(CMAKE_HOST_WIN32 AND NOT "$ENV{VERIARCHIVE_TEST_SUBST}" STREQUAL "1")
+    message(STATUS "subst probe skipped: it makes a drive letter in this logon session, "
+        "so it runs only when VERIARCHIVE_TEST_SUBST=1")
+elseif(CMAKE_HOST_WIN32)
     set(SUBSTITUTED "${WORK}/subst")
     file(WRITE "${SUBSTITUTED}/photos/sample.txt" "subst sample\n")
     file(TO_NATIVE_PATH "${SUBSTITUTED}" substituted_native)

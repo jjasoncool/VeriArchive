@@ -43,6 +43,10 @@ windows-ucrt64:
   variables:
     MSYSTEM: UCRT64
     CHERE_INVOKING: "1"
+    # The CLI end-to-end test registers a folder through a drive letter made
+    # with subst (decision 0027) only when asked to: the letter appears in the
+    # logon session that runs it, which is this job's own here.
+    VERIARCHIVE_TEST_SUBST: "1"
   before_script:
     - choco install msys2 -y --no-progress --params "/NoUpdate /InstallDir:C:\msys64"
     - >
