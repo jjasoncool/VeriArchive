@@ -304,6 +304,7 @@ lost+found/
 
 > Amended by `design/decisions/0023-manifest-named-in-the-record-transaction.md`: R-61's writer streams the body to a file of its own (`rNNNN.vam.body-<uuid>`) and writes header + body to a temporary file that it fsyncs without holding the database lock; the rename to `rNNNN.vam` happens inside the write transaction that records the revision, after it found the revision not recorded, so a recorded manifest is never replaced.
 > Amended by `design/decisions/0028-a-manifest-that-cannot-be-used.md`: R-62's reader compares line 1 of a recorded revision's manifest with the BLAKE3 recorded for it before it parses it: a line 1 that differs, also one that no longer parses, ends without a newline or is empty, is a changed manifest (`ManifestHashMismatch`), never a malformed one. In the read of the entries of any manifest, a line that does not parse, comes out of canonical order or ends the file without its newline is a malformed manifest only when what was read, read on to the end of the body, is the body validated; otherwise the manifest changed while it was read (`BodyMismatch`).
+> Amended by `design/decisions/0031-chunk-lines-and-the-merkle-root.md`: with a chunk size, the writer also streams the chunk lines into a side file of its own (`rNNNN.vam.chunks-<uuid>`, the uuid of its body file, with the body file's lifetime and leftover rules) and copies them after the entries; the body hash and length cover both.
 
 One UTF-8 file, `\n` line endings, no BOM.
 
@@ -326,6 +327,7 @@ line 2..N   body   — one canonical JSON object per line: entries (sorted per R
 ### B4.3 Header (line 1; shown wrapped, real header is one line)
 
 > Amended by `design/decisions/0027-subst-drive-letters.md`: `root_hint` is the archive root by its real path; a drive letter made with subst is replaced by the folder it stands for (`S:\Photos` is recorded as `D:\Data\Photos`).
+> Amended by `design/decisions/0031-chunk-lines-and-the-merkle-root.md`: `hash.chunk_size` is `0` or a positive multiple of 65536 up to 1073741824 (real archives: 67108864, fixed per archive; D2 resolved); `counts.chunks` is the number of chunk lines; `merkle_root` is present exactly when `chunk_size` is not 0; the writer fills in all three. A manifest with a chunk size whose header breaks this is malformed. The format version stays 1.
 
 ```json
 {"format":"vam","version":1,
@@ -357,6 +359,7 @@ Field rules:
 ### B4.4 Body lines
 
 > Amended by `design/decisions/0010-unreadable-entries-at-registration.md`: optional key `unreadable` replaces `b3`/`sha256` for entries unreadable at registration; key order `…,"sha256","unreadable","mode",…`. Link targets use the canonical form of decision 0008.
+> Amended by `design/decisions/0031-chunk-lines-and-the-merkle-root.md`: only a file (`t:"f"`) with a `b3` and `size > chunk_size` has chunk lines; streams, links, directories and entries without a content hash have none. The chunk lines are the last `counts.chunks` lines of the body, and each such file owns the next ⌈size / chunk_size⌉ of them by position, as two files can share `p` (R-41): `idx` 0 to n − 1, the file's `p`, `offset` idx × chunk_size, `length` the chunk size or what is left of the file. A manifest with a chunk size whose chunk lines break this, are not canonical JSON, or carry a `b3` that is not 64 lowercase hex digits is malformed; a manifest with `chunk_size` 0 is read as before, its chunk lines skipped.
 
 Entry line, keys in this order:
 
@@ -391,6 +394,8 @@ Entry line, keys in this order:
 - R-76 History checkpoints (V1.1): every N runs or on demand, sign `{last_row_hash,run_count,timestamp}` into `history_checkpoints`.
 
 ## B6. Merkle tree (definition fixed now; implemented in V1.1)
+
+> Amended by `design/decisions/0031-chunk-lines-and-the-merkle-root.md`: only entries with a content hash give leaves: a file with chunk lines its chunk hashes, any other file, link or stream its `b3`; a directory or an entry without a content hash (decisions 0010, 0014) none. Content hashes that do not give `merkle_root` are a `ManifestHashMismatch`.
 
 - Leaves: all chunk hashes in canonical order (entry order per R-43, `idx` ascending). Files with `size ≤ chunk_size` contribute their file `b3` as the single leaf; `l` and `s` entries contribute their `b3`; `d` entries contribute nothing.
 - `leaf = BLAKE3(0x00 ‖ raw32(b3))`; `node = BLAKE3(0x01 ‖ left ‖ right)`.
@@ -918,7 +923,7 @@ Whole-disk fingerprint (§B14) · btrfs change tracking · hardware-token / serv
 | # | Question | Default if unanswered before M3 |
 |---|---|---|
 | D1 | ~~Linux driver for verifying Windows-written NTFS media: kernel `ntfs3` or `ntfs-3g`? (affects mtime precision and ADS visibility)~~ | **Resolved** by `design/decisions/0006-ntfs3-reference-driver.md`: `ntfs3` read-only is the reference; `ntfs-3g` supported with an informational note; `filesystem_type` is the on-disk format name |
-| D2 | V1.1 chunk size: 64 MiB vs 16 MiB (smaller = finer corruption localisation, larger index) | 64 MiB |
+| D2 | ~~V1.1 chunk size: 64 MiB vs 16 MiB (smaller = finer corruption localisation, larger index)~~ | **Resolved** by `design/decisions/0031-chunk-lines-and-the-merkle-root.md`: 64 MiB (67108864), fixed per archive; a manifest's chunk size is 0 or a multiple of 64 KiB up to 1 GiB, sizes below 64 MiB for tests only |
 | D3 | ~~Overdue defaults (365 / 90 days) and whether OVERDUE blocks QUICK results~~ | **Resolved** by `design/decisions/0007-overdue-defaults.md`: 365 / 180; OVERDUE flags only |
 | D4 | ~~Compile-time pinned keys for production builds (R-73)?~~ | **Resolved** by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: off; no build embeds a key list until signing is built, when the question is asked again |
 | D5 | ~~Is writing `.veriarchive/` to sealed media ever acceptable in this organisation?~~ | **Resolved** (2026-10-08): off by default (R-89); `register` without `--write-media-copy` prints a one-line notice that the repository then holds the only copy of the baseline and must be backed up (R-86) |

@@ -62,6 +62,14 @@ _Avoid_: skipped file
 An entry that is readable now but has no content hash in the revision being verified, so there is nothing to compare it against.
 _Avoid_: new file (new means added since the revision)
 
+**Chunk**:
+A part of a file larger than its archive's chunk size (64 MiB): its bytes from a multiple of the chunk size, hashed on its own in the read that hashes the whole file, so that verification can name where a file differs. A file no larger than the chunk size is one chunk, the whole file, and has no chunk lines. In the interface: 區塊.
+_Avoid_: block (a unit of the filesystem or the device), segment
+
+**Merkle root**:
+The one hash over a revision's content hashes in canonical order (the chunks of its larger files, its other files, links and streams), recorded in the manifest header as `merkle_root`; it ties every chunk hash to its place in the revision. In the interface: 總碼; in technical output (manifest messages, the header field): Merkle 根雜湊.
+_Avoid_: root hash (the archive root is something else), tree hash, top hash
+
 ### Where it lives
 
 **Device**:
