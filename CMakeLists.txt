@@ -32,7 +32,18 @@ if(NOT BLAKE3_FOUND)
         URL https://github.com/BLAKE3-team/BLAKE3/archive/refs/tags/1.8.2.tar.gz
         URL_HASH SHA256=6b51aefe515969785da02e87befafc7fdc7a065cd3458cf1141f29267749e81f
         SOURCE_SUBDIR c)
+    # BLAKE3 1.8.2 asks for CMake 3.9, for which CMake 3.31 and later warn
+    # "Compatibility with CMake < 3.10 will be removed". BLAKE3 alone is
+    # configured with the policies of CMake 3.10 instead (CMake 4.0 and later
+    # read CMAKE_POLICY_VERSION_MINIMUM), so that warning does not arise and no
+    # warning is turned off. BLAKE3 uses neither policy 3.10 added (CMP0070,
+    # CMP0071), so it is built as before. Turning deprecation warnings off
+    # around it would not do: CMAKE_WARN_DEPRECATED does not govern this one,
+    # and FetchContent_MakeAvailable runs with the diagnostics (CMake 4.4
+    # cmake_diagnostic) in force where FetchContent was included.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
     FetchContent_MakeAvailable(blake3)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
 endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0>=2.72)
