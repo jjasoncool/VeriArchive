@@ -1,5 +1,6 @@
 #include "test_support.h"
 
+#include "app/text.h"
 #include "app/typed_path.h"
 #include "common/utf8.h"
 
@@ -52,10 +53,44 @@ void relative_paths_follow_the_working_directory()
     CHECK(va::app::typed_path("").empty());
 }
 
+// Decision 0029: a root on a network share, and on Windows one written in the
+// \\?\ or \\.\ form, is refused before anything of it is read, in words of
+// both languages; the refusal names the prefix as it was typed. A folder on a
+// local volume is never refused, nor is a name that looks like those forms on
+// Linux, where a backslash is an ordinary character (R-40). The share is a
+// sample name, refused from its text alone: nothing contacts it.
+void roots_on_shares_are_refused()
+{
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const auto local = std::filesystem::temp_directory_path();
+    CHECK(!va::app::root_refusal(va::app::typed_root(va::path_to_utf8(local))));
+    if (std::filesystem::path::preferred_separator != '\\') {
+        CHECK(!va::app::root_refusal(va::app::typed_root(R"(\\?\K:\SAMPLE)")));
+        CHECK(!va::app::root_refusal(va::app::typed_root(R"(\\sample-server\sample-share)")));
+        return;
+    }
+    const auto share = va::app::root_refusal(va::app::typed_root(R"(\\sample-server\sample-share\photos)"));
+    CHECK(share && *share ==
+                       "the archive root is on a network share; VeriArchive registers and verifies folders on "
+                       "volumes attached to this computer");
+    CHECK(share && chinese(*share) ==
+                       "封存根目錄位於網路共用資料夾上；VeriArchive 只註冊和驗證這台電腦所連接的磁碟區上的資料夾");
+    CHECK(va::app::root_refusal(va::app::typed_root("//sample-server/sample-share/photos/")) == share);
+
+    // The temporary folder in the \\?\ and \\.\ forms: on a local volume, so
+    // refused for its form only.
+    const auto prefixed = va::app::root_refusal(va::app::typed_root(R"(\\?\)" + va::path_to_utf8(local)));
+    CHECK(prefixed && *prefixed == R"(write the archive root without \\?\ in front (for example D:\Photos))");
+    CHECK(prefixed && chinese(*prefixed) == R"(封存根目錄前面請不要加上 \\?\（例如寫成 D:\Photos）)");
+    const auto dotted = va::app::root_refusal(va::app::typed_root(R"(\\.\)" + va::path_to_utf8(local)));
+    CHECK(dotted && *dotted == R"(write the archive root without \\.\ in front (for example D:\Photos))");
+}
+
 } // namespace
 
 void typed_path_tests()
 {
     typed_roots_name_their_folders();
     relative_paths_follow_the_working_directory();
+    roots_on_shares_are_refused();
 }

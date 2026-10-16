@@ -22,6 +22,23 @@ bool process_is_elevated();
 // comes back unchanged, and on Linux every path.
 std::filesystem::path resolve_subst_drive(const std::filesystem::path& path);
 
+// What keeps a folder the operator gave from being taken as an archive root
+// before anything of it is read (decision 0029). `root` is a root as the user
+// interfaces make it (app::typed_root).
+enum class RootKind {
+    Usable,        // nothing here: its volume is looked up as for any root
+    NetworkShare,  // on a network share, which is no volume of this computer: on Windows a network path
+                   // ("\\server\share\..."), or a drive letter that Windows reports as a network drive; on
+                   // Linux a network filesystem (NFS, SMB, sshfs, ...)
+    DevicePath,    // written in the \\?\ or \\.\ form ("\\?\D:\Photos", Windows only), which the volume lookup
+                   // and the C++ library misread
+};
+// Judged on Windows from the root's text and the type of its drive letter (a
+// network path from its text alone); on Linux from the filesystem type that
+// statfs and /proc/self/mountinfo give for it. A root whose filesystem cannot
+// be told is Usable: its volume lookup then says what is wrong.
+RootKind archive_root_kind(const std::filesystem::path& root);
+
 // Recorded in manifests and history rows (created_by).
 std::string os_name();   // "windows" or "linux"
 std::string host_name();

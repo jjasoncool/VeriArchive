@@ -36,4 +36,9 @@ std::optional<Mount> mount_containing(const std::vector<Mount>& mounts,
 // True for network or remote filesystem types (nfs, cifs, fuse.sshfs, ...).
 bool is_network_filesystem_type(std::string_view type);
 
+// Whether `path` (absolute and canonical) lies on a network or remote
+// filesystem: the type of the mount that contains it (mount_containing), or
+// nothing when no mount contains it.
+std::optional<bool> on_network_filesystem(const std::vector<Mount>& mounts, const std::filesystem::path& path);
+
 } // namespace va::platform::linux_mounts

@@ -2,6 +2,7 @@
 #include "platform/linux/mountinfo.h"
 #include <cstdlib>
 #include <ctime>
+#include <optional>
 #include <sys/statfs.h>
 #include <unistd.h>
 #include <vector>
@@ -63,13 +64,17 @@ bool writable_directory(const std::filesystem::path& directory)
     return writable;
 }
 
-// Fails closed: a filesystem that cannot be identified is treated as remote, so
-// SQLite is never silently placed on a network share.
-bool network_filesystem(const std::filesystem::path& path)
+namespace {
+
+// Whether `path` lies on a network or remote filesystem: by the filesystem
+// type statfs reports, then by the type of the mount that contains it in
+// /proc/self/mountinfo. Nothing when neither tells (statfs fails, or no mount
+// contains the path).
+std::optional<bool> network_filesystem_of(const std::filesystem::path& path)
 {
     struct statfs information {};
     if (statfs(path.c_str(), &information) != 0) {
-        return true;
+        return std::nullopt;
     }
 
     using magic = decltype(information.f_type);
@@ -92,9 +97,23 @@ bool network_filesystem(const std::filesystem::path& path)
 
     std::error_code error;
     const auto canonical = std::filesystem::canonical(path, error);
-    const auto mount =
-        linux_mounts::mount_containing(linux_mounts::read_mountinfo(), error ? path : canonical);
-    return !mount || linux_mounts::is_network_filesystem_type(mount->filesystem_type);
+    return linux_mounts::on_network_filesystem(linux_mounts::read_mountinfo(), error ? path : canonical);
+}
+
+} // namespace
+
+// Fails closed: a filesystem that cannot be identified is treated as remote, so
+// SQLite is never silently placed on a network share.
+bool network_filesystem(const std::filesystem::path& path)
+{
+    return network_filesystem_of(path).value_or(true);
+}
+
+// Decision 0029: a root on a network filesystem is refused. One whose
+// filesystem cannot be told is left to its volume lookup, which says why.
+RootKind archive_root_kind(const std::filesystem::path& root)
+{
+    return network_filesystem_of(root).value_or(false) ? RootKind::NetworkShare : RootKind::Usable;
 }
 
 bool process_is_elevated()

@@ -6,8 +6,13 @@
 #include "platform/platform_services.h"
 #include "platform/process_table.h"
 #include "platform/windows/long_path.h"
+#include "platform/windows/root_kind.h"
 
 #include <nlohmann/json.hpp>
+
+#include <string>
+#include <string_view>
+#include <vector>
 
 
 namespace {
@@ -76,6 +81,79 @@ void long_paths_keep_their_drive_or_share()
     CHECK(long_path(LR"(\\server)") == LR"(\\server)");
     CHECK(long_path(LR"(\\server\)") == LR"(\\server\)");
     CHECK(long_path(L"").empty());
+}
+
+// Decision 0029: the archive roots that Windows refuses before anything of
+// them is read, told from the text and the type of the drive letter (sample
+// data: K: is a local volume, Z: a drive letter mapped to a network share;
+// the server and share are sample names). Plain C++, so it is tested on every
+// OS although only Windows uses it.
+void windows_roots_on_shares_are_told()
+{
+    using va::platform::RootKind;
+    std::vector<std::wstring> asked;
+    const auto kind = [&asked](std::wstring_view root) {
+        return va::platform::windows::root_kind(root, [&asked](std::wstring_view drive) {
+            asked.emplace_back(drive);
+            return drive == L"Z:";
+        });
+    };
+    // A network path is a share, told without asking about any drive.
+    CHECK(kind(LR"(\\sample-server\sample-share\photos)") == RootKind::NetworkShare);
+    CHECK(kind(L"//sample-server/sample-share") == RootKind::NetworkShare);
+    CHECK(kind(LR"(\\sample-server)") == RootKind::NetworkShare);
+    CHECK(asked.empty());
+    // A drive letter mapped to a share, written in either case.
+    CHECK(kind(LR"(Z:\SAMPLE\photos)") == RootKind::NetworkShare);
+    CHECK(kind(L"z:/SAMPLE") == RootKind::NetworkShare);
+    CHECK(kind(LR"(Z:\)") == RootKind::NetworkShare);
+    CHECK((asked == std::vector<std::wstring>{L"Z:", L"Z:", L"Z:"}));
+    // A local volume's letter, and a path that names no drive, are usable.
+    CHECK(kind(LR"(K:\SAMPLE\photos)") == RootKind::Usable);
+    CHECK(kind(LR"(K:\)") == RootKind::Usable);
+    CHECK(kind(L"SAMPLE") == RootKind::Usable);
+    CHECK(kind(LR"(\SAMPLE)") == RootKind::Usable);
+    CHECK(kind(L"K:SAMPLE") == RootKind::Usable);
+    CHECK(kind(L"") == RootKind::Usable);
+    // The \\?\ and \\.\ forms: a share behind them is a share, as in any
+    // form; anything else is refused for its form.
+    CHECK(kind(LR"(\\?\UNC\sample-server\sample-share\photos)") == RootKind::NetworkShare);
+    CHECK(kind(LR"(\\?\unc\sample-server\sample-share)") == RootKind::NetworkShare);
+    CHECK(kind(LR"(\\.\UNC\sample-server\sample-share)") == RootKind::NetworkShare);
+    CHECK(kind(LR"(\\?\Z:\SAMPLE)") == RootKind::NetworkShare);
+    CHECK(kind(LR"(\\?\K:\SAMPLE\photos)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\K:\)") == RootKind::DevicePath);
+    CHECK(kind(L"//?/K:/SAMPLE") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\.\K:\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\UNCLE\SAMPLE)") == RootKind::DevicePath); // a name that only starts with UNC
+}
+
+// Decision 0029: on Linux a root on a network filesystem, told by the type of
+// the mount that contains it (sample mountinfo: NFS, SMB and sshfs mounts, a
+// local volume mounted in a folder of the NFS share, and a local volume
+// through ntfs-3g).
+// Plain C++, so it is tested on every OS although only Linux uses it.
+void linux_roots_on_network_filesystems_are_told()
+{
+    using va::platform::linux_mounts::on_network_filesystem;
+    const auto mounts = va::platform::linux_mounts::parse_mountinfo(
+        "22 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw\n"
+        "41 22 0:50 / /mnt/sample-nas rw,relatime shared:20 - nfs4 sample-server:/exports rw,vers=4.2\n"
+        "42 22 0:51 / /media/sample-share rw,relatime shared:21 - cifs //sample-server/share rw\n"
+        "43 22 0:52 / /home/sample/remote rw,nosuid,nodev - fuse.sshfs sample@sample-server:/data rw\n"
+        "44 41 8:17 / /mnt/sample-nas/usb rw,relatime shared:23 - ext4 /dev/sdb1 rw\n"
+        "45 22 8:33 / /media/sample/SAMPLE rw,nosuid - fuseblk /dev/sdc1 rw\n");
+    CHECK(mounts.size() == 6);
+    CHECK(on_network_filesystem(mounts, "/mnt/sample-nas/photos") == true);
+    CHECK(on_network_filesystem(mounts, "/mnt/sample-nas") == true);
+    CHECK(on_network_filesystem(mounts, "/media/sample-share/2026") == true);
+    CHECK(on_network_filesystem(mounts, "/home/sample/remote/photos") == true);
+    CHECK(on_network_filesystem(mounts, "/mnt/sample-nas/usb/photos") == false);
+    CHECK(on_network_filesystem(mounts, "/media/sample/SAMPLE/photos") == false);
+    CHECK(on_network_filesystem(mounts, "/home/sample/photos") == false);
+    CHECK(on_network_filesystem(mounts, "/mnt/sample-nas-2") == false);
+    CHECK(!on_network_filesystem({}, "/home/sample"));
 }
 
 void network_types_are_recognised()
@@ -176,6 +254,8 @@ void platform_tests()
     media_enumeration_identifies_local_volume();
     mountinfo_is_parsed();
     long_paths_keep_their_drive_or_share();
+    windows_roots_on_shares_are_told();
+    linux_roots_on_network_filesystems_are_told();
     network_types_are_recognised();
     network_detection_fails_closed();
 }

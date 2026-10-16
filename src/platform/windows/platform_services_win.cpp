@@ -1,5 +1,6 @@
 #include "platform/platform_services.h"
 #include "common/utf8.h"
+#include "platform/windows/root_kind.h"
 #include "platform/windows/subst_drive.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -124,6 +125,16 @@ std::filesystem::path resolve_subst_drive(const std::filesystem::path& path)
         return std::wstring(targets.data()); // the first target of the NUL-separated list
     };
     return std::filesystem::path(windows::resolve_subst(path.native(), query));
+}
+
+RootKind archive_root_kind(const std::filesystem::path& root)
+{
+    // GetDriveTypeW tells a drive letter mapped to a network share
+    // (DRIVE_REMOTE), unprivileged (R-09).
+    return windows::root_kind(root.native(), [](std::wstring_view drive) {
+        const std::wstring drive_root = std::wstring(drive) + L"\\";
+        return GetDriveTypeW(drive_root.c_str()) == DRIVE_REMOTE;
+    });
 }
 
 bool process_is_elevated()

@@ -140,6 +140,13 @@ int verify_command(const Arguments& arguments)
         }
         request.rotational = *io == "hdd";
     }
+    // Decision 0029: a root on a network share, or written in the \\?\ form,
+    // is refused before anything of it is read.
+    if (request.root) {
+        if (const auto refusal = app::root_refusal(*request.root)) {
+            return report_failure(arguments, {exit_code::usage, *refusal});
+        }
+    }
 
     auto session = open_session(arguments, false);
     if (!session) {

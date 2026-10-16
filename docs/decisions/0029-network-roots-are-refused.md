@@ -1,0 +1,51 @@
+---
+status: accepted
+date: 2026-10-16
+amends: HANDOFF §A4 (R-09: `GetDriveTypeW` on Windows), §B1.1 (R-30: a root on a network share is no root on a volume), §B16 (`register`, `verify --full <root_path>` and `archive relocate` exit `10` for such a root), §B17 (Register Archive and Verify Archive refuse it)
+---
+
+# A root on a network share is refused before anything is read
+
+An archive is a file tree on exactly one volume (R-30), known by that volume's filesystem id and its devices (§B10). A network share is no volume of this computer: neither the filesystem id nor the devices behind it can be read here. On Windows a root on a share, a network path (`\\server\share\Photos`) or a folder on a drive letter mapped to a share, failed when its volume was looked up, with "cannot identify the volume of the root: GetVolumeNameForVolumeMountPointW failed (Win32 error 87)", which does not say why. A root written in the `\\?\` form (`\\?\D:\Photos`) failed with "the root is not on the reported volume": the C++ library (MinGW's `lexically_relative`) takes the `D:` inside that form for a root name of its own, so the root is not found below the mount point of its volume. On Linux a root on a network filesystem (NFS, SMB, sshfs) was taken: it was described as a volume without a device, identified only by the kernel's filesystem id, which NFS and FUSE report as zero for every share. Such shares then read as the same volume, and their identity proved nothing.
+
+## Decision
+
+1. **Where a root is taken.** `register`, `verify --full <root_path>` (also with `--resume`) and `archive relocate` on the command line; Register Archive and Verify Archive in the GUI. The root made from what the operator typed (decision 0027, `app::typed_root`) is judged before anything of it is read: before its volume is looked up, the repository is written, or a scan starts. A refused root ends the command with exit 10 (usage), as a root that is not a folder does; the GUI shows "Not registered: ..." or "Not verified: ...". Verification by archive uuid takes no root: it looks for the archive's carrier among the volumes, as before.
+2. **A root on a network share** is refused with "the archive root is on a network share; VeriArchive registers and verifies folders on volumes attached to this computer".
+   - Windows: a network path (`\\server\share\...`, `//server/share`); a path in the `\\?\` or `\\.\` form that names a share (`\\?\UNC\server\share`, in any case) or a network drive; a path from the root of a drive letter that Windows reports as a network drive (`GetDriveTypeW`: `DRIVE_REMOTE`). A drive letter made with subst for a folder on a share is resolved to the share first (decision 0027), so it is refused the same way. A network path is told from its text alone: nothing on the share is opened, so a share that does not answer is refused at once.
+   - Linux: a root on a network or remote filesystem, told by the filesystem type that `statfs` reports, then by the type of the mount that contains the root in `/proc/self/mountinfo`: the types the repository's own check knows (R-83 step 4), such as `nfs`, `nfs4`, `cifs`, `smb3`, `9p` and FUSE's `sshfs` or `rclone`. A local volume mounted in a folder of a share is not on the share.
+3. **A root written in the `\\?\` or `\\.\` form** (Windows), when it names no share, is refused with "write the archive root without \\?\ in front (for example D:\Photos)", naming the prefix as typed. The form passes a path to Windows without the changes Windows makes to other paths, and the volume lookup and the C++ library misread it.
+4. **A root whose filesystem cannot be told** (on Linux, `statfs` fails or no mount contains the root) is not refused here: its volume lookup then says what is wrong, as before. The repository's check fails closed instead (R-83 step 4): SQLite must never be placed on a share unawares, while an archive root that cannot be told is still looked up as a volume, which then fails or identifies it.
+5. **Platform.** `platform::archive_root_kind(root)` tells `Usable`, `NetworkShare` or `DevicePath`. Windows: `windows::root_kind`, plain C++ over the root's text and a question about its drive letter, which the platform answers with `GetDriveTypeW`. Linux: `statfs`, then `linux_mounts::on_network_filesystem`, plain C++ over the parsed mountinfo. `app::root_refusal(root)` gives the refusal's words, which both user interfaces show; it is asked in the GUI on the operation's own thread, as on Linux it reads the root's filesystem.
+
+## Why
+
+A share is no volume. VeriArchive tells which media holds an archive by the filesystem id and the devices of its volume (§B1.2, §B10), and a share shows neither to this computer: on Windows nothing can be read, and on Linux the stand-in id is the same for every share, so a verification would accept any share at that path as the archive's carrier. The operator's archives lie on data disks attached to this computer (§A1: V1 targets data disks).
+
+The roots are refused where they are taken. The user interfaces already make the root there from what the operator typed (decision 0027), and the platform knows the drive types and the mounts, so the operator learns at once what is wrong with the root typed, before anything is read or written, in words of its own. The engines receive only roots that can be looked up, and their volume lookup (`IMediaEnumerator::volume_for_path`, §B9) is unchanged.
+
+The `\\?\` form is refused rather than taken apart: the form is for programs that pass a path to Windows unchanged, a root written by a person has a usual form, and a root on a volume's GUID path (`\\?\Volume{...}\`) has no drive letter that could stand in for it. The message shows the usual form.
+
+Rejected alternatives:
+
+- Registering a share by what the server tells (its name, the share's name): it names a place, not media; other media behind the same name would read as the same archive, and nothing would tell a copy from the original.
+- Refusing in the volume lookup of each platform (`volume_for_path` failing with these words): the refusal would come after the repository is opened and read, wrapped as "cannot identify the volume of the root: ...", with the exit code of a failed lookup; and on Linux the lookup would have to refuse what it describes today for every caller.
+- Taking `\\?\D:\Photos` as `D:\Photos`: one more way of writing a root to keep apart from the others (the root in a registration's plan, `register --resume` finding it), for a form people do not type, and one that names a volume's GUID path has nothing to be taken as.
+- Failing closed for archive roots too (refusing a root whose filesystem cannot be told): the volume lookup says more about such a root than "network share" would.
+
+## Consequences
+
+- Windows: the same roots as before are refused, now before anything is read, with the reason named, and with exit 10 instead of 11.
+- Linux: a root on a network filesystem, which was registered, verified and relocated to until now, is refused. An archive registered on one by an earlier version can no longer be verified by its root; verification by its uuid looks for it among the volumes, where Linux still lists a network filesystem as a volume without a device (`media list`), and finds it as before. An unfinished registration or relocation of such a root cannot be resumed, only abandoned (decisions 0025, 0026).
+- `media list` and the repository's check (R-83 step 4, `allow_network_repository`) are unchanged.
+- Decision 0022 names a directory listing on "a network share" among the reasons why an operation may give no progress for minutes: a share is no longer an archive root; a failing device still is.
+- No change to the manifests, the database or the golden test.
+- Tests: the classification as plain functions on both systems: Windows (network paths with either separator, `\\?\UNC\` and `\\.\UNC\` in any case, a drive letter mapped to a share also behind `\\?\`, the `\\?\` and `\\.\` forms of a local volume's drive letter and of a volume's GUID path, a local volume's drive letter, paths that name no drive letter, a name that only starts with UNC, and no question asked for a network path); Linux (sample mountinfo with NFS, SMB and sshfs mounts, a local volume mounted in a folder of the NFS share, ntfs-3g on a local volume, a path that only starts like the share's mount point, and no mount at all); the refusal's words in both languages, a local folder never refused, and on Linux the same text taken as a name; the CLI end to end on Windows: `register`, `verify --full` and `archive relocate` with a sample network path, and `register` and `verify --full` with the `\\?\` form, each exit 10 in either language and `--json`, nothing recorded. A mutation check removed each guard in turn (a network path, a share behind `\\?\UNC`, a network drive behind `\\?\`, `UNC` in any case, a name that only starts with `UNC`, a network drive, the `\\?\` form, the `\\.\` form, on Linux the mount's type and a path that no mount contains, the refusal in `register`, `verify` and `archive relocate`, the prefix named as typed, the words of each refusal), and each removal failed the test meant for it. The GUI's refusal has no test of its own (GTK): its words come from `root_refusal`, which the tests cover.
+
+### Interface terms (decision 0017)
+
+| English | 繁體中文 |
+|---|---|
+| network share | 網路共用資料夾 |
+| the archive root is on a network share; VeriArchive registers and verifies folders on volumes attached to this computer | 封存根目錄位於網路共用資料夾上；VeriArchive 只註冊和驗證這台電腦所連接的磁碟區上的資料夾 |
+| write the archive root without P in front (for example D:\Photos) | 封存根目錄前面請不要加上 P（例如寫成 D:\Photos） |

@@ -3,6 +3,7 @@
 // resume. The result always carries its mode (R-21) and the V1 guarantee (R-02).
 #include "gui/gui_app.h"
 
+#include "app/typed_path.h"
 #include "common/utf8.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/verify_engine.h"
@@ -129,6 +130,16 @@ void start_verification(GuiState& state, bool resume)
     // language in use then.
     state.job.start(state.text, view.progress,
         [&state, request, interrupted](CancelToken& cancel, IProgressSink& progress) -> Report {
+            // Decision 0029: a root on a network share, or one written in the
+            // \\?\ form, is refused before anything of it is read. Asked here,
+            // off the window's thread: on Linux it reads the root's filesystem.
+            if (request.root) {
+                if (auto refusal = app::root_refusal(*request.root)) {
+                    return [refusal = std::move(*refusal)](const app::Text& text) {
+                        return text.format("Not verified: {}", text(refusal));
+                    };
+                }
+            }
             auto& session = *state.session;
             auto store = ArchiveStore::open(session.context.repo);
             if (!store) {

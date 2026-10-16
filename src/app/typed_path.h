@@ -3,6 +3,8 @@
 // paths the engines receive. Both user interfaces make them here, so a folder
 // typed in either is the same root: one root_hint, one root in plans and runs.
 #include <filesystem>
+#include <optional>
+#include <string>
 #include <string_view>
 
 namespace va::app {
@@ -21,5 +23,13 @@ std::filesystem::path typed_path(std::string_view text);
 // "D:\" stays), through a drive letter made with subst resolved to the folder
 // that letter stands for, whose volume can be identified (decision 0027).
 std::filesystem::path typed_root(std::string_view text);
+
+// Why a root made by typed_root is refused before anything of it is read
+// (decision 0029), in English for Text; nothing when it is not. VeriArchive
+// registers and verifies folders on volumes attached to this computer: a root
+// on a network share is refused, and so is one written in the \\?\ or the
+// \\.\ form, whose message names the prefix as it was typed. Each user
+// interface asks this where it takes a root, before its volume is looked up.
+std::optional<std::string> root_refusal(const std::filesystem::path& root);
 
 } // namespace va::app

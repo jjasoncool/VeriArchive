@@ -155,6 +155,13 @@ constexpr CatalogEntry entries[] = {
         "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]"},
     {"--io takes hdd or ssd", "--io 只接受 hdd 或 ssd"},
     {"not a directory: {}", "不是資料夾：{}"},
+    // A root refused before anything of it is read (decision 0029), from src/app/typed_path.cpp; the
+    // command line and the GUI show it.
+    {"the archive root is on a network share; VeriArchive registers and verifies folders on volumes attached "
+        "to this computer",
+        "封存根目錄位於網路共用資料夾上；VeriArchive 只註冊和驗證這台電腦所連接的磁碟區上的資料夾"},
+    {"write the archive root without {} in front (for example D:\\Photos)",
+        "封存根目錄前面請不要加上 {}（例如寫成 D:\\Photos）"},
     // src/cli/verify_commands.cpp
     {"FULL VERIFY {}  {} ({}) revision {}", "完整驗證 {}  {}（{}）版次 {}"},
     {"identity: {}", "媒體身分：{}", Match::Cause},

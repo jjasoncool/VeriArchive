@@ -2,6 +2,7 @@
 // revision), with progress, cancel and resume for an interrupted registration.
 #include "gui/gui_app.h"
 
+#include "app/typed_path.h"
 #include "common/utf8.h"
 #include "core/engine/register_engine.h"
 #include "platform/file_system.h"
@@ -95,6 +96,14 @@ void start_registration(GuiState& state)
     // language in use then.
     state.job.start(state.text, view.progress,
         [&state, request](CancelToken& cancel, IProgressSink& progress) -> Report {
+            // Decision 0029: a root on a network share, or one written in the
+            // \\?\ form, is refused before anything of it is read. Asked here,
+            // off the window's thread: on Linux it reads the root's filesystem.
+            if (auto refusal = app::root_refusal(request.root)) {
+                return [refusal = std::move(*refusal)](const app::Text& text) {
+                    return text.format("Not registered: {}", text(refusal));
+                };
+            }
             auto& session = *state.session;
             auto store = ArchiveStore::open(session.context.repo);
             if (!store) {

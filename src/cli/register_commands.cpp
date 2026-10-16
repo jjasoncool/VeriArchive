@@ -121,6 +121,11 @@ int register_command(const Arguments& arguments)
         }
         request.rotational = *io == "hdd";
     }
+    // Decision 0029: a root on a network share, or written in the \\?\ form,
+    // is refused before anything of it is read.
+    if (const auto refusal = app::root_refusal(request.root)) {
+        return report_failure(arguments, {exit_code::usage, *refusal});
+    }
     // The error_code overload: a root that cannot be checked is reported, not thrown.
     std::error_code root_error;
     if (!std::filesystem::is_directory(request.root, root_error)) {

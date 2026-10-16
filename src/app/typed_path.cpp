@@ -44,4 +44,20 @@ std::filesystem::path typed_root(std::string_view text)
     return platform::resolve_subst_drive(without_trailing_separators(typed_path(text)));
 }
 
+std::optional<std::string> root_refusal(const std::filesystem::path& root)
+{
+    switch (platform::archive_root_kind(root)) {
+    case platform::RootKind::NetworkShare:
+        return "the archive root is on a network share; VeriArchive registers and verifies folders on volumes "
+               "attached to this computer";
+    case platform::RootKind::DevicePath:
+        // The four characters of the prefix as typed: "\\?\", "\\.\", "//?/".
+        return "write the archive root without " + path_to_utf8(root).substr(0, 4) +
+               " in front (for example D:\\Photos)";
+    case platform::RootKind::Usable:
+        break;
+    }
+    return std::nullopt;
+}
+
 } // namespace va::app

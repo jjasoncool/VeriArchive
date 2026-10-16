@@ -174,4 +174,13 @@ bool is_network_filesystem_type(std::string_view type)
     return false;
 }
 
+std::optional<bool> on_network_filesystem(const std::vector<Mount>& mounts, const std::filesystem::path& path)
+{
+    const auto mount = mount_containing(mounts, path);
+    if (!mount) {
+        return std::nullopt;
+    }
+    return is_network_filesystem_type(mount->filesystem_type);
+}
+
 } // namespace va::platform::linux_mounts
