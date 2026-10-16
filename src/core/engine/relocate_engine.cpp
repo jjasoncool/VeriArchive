@@ -755,9 +755,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     outcome.manifest = manifest_path(services.layout.manifests(), uuid, outcome.revision);
     std::error_code directory_error;
     std::filesystem::create_directories(outcome.manifest.parent_path(), directory_error);
-    // No chunk lines yet: relocation switches them on in a later stage
-    // (decision 0031). The writer fills in the chunk size and Merkle root.
-    ManifestWriter writer(services.writer, services.repository_files, outcome.manifest, 0);
+    // rN's chunk size, and rN's chunk hashes of every matched file
+    // (decision 0032); a revision without a chunk size stays without. The
+    // writer computes the Merkle root again: rN's, unless a link's target
+    // was translated (decision 0008), whose new hash is a leaf.
+    const auto chunk_size = manifest->header.chunk_size;
+    ManifestWriter writer(services.writer, services.repository_files, outcome.manifest, chunk_size);
     for (const auto& entry : comparison.current_entries) {
         if (auto added = writer.add(entry); !added) {
             return stopped_by(Kind::Repository, "cannot write the manifest: " + added.error().message);
@@ -865,7 +868,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         if (auto inserted = store.insert_revision(revision); !inserted) {
             return inserted;
         }
-        if (auto indexed = store.insert_file_rows(uuid, creates, comparison.current_entries, 0); !indexed) {
+        if (auto indexed = store.insert_file_rows(uuid, creates, comparison.current_entries, chunk_size);
+            !indexed) {
             return indexed;
         }
         EvidenceRecord evidence_record{uuid, outcome.run_id, evidence.seen_at, volume_to_json_text(*volume),

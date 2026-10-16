@@ -56,9 +56,10 @@ struct ComparisonResult {
     std::map<std::string, std::uint64_t> counts;
     std::vector<VerifyItemRecord> items;    // non-Verified items (run_id left empty)
     std::uint64_t coverage_bytes = 0;       // bytes whose content matched
-    // The media as it is now, with recorded hashes for matched content and
-    // known-unreadable entries carried over unchanged (decision 0010): the
-    // entries of a relocated revision (decision 0004). Canonical order.
+    // The media as it is now, with recorded hashes (chunk hashes included)
+    // for matched content and known-unreadable entries carried over unchanged
+    // (decision 0010): the entries of a relocated revision (decisions 0004,
+    // 0032). Canonical order.
     std::vector<Entry> current_entries;
 };
 

@@ -114,13 +114,14 @@ private:
 };
 
 // The new carrier's entry for matched content: its own name and metadata, the
-// recorded hashes (decision 0004).
+// recorded hashes (decision 0004), its chunk hashes included (decision 0032).
 Entry carried_entry(const Entry& recorded, const Entry& current)
 {
     Entry entry = current;
     entry.b3 = recorded.b3;
     entry.sha256 = recorded.sha256;
     entry.size = recorded.size;
+    entry.chunks = recorded.chunks;
     return entry;
 }
 

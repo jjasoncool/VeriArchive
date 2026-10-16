@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "engine_fixture.h"
+#include "manifest_samples.h"
 
 #include "app/history.h"
 #include "app/unfinished_operations.h"
@@ -13,6 +14,7 @@
 #include "core/engine/heartbeat.h"
 #include "core/engine/registration_attempt.h"
 #include "core/engine/relocate_engine.h"
+#include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
 
@@ -2623,6 +2625,222 @@ void a_relocation_overtaken_before_its_record_writes_nothing()
     }
 }
 
+// ---- Chunk lines in a relocation (decision 0032) ---------------------------
+
+constexpr std::uint64_t test_chunk_size = 64 * 1024;
+
+// Volume 1 at /vol, volume 2 (a new disk) at /vol/new. The archive at
+// /vol/old holds four large files and a small one (sample data), registered
+// by register_old().
+struct ChunkedRelocation : test::EngineFixture {
+    va::Uuid archive_uuid;
+    std::map<std::string, std::string> files;
+
+    ChunkedRelocation()
+    {
+        auto second = test::fake_volume(archive.root() / "new");
+        second.filesystem_uuid = "5555666677778888";
+        second.filesystem_uuid_short = "77778888";
+        second.devices.front().serial = "NEW-DISK";
+        media.extra_volumes.push_back(second);
+        for (int index = 0; index < 4; ++index) {
+            files["big" + std::to_string(index) + ".bin"] =
+                test::patterned(2 * test_chunk_size + 7 + 100 * static_cast<std::size_t>(index), index);
+        }
+        files["small.txt"] = "small (sample data)";
+        for (const auto& [name, content] : files) {
+            archive.add_file("old/" + name, content);
+        }
+    }
+
+    // Registers /vol/old, giving the archive `chunk_size` (0: as V1 did).
+    bool register_old(std::uint64_t chunk_size = test_chunk_size)
+    {
+        va::RegisterRequest request;
+        request.root = archive.root() / "old";
+        request.chunk_size = chunk_size;
+        const auto registered = register_root(request);
+        CHECK(registered.has_value());
+        archive_uuid = registered ? registered->archive_uuid : va::Uuid{};
+        return registered.has_value();
+    }
+
+    void copy_to_new_disk()
+    {
+        for (const auto& [name, content] : files) {
+            archive.add_file("new/" + name, content);
+        }
+    }
+
+    std::expected<va::RelocateOutcome, va::RelocateFailure> relocate(bool resume = false)
+    {
+        va::RelocateServices services{archive, *repository.files, *repository.writer, media, store,
+            repository.context.repo, repository.context.repository_uuid, host, processes};
+        va::RelocateRequest request{archive_uuid, archive.root() / "new", std::nullopt, resume};
+        return va::relocate_archive(services, request, cancel, progress);
+    }
+
+    // A revision's manifest, read to its end: its header, and its entries
+    // by path with their chunk hashes.
+    std::pair<va::ManifestHeader, std::map<std::string, va::Entry>> manifest(std::uint32_t revision)
+    {
+        std::pair<va::ManifestHeader, std::map<std::string, va::Entry>> result;
+        auto reader = va::ManifestReader::open(
+            *repository.files, va::manifest_path(repository.context.repo.manifests(), archive_uuid, revision));
+        CHECK(reader.has_value());
+        if (!reader) {
+            return result;
+        }
+        result.first = reader->header();
+        for (;;) {
+            auto next = reader->next();
+            CHECK(next.has_value());
+            if (!next || !*next) {
+                return result;
+            }
+            result.second[(**next).path.p] = **next;
+        }
+    }
+
+    // The chunk hashes of each entry the index holds of `revision`.
+    std::map<std::string, std::vector<std::string>> indexed_chunks(std::uint32_t revision)
+    {
+        std::map<std::string, std::vector<std::string>> chunks;
+        if (const auto rows = store.file_rows(archive_uuid, revision)) {
+            for (const auto& row : *rows) {
+                chunks[row.path.p] = row.chunks;
+            }
+        }
+        return chunks;
+    }
+
+    std::string merkle_root_recorded(std::uint32_t revision)
+    {
+        const auto recorded = store.revision(archive_uuid, revision);
+        return recorded && *recorded ? (*recorded)->merkle_root : std::string("-");
+    }
+};
+
+std::map<std::string, std::vector<std::string>> chunks_of(const std::map<std::string, va::Entry>& entries)
+{
+    std::map<std::string, std::vector<std::string>> chunks;
+    for (const auto& [path, entry] : entries) {
+        chunks[path] = entry.chunks;
+    }
+    return chunks;
+}
+
+// Relocation keeps the chunk size of the revision it verifies, and carries
+// the chunk hashes of every matched file into the new revision as it carries
+// their file hashes (decision 0004); its Merkle root, computed again, is the
+// one before. The index holds the new revision's chunk rows and root.
+void a_relocation_carries_chunk_lines()
+{
+    ChunkedRelocation fixture;
+    if (!fixture.register_old()) {
+        return;
+    }
+    fixture.copy_to_new_disk();
+    const auto relocated = fixture.relocate();
+    CHECK(relocated && relocated->revision == 2 && relocated->result == "PASSED");
+    if (!relocated) {
+        std::cerr << "  " << relocated.error().message << '\n';
+        return;
+    }
+    const auto [before_header, before] = fixture.manifest(1);
+    const auto [after_header, after] = fixture.manifest(2);
+    CHECK(before_header.chunk_size == test_chunk_size && after_header.chunk_size == test_chunk_size);
+    CHECK(after_header.counts.chunks == 12 && after_header.counts.chunks == before_header.counts.chunks);
+    CHECK(after.size() == 5 && chunks_of(after) == chunks_of(before));
+    CHECK(after.contains("big3.bin") && after.at("big3.bin").chunks.size() == 3);
+    CHECK(after_header.merkle_root == before_header.merkle_root && after_header.merkle_root.size() == 64);
+    CHECK(fixture.indexed_chunks(2) == chunks_of(after));
+    CHECK(fixture.merkle_root_recorded(2) == after_header.merkle_root);
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+}
+
+// R-104 with decision 0026: the files matched by an attempt before a resume
+// are not read again, and carry the chunk hashes of the revision verified as
+// the files matched by the resume do.
+void a_resumed_relocation_carries_chunk_lines_of_earlier_attempts()
+{
+    ChunkedRelocation fixture;
+    if (!fixture.register_old()) {
+        return;
+    }
+    fixture.copy_to_new_disk();
+    fixture.archive.node("new/big2.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.relocate();
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete);
+    fixture.archive.node("new/big2.bin").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(true);
+    CHECK(resumed && resumed->resumed && resumed->revision == 2);
+    if (!resumed) {
+        return;
+    }
+    CHECK(fixture.archive.bytes_read ==
+          fixture.files["big2.bin"].size() + fixture.files["big3.bin"].size() + fixture.files["small.txt"].size());
+    const auto [before_header, before] = fixture.manifest(1);
+    const auto [after_header, after] = fixture.manifest(2);
+    CHECK(after.size() == 5 && chunks_of(after) == chunks_of(before));
+    CHECK(after.contains("big0.bin") && after.at("big0.bin").chunks.size() == 3);
+    CHECK(after_header.merkle_root == before_header.merkle_root);
+    CHECK(fixture.indexed_chunks(2) == chunks_of(after));
+}
+
+// A revision without a chunk size (as V1 registered it) is relocated without
+// one: relocation compares whole files and adds no chunk hashes.
+void an_unchunked_revision_is_relocated_unchunked()
+{
+    ChunkedRelocation fixture;
+    if (!fixture.register_old(0)) {
+        return;
+    }
+    fixture.copy_to_new_disk();
+    const auto relocated = fixture.relocate();
+    CHECK(relocated && relocated->revision == 2);
+    const auto [header, entries] = fixture.manifest(2);
+    CHECK(header.chunk_size == 0 && header.counts.chunks == 0 && header.merkle_root.empty() && entries.size() == 5);
+    for (const auto& [path, entry] : entries) {
+        CHECK(entry.chunks.empty());
+    }
+    CHECK(fixture.merkle_root_recorded(2).empty());
+    CHECK(fixture.repository.query("SELECT COUNT(*) FROM chunks") == "0");
+}
+
+// Decision 0008: a link whose absolute target a driver translated is carried
+// with the new carrier's target, whose hash is its leaf: the Merkle root of
+// the new revision differs from the one before only there, its chunk lines
+// are the same (sample data, registered on Linux, relocated on Windows).
+void a_translated_link_changes_the_merkle_root()
+{
+    ChunkedRelocation fixture;
+    fixture.archive.add_link("old/data-link", "/mnt/sample/data");
+    fixture.host.os = "linux";
+    if (!fixture.register_old()) {
+        return;
+    }
+    fixture.host.os = "windows";
+    fixture.copy_to_new_disk();
+    fixture.archive.add_link("new/data-link", "Z:/sample/data");
+    const auto relocated = fixture.relocate();
+    CHECK(relocated && relocated->result == "PASSED_WITH_WARNINGS");
+    if (!relocated) {
+        return;
+    }
+    const auto [before_header, before] = fixture.manifest(1);
+    const auto [after_header, after] = fixture.manifest(2);
+    CHECK(after.contains("data-link") && after.at("data-link").b3 == va::blake3_hex("Z:/sample/data") &&
+          before.contains("data-link") && before.at("data-link").b3 == va::blake3_hex("/mnt/sample/data"));
+    CHECK(chunks_of(after) == chunks_of(before));
+    CHECK(after_header.merkle_root.size() == 64 && after_header.merkle_root != before_header.merkle_root);
+    CHECK(fixture.merkle_root_recorded(2) == after_header.merkle_root);
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED");
+}
+
 } // namespace
 
 void relocate_tests()
@@ -2677,4 +2895,8 @@ void relocate_tests()
     an_interrupted_relocation_made_for_an_older_revision_says_to_abandon_it();
     a_relocation_stopped_by_a_failure_after_an_import_says_to_abandon_it();
     a_relocation_overtaken_before_its_record_writes_nothing();
+    a_relocation_carries_chunk_lines();
+    a_resumed_relocation_carries_chunk_lines_of_earlier_attempts();
+    an_unchunked_revision_is_relocated_unchunked();
+    a_translated_link_changes_the_merkle_root();
 }
