@@ -1680,8 +1680,6 @@ void a_relocation_leaves_a_registration_its_saved_files()
     CHECK(relocated && relocated->revision == 3);
 }
 
-// Writes the repository through `inner`, except the files of a manifest,
-// which cannot be created (a sample failure, as a full disk would be).
 // Decision 0026, points 5 and 8: rows under the revision a relocation records
 // that no plan names are no registration's saved progress, as rows left by a
 // crash, or by a registration of an older version abandoned while it ran
@@ -1729,6 +1727,8 @@ void a_relocation_replaces_rows_that_no_plan_names()
     CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
 }
 
+// Writes the repository through `inner`, except the files of a manifest,
+// which cannot be created (a sample failure, as a full disk would be).
 class ManifestFailingWriter final : public va::IFileWriter {
 public:
     explicit ManifestFailingWriter(va::IFileWriter& inner) : inner_(inner) {}
