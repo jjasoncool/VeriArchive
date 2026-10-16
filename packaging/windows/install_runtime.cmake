@@ -16,6 +16,15 @@ if(POLICY CMP0207)
     cmake_policy(SET CMP0207 NEW) # normalise paths before matching exclude patterns
 endif()
 
+# cmake_install.cmake includes this script from the source tree, so a build
+# tree configured before VERIARCHIVE_RUNTIME_SCAN_DIR existed runs it without
+# that folder, and step 1 would make its scratch folder at the root of the
+# current drive. Building configures the tree again.
+if(NOT VERIARCHIVE_RUNTIME_SCAN_DIR)
+    message(FATAL_ERROR "VERIARCHIVE_RUNTIME_SCAN_DIR is not set: this build was configured by an older "
+        "version; run cmake --build (it configures again) before installing")
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/desktop_dlls.cmake")
 
 set(prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
