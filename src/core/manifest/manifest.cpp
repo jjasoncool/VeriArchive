@@ -81,6 +81,10 @@ ChunkLine chunk_of(const std::string& p, std::uint64_t size, std::uint64_t idx, 
 
 bool add_merkle_leaves(MerkleTreeBuilder& tree, const Entry& entry, std::uint64_t chunk_size)
 {
+    // Also a b3 that gives no leaf: a file's with chunk lines, a directory's.
+    if (!entry.b3.empty() && !is_hash_hex(entry.b3)) {
+        return false;
+    }
     if (has_chunk_lines(entry, chunk_size)) {
         if (!std::all_of(entry.chunks.begin(), entry.chunks.end(),
                 [](const std::string& chunk) { return is_hash_hex(chunk); })) {

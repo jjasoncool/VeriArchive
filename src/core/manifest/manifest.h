@@ -52,8 +52,9 @@ ChunkLine chunk_of(const std::string& p, std::uint64_t size, std::uint64_t idx, 
 // Adds the leaves `entry` gives the Merkle tree of a manifest with chunk lines
 // (§B6): the hashes of its chunks if it has chunk lines, else the b3 of a
 // file, link or stream; nothing for a directory or an entry without a content
-// hash. Adds nothing and returns false when one of them is not 64 lowercase
-// hex digits.
+// hash. Adds nothing and returns false when one of them, or the entry's b3
+// where it is no leaf, is not 64 lowercase hex digits: in a manifest with a
+// chunk size every b3 is (decision 0031).
 bool add_merkle_leaves(MerkleTreeBuilder& tree, const Entry& entry, std::uint64_t chunk_size);
 
 struct ManifestCounts {

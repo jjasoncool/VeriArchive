@@ -1107,8 +1107,14 @@ void chunked_manifests_are_read_strictly()
         "invalid chunk line: parse error"));
     CHECK(reading.malformed(reading.chunk_changed(9, [](va::ChunkLine& chunk) { chunk.b3 = uppercase(chunk.b3); }),
         "invalid chunk line: b3 is not 64 lowercase hex digits"));
+    // Every entry's b3, a Merkle leaf (a.txt's) or not (big.bin's, whose
+    // chunks are its leaves; a directory's).
+    const std::string entry_b3 = "invalid manifest entry: b3 is not 64 lowercase hex digits";
     CHECK(reading.malformed(reading.entry_changed(0, [](va::Entry& entry) { entry.b3 = uppercase(entry.b3); }),
-        "invalid manifest entry: b3 is not 64 lowercase hex digits"));
+        entry_b3));
+    CHECK(reading.malformed(reading.entry_changed(1, [](va::Entry& entry) { entry.b3 = uppercase(entry.b3); }),
+        entry_b3));
+    CHECK(reading.malformed(reading.entry_changed(3, [](va::Entry& entry) { entry.b3 = "zz"; }), entry_b3));
 
     // Content hashes that do not give the Merkle root.
     CHECK(reading.merkle_mismatch(
@@ -1244,6 +1250,16 @@ void writer_takes_chunk_hashes_only_where_they_belong()
     upper_file.b3 = uppercase(upper_file.b3);
     CHECK(refused(test_chunk_size, upper_file) == "b3 is not 64 lowercase hex digits");
     CHECK(refused(0, upper_file).empty()); // without a chunk size, as before
+    // Also a b3 that is no Merkle leaf: a file's with chunk lines, a directory's.
+    auto upper_big = big;
+    upper_big.b3 = uppercase(upper_big.b3);
+    CHECK(refused(test_chunk_size, upper_big) == "b3 is not 64 lowercase hex digits");
+    va::Entry hashed_directory;
+    hashed_directory.type = 'd';
+    hashed_directory.path.p = "dir";
+    hashed_directory.b3 = "zz";
+    CHECK(refused(test_chunk_size, hashed_directory) == "b3 is not 64 lowercase hex digits");
+    CHECK(refused(0, hashed_directory).empty());
     const std::string invalid = "chunk_size 1000 is not 0 or a multiple of 65536 up to 1073741824";
     CHECK(refused(1000, test::sample_file("a.txt", "hello", 1000)) == invalid);
     {
@@ -1300,6 +1316,22 @@ void merkle_leaves_of_each_entry()
     auto directory = test::sample_file("dir", "", test_chunk_size);
     directory.type = 'd';
     CHECK(!directory.b3.empty() && leaves(directory) == 0);
+
+    // An entry with a hash that is not 64 lowercase hex digits adds nothing,
+    // whether the hash is a leaf (a chunk's, a smaller file's) or not (the b3
+    // of a file with chunk lines, a directory's).
+    auto upper_chunk = big;
+    upper_chunk.chunks.back() = uppercase(upper_chunk.chunks.back());
+    auto upper_exact = exact;
+    upper_exact.b3 = uppercase(upper_exact.b3);
+    auto upper_big = big;
+    upper_big.b3 = uppercase(upper_big.b3);
+    auto upper_directory = directory;
+    upper_directory.b3 = uppercase(upper_directory.b3);
+    for (const auto& entry : {upper_chunk, upper_exact, upper_big, upper_directory}) {
+        va::MerkleTreeBuilder tree;
+        CHECK(!va::add_merkle_leaves(tree, entry, test_chunk_size) && tree.leaves() == 0);
+    }
 }
 
 // After a failure, the reader gives the same failure again rather than go on
