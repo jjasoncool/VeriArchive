@@ -115,8 +115,11 @@ constexpr CatalogEntry entries[] = {
     {"first-run:home", "第一次使用（個人資料夾）"},
     {"History intact: {} verification runs, hash chain verified.",
         "歷程完整：共 {} 次驗證執行，雜湊鏈已驗證。"},
-    {"V1 detects edited or deleted rows; signed checkpoints arrive in V1.1.",
-        "V1 可偵測被修改或刪除的紀錄；簽章檢查點將於 V1.1 提供。"},
+    // What a check of the chain tells in V1, from src/app/history.h; the GUI shows it too.
+    {"V1 detects a recorded run that was changed or removed, but not the removal of the newest runs, nor runs "
+        "changed with the chain computed again; V1.1's signed checkpoints are planned for that.",
+        "V1 可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除，也偵測不到修改後連雜湊鏈都"
+        "重新計算過的紀錄；V1.1 預計以簽章檢查點補上這一點。"},
     {"History BROKEN at run {}: {}", "歷程於執行 {} 處斷裂：{}"},
     {"previous row was deleted or edited (prev_hash does not link)",
         "前一筆紀錄已被刪除或修改（prev_hash 無法銜接）"},
@@ -419,10 +422,6 @@ constexpr CatalogEntry entries[] = {
     {"Note", "備註"},
     {"Never verified.", "從未驗證。"},
     {"Cannot check the history: {}", "無法檢查歷程：{}"},
-    {"History intact: {} runs, hash chain verified. (V1 detects edited or deleted rows; "
-        "signed checkpoints arrive in V1.1.)",
-        "歷程完整：{} 次執行，雜湊鏈已驗證。（V1 可偵測被修改或刪除的紀錄；"
-        "簽章檢查點將於 V1.1 提供。）"},
     {"Archive:", "封存："},
     {"Show runs", "顯示執行紀錄"},
     {"Check history chain", "檢查歷程鏈"},

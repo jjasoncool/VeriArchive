@@ -2,6 +2,7 @@
 // info shows the active RepositoryRoot, its uuid and how it was selected (R-85).
 #include "cli/commands.h"
 
+#include "app/history.h"
 #include "common/utf8.h"
 #include "core/engine/rebuild_index.h"
 #include "platform/file_system.h"
@@ -53,8 +54,7 @@ int verify_history(const Arguments& arguments, const Session& session)
         std::cout << text.format("History intact: {} verification runs, hash chain verified.",
                          check->runs)
                   << '\n'
-                  << text("V1 detects edited or deleted rows; signed checkpoints arrive in V1.1.")
-                  << '\n';
+                  << text(app::history_chain_limits) << '\n';
     } else {
         const auto& text = arguments.text;
         std::cout << text.format("History BROKEN at run {}: {}", *check->first_broken_run,

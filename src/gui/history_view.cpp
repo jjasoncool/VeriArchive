@@ -53,9 +53,8 @@ void check_chain(GuiState& state)
         });
     } else if (!check->first_broken_run) {
         show_chain_result(state, [runs = check->runs](const app::Text& text) {
-            return text.format("History intact: {} runs, hash chain verified. (V1 detects edited or deleted rows; "
-                               "signed checkpoints arrive in V1.1.)",
-                runs);
+            return text.format("History intact: {} verification runs, hash chain verified.", runs) + "\n" +
+                   text(app::history_chain_limits);
         });
     } else {
         show_chain_result(state,

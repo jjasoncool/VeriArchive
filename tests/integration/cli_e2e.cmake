@@ -437,8 +437,16 @@ if(NOT item_count EQUAL 3)
     message(FATAL_ERROR "expected 3 reported items, got ${item_count}:\n${last_output}")
 endif()
 
-# History is chained and intact (R-18); listing works.
+# History is chained and intact (R-18); listing works. The check says what
+# it cannot tell in V1, in either language.
 run_cli("0" repo verify-history)
+if(NOT last_output MATCHES "\nV1 可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除")
+    message(FATAL_ERROR "verify-history does not say what V1 cannot tell:\n${last_output}")
+endif()
+run_cli("0" --lang en repo verify-history)
+if(NOT last_output MATCHES "\nV1 detects a recorded run that was changed or removed, but not the removal of the newest runs, nor runs changed with the chain computed again; V1[.]1's signed checkpoints are planned for that[.]\n")
+    message(FATAL_ERROR "verify-history does not say what V1 cannot tell:\n${last_output}")
+endif()
 run_cli("0" archive list)
 # People see local time with its offset from UTC; --json keeps UTC.
 if(NOT last_output MATCHES "[0-9]+-[0-9]+-[0-9]+ [0-9]+:[0-9]+:[0-9]+（UTC")

@@ -1,4 +1,5 @@
 #include "test_support.h"
+#include "app/history.h"
 #include "app/text.h"
 
 #include <array>
@@ -224,6 +225,12 @@ void translation_tests()
     // the same way.
     CHECK(chinese("error: 12 entries carry portability warnings") ==
           "錯誤：12 entries carry portability warnings");
+
+    // What a check of the history chain tells in V1 (app/history.h), which
+    // the command line and the GUI show after a chain that holds.
+    CHECK(chinese(va::app::history_chain_limits) ==
+          "V1 可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除，也偵測不到修改後連雜湊鏈都"
+          "重新計算過的紀錄；V1.1 預計以簽章檢查點補上這一點。");
 
     // FormatOnly templates are used through format and never match sentences.
     CHECK(chinese.format("{} archives", 3) == "3 個封存");

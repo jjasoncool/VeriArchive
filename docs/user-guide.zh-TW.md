@@ -272,7 +272,7 @@ veriarchive-cli archive compare <uuid> <uuid>    # 兩個封存的內容是否�
 
 中斷的 `archive relocate` 也會列在這裡，是一次「未完成」的完整驗證，版次是它拿來和新載體比對的版次，並標示「中斷的搬移嘗試」：它讀取的是新載體，不是封存原本的載體。搬移尚未完成時，請以 `archive relocate <uuid> <根目錄> --resume` 繼續；`verify --resume` 不會繼續它，並會這樣告訴你。搬移完成、記錄封存下一個版次的那次完整驗證，會標示「從 r1 搬移」，r1 是它拿來和新載體比對的版次。圖形介面把這些標示放在「備註」欄，只有含這類執行紀錄的封存才會出現這一欄；`history --json` 則為每次執行提供 `relocation`：null，或搬移的 `run_id`、`from_revision` 與 `interrupted_attempt`。
 
-歷程是用雜湊串成的鏈，被修改或刪除的紀錄都會被發現：
+歷程是用雜湊串成的鏈。在 V1，檢查歷程鏈可以發現已記錄的執行紀錄被修改或刪除，但發現不了最新幾筆執行紀錄被刪除，也發現不了修改後連雜湊鏈都重新計算過的紀錄；V1.1 預計以簽章檢查點補上這一點。檢查方式：
 
 - 圖形介面：按「檢查歷程鏈」
 - 命令列：`veriarchive-cli repo verify-history`

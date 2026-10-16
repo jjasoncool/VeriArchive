@@ -9,7 +9,9 @@ creates backups. Windows and Linux, one codebase.
 - **Verify** later: the media is identified (filesystem and device identity), every registered
   byte is re-read from the disk (bypassing the cache) and compared with the baseline.
 - Results always carry their mode and date: "Last FULL verify: PASSED on …" — never a bare status.
-- Verification history is hash-chained, so edited or deleted history rows are detected.
+- Verification history is hash-chained. In V1, checking the chain (`repo verify-history`) detects
+  a recorded run that was changed or removed, but not the removal of the newest runs, nor runs
+  changed with the chain computed again; V1.1's signed checkpoints are planned for that.
 
 V1 detects accidental corruption and unintended change. Tamper evidence (signed manifests) begins
 in V1.1.

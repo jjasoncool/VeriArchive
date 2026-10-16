@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "common/time.h"
+#include "core/hash/hashers.h"
 #include "test_repository.h"
 
 #include <chrono>
@@ -62,7 +63,8 @@ void archives_revisions_and_labels()
     CHECK(store->insert_evidence({archive.archive_uuid, "", "2026-10-08T00:00:00Z", "{}", "MATCH", ""}));
 }
 
-// R-18 / R-90: edited or deleted history rows are detected.
+// R-18 / R-90: an edited run is detected, and so is a deleted run that a later
+// run follows.
 void history_chain_detects_tampering()
 {
     TestRepository repository;
@@ -89,6 +91,37 @@ void history_chain_detects_tampering()
     repository.execute("DELETE FROM verify_runs WHERE run_id = 'run-2'");
     check = store->check_history(repository_uuid);
     CHECK(check && check->first_broken_run == std::optional<std::string>("run-3"));
+}
+
+// What the chain cannot tell in V1, as `repo verify-history`, the GUI and the
+// guides say (app::history_chain_limits): the newest run removed leaves a
+// chain that holds, and so does a run changed by someone who computes its
+// hash again (and every later run's); V1.1's signed checkpoints (R-76) are
+// planned for that. Sample runs.
+void history_chain_limits_in_v1()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const auto& repository_uuid = repository.context.repository_uuid;
+    CHECK(store.append_verify_run(run("run-1", "PASSED"), repository_uuid));
+    CHECK(store.append_verify_run(run("run-2", "FAILED"), repository_uuid));
+    repository.execute("DELETE FROM verify_runs WHERE run_id = 'run-2'");
+    auto check = store.check_history(repository_uuid);
+    CHECK(check && check->runs == 1 && !check->first_broken_run);
+
+    auto failed = store.append_verify_run(run("run-3", "FAILED"), repository_uuid);
+    CHECK(failed.has_value());
+    if (!failed) {
+        return;
+    }
+    failed->result = "PASSED";
+    const auto rehashed = va::blake3_hex(failed->prev_hash + va::verify_run_hash_input(*failed));
+    repository.execute(
+        ("UPDATE verify_runs SET result = 'PASSED', row_hash = '" + rehashed + "' WHERE run_id = 'run-3'").c_str());
+    check = store.check_history(repository_uuid);
+    CHECK(check && check->runs == 2 && !check->first_broken_run);
+    const auto runs = store.verify_runs("28ff645e-a220-4aac-ae0b-6c328bf1a2b3");
+    CHECK(runs && runs->size() == 2 && runs->back().result == "PASSED");
 }
 
 void items_and_progress()
@@ -705,6 +738,7 @@ void archive_store_tests()
 {
     archives_revisions_and_labels();
     history_chain_detects_tampering();
+    history_chain_limits_in_v1();
     items_and_progress();
     pending_registrations_with_checkpoints();
     unfinished_verifications_with_checkpoints();
