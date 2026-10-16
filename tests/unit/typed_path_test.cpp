@@ -34,6 +34,15 @@ void typed_roots_name_their_folders()
         CHECK(root(R"(\\server\share\dir\)") == R"(\\server\share\dir)");
         CHECK(root("//server/share/dir/") == "//server/share/dir");
         CHECK(root(R"(\\?\C:\Photos\)") == R"(\\?\C:\Photos)");
+        // A volume's GUID path is the root folder of its volume, as "C:\" is
+        // (decision 0029, point 3): its separator stays; a folder below it
+        // drops its own. (Sample GUIDs.)
+        CHECK(root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)") ==
+              R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)");
+        CHECK(root(R"(\\?\volume{c0ffee00-0000-4000-8000-000000000001}\\)") ==
+              R"(\\?\volume{c0ffee00-0000-4000-8000-000000000001}\)");
+        CHECK(root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos\)") ==
+              R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\Photos)");
     } else {
         CHECK(root("/vol/photos/./2026/../2025/") == "/vol/photos/2025");
         CHECK(root("/vol/photos//") == "/vol/photos");
@@ -69,6 +78,7 @@ void roots_on_shares_are_refused()
     if (std::filesystem::path::preferred_separator != '\\') {
         CHECK(!va::app::root_refusal(va::app::typed_root(R"(\\?\K:\SAMPLE)")));
         CHECK(!va::app::root_refusal(va::app::typed_root(R"(\\sample-server\sample-share)")));
+        CHECK(!va::app::root_refusal(va::app::typed_root(R"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001}\)")));
         return;
     }
     const auto share = va::app::root_refusal(va::app::typed_root(R"(\\sample-server\sample-share\photos)"));
@@ -86,6 +96,20 @@ void roots_on_shares_are_refused()
     CHECK(prefixed && chinese(*prefixed) == R"(封存根目錄前面請不要加上 \\?\（例如寫成 D:\Photos）)");
     const auto dotted = va::app::root_refusal(va::app::typed_root(R"(\\.\)" + va::path_to_utf8(local)));
     CHECK(dotted && *dotted == R"(write the archive root without \\.\ in front (for example D:\Photos))");
+
+    // Decision 0029, point 3: a volume's GUID path in the \\?\ form is taken,
+    // as is a folder below it (sample GUIDs, judged from the text alone). One
+    // that names a volume's GUID otherwise, in the \\.\ form or with its GUID
+    // cut short, says how to write it, in either language.
+    CHECK(!va::app::root_refusal(va::app::typed_root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)")));
+    CHECK(!va::app::root_refusal(va::app::typed_root(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE)")));
+    const auto guid_words = R"(write a volume's GUID path exactly as mountvol lists it, with \\?\ in front)";
+    for (const auto* written : {R"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE)",
+             R"(\\?\VOLUME{c0ffee00-0000-4000-8000-00000000001}\SAMPLE)"}) {
+        const auto guid = va::app::root_refusal(va::app::typed_root(written));
+        CHECK(guid && *guid == guid_words);
+        CHECK(guid && chinese(*guid) == R"(磁碟區的 GUID 路徑請完全照 mountvol 列出的樣子寫，前面加上 \\?\)");
+    }
 }
 
 // The root of `register` and `archive relocate`, and the root that Resume in

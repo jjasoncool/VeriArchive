@@ -170,6 +170,8 @@ constexpr CatalogEntry entries[] = {
         "封存根目錄位於網路共用資料夾上；VeriArchive 只註冊和驗證這台電腦所連接的磁碟區上的資料夾"},
     {"write the archive root without {} in front (for example D:\\Photos)",
         "封存根目錄前面請不要加上 {}（例如寫成 D:\\Photos）"},
+    {"write a volume's GUID path exactly as mountvol lists it, with \\\\?\\ in front",
+        "磁碟區的 GUID 路徑請完全照 mountvol 列出的樣子寫，前面加上 \\\\?\\"},
     // src/cli/verify_commands.cpp
     {"FULL VERIFY {}  {} ({}) revision {}", "完整驗證 {}  {}（{}）版次 {}"},
     {"identity: {}", "媒體身分：{}", Match::Cause},

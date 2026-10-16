@@ -2,6 +2,7 @@
 
 #include "engine_fixture.h"
 
+#include "app/typed_path.h"
 #include "common/time.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
@@ -443,6 +444,45 @@ void archive_found_by_uuid_is_read_at_its_folder()
             by_uuid.archive_uuid = registered->archive_uuid;
             const auto verified = drive.verify(by_uuid);
             CHECK(verified && verified->result == "PASSED" && va::path_to_utf8(verified->root) == R"(K:\)");
+        }
+    }
+}
+
+// Decision 0029, point 3: an archive on a volume that has no drive letter or
+// folder path, whose mount point Windows gives as its GUID path, registered
+// through that path as the user interfaces take it, and verified by its uuid.
+// The root VeriArchive finds there itself, the volume's root folder with its
+// separator or a folder below it, is read, recorded with the run while it
+// works, and never refused. Windows only: elsewhere no volume is named so.
+// (A sample GUID, sample files.)
+void an_archive_on_a_volume_known_by_its_guid_path_verifies_by_uuid()
+{
+    if (std::filesystem::path::preferred_separator != '\\') {
+        return;
+    }
+    const std::filesystem::path volume_root = R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000029}\)";
+    for (const std::string folder : {"", "SAMPLE"}) {
+        EngineFixture fixture(volume_root);
+        fixture.archive.add_file(folder.empty() ? "a.txt" : folder + "/a.txt", "a (sample data)");
+        const auto root = folder.empty() ? volume_root : volume_root / folder;
+        const auto typed = va::app::typed_root(va::path_to_utf8(root) + (folder.empty() ? "" : R"(\)"));
+        CHECK(typed == root && !va::app::root_refusal(typed));
+        const auto registered = fixture.register_root(typed);
+        CHECK(registered.has_value());
+        if (!registered) {
+            continue;
+        }
+        RunWatcher watcher(fixture.store);
+        va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        va::VerifyRequest request;
+        request.archive_uuid = registered->archive_uuid;
+        const auto verified = va::verify_full(services, request, fixture.cancel, watcher);
+        CHECK(verified && verified->result == "PASSED" && verified->root == root);
+        CHECK(verified && !va::app::root_refusal(verified->root));
+        CHECK(!watcher.records_seen.empty());
+        for (const auto& record : watcher.records_seen) {
+            CHECK(record.value("root", std::string{}) == va::path_to_utf8(root));
         }
     }
 }
@@ -1469,6 +1509,7 @@ void verify_engine_tests()
     resume_refused_after_new_revision();
     run_record_says_where_and_how_much();
     archive_found_by_uuid_is_read_at_its_folder();
+    an_archive_on_a_volume_known_by_its_guid_path_verifies_by_uuid();
     an_index_that_differs_from_its_manifest_is_never_taken();
     a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root();
     a_known_archive_whose_manifest_cannot_be_used_fails_unread();

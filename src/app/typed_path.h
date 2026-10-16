@@ -20,16 +20,22 @@ std::filesystem::path typed_path(std::string_view text);
 // The folder or volume root typed by the operator (register, verify --full,
 // archive relocate; the Register and Verify views): a typed_path without the
 // separators it ends with ("D:\Photos\" is the folder "D:\Photos", while
-// "D:\" stays), through a drive letter made with subst resolved to the folder
-// that letter stands for, whose volume can be identified (decision 0027).
+// "D:\" and a volume's GUID path "\\?\Volume{...}\" stay), through a drive
+// letter made with subst resolved to the folder that letter stands for, whose
+// volume can be identified (decision 0027).
 std::filesystem::path typed_root(std::string_view text);
 
 // Why a root made by typed_root is refused before anything of it is read
 // (decision 0029), in English for Text; nothing when it is not. VeriArchive
 // registers and verifies folders on volumes attached to this computer: a root
 // on a network share is refused, and so is one written in the \\?\ or the
-// \\.\ form, whose message names the prefix as it was typed. Each user
-// interface asks this where it takes a root, before its volume is looked up.
+// \\.\ form, whose message names the prefix as it was typed, but for a
+// volume's GUID path in the \\?\ form ("\\?\Volume{...}\Photos"), the only
+// name of a volume that has no drive letter or folder path, which is taken.
+// One that names a volume's GUID otherwise ("\\.\Volume{...}\", a GUID cut
+// short) is refused with words of its own. Each user interface asks this
+// where the operator gives a root, before its volume is looked up; never of a
+// root that VeriArchive finds itself (an archive verified by its uuid).
 std::optional<std::string> root_refusal(const std::filesystem::path& root);
 
 // Why the root of `register` or `archive relocate`, made by typed_root from

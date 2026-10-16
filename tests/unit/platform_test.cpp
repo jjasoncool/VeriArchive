@@ -1,5 +1,7 @@
 #include "test_support.h"
 
+#include "app/typed_path.h"
+#include "common/utf8.h"
 #include "core/engine/registration_attempt.h"
 #include "platform/linux/mountinfo.h"
 #include "platform/media_enumerator.h"
@@ -7,9 +9,14 @@
 #include "platform/process_table.h"
 #include "platform/windows/long_path.h"
 #include "platform/windows/root_kind.h"
+#include "platform/windows/volume_list.h"
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -125,8 +132,107 @@ void windows_roots_on_shares_are_told()
     CHECK(kind(LR"(\\?\K:\)") == RootKind::DevicePath);
     CHECK(kind(L"//?/K:/SAMPLE") == RootKind::DevicePath);
     CHECK(kind(LR"(\\.\K:\SAMPLE)") == RootKind::DevicePath);
-    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE)") == RootKind::DevicePath);
     CHECK(kind(LR"(\\?\UNCLE\SAMPLE)") == RootKind::DevicePath); // a name that only starts with UNC
+}
+
+// Decision 0029, point 3: a volume's GUID path in the \\?\ form, as mountvol
+// lists it, the only name of a volume that has no drive letter or folder
+// path, is taken, also for a folder below it, "Volume" and the GUID in any
+// case, and with either separator; nothing is asked about a drive for it.
+// The \\.\ form of it, a GUID cut short or longer, and a name that only
+// starts like one stay refused for their form, as the \\?\ form of a drive
+// letter does. (Sample GUIDs.) Plain C++, so it is tested on every OS
+// although only Windows uses it.
+void windows_volume_guid_paths_are_taken()
+{
+    using va::platform::RootKind;
+    std::vector<std::wstring> asked;
+    const auto kind = [&asked](std::wstring_view root) {
+        return va::platform::windows::root_kind(root, [&asked](std::wstring_view drive) {
+            asked.emplace_back(drive);
+            return drive == L"Z:";
+        });
+    };
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)") == RootKind::Usable);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE\photos)") == RootKind::Usable);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001})") == RootKind::Usable);
+    CHECK(kind(LR"(\\?\volume{C0FFEE00-0000-4000-8000-0000000000AB}\SAMPLE)") == RootKind::Usable);
+    CHECK(kind(L"//?/Volume{c0ffee00-0000-4000-8000-000000000001}/SAMPLE") == RootKind::Usable);
+    CHECK(asked.empty());
+    CHECK(kind(LR"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-00000000001}\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-0000000000012}\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00x0000-4000-8000-000000000001}\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-00000000000g}\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volumes{c0ffee00-0000-4000-8000-000000000001}\SAMPLE)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001)") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume{})") == RootKind::DevicePath);
+    CHECK(kind(LR"(\\?\Volume)") == RootKind::DevicePath);
+    // A share behind the form stays a share, and so does a network path whose
+    // server is named like a volume.
+    CHECK(kind(LR"(\\?\UNC\Volume{c0ffee00-0000-4000-8000-000000000001}\share)") == RootKind::NetworkShare);
+    CHECK(kind(LR"(\\Volume{c0ffee00-0000-4000-8000-000000000001}\share)") == RootKind::NetworkShare);
+}
+
+// Decision 0029, point 3: every volume that Windows names is listed, one with
+// a drive letter or folder path under the first of them, one with neither
+// under its GUID path, its only name, so that verification by archive uuid
+// finds an archive there too. (Sample names.) Plain C++, so it is tested on
+// every OS although only Windows uses it.
+void volumes_without_a_mount_point_are_listed_by_their_guid_path()
+{
+    using va::platform::windows::volumes_to_list;
+    const std::wstring lettered = LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)";
+    const std::wstring folder = LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000002}\)";
+    const std::wstring unnamed = LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000003}\)";
+    const auto listed = volumes_to_list({{lettered, {LR"(K:\)", LR"(C:\mnt\SAMPLE\)"}},
+        {folder, {LR"(C:\mnt\SAMPLE-2\)"}}, {unnamed, {}}});
+    using Listed = std::pair<std::wstring, std::wstring>;
+    CHECK((listed == std::vector<Listed>{{lettered, LR"(K:\)"}, {folder, LR"(C:\mnt\SAMPLE-2\)"}, {unnamed, unnamed}}));
+    CHECK(volumes_to_list({}).empty());
+}
+
+// Decision 0029, point 3, with this computer's own volumes: the volume that
+// holds the temporary folder, named by its GUID path, which Windows gives
+// for it (a folder below it, its root with or without its separator), is a
+// folder, where the C++ library cannot tell it; a file and a missing folder
+// below it are not. A folder through the volume's own mount point is one too.
+// Only reads. (Sample names, in a folder of their own in the temporary folder.)
+void volume_guid_paths_name_folders()
+{
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto folder = std::filesystem::temp_directory_path() / ("va-SAMPLE-guid-" + std::to_string(stamp));
+    std::filesystem::create_directories(folder);
+    std::ofstream(folder / "SAMPLE.txt") << "sample data\n";
+    CHECK(va::platform::is_directory(folder));
+    CHECK(!va::platform::is_directory(folder / "SAMPLE.txt"));
+    CHECK(!va::platform::is_directory(folder / "SAMPLE-missing"));
+    const auto volume = va::platform::make_media_enumerator()->volume_for_path(folder);
+    CHECK(volume.has_value());
+    if (std::filesystem::path::preferred_separator == '\\' && volume && !volume->volume_guid.empty()) {
+        // "C:\" and the folder below it, as "\\?\Volume{...}\" and the same folder below that.
+        const auto below = va::path_to_utf8(folder.lexically_relative(volume->mount_point));
+        const auto guid_root = R"(\\?\Volume)" + volume->volume_guid + R"(\)";
+        CHECK(va::app::root_refusal(va::path_from_utf8(guid_root + below)) == std::nullopt);
+        // Taken as the root of a registration or relocation: the volume's root
+        // folder, as typed with its separator or without, and the folder below it.
+        CHECK(va::app::root_not_taken(va::app::typed_root(guid_root), guid_root) == std::nullopt);
+        CHECK(va::app::root_not_taken(va::app::typed_root(guid_root.substr(0, guid_root.size() - 1)), "") ==
+              std::nullopt);
+        CHECK(va::app::root_not_taken(va::app::typed_root(guid_root + below), "") == std::nullopt);
+        CHECK(va::platform::is_directory(va::path_from_utf8(guid_root)));
+        CHECK(va::platform::is_directory(va::path_from_utf8(guid_root.substr(0, guid_root.size() - 1))));
+        CHECK(va::platform::is_directory(va::path_from_utf8(guid_root + below)));
+        CHECK(!va::platform::is_directory(va::path_from_utf8(guid_root + below + R"(\SAMPLE.txt)")));
+        CHECK(!va::platform::is_directory(va::path_from_utf8(guid_root + below + R"(\SAMPLE-missing)")));
+        // The volume itself, by that path.
+        const auto through_guid = va::platform::make_media_enumerator()->volume_for_path(
+            va::path_from_utf8(guid_root + below));
+        CHECK(through_guid && through_guid->filesystem_uuid == volume->filesystem_uuid);
+    }
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
 }
 
 // Decision 0029: on Linux a root on a network filesystem, told by the type of
@@ -315,6 +421,9 @@ void platform_tests()
     mountinfo_is_parsed();
     long_paths_keep_their_drive_or_share();
     windows_roots_on_shares_are_told();
+    windows_volume_guid_paths_are_taken();
+    volumes_without_a_mount_point_are_listed_by_their_guid_path();
+    volume_guid_paths_name_folders();
     linux_roots_on_network_filesystems_are_told();
     linux_network_filesystems_are_told_by_statfs_and_mounts();
     network_types_are_recognised();

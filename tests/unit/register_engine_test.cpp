@@ -319,6 +319,10 @@ void trailing_separators_leave_the_folder()
     CHECK(folder("photos/") == "photos");
     CHECK(folder("/") == "/");
     CHECK(folder("").empty());
+    // A volume's GUID path (decision 0029, point 3) is the root folder of its
+    // volume, as "D:\" is: its own separator stays, in the \\?\ form only.
+    // (Sample GUIDs.)
+    const std::string guid_root = R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)";
     if (std::filesystem::path::preferred_separator == '\\') {
         CHECK(folder(R"(D:\Photos\)") == R"(D:\Photos)");
         CHECK(folder("D:/Photos/") == "D:/Photos");
@@ -326,8 +330,16 @@ void trailing_separators_leave_the_folder()
         CHECK(folder("D:/") == "D:/");
         CHECK(folder("D:") == "D:");
         CHECK(folder(R"(\\server\share\dir\)") == R"(\\server\share\dir)");
+        CHECK(folder(guid_root.c_str()) == guid_root);
+        CHECK(folder((guid_root + R"(\)").c_str()) == guid_root);
+        CHECK(folder(R"(\\?\VOLUME{c0ffee00-0000-4000-8000-000000000001}\)") ==
+              R"(\\?\VOLUME{c0ffee00-0000-4000-8000-000000000001}\)");
+        CHECK(folder((guid_root + R"(Photos\)").c_str()) == guid_root + "Photos");
+        CHECK(folder(R"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001}\)") ==
+              R"(\\.\Volume{c0ffee00-0000-4000-8000-000000000001})");
     } else {
         CHECK(folder(R"(/vol/name\)") == R"(/vol/name\)");
+        CHECK(folder(guid_root.c_str()) == guid_root);  // a name, as '\' separates nothing
     }
 }
 

@@ -23,6 +23,27 @@ bool starts_with_two_separators(const std::filesystem::path& path)
     return false;
 }
 
+// Whether `text`, a root refused for being written in the \\?\ or \\.\ form,
+// names a volume by its GUID behind its four-character prefix ("Volume{", in
+// any case): a volume's GUID path written otherwise than in the \\?\ form
+// that mountvol lists, which is taken (decision 0029, point 3), as with
+// "\\.\" in front or with its GUID cut short.
+bool names_a_volume_guid(std::string_view text)
+{
+    constexpr std::string_view volume = "volume{";
+    if (text.size() < 4 + volume.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < volume.size(); ++index) {
+        const char character = text[4 + index];
+        const char lower = character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
+        if (lower != volume[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 std::filesystem::path typed_path(std::string_view text)
@@ -50,10 +71,14 @@ std::optional<std::string> root_refusal(const std::filesystem::path& root)
     case platform::RootKind::NetworkShare:
         return "the archive root is on a network share; VeriArchive registers and verifies folders on volumes "
                "attached to this computer";
-    case platform::RootKind::DevicePath:
+    case platform::RootKind::DevicePath: {
+        const auto text = path_to_utf8(root);
+        if (names_a_volume_guid(text)) {
+            return R"(write a volume's GUID path exactly as mountvol lists it, with \\?\ in front)";
+        }
         // The four characters of the prefix as typed: "\\?\", "\\.\", "//?/".
-        return "write the archive root without " + path_to_utf8(root).substr(0, 4) +
-               " in front (for example D:\\Photos)";
+        return "write the archive root without " + text.substr(0, 4) + " in front (for example D:\\Photos)";
+    }
     case platform::RootKind::Usable:
         break;
     }
@@ -65,9 +90,9 @@ std::optional<std::string> root_not_taken(const std::filesystem::path& root, std
     if (auto refusal = root_refusal(root)) {
         return refusal;
     }
-    // The error_code overload: a root that cannot be checked is reported, not thrown.
-    std::error_code error;
-    if (!std::filesystem::is_directory(root, error)) {
+    // Asked of the platform: the C++ library cannot tell that a volume's GUID
+    // path is a folder (decision 0029, point 3).
+    if (!platform::is_directory(root)) {
         return "not a directory: " + std::string(typed);
     }
     return std::nullopt;

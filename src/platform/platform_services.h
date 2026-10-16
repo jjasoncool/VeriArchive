@@ -31,14 +31,23 @@ enum class RootKind {
                    // ("\\server\share\..."), or a drive letter that Windows reports as a network drive; on
                    // Linux a network filesystem (NFS, SMB, sshfs, ...)
     DevicePath,    // written in the \\?\ or \\.\ form (Windows only): "\\?\D:\Photos", which the volume lookup
-                   // and the C++ library misread, and also a volume's GUID path ("\\?\Volume{...}\Photos"),
-                   // which they do not (decision 0029, point 3)
+                   // and the C++ library misread. Not a volume's GUID path in the \\?\ form
+                   // ("\\?\Volume{...}\Photos"), the only name of a volume that has no drive letter or
+                   // folder path, which they read as a root on its volume: it is Usable (decision 0029, point 3)
 };
 // Judged on Windows from the root's text and the type of its drive letter (a
 // network path from its text alone); on Linux from the filesystem type that
 // statfs and /proc/self/mountinfo give for it. A root whose filesystem cannot
 // be told is Usable: its volume lookup then says what is wrong.
 RootKind archive_root_kind(const std::filesystem::path& root);
+
+// Whether `path` is a folder, as the root of a registration or relocation
+// must be (app::root_not_taken). On Windows asked of GetFileAttributesW in
+// the \\?\ form (R-23), which takes a volume's GUID path ("\\?\Volume{...}\")
+// as the volume's root folder, where std::filesystem::is_directory of the C++
+// library fails; such a path written without its separator names the volume
+// itself, and is asked again with it. On Linux std::filesystem::is_directory.
+bool is_directory(const std::filesystem::path& path);
 
 // Recorded in manifests and history rows (created_by).
 std::string os_name();   // "windows" or "linux"

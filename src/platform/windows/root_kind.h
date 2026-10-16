@@ -1,12 +1,13 @@
 #pragma once
 // Which archive roots on Windows are refused before anything of them is read
 // (decision 0029): one on a network share, which is no volume of this
-// computer, and one written in the \\?\ or \\.\ form. Windows reports no
-// volume for a share (GetVolumeNameForVolumeMountPointW fails with Win32
-// error 87), and the C++ library reads the drive letter inside "\\?\D:\Photos"
-// as a root of its own, so the root is not found on its volume. Plain C++
-// without Windows headers, so it is tested on every OS, like the drive
-// letters made with subst.
+// computer, and one written in the \\?\ or \\.\ form, but for a volume's GUID
+// path ("\\?\Volume{...}\"), the only name of a volume that has no drive
+// letter or folder path. Windows reports no volume for a share
+// (GetVolumeNameForVolumeMountPointW fails with Win32 error 87), and the C++
+// library reads the drive letter inside "\\?\D:\Photos" as a root of its own,
+// so the root is not found on its volume. Plain C++ without Windows headers,
+// so it is tested on every OS, like the drive letters made with subst.
 #include "platform/platform_services.h"
 
 #include <functional>
@@ -23,8 +24,11 @@ using NetworkDriveQuery = std::function<bool(std::wstring_view drive)>;
 //  - a network path, "\\server\share\..." or "//server/share", is NetworkShare;
 //  - a path in the \\?\ or \\.\ form is NetworkShare when what follows names a
 //    share ("\\?\UNC\server\share", in any case) or a network drive
-//    ("\\?\Z:\..."), otherwise DevicePath ("\\?\D:\Photos",
-//    "\\?\Volume{...}\", "\\.\D:\Photos");
+//    ("\\?\Z:\..."); Usable when it is a volume's GUID path in the \\?\ form,
+//    as mountvol lists it ("\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\",
+//    "Volume" in any case, followed by a separator or nothing), or a folder
+//    below one; otherwise DevicePath ("\\?\D:\Photos", "\\.\D:\Photos",
+//    "\\.\Volume{...}\", a GUID cut short);
 //  - a path from the root of a drive letter is NetworkShare when that letter
 //    is a network drive;
 //  - anything else is Usable.

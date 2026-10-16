@@ -72,11 +72,12 @@ std::expected<std::string, IoError> root_subpath_of(
     const std::filesystem::path& root, const VolumeInfo& volume);
 
 // `root` without the separators it ends with, except a root's own: "D:\Photos\"
-// and "/mnt/photos/" are the folders "D:\Photos" and "/mnt/photos", while "D:\"
-// and "/" stay as they are. Shells complete a folder name with a separator, so
-// the user interfaces make every root they give the engines this way: one
-// folder then has one root_hint and one root in plans and runs. Plans are
-// found by their root compared this way too.
+// and "/mnt/photos/" are the folders "D:\Photos" and "/mnt/photos", while "D:\",
+// "/" and a volume's GUID path "\\?\Volume{...}\" (decision 0029) stay as they
+// are. Shells complete a folder name with a separator, so the user interfaces
+// make every root they give the engines this way: one folder then has one
+// root_hint and one root in plans and runs. Plans are found by their root
+// compared this way too.
 std::filesystem::path without_trailing_separators(std::filesystem::path root);
 
 // Decision 0001: roots on one volume overlap when one equals or contains the

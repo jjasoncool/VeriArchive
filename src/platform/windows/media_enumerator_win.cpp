@@ -2,6 +2,7 @@
 // volume handles are opened with desired access 0, which is enough for the
 // identification IOCTLs used here.
 #include "platform/media_enumerator.h"
+#include "platform/windows/volume_list.h"
 #include "platform/windows/win_util.h"
 
 #include "common/utf8.h"
@@ -255,17 +256,19 @@ public:
         if (search == INVALID_HANDLE_VALUE) {
             return std::unexpected(error_from_win32(GetLastError(), "FindFirstVolumeW"));
         }
+        std::vector<windows::VolumeNames> found;
         do {
             const std::wstring volume_name(name);
-            const auto mounts = mount_points_of(volume_name);
-            if (mounts.empty()) {
-                continue; // not mounted anywhere, so it cannot hold an archive root
-            }
-            if (auto volume = describe_volume(volume_name, mounts.front())) {
-                result.push_back(std::move(*volume));
-            }
+            found.push_back({volume_name, mount_points_of(volume_name)});
         } while (FindNextVolumeW(search, name, MAX_PATH + 1));
         FindVolumeClose(search);
+        // Also a volume that has no drive letter or folder path, under its
+        // GUID path (decision 0029, point 3).
+        for (const auto& [volume_name, mount_point] : windows::volumes_to_list(found)) {
+            if (auto volume = describe_volume(volume_name, mount_point)) {
+                result.push_back(std::move(*volume));
+            }
+        }
         return result;
     }
 

@@ -1,5 +1,6 @@
 #include "platform/platform_services.h"
 #include "common/utf8.h"
+#include "platform/windows/long_path.h"
 #include "platform/windows/root_kind.h"
 #include "platform/windows/subst_drive.h"
 #define WIN32_LEAN_AND_MEAN
@@ -135,6 +136,18 @@ RootKind archive_root_kind(const std::filesystem::path& root)
         const std::wstring drive_root = std::wstring(drive) + L"\\";
         return GetDriveTypeW(drive_root.c_str()) == DRIVE_REMOTE;
     });
+}
+
+bool is_directory(const std::filesystem::path& path)
+{
+    auto name = windows::long_path(path.native());
+    auto attributes = GetFileAttributesW(name.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES && !name.empty() && name.back() != L'\\') {
+        // "\\?\Volume{...}" names the volume; its root folder is "\\?\Volume{...}\".
+        name += L'\\';
+        attributes = GetFileAttributesW(name.c_str());
+    }
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 bool process_is_elevated()

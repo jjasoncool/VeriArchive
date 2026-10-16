@@ -2,7 +2,10 @@
 
 #include "common/archive_path.h"
 #include "common/unicode.h"
+#include "common/utf8.h"
 #include "core/engine/recorded_manifest.h"
+
+#include <string_view>
 
 namespace va {
 
@@ -110,12 +113,47 @@ std::expected<std::string, IoError> root_subpath_of(
     return archive_path->p;
 }
 
+namespace {
+
+// Whether `path` is a volume's name by its GUID, "\\?\Volume{...}" ("Volume"
+// in any case), without the separator that makes it the volume's root folder
+// (decision 0029, point 3). Told from its text: the C++ library reads such a
+// path as one below "\" of the current drive.
+bool names_a_volume_by_its_guid(const std::filesystem::path& path)
+{
+    const auto text = path_to_utf8(path);
+    constexpr std::string_view prefix = R"(\\?\)";
+    constexpr std::string_view volume = "volume{";
+    if (!text.starts_with(prefix) || !text.ends_with('}') || text.size() <= prefix.size() + volume.size()) {
+        return false;
+    }
+    const auto name = std::string_view(text).substr(prefix.size());
+    for (std::size_t index = 0; index < volume.size(); ++index) {
+        const char character = name[index];
+        const char lower = character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a') : character;
+        if (lower != volume[index]) {
+            return false;
+        }
+    }
+    return name.find_first_of(R"(\/)") == std::string_view::npos;
+}
+
+} // namespace
+
 std::filesystem::path without_trailing_separators(std::filesystem::path root)
 {
     // A path that ends with a separator has an empty file name; one without a
-    // relative part is a root ("D:\", "/"). Each parent_path() drops one element.
+    // relative part is a root ("D:\", "/"). Each parent_path() drops one
+    // element, and the separators before it. A volume's GUID path is a root
+    // too, the volume's root folder, as "D:\" is: it keeps one separator,
+    // its own, without which it names the volume itself, which Windows does
+    // not take for a folder.
     while (!root.has_filename() && root.has_relative_path()) {
-        root = root.parent_path();
+        auto parent = root.parent_path();
+        if (names_a_volume_by_its_guid(parent)) {
+            return parent / "";
+        }
+        root = std::move(parent);
     }
     return root;
 }

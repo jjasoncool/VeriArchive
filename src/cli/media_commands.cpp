@@ -1,5 +1,7 @@
-// `media list`: every mounted volume with its filesystem identity and the
-// physical devices behind it (M2). Needs no repository.
+// `media list`: every volume with its filesystem identity and the physical
+// devices behind it (M2), under its mount point: on Windows its first drive
+// letter or folder path, or its GUID path where it has neither (decision
+// 0029). Needs no repository.
 #include "cli/commands.h"
 
 #include "common/utf8.h"

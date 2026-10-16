@@ -109,6 +109,12 @@ RootKind archive_root_kind(const std::filesystem::path& root)
                : RootKind::Usable;
 }
 
+bool is_directory(const std::filesystem::path& path)
+{
+    std::error_code error;
+    return std::filesystem::is_directory(path, error);
+}
+
 bool process_is_elevated()
 {
     return geteuid() == 0;
