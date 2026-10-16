@@ -412,8 +412,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     // filesystem id and a device that its manifest records, and no identity
     // file naming another archive). Roots of archives never overlap on one
     // volume (decision 0001), so that archive's root cannot be there.
-    if (!pool->unusable.empty() &&
-        match_identity(evidence, located->root_subpath, candidates).result != MatchResult::Match) {
+    if (!pool->unusable.empty() && !plainly_another_archives_root(evidence, located->root_subpath, candidates)) {
         return stop(VerifyStop::Kind::Repository, root_may_belong_to(pool->unusable.front()));
     }
     // Earlier revisions' carriers are read only when no latest carrier

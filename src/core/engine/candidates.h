@@ -66,6 +66,18 @@ std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSy
     const RepositoryLayout& layout, const MediaEvidence& evidence, std::string_view root_subpath,
     std::span<ArchiveCandidate> candidates);
 
+// Decision 0028, point 4: while the latest manifest of some archive cannot be
+// used, its carrier and its root are unknown, and a root may be its, unless
+// the root is plainly another archive's: its media evidence (with the claim
+// of the identity file on it, if any) is a MATCH of an archive whose latest
+// manifest can be used (`candidates`) at the root's folder, the filesystem id
+// and a device being the ones that manifest records. Roots of archives never
+// overlap on one volume (decision 0001), so the archive whose manifest cannot
+// be used is not there. A verification by root and a registration of a new
+// revision (`register --new-revision`) of such a root go on as that archive's.
+bool plainly_another_archives_root(
+    const MediaEvidence& evidence, std::string_view root_subpath, std::span<const ArchiveCandidate> candidates);
+
 // The archive that the identity file at `root` names (.veriarchive/identity.json,
 // written with a media copy, R-89): a claim, not a proof (§B1.2). Nothing where
 // there is no such file, or it names no archive.

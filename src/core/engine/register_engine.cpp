@@ -725,11 +725,25 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             target = named->archive.archive_uuid;
             lost = std::move(*named);
         } else {
-            auto candidates = load_candidates(store, services.repository_files, services.layout);
-            if (!candidates) {
-                return fail(Kind::Repository, candidates.error().message);
+            // Matching needs every archive's latest manifest (decision 0028,
+            // point 4): while one cannot be used, the root may be that
+            // archive's. A new revision of a root that is plainly another
+            // archive's goes ahead as that archive's, by the rule that lets a
+            // verification by root go ahead; every other registration stops,
+            // a new folder or volume too, as it could be that archive's.
+            auto pool = load_candidate_pool(store, services.repository_files, services.layout);
+            if (!pool) {
+                return fail(Kind::Repository, pool.error().message);
             }
-            const auto checked = check_existing_archives(services, *candidates, evidence, *root_subpath, request);
+            if (!pool->unusable.empty() &&
+                !(request.new_revision &&
+                    plainly_another_archives_root(MediaEvidence{evidence.seen_at, evidence.volume,
+                                                      read_identity_claim(services.archive_files, request.root)},
+                        *root_subpath, pool->candidates))) {
+                return fail(Kind::Repository, pool->unusable.front().message);
+            }
+            auto& candidates = pool->candidates;
+            const auto checked = check_existing_archives(services, candidates, evidence, *root_subpath, request);
             if (!checked) {
                 return std::unexpected(checked.error());
             }

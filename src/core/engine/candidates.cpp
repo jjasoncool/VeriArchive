@@ -103,6 +103,12 @@ std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSy
     return match_identity(evidence, root_subpath, candidates);
 }
 
+bool plainly_another_archives_root(
+    const MediaEvidence& evidence, std::string_view root_subpath, std::span<const ArchiveCandidate> candidates)
+{
+    return match_identity(evidence, root_subpath, candidates).result == MatchResult::Match;
+}
+
 std::optional<Uuid> read_identity_claim(IFileSystemAccess& files, const std::filesystem::path& root)
 {
     auto source = files.open(root / ".veriarchive" / "identity.json", ReadOptions{false, true});

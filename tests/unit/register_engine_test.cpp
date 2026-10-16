@@ -7,6 +7,7 @@
 #include "core/engine/archive_status.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/rebuild_index.h"
+#include "core/engine/relocate_engine.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
@@ -2425,6 +2426,96 @@ void a_registration_over_a_lost_manifest_resumes()
     }
 }
 
+// Decision 0028, point 4: beside an archive whose latest manifest cannot be
+// used, a registration of a new revision goes ahead where its root is plainly
+// another archive's, by the rule that lets a verification by root go ahead.
+// Two archives on one volume (sample data): A at /vol/a, whose manifest is
+// gone, and B at /vol/b. A new revision of B's root, a MATCH at its folder, is
+// registered as B's revision 2, which verifies by its root. Every other
+// registration stops with A's plain message and writes nothing: a new
+// revision of A's root, a new folder, B's root registered as a separate
+// archive, and a new revision of B's root with no device serial to compare
+// (MATCH_WEAK: a clone reads the same), on another device (MIGRATED), and
+// with an identity file that names A. So does a relocation of B. Once A's
+// manifest is put back, the new folder registers.
+void a_new_revision_of_another_archives_root_goes_ahead_beside_a_damaged_archive()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a/SAMPLE-one.txt", "one (sample data)");
+    fixture.archive.add_file("b/SAMPLE-two.txt", "two (sample data)");
+    fixture.archive.add_file("c/SAMPLE-three.txt", "three (sample data)");
+    fixture.archive.add_file("b-copy/SAMPLE-two.txt", "two (sample data)");
+    const auto a = fixture.run(at("/vol/a"));
+    const auto b = fixture.run(at("/vol/b"));
+    CHECK(a && b);
+    if (!a || !b) {
+        return;
+    }
+    const auto& layout = fixture.repository.context.repo;
+    const auto path = va::manifest_path(layout.manifests(), a->archive_uuid, 1);
+    const auto kept = read_bytes(path);
+    std::filesystem::remove(path);
+    const auto message = "the manifest of revision 1 (manifests/" + a->archive_uuid + "/r0001.vam) is missing" +
+                         test::put_back(a->archive_uuid, 1);
+    const auto new_revision = [](const std::filesystem::path& root) {
+        auto request = at(root);
+        request.new_revision = true;
+        return request;
+    };
+    const auto stops = [&](const va::RegisterRequest& request, const char* what) {
+        const auto registered = fixture.run(request);
+        CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
+              registered.error().message == message);
+        if (registered) {
+            std::cerr << "  " << what << ": registered revision " << registered->revision << '\n';
+        } else if (registered.error().message != message) {
+            std::cerr << "  " << what << ": " << registered.error().message << '\n';
+        }
+        const auto plans = fixture.store.settings_with_prefix("registration:");
+        CHECK(plans && plans->empty());
+    };
+
+    fixture.archive.add_file("b/SAMPLE-four.txt", "four (sample data)");
+    const auto again = fixture.run(new_revision("/vol/b"));
+    CHECK(again && again->archive_uuid == b->archive_uuid && again->revision == 2);
+    if (!again) {
+        std::cerr << "  a new revision of B's root: " << again.error().message << '\n';
+    }
+    const auto verified = fixture.verify("/vol/b");
+    CHECK(verified && verified->archive_uuid == b->archive_uuid && verified->revision == 2 &&
+          verified->result == "PASSED");
+
+    stops(new_revision("/vol/a"), "a new revision of A's root");
+    stops(at("/vol/c"), "a new folder");
+    auto separate = at("/vol/b");
+    separate.force_new_archive = true;
+    stops(separate, "B's root as a separate archive");
+    const auto volume = fixture.media.volume;
+    fixture.media.volume.devices.front().serial.clear();
+    stops(new_revision("/vol/b"), "no device serial");
+    fixture.media.volume = volume;
+    fixture.media.volume.devices.front().serial = "OTHER-SERIAL";
+    stops(new_revision("/vol/b"), "another device");
+    fixture.media.volume = volume;
+    fixture.archive.add_file("b/.veriarchive/identity.json", "{\"archive_uuid\":\"" + a->archive_uuid + "\"}");
+    stops(new_revision("/vol/b"), "an identity file naming A");
+    fixture.archive.remove("b/.veriarchive");
+
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, layout, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        va::RelocateRequest{b->archive_uuid, fixture.archive.root() / "b-copy", std::nullopt, false}, fixture.cancel,
+        fixture.progress);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Repository &&
+          relocated.error().message == message);
+    CHECK(revisions_of(fixture, b->archive_uuid) == (std::vector<std::uint32_t>{1, 2}));
+
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << kept;
+    const auto c = fixture.run(at("/vol/c"));
+    CHECK(c && c->revision == 1);
+}
+
 } // namespace
 
 void register_engine_tests()
@@ -2476,4 +2567,5 @@ void register_engine_tests()
     a_registration_over_a_manifest_that_is_not_lost_is_refused();
     a_registration_over_a_lost_manifest_needs_the_archives_own_root();
     a_registration_over_a_lost_manifest_resumes();
+    a_new_revision_of_another_archives_root_goes_ahead_beside_a_damaged_archive();
 }
