@@ -216,7 +216,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     // the operator to abandon: both are refused, saying so.
     nlohmann::json record;
     std::string run_id;
-    Timestamp started;
+    Timestamp started;          // when the relocation's first attempt started
+    Timestamp attempt_started;  // when this attempt started
     std::uint64_t resumes = 0;
     std::optional<RelocateFailure> refused;
     const auto claimed = [&]() -> std::expected<void, IoError> {
@@ -258,6 +259,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             }
             run_id = generate_uuid();
             started = current_timestamp();
+            attempt_started = started;
             record = nlohmann::json{{"archive_uuid", uuid}, {"label", archive.label},
                 {"revision", previous_revision}, {"run_id", run_id}, {"started", started},
                 {"root", path_to_utf8(request.root)}, {"root_subpath", *root_subpath},
@@ -333,7 +335,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         }
         record["root"] = path_to_utf8(request.root);
         record["resumes"] = resumes;
-        record["updated"] = current_timestamp();
+        attempt_started = current_timestamp();
+        record["updated"] = attempt_started;
         if (auto saved = store.update_setting(key, record.dump()); !saved) {
             return saved;
         }
@@ -476,6 +479,46 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         return fail(Kind::Refused, "the unfinished relocation of archive " + uuid +
                                        " was abandoned while this attempt ran; nothing was changed");
     };
+    // An interrupted attempt (cancelled, its device removed) is recorded in
+    // the history as an interrupted verification is (R-104): an INCOMPLETE
+    // FULL verification of the revision it compared the new carrier with,
+    // under a run id of its own (the relocation's run_id is the FULL
+    // verification that records the next revision), from when this attempt
+    // started, counting what its comparison counted (the entries matched by
+    // the attempts before included, as a resumed verification counts them),
+    // with its items, the new carrier's evidence, and the relocation it
+    // belongs to (decision 0026). Appended to the hash chain as every run is
+    // (R-90). Written when the database allows, as the stop mark: the
+    // relocation goes on from its record and checkpoints either way.
+    const auto record_interruption = [&](const ComparisonResult& compared) {
+        VerifyRunRecord run;
+        run.run_id = generate_uuid();
+        run.archive_uuid = uuid;
+        run.revision = previous_revision;
+        run.mode = "FULL";
+        run.started = attempt_started;
+        run.finished = current_timestamp();
+        run.result = "INCOMPLETE";
+        run.coverage_bytes = compared.coverage_bytes;
+        run.counts_json = nlohmann::json{{"items", compared.counts}, {"relocation", run_id}}.dump();
+        run.host = services.host.host;
+        run.app_version = services.host.app_version;
+        auto items = compared.items;
+        for (auto& item : items) {
+            item.run_id = run.run_id;
+        }
+        (void)store.write_transaction([&]() -> std::expected<void, IoError> {
+            EvidenceRecord seen{uuid, run.run_id, evidence.seen_at, volume_to_json_text(*volume),
+                std::string(to_string(own_match)), "relocation interrupted"};
+            if (auto inserted = store.insert_evidence(seen); !inserted) {
+                return inserted;
+            }
+            if (auto appended = store.append_verify_run(run, services.repository_uuid); !appended) {
+                return std::unexpected(appended.error());
+            }
+            return store.insert_verify_items(items);
+        });
+    };
     if (lost) {
         return lost_to_another();
     }
@@ -524,6 +567,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             comparison.items);
     }
     if (comparison.incomplete) {
+        record_interruption(comparison);
         return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
     }
     if (!comparison.scan_error.empty()) {
@@ -654,7 +698,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         // The verification that accepted the carrier is a FULL verify of the
         // new revision. It ran from the relocation's start; a resumed one
         // says how often it was resumed: the entries matched before each
-        // resume were not read again (R-104).
+        // resume were not read again (R-104). Its counts and coverage are the
+        // whole relocation's; the INCOMPLETE runs of the attempts before it,
+        // which lie within its time, say when each of them read.
         VerifyRunRecord run;
         run.run_id = outcome.run_id;
         run.archive_uuid = uuid;
@@ -710,6 +756,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                                            " <root_path> --resume`)");
         }
         if (cancelled_waiting) {
+            record_interruption(comparison);
             return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
         }
         return stopped_by(Kind::Repository, "cannot record the relocation: " + recorded.error().message);

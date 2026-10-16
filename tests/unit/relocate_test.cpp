@@ -5,6 +5,7 @@
 #include "app/unfinished_operations.h"
 #include "common/time.h"
 #include "core/engine/abandon_registration.h"
+#include "core/engine/archive_status.h"
 #include "core/engine/abandon_relocation.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/registration_attempt.h"
@@ -660,18 +661,32 @@ void an_interrupted_relocation_resumes_without_reading_again()
     CHECK(before.size() == 40 && hashes_of(fixture, 2) == before);
     const auto rows = fixture.store.file_rows(fixture.archive_uuid, 2);
     CHECK(rows && rows->size() == 40);
-    // One FULL verification of revision 2 in the history, the relocation's
-    // run, which covered every byte and says it was resumed once.
+    // In the history, the interrupted attempt: an INCOMPLETE verification of
+    // revision 1 under a run of its own, naming the relocation, from when it
+    // started, with the 20 photos it matched. Then the relocation's run, the
+    // FULL verification of revision 2, which covered every byte, started
+    // when the first attempt started, and says it was resumed once. The hash
+    // chain holds.
     const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
-    CHECK(runs && runs->size() == 1);
-    if (runs && runs->size() == 1) {
-        const auto& run = runs->front();
+    CHECK(runs && runs->size() == 2);
+    if (runs && runs->size() == 2) {
+        const auto& interrupted = runs->front();
+        CHECK(interrupted.run_id != run_id && interrupted.revision == 1 && interrupted.mode == "FULL" &&
+              interrupted.result == "INCOMPLETE");
+        CHECK(interrupted.coverage_bytes == sample_photo_bytes &&
+              interrupted.started == record.value("started", std::string{}));
+        auto noted = nlohmann::json::parse(interrupted.counts_json, nullptr, false);
+        CHECK(noted.is_object() && noted.value("relocation", std::string{}) == run_id &&
+              noted["items"].value("Verified", 0) == 20);
+        const auto& run = runs->back();
         CHECK(run.run_id == run_id && run.revision == 2 && run.mode == "FULL" && run.result == "PASSED");
         CHECK(run.coverage_bytes == sample_bytes && run.started == record.value("started", std::string{}));
         const auto counts = nlohmann::json::parse(run.counts_json, nullptr, false);
         CHECK(counts.is_object() && counts.value("resumed", 0) == 1 &&
               counts.value("relocated_from_revision", 0) == 1);
     }
+    const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
+    CHECK(chain && chain->runs == 2 && !chain->first_broken_run);
     CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
     CHECK(fixture.saved(run_id).files == 0);
     const auto verified = fixture.verify(fixture.archive.root() / "new");
@@ -734,12 +749,18 @@ void a_resume_needs_the_volume_it_started_on()
 // that a resumed relocation records starts when its first attempt started
 // (decision 0026). Here the first attempt started days before (a sample
 // time); the second reads the same disk at another mount point and is
-// interrupted there as well; the third records.
+// interrupted there as well; the third records. Each interrupted attempt is
+// in the history as an INCOMPLETE verification of revision 1, from when it
+// started, counting what the relocation had matched by its stop (the second
+// one the photos the first matched, too); the FULL verification of revision
+// 2 spans them and is recorded after them, and the chain, which follows the
+// order recorded, holds.
 void a_resumed_relocation_names_where_it_reads_and_keeps_its_start()
 {
     RelocationFixture fixture(true);
     const auto run_id = fixture.interrupted_relocation(fixture.processes.self, false);
     auto record = fixture.record();
+    const auto first_started = record.value("started", std::string{});
     const std::string started = "2026-10-01T08:00:00Z"; // sample data
     record["started"] = started;
     CHECK(fixture.store.set_setting(fixture.key(), record.dump()));
@@ -759,12 +780,122 @@ void a_resumed_relocation_names_where_it_reads_and_keeps_its_start()
     const auto resumed = fixture.relocate(fixture.archive.root() / "moved", true);
     CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id);
     const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
-    CHECK(runs && runs->size() == 1);
-    if (runs && runs->size() == 1) {
-        CHECK(runs->front().started == started && runs->front().coverage_bytes == sample_bytes);
-        const auto counts = nlohmann::json::parse(runs->front().counts_json, nullptr, false);
+    CHECK(runs && runs->size() == 3);
+    if (runs && runs->size() == 3) {
+        const auto& first = (*runs)[0];
+        const auto& second = (*runs)[1];
+        const auto& relocated = (*runs)[2];
+        for (const auto* attempt : {&first, &second}) {
+            const auto noted = nlohmann::json::parse(attempt->counts_json, nullptr, false);
+            CHECK(attempt->result == "INCOMPLETE" && attempt->revision == 1 && attempt->run_id != run_id &&
+                  noted.is_object() && noted.value("relocation", std::string{}) == run_id);
+        }
+        // The photos; then the photos and the 10 videos before v130 (sample data).
+        CHECK(first.started == first_started && first.coverage_bytes == sample_photo_bytes);
+        CHECK(second.coverage_bytes == sample_photo_bytes + 5245 && second.started >= first.finished);
+        CHECK(relocated.started == started && relocated.started < first.started &&
+              relocated.coverage_bytes == sample_bytes && relocated.revision == 2);
+        const auto counts = nlohmann::json::parse(relocated.counts_json, nullptr, false);
         CHECK(counts.is_object() && counts.value("resumed", 0) == 2);
     }
+    const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
+    CHECK(chain && chain->runs == 3 && !chain->first_broken_run);
+}
+
+// R-104: an attempt cancelled (Ctrl+C) while it hashes is recorded in the
+// history as an interrupted verification is: an INCOMPLETE FULL verification
+// of the revision it verifies against, under a run of its own that names the
+// relocation, from when the attempt started, with what it had matched, the
+// items found so far (a photo whose time the copy changed, sample data) and
+// the new carrier's evidence. It is no run for `verify --resume`, and it
+// makes no claim: the archive still has no last verify. A verification of
+// the old carrier stopped before it is no longer listed, as a later
+// verification of the same archive supersedes it (decision 0022); the
+// relocation is. Resumed, it reads only the rest and records the FULL
+// verification of revision 2. The hash chain holds.
+void an_interrupted_attempt_is_recorded_incomplete()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    fixture.archive.node("new/photos/p105.bin").mtime_ns += 3'600'000'000'000; // sample data
+    const va::app::AttemptCheck attempts{&fixture.processes, fixture.host.host, {}};
+    const auto listed = [&] {
+        std::vector<va::app::OperationKind> kinds;
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+        CHECK(read.has_value());
+        for (const auto& operation : read ? read->operations : std::vector<va::app::UnfinishedOperation>{}) {
+            kinds.push_back(operation.kind);
+        }
+        return kinds;
+    };
+
+    // A verification of the old carrier, cancelled: listed as stopped.
+    {
+        va::CancelToken cancel;
+        test::HookedFiles hooked(fixture.archive, "p110.bin", [&] { cancel.cancel(); });
+        va::VerifyServices services{hooked, *fixture.repository.files, fixture.media, fixture.store,
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        va::VerifyRequest request;
+        request.root = fixture.archive.root() / "old";
+        const auto verified = va::verify_full(services, request, cancel, fixture.progress);
+        CHECK(verified && verified->result == "INCOMPLETE");
+    }
+    CHECK(listed() == std::vector<va::app::OperationKind>{va::app::OperationKind::Verification});
+
+    const auto evidence_before = count_rows(fixture, "media_evidence");
+    va::CancelToken cancel;
+    test::HookedFiles hooked(fixture.archive, "v130.bin", [&] { cancel.cancel(); });
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto interrupted = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, cancel, fixture.progress);
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
+          interrupted.error().message == "relocation was interrupted; continue it with `archive relocate " +
+                                             fixture.archive_uuid + " <root_path> --resume`");
+    const auto record = fixture.record();
+    const auto run_id = record.value("run_id", std::string{});
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 2);
+    if (!runs || runs->size() != 2) {
+        return;
+    }
+    const auto attempt = runs->back();
+    CHECK(attempt.result == "INCOMPLETE" && attempt.mode == "FULL" && attempt.revision == 1 &&
+          attempt.run_id != run_id && attempt.started == record.value("started", std::string{}) &&
+          !attempt.finished.empty() && attempt.finished >= attempt.started);
+    // The 20 photos and the 10 videos before v130 (sample data), one with its time changed.
+    CHECK(attempt.coverage_bytes == sample_photo_bytes + 5245);
+    auto noted = nlohmann::json::parse(attempt.counts_json, nullptr, false);
+    CHECK(noted.is_object() && noted.value("relocation", std::string{}) == run_id &&
+          noted["items"].value("Verified", 0) == 29 && noted["items"].value("MetadataMismatch", 0) == 1);
+    const auto items = fixture.store.verify_items(attempt.run_id);
+    CHECK(items && items->size() == 1 && items->front().path.p == "photos/p105.bin" &&
+          items->front().status == "MetadataMismatch");
+    CHECK(count_rows(fixture, "media_evidence") == evidence_before + 1);
+
+    // No verification to resume, and no claim about the archive.
+    va::VerifyRequest resume_it;
+    resume_it.root = fixture.archive.root() / "new";
+    resume_it.resume_run = attempt.run_id;
+    const auto refused = fixture.verify(resume_it);
+    CHECK(!refused && refused.error().message == "run " + attempt.run_id + " is not an interrupted run");
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto statuses = va::archive_statuses(fixture.store, va::Policy{}, now);
+    CHECK(statuses && statuses->size() == 1 && !statuses->front().last_any && !statuses->front().last_full);
+    CHECK(listed() == std::vector<va::app::OperationKind>{va::app::OperationKind::Relocation});
+
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id &&
+          resumed->result == "PASSED_WITH_WARNINGS");
+    CHECK(fixture.archive.bytes_read == sample_bytes - sample_photo_bytes - 5245);
+    const auto all = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(all && all->size() == 3 && all->back().run_id == run_id && all->back().result == "PASSED_WITH_WARNINGS" &&
+          all->back().started == attempt.started && all->back().coverage_bytes == sample_bytes);
+    const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
+    CHECK(chain && chain->runs == 3 && !chain->first_broken_run);
 }
 
 // R-104: a relocation resumes only while its archive is at the revision it
@@ -1374,6 +1505,7 @@ enum class WhileWaiting {
     OtherCommits,         // another operation commits something else
     OtherRecordsIt,       // another operation records the same revision
     RelocationCancelled,  // the operator cancels the relocation (Ctrl+C)
+    CancelledThenFree,    // the operator cancels it, and the other operation lets go of the lock a moment later
 };
 
 // Decision 0023: the record of a relocation waits for the write lock that
@@ -1383,12 +1515,17 @@ enum class WhileWaiting {
 // than failing because the database is locked; cancelled while it waits, it
 // stops as interrupted (exit 4). Nothing is changed unless it records; a
 // relocation cancelled keeps everything it matched (decision 0026), and its
-// resume reads no file again. Scaled down: the relocation's statements wait
-// 100 ms for the lock, and the other operation holds it 400 ms.
+// resume reads no file again. Cancelled, it is recorded INCOMPLETE where the
+// database allows it: not while the other operation still holds the lock,
+// but once that one lets go within a statement's wait. Scaled down: the
+// relocation's statements wait 100 ms for the lock, and the other operation
+// holds it 400 ms; or 1 s and 1.5 s, where the INCOMPLETE run is recorded
+// once the lock is free.
 void a_relocation_waits_for_the_write_lock(WhileWaiting what)
 {
     RelocationFixture fixture;
     fixture.copy_to_new_disk();
+    const bool freed = what == WhileWaiting::CancelledThenFree;
     std::thread holder;
     std::binary_semaphore held{0};
     va::CancelToken cancel;
@@ -1402,15 +1539,15 @@ void a_relocation_waits_for_the_write_lock(WhileWaiting what)
                     "manifests/" + fixture.archive_uuid + "/r0002.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z"}));
             }
             held.release();
-            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            std::this_thread::sleep_for(std::chrono::milliseconds(freed ? 1500 : 400));
             CHECK(store.commit());
         });
         CHECK(held.try_acquire_for(std::chrono::seconds(60)));
-        if (what == WhileWaiting::RelocationCancelled) {
+        if (what == WhileWaiting::RelocationCancelled || freed) {
             cancel.cancel();
         }
     });
-    auto store = fixture.repository.store(std::chrono::milliseconds(100));
+    auto store = fixture.repository.store(std::chrono::milliseconds(freed ? 1000 : 100));
     va::RelocateServices services{fixture.archive, *fixture.repository.files, hooked, fixture.media, store,
         fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
         fixture.processes};
@@ -1431,6 +1568,7 @@ void a_relocation_waits_for_the_write_lock(WhileWaiting what)
                                                     "ran; nothing was changed";
         break;
     case WhileWaiting::RelocationCancelled:
+    case WhileWaiting::CancelledThenFree:
         expected = !relocated && relocated.error().kind == va::RelocateFailure::Kind::Incomplete &&
                    relocated.error().message == "relocation was interrupted; continue it with `archive relocate " +
                                                     fixture.archive_uuid + " <root_path> --resume`";
@@ -1448,8 +1586,20 @@ void a_relocation_waits_for_the_write_lock(WhileWaiting what)
     CHECK(manifest_names(fixture) == std::set<std::string>{"r0001.vam"});
     const auto archive = fixture.store.find_archive(fixture.archive_uuid);
     CHECK(archive && *archive && (*archive)->current_revision == 1);
+    // No FULL verification of revision 2. A relocation cancelled is
+    // recorded INCOMPLETE where the database allows it (decision 0026),
+    // which the other process's lock may not.
     const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
-    CHECK(runs && runs->empty());
+    CHECK(runs && (what == WhileWaiting::OtherRecordsIt ? runs->empty() : runs->size() <= 1) &&
+          std::ranges::all_of(*runs, [](const va::VerifyRunRecord& run) {
+              return run.result == "INCOMPLETE" && run.revision == 1;
+          }));
+    if (freed) {
+        // Every entry had matched: the attempt was cancelled at its record.
+        CHECK(runs && runs->size() == 1 && runs->front().coverage_bytes == 9 &&
+              nlohmann::json::parse(runs->front().counts_json, nullptr, false).value("relocation", std::string{}) ==
+                  fixture.record().value("run_id", std::string{}));
+    }
     if (what == WhileWaiting::OtherRecordsIt) {
         // Its revision is taken: it can never finish, and its record went.
         CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
@@ -1664,6 +1814,7 @@ void relocate_tests()
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();
     a_resumed_relocation_names_where_it_reads_and_keeps_its_start();
+    an_interrupted_attempt_is_recorded_incomplete();
     a_resume_needs_the_revision_it_verifies();
     a_relocation_replaces_a_record_that_can_no_longer_finish();
     a_resume_waits_while_the_attempt_before_runs();
@@ -1680,6 +1831,7 @@ void relocate_tests()
     a_relocation_waits_for_the_write_lock(WhileWaiting::OtherCommits);
     a_relocation_waits_for_the_write_lock(WhileWaiting::OtherRecordsIt);
     a_relocation_waits_for_the_write_lock(WhileWaiting::RelocationCancelled);
+    a_relocation_waits_for_the_write_lock(WhileWaiting::CancelledThenFree);
     abandoning_a_relocation_removes_only_its_record_and_saved_progress();
     a_running_relocation_is_not_abandoned();
     an_attempt_stops_when_its_relocation_is_abandoned();
