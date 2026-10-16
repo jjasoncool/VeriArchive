@@ -324,35 +324,39 @@ if(CMAKE_HOST_WIN32)
             message(FATAL_ERROR "verify through ${letter}: exit ${through_verify_code}\n"
                 "${through_verify_output}\n${through_verify_errors}")
         endif()
+        # The same archive by the real path. The real path is the root the CLI
+        # gives for the folder's path without the letter, not that path itself:
+        # WORK may be reached through a drive letter made with subst too (a
+        # short path for a deep build tree), which the CLI also resolves.
+        run_cli("0;2" verify --full "${SUBSTITUTED}/photos" --json)
+        string(JSON real_uuid GET "${last_output}" archive_uuid)
+        string(JSON real_root GET "${last_output}" root)
+        string(TOLOWER "${real_root}" real_root)
+        if(NOT real_uuid STREQUAL subst_uuid)
+            message(FATAL_ERROR "the real path of a folder registered through ${letter}: is another archive")
+        endif()
+        string(TOLOWER "^${letter}:" through_letter)
         string(JSON verified_uuid GET "${through_verify_output}" archive_uuid)
         string(JSON verified_root GET "${through_verify_output}" root)
         string(TOLOWER "${verified_root}" verified_root)
-        string(TOLOWER "${substituted_native}\\photos" real_root)
-        if(NOT verified_uuid STREQUAL subst_uuid OR NOT verified_root STREQUAL real_root)
+        if(NOT verified_uuid STREQUAL subst_uuid OR NOT verified_root STREQUAL real_root
+                OR verified_root MATCHES "${through_letter}")
             message(FATAL_ERROR "verify through ${letter}: found ${verified_uuid} at ${verified_root}, "
                 "expected ${subst_uuid} at ${real_root}")
         endif()
         # The manifest's root_hint is the real path, not the letter.
-        file(TO_CMAKE_PATH "${subst_manifest}" subst_manifest)
-        file(READ "${subst_manifest}" manifest_start LIMIT 65536)
-        string(FIND "${manifest_start}" "\n" header_end)
-        string(SUBSTRING "${manifest_start}" 0 ${header_end} header)
-        string(JSON root_hint GET "${header}" root_hint)
+        read_root_hint("${subst_manifest}" root_hint)
         string(TOLOWER "${root_hint}" root_hint)
-        if(NOT root_hint STREQUAL real_root)
-            message(FATAL_ERROR "root_hint of a registration through ${letter}: is ${root_hint}")
+        if(NOT root_hint STREQUAL real_root OR root_hint MATCHES "${through_letter}")
+            message(FATAL_ERROR "root_hint of a registration through ${letter}: is ${root_hint}, "
+                "expected ${real_root}")
         endif()
-        # The real volume: the root's place on it, and the same archive by the real path.
+        # The real volume: the root's place on it.
         get_filename_component(work_name "${WORK}" NAME)
         run_cli("0" archive show "${subst_uuid}" --json)
         string(JSON subst_subpath GET "${last_output}" root_subpath)
         if(NOT subst_subpath MATCHES "/${work_name}/subst/photos$")
             message(FATAL_ERROR "root_subpath of a registration through ${letter}: is ${subst_subpath}")
-        endif()
-        run_cli("0;2" verify --full "${SUBSTITUTED}/photos" --json)
-        string(JSON verified_uuid GET "${last_output}" archive_uuid)
-        if(NOT verified_uuid STREQUAL subst_uuid)
-            message(FATAL_ERROR "the real path of a folder registered through ${letter}: is another archive")
         endif()
         run_cli("12" register "${SUBSTITUTED}/photos")
     endif()
