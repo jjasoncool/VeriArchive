@@ -80,7 +80,7 @@ veriarchive-cli register E:\ --label ARCH-0012
 
 用 `subst` 建立的磁碟機代號（例如代表資料夾 `D:\Data` 的 `S:`）不是磁碟區。經由這種代號指定的資料夾，會以它的實際路徑註冊：註冊 `S:\Photos` 時，記錄的是 `D:\Data\Photos` 及它所在的磁碟區，報告也顯示這個路徑。之後經由代號或實際路徑都能驗證。
 
-VeriArchive 只註冊和驗證這台電腦所連接的磁碟區上的資料夾。網路共用資料夾會被拒絕：網路路徑（`\\server\share\Photos`）、對應到網路共用的磁碟機代號上的資料夾，以及 Linux 上網路檔案系統（NFS、SMB、sshfs）裡的資料夾，或 GNOME、KDE 開啟的共用資料夾（在它們的檔案對話方塊中選擇這種共用資料夾時，包括按「選擇…」，得到的是 `/run/user/<uid>/gvfs` 或 `/run/user/<uid>/kio-fuse-…` 底下的資料夾）。GNOME 在那裡顯示的手機和相機也會被拒絕。前面加上 `\\?\` 的根目錄（`\\?\D:\Photos`）也會被拒絕：請寫成 `D:\Photos`。這時 `register`、`verify --full <根目錄>` 和 `archive relocate` 會在讀取任何內容之前停止，結束代碼是 10。
+VeriArchive 只註冊和驗證這台電腦所連接的磁碟區上的資料夾。網路共用資料夾會被拒絕：網路路徑（`\\server\share\Photos`）、對應到網路共用的磁碟機代號上的資料夾，以及 Linux 上網路檔案系統（NFS、SMB、sshfs）裡的資料夾，或 GNOME、KDE 開啟的共用資料夾（在它們的檔案對話方塊中選擇這種共用資料夾時，包括按「選擇…」，得到的是 `/run/user/<uid>/gvfs` 或 `/run/user/<uid>/kio-fuse-…` 底下的資料夾）。GNOME 在那裡顯示的手機和相機也會被拒絕。前面加上 `\\?\` 的根目錄（`\\?\D:\Photos`）也會被拒絕，磁碟區的 GUID 路徑（`\\?\Volume{...}\Photos`）也一樣：請用磁碟區的磁碟機代號寫成 `D:\Photos`。沒有磁碟機代號的磁碟區，請先在「磁碟管理」中為它指派磁碟機代號，或掛接到一個空的 NTFS 資料夾。這時 `register`、`verify --full <根目錄>` 和 `archive relocate` 會在讀取任何內容之前停止，結束代碼是 10。
 
 註冊時讀不到的檔案（權限不足、媒體錯誤等）會被記錄下來，但不含雜湊，日後絕不會回報為「已驗證」。
 

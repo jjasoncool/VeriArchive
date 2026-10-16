@@ -30,8 +30,9 @@ enum class RootKind {
     NetworkShare,  // on a network share, which is no volume of this computer: on Windows a network path
                    // ("\\server\share\..."), or a drive letter that Windows reports as a network drive; on
                    // Linux a network filesystem (NFS, SMB, sshfs, ...)
-    DevicePath,    // written in the \\?\ or \\.\ form ("\\?\D:\Photos", Windows only), which the volume lookup
-                   // and the C++ library misread
+    DevicePath,    // written in the \\?\ or \\.\ form (Windows only): "\\?\D:\Photos", which the volume lookup
+                   // and the C++ library misread, and also a volume's GUID path ("\\?\Volume{...}\Photos"),
+                   // which they do not (decision 0029, point 3)
 };
 // Judged on Windows from the root's text and the type of its drive letter (a
 // network path from its text alone); on Linux from the filesystem type that
