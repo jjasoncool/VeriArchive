@@ -1,12 +1,16 @@
 // Verify Archive (§B17): FULL verification of a folder or volume, or of a
 // registered archive found on the attached volumes, with progress, cancel and
 // resume. The result always carries its mode (R-21) and the V1 guarantee (R-02).
+// For a registered archive without chunk hashes, the verification can add them
+// (decision 0033).
 #include "gui/gui_app.h"
 
+#include "app/chunk_size.h"
 #include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "app/verify_report.h"
 #include "common/utf8.h"
+#include "core/engine/add_chunk_hashes.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/verify_engine.h"
 #include "platform/file_system.h"
@@ -57,6 +61,17 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
                     (item.detail.empty() ? "" : "  " + text.parenthesized(text(app::item_detail_words(item.detail)))) +
                     "\n";
         }
+    }
+    // Decision 0033: the revision that records the chunk hashes added, or why
+    // there is none.
+    if (outcome.added_revision > 0) {
+        body += "\n" +
+                text.format("Chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
+                    outcome.added_revision, app::chunk_size_text(outcome.adding_chunk_size), outcome.added_chunks,
+                    outcome.added_merkle_root) +
+                "\n";
+    } else if (!outcome.not_added.empty()) {
+        body += "\n" + text.format("Chunk hashes not added: {}", text(outcome.not_added)) + "\n";
     }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::Window)) {
         body += "\n" + *advice + "\n";
@@ -113,6 +128,35 @@ bool strict_metadata(const GuiState& state)
 // this view. A run left INCOMPLETE is offered for Resume here.
 void run_verification(GuiState& state, VerifyRequest request);
 
+// "Full verify, and add chunk hashes" (decision 0033) is offered only for a
+// registered archive chosen in the drop-down to which a verification would
+// add them, by its rule (why_chunk_hashes_cannot_be_added): one whose current
+// revision has no chunk size, as its manifest says (R-14), and that is not
+// retired. For any other choice it is cleared and cannot be chosen.
+void offer_chunk_hashes(GuiState& state)
+{
+    auto& view = state.verify_view;
+    if (!view.add_chunk_hashes) {
+        return;
+    }
+    bool offered = false;
+    const auto selected = chosen_archive(view.archive, view.archive_uuids, 1);
+    if (state.session && selected) {
+        if (auto store = ArchiveStore::open_read_only(state.session->context.repo)) {
+            if (const auto archive = store->find_archive(*selected); archive && *archive) {
+                const auto repository_files = platform::make_file_system_access();
+                const auto refused = why_chunk_hashes_cannot_be_added(
+                    *store, *repository_files, state.session->context.repo, **archive);
+                offered = refused && !*refused;
+            }
+        }
+    }
+    if (!offered) {
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(view.add_chunk_hashes), FALSE);
+    }
+    gtk_widget_set_sensitive(view.add_chunk_hashes, offered);
+}
+
 void start_verification(GuiState& state, bool resume)
 {
     auto& view = state.verify_view;
@@ -125,6 +169,9 @@ void start_verification(GuiState& state, bool resume)
     request.strict_metadata = strict_metadata(state);
     // R-111: the window has no --io; the config's override by serial applies.
     request.rotational_override = state.session->context.config.rotational_override;
+    // A resumed run adds chunk hashes as the run it continues did.
+    request.add_chunk_hashes = !resume && gtk_widget_get_sensitive(view.add_chunk_hashes) &&
+                               gtk_check_button_get_active(GTK_CHECK_BUTTON(view.add_chunk_hashes));
     if (resume) {
         request.resume_run = view.incomplete_run;
         request.root = view.incomplete_root;
@@ -239,6 +286,8 @@ void run_verification(GuiState& state, VerifyRequest request)
                     gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.progress), state.text("Done").c_str());
                     show_report(state, result);
                     refresh_archive_list(state);
+                    // A revision with chunk hashes may have been recorded.
+                    offer_chunk_hashes(state);
                 },
                 [&](Report error) { show_error(state, std::move(error)); });
         });
@@ -292,6 +341,7 @@ void refresh_archive_choices(GuiState& state)
     verify_items.insert(verify_items.end(), labels.begin(), labels.end());
     set_choices(state.verify_view.archive, verify_items);
     state.verify_view.archive_uuids = uuids;
+    offer_chunk_hashes(state);
 
     set_choices(state.history_view.archive, labels);
     state.history_view.archive_uuids = uuids;
@@ -354,6 +404,19 @@ GtkWidget* build_verify_view(GuiState& state)
     view.strict = gtk_check_button_new_with_label(
         state.text("Strict metadata (timestamp and attribute differences fail the run)").c_str());
     gtk_box_append(GTK_BOX(box), view.strict);
+
+    view.add_chunk_hashes = gtk_check_button_new_with_label(state.text("Full verify, and add chunk hashes").c_str());
+    gtk_widget_set_tooltip_text(view.add_chunk_hashes,
+        state.text("For a registered archive without chunk hashes, chosen above. Every file is read once; when every "
+                   "entry matches, the next revision records the same entries with their chunk hashes. Any "
+                   "difference records the verification alone.")
+            .c_str());
+    gtk_widget_set_sensitive(view.add_chunk_hashes, FALSE);
+    gtk_box_append(GTK_BOX(box), view.add_chunk_hashes);
+    g_signal_connect(view.archive, "notify::selected", G_CALLBACK(+[](GObject*, GParamSpec*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded([&] { offer_chunk_hashes(state); }, [&](Report error) { show_error(state, std::move(error)); });
+    }), &state);
 
     GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     view.start = gtk_button_new_with_label(state.text("Verify (FULL)").c_str());

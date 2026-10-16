@@ -1,8 +1,37 @@
 #include "core/engine/add_chunk_hashes.h"
 
+#include "core/engine/recorded_manifest.h"
+
 #include <format>
 
 namespace va {
+
+std::expected<std::optional<std::string>, IoError> why_chunk_hashes_cannot_be_added(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const ArchiveRecord& archive)
+{
+    if (archive.status == "RETIRED") {
+        return std::optional<std::string>("a retired archive takes no new revisions");
+    }
+    const auto current = store.revision(archive.archive_uuid, archive.current_revision);
+    if (!current) {
+        return std::unexpected(current.error());
+    }
+    if (!*current) {
+        return std::unexpected(
+            IoError{IoErrorKind::NotFound, 0, "archive " + archive.archive_uuid + " has no revision yet"});
+    }
+    const auto header = load_recorded_header(repository_files, layout, **current);
+    if (!header) {
+        return std::unexpected(IoError{IoErrorKind::Other, 0, plain_message(header.error())});
+    }
+    if (header->chunk_size > 0) {
+        return std::optional<std::string>("revision " + std::to_string(header->revision) + " of archive " +
+                                          archive.archive_uuid +
+                                          " has chunk hashes already; a FULL verify compares them, and there are "
+                                          "none to add");
+    }
+    return std::optional<std::string>{};
+}
 
 std::uint64_t adding_chunk_size(const nlohmann::json& record)
 {

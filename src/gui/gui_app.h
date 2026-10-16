@@ -99,6 +99,7 @@ struct GuiState {
         GtkWidget* folder = nullptr;
         GtkWidget* archive = nullptr;      // drop-down: "the folder or volume above" or a registered archive
         GtkWidget* strict = nullptr;
+        GtkWidget* add_chunk_hashes = nullptr;  // decision 0033: offered for an archive without chunk hashes
         GtkWidget* start = nullptr;
         GtkWidget* resume = nullptr;
         GtkWidget* cancel = nullptr;

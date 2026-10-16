@@ -706,6 +706,17 @@ constexpr CatalogEntry entries[] = {
         "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：在"
         "「註冊封存」頁選擇它的資料夾或磁碟區（{}），勾選「{}」，再按「{}」。",
         Match::FormatOnly},
+    // Adding chunk hashes (decision 0033): the checkbox, offered for a
+    // registered archive without them, and the report's line.
+    {"Full verify, and add chunk hashes", "完整驗證，並加入區塊雜湊"},
+    {"For a registered archive without chunk hashes, chosen above. Every file is read once; when every entry "
+        "matches, the next revision records the same entries with their chunk hashes. Any difference records the "
+        "verification alone.",
+        "適用於上方選擇、尚無區塊雜湊的已註冊封存。每個檔案只讀取一次；所有項目都相符時，"
+        "下一個版次會記錄相同的項目及其區塊雜湊。有任何不同時，只記錄這次驗證的結果。"},
+    {"Chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
+        "已加入區塊雜湊：由版次 {} 記錄（區塊大小 {}，{} 個區塊，總碼 {}）"},
+    {"Chunk hashes not added: {}", "未加入區塊雜湊：{}", Match::Cause},
     // src/gui/compare_view.cpp
     {"ARCHIVES {}", "比較結果：{}"},
     {"Every entry of A is in B with the same type and content, and B has no other entries.",

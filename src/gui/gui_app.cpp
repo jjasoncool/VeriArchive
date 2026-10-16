@@ -113,6 +113,7 @@ struct Kept {
     bool register_finished = false;
     std::string verify_folder;
     bool strict = false;
+    bool add_chunk_hashes = false;
     std::optional<Uuid> verify_archive;  // empty: "The folder or volume above"
     double verify_fraction = 0.0;
     bool verify_finished = false;
@@ -163,6 +164,7 @@ Kept keep(const GuiState& state)
     const auto& verifying = state.verify_view;
     kept.verify_folder = entry_text(verifying.folder);
     kept.strict = checked(verifying.strict);
+    kept.add_chunk_hashes = checked(verifying.add_chunk_hashes);
     kept.verify_archive = chosen_archive(verifying.archive, verifying.archive_uuids, 1);
     kept.verify_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(verifying.progress));
     kept.verify_finished = finished(verifying.progress);
@@ -209,6 +211,10 @@ void restore(GuiState& state, const Kept& kept)
     gtk_editable_set_text(GTK_EDITABLE(verifying.folder), kept.verify_folder.c_str());
     gtk_check_button_set_active(GTK_CHECK_BUTTON(verifying.strict), kept.strict);
     choose_archive(verifying.archive, verifying.archive_uuids, 1, kept.verify_archive);
+    // Choosing the archive offered the checkbox again, where it may be chosen.
+    if (gtk_widget_get_sensitive(verifying.add_chunk_hashes)) {
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(verifying.add_chunk_hashes), kept.add_chunk_hashes);
+    }
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(verifying.progress), kept.verify_fraction);
     if (kept.verify_finished) {
         gtk_progress_bar_set_text(GTK_PROGRESS_BAR(verifying.progress), text("Done").c_str());

@@ -573,6 +573,52 @@ void an_interrupted_run_resumes_adding()
     CHECK(left && left->empty());
 }
 
+// The rule by which a verification refuses to add chunk hashes, and by which
+// the GUI offers to add them (decision 0033): an archive registered without
+// them takes them; one whose revision has them, or that is retired, does not,
+// saying why; one whose manifest cannot be read fails.
+void what_takes_chunk_hashes()
+{
+    const auto why = [](test::EngineFixture& fixture, const va::Uuid& archive_uuid) {
+        const auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive);
+        return va::why_chunk_hashes_cannot_be_added(
+            fixture.store, *fixture.repository.files, fixture.repository.context.repo, **archive);
+    };
+    RegisteredWithout without;
+    const auto takes = why(without, without.archive_uuid);
+    CHECK(takes && !*takes);
+
+    test::EngineFixture with;
+    with.archive.add_file("big.bin", test::patterned(2 * test_chunk_size + 1, 9));
+    va::RegisterRequest request;
+    request.root = with.archive.root();
+    request.chunk_size = test_chunk_size;
+    const auto registered = with.register_root(request);
+    CHECK(registered.has_value());
+    if (registered) {
+        const auto has_them = why(with, registered->archive_uuid);
+        CHECK(has_them && *has_them == "revision 1 of archive " + registered->archive_uuid +
+                                           " has chunk hashes already; a FULL verify compares them, and there are "
+                                           "none to add");
+    }
+
+    without.repository.execute(
+        ("UPDATE archives SET status = 'RETIRED' WHERE archive_uuid = '" + without.archive_uuid + "'").c_str());
+    const auto retired = why(without, without.archive_uuid);
+    CHECK(retired && *retired == "a retired archive takes no new revisions");
+    without.repository.execute(
+        ("UPDATE archives SET status = 'REGISTERED' WHERE archive_uuid = '" + without.archive_uuid + "'").c_str());
+
+    auto away = without.manifest(1);
+    away += ".away";
+    std::filesystem::rename(without.manifest(1), away);
+    const auto gone = why(without, without.archive_uuid);
+    CHECK(!gone && gone.error().message.contains("the manifest of revision 1 (manifests/" + without.archive_uuid +
+                                                   "/r0001.vam) is missing"));
+    std::filesystem::rename(away, without.manifest(1));
+}
+
 // The entries and header of the revision that adds chunk hashes.
 void the_revision_that_adds_them()
 {
@@ -630,5 +676,6 @@ void add_chunk_hashes_tests()
     the_record_removes_what_can_no_longer_finish();
     entry_lines_that_cannot_be_written_again_add_nothing();
     an_interrupted_run_resumes_adding();
+    what_takes_chunk_hashes();
     the_revision_that_adds_them();
 }

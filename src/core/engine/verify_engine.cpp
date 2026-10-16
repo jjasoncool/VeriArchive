@@ -598,24 +598,15 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     // Decision 0033: chunk hashes are added to an archive whose current
     // revision has none, as its manifest says (R-14), and that takes new
-    // revisions. Refused before anything is read or written. A manifest that
-    // cannot be used fails the run below, as in any FULL verify, which then
-    // records no revision.
+    // revisions. Refused before anything is read or written.
     if (adding > 0 && !resume) {
-        if ((*archive)->status == "RETIRED") {
-            return stop(VerifyStop::Kind::Refused, "a retired archive takes no new revisions");
+        const auto refused =
+            why_chunk_hashes_cannot_be_added(store, services.repository_files, services.layout, **archive);
+        if (!refused) {
+            return stop(VerifyStop::Kind::Repository, refused.error().message);
         }
-        const auto current = store.revision((*archive)->archive_uuid, (*archive)->current_revision);
-        if (!current) {
-            return stop(VerifyStop::Kind::Repository, current.error().message);
-        }
-        if (*current) {
-            const auto header = load_recorded_header(services.repository_files, services.layout, **current);
-            if (header && header->chunk_size > 0) {
-                return stop(VerifyStop::Kind::Refused,
-                    "revision " + std::to_string(header->revision) + " of archive " + (*archive)->archive_uuid +
-                        " has chunk hashes already; a FULL verify compares them, and there are none to add");
-            }
+        if (*refused) {
+            return stop(VerifyStop::Kind::Refused, **refused);
         }
     }
 

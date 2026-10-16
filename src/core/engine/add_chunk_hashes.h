@@ -13,12 +13,14 @@
 #include "core/engine/candidates.h"
 #include "core/manifest/entry.h"
 #include "core/manifest/manifest.h"
+#include "core/repository/archive_store.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <expected>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,6 +29,15 @@ namespace va {
 // The member of a run's record that says that the run adds chunk hashes: the
 // chunk size at which it hashes them.
 inline constexpr const char* adding_member = "add_chunk_hashes";
+
+// Why chunk hashes cannot be added to `archive` now, or nothing when they can:
+// a retired archive takes no new revisions (decision 0003), and an archive
+// whose current revision has a chunk size, as its manifest says (R-14), has
+// them. Reads the first line of that manifest alone (load_recorded_header);
+// fails when it cannot. The rule by which a verification refuses to add them
+// and the GUI offers to.
+std::expected<std::optional<std::string>, IoError> why_chunk_hashes_cannot_be_added(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const ArchiveRecord& archive);
 
 // The chunk size at which the run whose record is `record` adds chunk hashes;
 // 0 when it adds none (a FULL verify that only verifies, or a record of a
