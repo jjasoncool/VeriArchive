@@ -26,7 +26,7 @@ std::string text_member(const nlohmann::json& record, const char* name)
 // finish it is its checkbox "Resume an interrupted registration of this folder
 // or volume", with the registration's root entered; made for an older
 // revision (decision 0030), it can only be abandoned.
-std::string registration_refusal(const RefusingOperation& refusing, RefusedIn view, bool stopped)
+std::string registration_refusal(const RefusingOperation& refusing, RefusedIn view, bool runs)
 {
     const auto& uuid = refusing.archive_uuid;
     const auto creates = std::to_string(refusing.revision);
@@ -34,17 +34,17 @@ std::string registration_refusal(const RefusingOperation& refusing, RefusedIn vi
         const auto made = "the unfinished registration of archive " + uuid + " (root \"" + refusing.root +
                           "\") would create revision " + creates + ", but the archive now has a later revision (" +
                           std::to_string(*refusing.later_revision) + "); the registration can no longer finish";
-        return stopped ? made + ": abandon it with Abandon... in the Archive List"
-                       : made + ", and is still running: wait for it to stop, then abandon it with Abandon... in the "
-                                "Archive List";
+        return runs ? made + ", and is still running: wait for it to stop, then abandon it with Abandon... in the "
+                             "Archive List"
+                    : made + ": abandon it with Abandon... in the Archive List";
     }
     // The registration of the very root entered: its plan is that root's.
     if (refusing.this_root) {
         const std::string ways = "finish it by ticking Resume an interrupted registration of this folder or volume "
                                  "and pressing Register again, or abandon it with Abandon... in the Archive List";
-        return stopped ? "an interrupted registration of this root exists (archive " + uuid + "); " + ways
-                       : "a registration of this root (archive " + uuid +
-                             ") is still running; wait for it to finish; if it stops, " + ways;
+        return runs ? "a registration of this root (archive " + uuid +
+                          ") is still running; wait for it to finish; if it stops, " + ways
+                    : "an interrupted registration of this root exists (archive " + uuid + "); " + ways;
     }
     // Of another root of the archive, such as a second mount point of its volume.
     const auto creating = "an unfinished registration of archive " + uuid + " (root \"" + refusing.root +
@@ -55,40 +55,40 @@ std::string registration_refusal(const RefusingOperation& refusing, RefusedIn vi
               "pressing Register"
             : "in Register Archive by entering its root, ticking Resume an interrupted registration of this folder or "
               "volume and pressing Register";
-    return stopped ? creating + "; nothing was changed (finish it first " + resume +
-                         ", or abandon it with Abandon... in the Archive List)"
-                   : creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
-                                "finish it " +
-                         resume + ", or abandon it with Abandon... in the Archive List)";
+    return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
+                             "finish it " +
+                      resume + ", or abandon it with Abandon... in the Archive List)"
+                : creating + "; nothing was changed (finish it first " + resume +
+                      ", or abandon it with Abandon... in the Archive List)";
 }
 
 // A relocation of the archive (decision 0026), which has no window: it is
 // continued on the command line, the new root written as it can be typed
 // (decision 0022, point 9). One whose new carrier differs can never finish,
 // and is only abandoned.
-std::string relocation_refusal(const RefusingOperation& refusing, bool stopped)
+std::string relocation_refusal(const RefusingOperation& refusing, bool runs)
 {
     const auto& uuid = refusing.archive_uuid;
     const auto to = " (to \"" + refusing.root + "\")";
     if (refusing.differs) {
         const auto found = "the unfinished relocation of archive " + uuid + to +
                            " found that the new carrier does not hold the recorded content";
-        return stopped ? found + " and cannot be resumed; abandon it with Abandon... in the Archive List, then "
-                                 "relocate again"
-                       : found + " and is still running; wait for it to end; if it is then still listed in the "
-                                 "Archive List, abandon it there with Abandon..., then relocate again";
+        return runs ? found + " and is still running; wait for it to end; if it is then still listed in the "
+                              "Archive List, abandon it there with Abandon..., then relocate again"
+                    : found + " and cannot be resumed; abandon it with Abandon... in the Archive List, then "
+                              "relocate again";
     }
     const auto ways = "resume it on the command line with `archive relocate " + uuid + " " +
                       shell_argument(refusing.root) + " --resume`, or abandon it with Abandon... in the Archive List";
-    return stopped ? "an unfinished relocation of archive " + uuid + to + " exists; " + ways
-                   : "an unfinished relocation of archive " + uuid + to +
-                         " exists and is still running; wait for it to finish; if it stops, " + ways;
+    return runs ? "an unfinished relocation of archive " + uuid + to +
+                      " exists and is still running; wait for it to finish; if it stops, " + ways
+                : "an unfinished relocation of archive " + uuid + to + " exists; " + ways;
 }
 
 // A FULL verify that adds chunk hashes to the archive (decision 0033): Verify
 // Archive's Resume interrupted run continues it once its archive is chosen in
 // the view's list.
-std::string verification_refusal(const RefusingOperation& refusing, RefusedIn view, bool stopped)
+std::string verification_refusal(const RefusingOperation& refusing, RefusedIn view, bool runs)
 {
     const auto refusal = "an unfinished verification of archive " + refusing.archive_uuid +
                          " that adds chunk hashes (run " + refusing.run_id + ") is creating revision " +
@@ -96,40 +96,40 @@ std::string verification_refusal(const RefusingOperation& refusing, RefusedIn vi
     const std::string resume = view == RefusedIn::VerifyArchive
                                    ? "with Resume interrupted run once the archive is chosen above"
                                    : "with Resume interrupted run in Verify Archive once the archive is chosen there";
-    return stopped ? refusal + "; nothing was changed (finish it first " + resume +
-                         ", or abandon it with Abandon... in the Archive List)"
-                   : refusal + " and is still running; nothing was changed (wait for it to finish; if it stops, "
-                               "finish it " +
-                         resume + ", or abandon it with Abandon... in the Archive List)";
+    return runs ? refusal + " and is still running; nothing was changed (wait for it to finish; if it stops, "
+                            "finish it " +
+                      resume + ", or abandon it with Abandon... in the Archive List)"
+                : refusal + "; nothing was changed (finish it first " + resume +
+                      ", or abandon it with Abandon... in the Archive List)";
 }
 
 } // namespace
 
-std::string refusal_in_window(const RefusingOperation& refusing, RefusedIn view, bool stopped)
+std::string refusal_in_window(const RefusingOperation& refusing, RefusedIn view, bool runs)
 {
     switch (refusing.kind) {
     case Kind::Registration:
-        return registration_refusal(refusing, view, stopped);
+        return registration_refusal(refusing, view, runs);
     case Kind::Relocation:
-        return relocation_refusal(refusing, stopped);
+        return relocation_refusal(refusing, runs);
     case Kind::AddingVerification:
-        return verification_refusal(refusing, view, stopped);
+        return verification_refusal(refusing, view, runs);
     }
     return {};
 }
 
-std::string register_message_in_window(const RegisterFailure& failure, bool stopped)
+std::string register_message_in_window(const RegisterFailure& failure, bool runs)
 {
-    return failure.refusing ? refusal_in_window(*failure.refusing, RefusedIn::RegisterArchive, stopped)
+    return failure.refusing ? refusal_in_window(*failure.refusing, RefusedIn::RegisterArchive, runs)
                             : failure.message;
 }
 
-std::string stop_message_in_window(const VerifyStop& stop, bool stopped)
+std::string stop_message_in_window(const VerifyStop& stop, bool runs)
 {
-    return stop.refusing ? refusal_in_window(*stop.refusing, RefusedIn::VerifyArchive, stopped) : stop.message;
+    return stop.refusing ? refusal_in_window(*stop.refusing, RefusedIn::VerifyArchive, runs) : stop.message;
 }
 
-std::expected<bool, IoError> refusing_operation_stopped(ArchiveStore& store, const RefusingOperation& refusing,
+std::expected<bool, IoError> refusing_operation_runs(ArchiveStore& store, const RefusingOperation& refusing,
     const AttemptCheck& attempts, std::chrono::sys_seconds wall_now)
 {
     const auto& record = refusing.record;
@@ -182,20 +182,25 @@ std::expected<bool, IoError> refusing_operation_stopped(ArchiveStore& store, con
         break;
     }
     }
-    return has_stopped(state_of_one_read(operation, wall_now));
+    // Running, or held up while its process runs. Where one read cannot tell,
+    // as for a record that says nothing of its state (an older version's,
+    // waiting for progress, and later quiet or not known), it is not taken
+    // for one that runs: the window names its ways on (decision 0033).
+    const auto state = state_of_one_read(operation, wall_now);
+    return state == OperationState::Running || state == OperationState::Silent;
 }
 
 namespace {
 
-// Whether the window takes `refusing` for one that has stopped, and names its
-// ways on: as refusing_operation_stopped judges it, with this process taken
-// for one that runs no operation (judge_attempt without
-// `runs_an_operation`), and where it cannot be judged.
-bool stopped_as_the_window_judges(ArchiveStore& store, const RefusingOperation& refusing, IProcessTable& processes,
+// Whether the window says that `refusing` still runs: as
+// refusing_operation_runs judges it, with this process taken for one that
+// runs no operation (judge_attempt without `runs_an_operation`); not where it
+// cannot be judged, where the window names its ways on.
+bool runs_as_the_window_judges(ArchiveStore& store, const RefusingOperation& refusing, IProcessTable& processes,
     const std::string& host, std::chrono::sys_seconds now)
 {
-    const auto stopped = refusing_operation_stopped(store, refusing, AttemptCheck{&processes, host, {}}, now);
-    return !stopped || *stopped;
+    const auto runs = refusing_operation_runs(store, refusing, AttemptCheck{&processes, host, {}}, now);
+    return runs && *runs;
 }
 
 } // namespace
@@ -203,15 +208,15 @@ bool stopped_as_the_window_judges(ArchiveStore& store, const RefusingOperation& 
 std::string register_message_in_window(const RegisterFailure& failure, ArchiveStore& store,
     IProcessTable& processes, const std::string& host, std::chrono::sys_seconds now)
 {
-    return register_message_in_window(failure,
-        !failure.refusing || stopped_as_the_window_judges(store, *failure.refusing, processes, host, now));
+    return register_message_in_window(
+        failure, failure.refusing && runs_as_the_window_judges(store, *failure.refusing, processes, host, now));
 }
 
 std::string stop_message_in_window(const VerifyStop& stop, ArchiveStore& store, IProcessTable& processes,
     const std::string& host, std::chrono::sys_seconds now)
 {
     return stop_message_in_window(
-        stop, !stop.refusing || stopped_as_the_window_judges(store, *stop.refusing, processes, host, now));
+        stop, stop.refusing && runs_as_the_window_judges(store, *stop.refusing, processes, host, now));
 }
 
 } // namespace va::app

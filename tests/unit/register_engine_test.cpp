@@ -2043,17 +2043,17 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     auto through_data = at(data);
     through_data.new_revision = true;
     // Register Archive's words for the registration of `data` that refuses,
-    // once it has stopped and while it runs.
-    const auto another_in_window = [&](std::uint32_t revision, bool stopped) {
+    // while it runs (`runs`), and otherwise.
+    const auto another_in_window = [&](std::uint32_t revision, bool runs) {
         const auto creating = "an unfinished registration of archive " + archive_uuid + " (root \"" +
                               va::path_to_utf8(data) + "\") is creating revision " + std::to_string(revision);
         const std::string resume = "by entering its root above, ticking Resume an interrupted registration of this "
                                    "folder or volume and pressing Register";
-        return stopped ? creating + "; nothing was changed (finish it first " + resume +
-                             ", or abandon it with Abandon... in the Archive List)"
-                       : creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
-                                    "finish it " +
-                             resume + ", or abandon it with Abandon... in the Archive List)";
+        return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
+                                 "finish it " +
+                          resume + ", or abandon it with Abandon... in the Archive List)"
+                    : creating + "; nothing was changed (finish it first " + resume +
+                          ", or abandon it with Abandon... in the Archive List)";
     };
     const auto now = [] { return std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()); };
 
@@ -2062,7 +2062,7 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     fixture.archive.add_file("alias/data/new.bin", "new (sample data)");
     std::expected<va::RegisterOutcome, va::RegisterFailure> second = std::unexpected(va::RegisterFailure{});
     std::string plan_meanwhile;
-    std::optional<std::expected<bool, va::IoError>> stopped_meanwhile;
+    std::optional<std::expected<bool, va::IoError>> runs_meanwhile;
     test::HookedFiles hooked(fixture.archive, "f120.bin", [&] {
         // A second command, in a process of its own, which sees the first's.
         auto store = fixture.repository.store();
@@ -2077,7 +2077,7 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
         second = va::register_archive(services, through_alias, cancel, quiet);
         CHECK(store.setting("registration:" + archive_uuid).value_or("") == plan_meanwhile);
         if (!second && second.error().refusing) {
-            stopped_meanwhile = va::app::refusing_operation_stopped(
+            runs_meanwhile = va::app::refusing_operation_runs(
                 store, *second.error().refusing, {&processes, fixture.host.host, {}}, now());
         }
     });
@@ -2094,9 +2094,9 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
           second.error().refusing->kind == va::RefusingOperation::Kind::Registration &&
           !second.error().refusing->this_root && second.error().refusing->revision == 2 &&
           second.error().refusing->root == va::path_to_utf8(data) && !second.error().refusing->later_revision);
-    CHECK(stopped_meanwhile && *stopped_meanwhile && !**stopped_meanwhile);
-    CHECK(!second && va::app::register_message_in_window(second.error(), false) == another_in_window(2, false) &&
-          va::app::register_message_in_window(second.error(), true) == another_in_window(2, true));
+    CHECK(runs_meanwhile && *runs_meanwhile && **runs_meanwhile);
+    CHECK(!second && va::app::register_message_in_window(second.error(), true) == another_in_window(2, true) &&
+          va::app::register_message_in_window(second.error(), false) == another_in_window(2, false));
     CHECK(first && first->revision == 2);
     const auto verified = fixture.verify(data);
     CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
@@ -2122,24 +2122,24 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     // Register Archive, through another root, its root and the checkbox, and
     // through its own root, the checkbox again.
     const auto judged_stopped = [&](const va::RegisterFailure& failure) {
-        const auto judged = va::app::refusing_operation_stopped(
+        const auto runs = va::app::refusing_operation_runs(
             fixture.store, *failure.refusing, {&fixture.processes, fixture.host.host, {}}, now());
-        CHECK(judged.has_value());
-        return judged && *judged;
+        CHECK(runs.has_value());
+        return runs && !*runs;
     };
     CHECK(!refused && refused.error().refusing && !refused.error().refusing->this_root &&
           refused.error().refusing->revision == 3 && judged_stopped(refused.error()) &&
-          va::app::register_message_in_window(refused.error(), true) == another_in_window(3, true));
+          va::app::register_message_in_window(refused.error(), false) == another_in_window(3, false));
     const auto finish_by_ticking = "finish it by ticking Resume an interrupted registration of this folder or "
                                    "volume and pressing Register again, or abandon it with Abandon... in the Archive "
                                    "List";
     CHECK(!same_root && same_root.error().refusing && same_root.error().refusing->this_root &&
           same_root.error().refusing->revision == 3 && same_root.error().refusing->archive_uuid == archive_uuid &&
           judged_stopped(same_root.error()) &&
-          va::app::register_message_in_window(same_root.error(), true) ==
+          va::app::register_message_in_window(same_root.error(), false) ==
               "an interrupted registration of this root exists (archive " + archive_uuid + "); " +
                   std::string(finish_by_ticking) &&
-          va::app::register_message_in_window(same_root.error(), false) ==
+          va::app::register_message_in_window(same_root.error(), true) ==
               "a registration of this root (archive " + archive_uuid +
                   ") is still running; wait for it to finish; if it stops, " + std::string(finish_by_ticking));
 
@@ -2196,13 +2196,93 @@ void the_window_takes_its_own_registration_without_a_stop_mark_for_stopped()
     test::FakeProcessTable another;
     another.self = {7000, "boot-1:7000", "veriarchive-cli.exe"};
     another.others = {fixture.processes.self};
-    const auto from_another =
-        va::app::refusing_operation_stopped(fixture.store, *refused.error().refusing, {&another, fixture.host.host, {}}, now);
-    CHECK(from_another && !*from_another);
+    const auto from_another = va::app::refusing_operation_runs(
+        fixture.store, *refused.error().refusing, {&another, fixture.host.host, {}}, now);
+    CHECK(from_another && *from_another);
     auto resume = at("/vol");
     resume.resume = true;
     const auto resumed = fixture.run(resume);
     CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+}
+
+// A registration's plan as a version before decision 0022 wrote it, which
+// says nothing of its state: no "updated", no stop mark, no process (sample
+// data: a registration of a new revision interrupted here, its plan written
+// again with that version's members only). Its attempt stopped long ago, but
+// one read cannot tell whether it runs, as the Archive List, which shows it
+// waiting for progress, cannot. So Register Archive, refused by it through
+// its root and through another root of its archive (a second mount point of
+// its volume), names its ways on (decision 0033), not that it still runs; the
+// resume it names, confirmed as an older version's plan asks (decision 0022,
+// point 7), goes ahead, as the plan names no process (decision 0024), and
+// records the revision.
+void the_window_names_its_ways_on_for_a_plan_that_says_nothing_of_its_state()
+{
+    Fixture fixture;
+    for (int index = 0; index < 10; ++index) {
+        const auto name = "f" + std::to_string(100 + index) + ".bin";
+        const auto content = std::string(500 + index, static_cast<char>('a' + index % 26));
+        fixture.archive.add_file("data/" + name, content);
+        fixture.archive.add_file("alias/data/" + name, content);
+    }
+    auto alias = fixture.media.volume;
+    alias.mount_point = fixture.archive.root() / "alias";
+    fixture.media.extra_volumes.push_back(alias);
+    const auto data = fixture.archive.root() / "data";
+    const auto registered = fixture.run(at(data));
+    CHECK(registered && registered->revision == 1);
+    if (!registered) {
+        return;
+    }
+    const auto& archive_uuid = registered->archive_uuid;
+    auto through_data = at(data);
+    through_data.new_revision = true;
+    auto through_alias = at(fixture.archive.root() / "alias" / "data");
+    through_alias.new_revision = true;
+    fixture.archive.add_file("data/newer.bin", "newer (sample data)");
+    fixture.archive.node("data/f105.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.run(through_data);
+    fixture.archive.node("data/f105.bin").open_error.reset();
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    const auto key = "registration:" + archive_uuid;
+    const auto plan = nlohmann::json::parse(fixture.store.setting(key).value_or(""), nullptr, false);
+    nlohmann::json older = nlohmann::json::object();
+    for (const char* member : {"archive_uuid", "revision", "label", "created", "new_archive", "root", "copy_of"}) {
+        if (plan.is_object() && plan.contains(member)) {
+            older[member] = plan[member];
+        }
+    }
+    CHECK(older.size() >= 6 && fixture.store.set_setting(key, older.dump()));
+
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto in_window = [&](const va::RegisterFailure& failure) {
+        return va::app::register_message_in_window(failure, fixture.store, fixture.processes, fixture.host.host, now);
+    };
+    const auto same_root = fixture.run(through_data);
+    CHECK(!same_root && same_root.error().refusing && same_root.error().refusing->this_root);
+    if (!same_root && same_root.error().refusing) {
+        const auto runs = va::app::refusing_operation_runs(
+            fixture.store, *same_root.error().refusing, {&fixture.processes, fixture.host.host, {}}, now);
+        CHECK(runs && !*runs);
+        CHECK(in_window(same_root.error()) ==
+              "an interrupted registration of this root exists (archive " + archive_uuid +
+                  "); finish it by ticking Resume an interrupted registration of this folder or volume and pressing "
+                  "Register again, or abandon it with Abandon... in the Archive List");
+    }
+    const auto other_root = fixture.run(through_alias);
+    CHECK(!other_root && other_root.error().refusing && !other_root.error().refusing->this_root);
+    if (!other_root && other_root.error().refusing) {
+        CHECK(in_window(other_root.error()) ==
+              "an unfinished registration of archive " + archive_uuid + " (root \"" + va::path_to_utf8(data) +
+                  "\") is creating revision 2; nothing was changed (finish it first by entering its root above, "
+                  "ticking Resume an interrupted registration of this folder or volume and pressing Register, or "
+                  "abandon it with Abandon... in the Archive List)");
+    }
+    auto resume = at(data);
+    resume.resume = true;
+    resume.confirmed = true;
+    const auto resumed = fixture.run(resume);
+    CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 2);
 }
 
 // ---- A plan made for an older revision (decision 0030) ---------------------
@@ -2285,9 +2365,9 @@ void a_registration_made_for_an_older_revision_never_records()
         CHECK(!*failure && (*failure).error().refusing &&
               (*failure).error().refusing->kind == va::RefusingOperation::Kind::Registration &&
               (*failure).error().refusing->later_revision == 3u && (*failure).error().refusing->revision == 2 &&
-              va::app::register_message_in_window((*failure).error(), true) ==
-                  in_window + ": abandon it with Abandon... in the Archive List" &&
               va::app::register_message_in_window((*failure).error(), false) ==
+                  in_window + ": abandon it with Abandon... in the Archive List" &&
+              va::app::register_message_in_window((*failure).error(), true) ==
                   in_window + ", and is still running: wait for it to stop, then abandon it with Abandon... in the "
                               "Archive List");
     }
@@ -3890,6 +3970,7 @@ void register_engine_tests()
     an_abandoned_attempt_leaves_the_next_registration_alone();
     a_registration_never_replaces_another_unfinished_one_of_its_archive();
     the_window_takes_its_own_registration_without_a_stop_mark_for_stopped();
+    the_window_names_its_ways_on_for_a_plan_that_says_nothing_of_its_state();
     a_registration_made_for_an_older_revision_never_records();
     a_registration_meets_a_later_revision_at_its_record();
     a_registration_made_for_an_older_revision_stops_reading();
