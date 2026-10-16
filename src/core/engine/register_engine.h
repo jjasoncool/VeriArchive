@@ -60,6 +60,18 @@ struct RegisterOutcome {
     bool lost_revision_left_out = false;
 };
 
+// An archive whose root the root of a registration over a lost manifest
+// overlaps, on a volume that the root's volume matches only as MIGRATED (the
+// filesystem id that archive's latest manifest records, on another device)
+// or MATCH_WEAK (no device, or no filesystem id, to compare): the root's
+// volume may be a sector-by-sector clone of that archive's volume, or that
+// volume itself (decision 0028, point 8). Named before the operator confirms.
+struct PossibleClone {
+    Uuid archive_uuid;
+    std::string label;
+    MatchResult match = MatchResult::MatchWeak;  // MIGRATED or MATCH_WEAK
+};
+
 // What a registration over a lost manifest registers (decision 0028, point
 // 8), as it says before the operator confirms it.
 struct LostManifestRegistration {
@@ -69,6 +81,7 @@ struct LostManifestRegistration {
     std::uint32_t revision = 0;             // the revision it registers: the next one
     std::string root;                       // UTF-8, as the root is given
     UnusableManifest manifest;              // what is wrong with the lost revision's manifest
+    std::vector<PossibleClone> possible_clones;  // in the order of the archives' labels
 };
 
 struct RegisterFailure {

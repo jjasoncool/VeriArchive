@@ -1102,6 +1102,8 @@ run_cli("12" register "${MEDIA}" --lost-manifest "${media_prefix}" --json)
 string(JSON asked_revision GET "${last_output}" registration revision)
 string(JSON asked_lost GET "${last_output}" registration lost_revision)
 string(JSON asked_kind GET "${last_output}" registration manifest_problem kind)
+# No other archive's root overlaps this one on a volume that may be a clone.
+string(JSON asked_clones LENGTH "${last_output}" registration possible_clones)
 run_cli("2" archive show "${media_prefix}" --json)
 string(JSON asked_unchanged GET "${last_output}" revision)
 run_cli("0" register "${MEDIA}" --lost-manifest "${media_prefix}" --confirm --json)
@@ -1123,7 +1125,7 @@ if(media_usable EQUAL -1 OR media_last_resort EQUAL -1 OR media_import_named EQU
         OR NOT media_asked_chinese MATCHES "^無法取回的清單檔：ARCH-[0-9]+（${media_uuid}），版次 2\n"
         OR NOT media_asked_chinese MATCHES "錯誤：若要註冊版次 3，請加上 --confirm 再執行一次\n$"
         OR NOT asked_revision EQUAL 3 OR NOT asked_lost EQUAL 2 OR NOT asked_kind STREQUAL "missing"
-        OR NOT asked_unchanged EQUAL 2 OR NOT over_revision EQUAL 3 OR NOT over_lost EQUAL 2 OR NOT over_left_out
+        OR NOT asked_clones EQUAL 0 OR NOT asked_unchanged EQUAL 2 OR NOT over_revision EQUAL 3 OR NOT over_lost EQUAL 2 OR NOT over_left_out
         OR NOT media_revisions EQUAL 2 OR NOT media_first EQUAL 1 OR NOT media_latest EQUAL 3
         OR NOT over_verified MATCHES "^PASSED" OR NOT over_verified_revision EQUAL 3)
     message(FATAL_ERROR "a registration over a lost manifest: usable ${media_usable}, last resort ${media_last_resort}, "

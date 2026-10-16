@@ -398,10 +398,12 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
 }
 
 // The archive named for a registration over its lost manifest (decision 0028,
-// point 8), and what is wrong with the manifest of its revision.
+// point 8), what is wrong with the manifest of its revision, and the archives
+// whose root the root given overlaps on a volume that may be a clone.
 struct LostManifest {
     ArchiveRecord archive;
     UnusableManifest manifest;
+    std::vector<PossibleClone> possible_clones;
 };
 
 // What only the index gets wrong of an intact manifest: rebuilt from the
@@ -452,8 +454,15 @@ std::optional<std::filesystem::path> media_copy_to_import(IFileSystemAccess& fil
 // its root. So the root is the operator's word, and refused only where it is
 // plainly another archive's: an identity file on it that names another
 // archive, or a root that overlaps the root of an archive whose manifest can
-// be used on the same volume (decision 0001). And where the root still holds
-// the lost manifest as a media copy that `import` would put back, it says to
+// be used on a volume that is plainly that archive's, a MATCH of it (the
+// filesystem id and a device that its latest manifest records), as
+// plainly_another_archives_root tells one, at an overlapping folder rather
+// than the same (decision 0001). A root that overlaps another archive's on a
+// volume that it matches only as MIGRATED or MATCH_WEAK may be a clone of that
+// volume, as a device and a sector-by-sector clone of it registered as two
+// archives read to each other, attached or not: it is taken, and that archive
+// is named before the operator confirms. And where the root still holds the
+// lost manifest as a media copy that `import` would put back, it says to
 // import that instead: the manifest is not lost.
 std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServices& services,
     const RegisterRequest& request, const MediaEvidence& evidence, const std::string& root_subpath)
@@ -489,7 +498,7 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
         return fail(Kind::Refused, "the manifest of revision " + std::to_string(revision) + " of archive " + uuid +
                                        " is not lost: " + plain_message(unusable));
     }
-    LostManifest lost{**archive, unusable};
+    LostManifest lost{**archive, unusable, {}};
 
     if (const auto claimed = read_identity_claim(services.archive_files, request.root); claimed && *claimed != uuid) {
         return fail(Kind::Refused, "the identity file of this root (.veriarchive/identity.json) names archive " +
@@ -504,8 +513,8 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
                                        std::to_string(revision) + " of archive " + uuid + ": put it back with `import " +
                                        path_to_utf8(*copy) + "`");
     }
-    // As a relocation's new root (decision 0001): earlier carriers of
-    // another archive never make one overlap.
+    // Earlier carriers of another archive never make one overlap, as for a
+    // relocation's new root (decision 0001).
     const auto pool = load_candidate_pool(store, services.repository_files, services.layout);
     if (!pool) {
         return fail(Kind::Repository, pool.error().message);
@@ -513,15 +522,24 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
     for (const auto& candidate : pool->candidates) {
         // The archive itself, where matching reads its manifest's line 1,
         // which may be intact while its body is not.
-        if (candidate.archive_uuid == uuid) {
+        if (candidate.archive_uuid == uuid || !roots_overlap(candidate.root_subpath, root_subpath)) {
             continue;
         }
+        // The identity file took its part above: one naming the archive
+        // itself does not make another archive's root its own.
         const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
-        const bool same_volume = match.result == MatchResult::Match || match.result == MatchResult::MatchWeak ||
-                                 match.result == MatchResult::Migrated;
-        if (same_volume && roots_overlap(candidate.root_subpath, root_subpath)) {
-            return fail(Kind::Refused,
-                "the root overlaps archive " + candidate.archive_uuid + " on the same volume (decision 0001)");
+        if (match.result == MatchResult::Match) {
+            return fail(Kind::Refused, "the root overlaps the root of archive " + candidate.archive_uuid +
+                                           ", whose latest manifest records this volume's filesystem id and device "
+                                           "(decision 0001)");
+        }
+        if (match.result == MatchResult::MatchWeak || match.result == MatchResult::Migrated) {
+            const auto other = store.find_archive(candidate.archive_uuid);
+            if (!other) {
+                return fail(Kind::Repository, other.error().message);
+            }
+            lost.possible_clones.push_back(
+                PossibleClone{candidate.archive_uuid, *other ? (*other)->label : std::string{}, match.result});
         }
     }
     return lost;
@@ -821,7 +839,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             return std::unexpected(RegisterFailure{Kind::Unconfirmed,
                 "run the command again with --confirm to register revision " + std::to_string(plan.revision),
                 LostManifestRegistration{plan.archive_uuid, plan.label, *plan.lost_revision, plan.revision, plan.root,
-                    lost->manifest}});
+                    lost->manifest, lost->possible_clones}});
         }
         // Recorded before any work, so an interruption leaves a resumable
         // registration. The plan names the process that runs this attempt

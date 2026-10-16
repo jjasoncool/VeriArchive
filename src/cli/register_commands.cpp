@@ -37,6 +37,11 @@ int failure_code(RegisterFailure::Kind kind)
 nlohmann::json lost_manifest_json(const LostManifestRegistration& registration)
 {
     const auto& manifest = registration.manifest;
+    auto clones = nlohmann::json::array();
+    for (const auto& clone : registration.possible_clones) {
+        clones.push_back({{"archive_uuid", clone.archive_uuid}, {"label", clone.label},
+            {"match", std::string(to_string(clone.match))}});
+    }
     return {
         {"archive_uuid", registration.archive_uuid},
         {"label", registration.label},
@@ -45,6 +50,7 @@ nlohmann::json lost_manifest_json(const LostManifestRegistration& registration)
         {"root", registration.root},
         {"manifest_problem", {{"kind", kind_code(manifest.kind)}, {"revision", manifest.revision},
                                  {"manifest", manifest.manifest}, {"message", plain_message(manifest)}}},
+        {"possible_clones", std::move(clones)},
     };
 }
 
@@ -64,8 +70,20 @@ int unconfirmed(const Arguments& arguments, const RegisterFailure& failure)
     std::cout << text.format("Lost manifest of {} ({}), revision {}", registration.label, registration.archive_uuid,
                      registration.lost_revision)
               << "\n  " << text(what_is_wrong_with(registration.manifest)) << "\n  "
-              << text.format("root: {}", registration.root) << '\n'
-              << text.format("Registering revision {} from this root takes what it holds now as the archive's new "
+              << text.format("root: {}", registration.root) << '\n';
+    // An archive whose root this root overlaps on a volume that may be a
+    // clone of this one, or this one itself: the operator, who knows which
+    // device is which, confirms only where the root is not that archive's.
+    for (const auto& clone : registration.possible_clones) {
+        std::cout << "  "
+                  << text.format("possibly a clone: this root overlaps the root of archive {} ({}) on a volume that "
+                                 "this one matches only as {}: this volume may be a sector-by-sector clone of that "
+                                 "archive's, or that archive's own; confirm only where this root is not that "
+                                 "archive's",
+                         clone.label, clone.archive_uuid, text(to_string(clone.match)))
+                  << '\n';
+    }
+    std::cout << text.format("Registering revision {} from this root takes what it holds now as the archive's new "
                              "baseline, without comparing it with revision {}, whose manifest is lost: damage since "
                              "revision {} was registered would not be found. Do this only where no backup of the "
                              "repository, export of revision {} or media copy holds that manifest. The archive "

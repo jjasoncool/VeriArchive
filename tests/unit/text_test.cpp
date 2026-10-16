@@ -682,8 +682,22 @@ void translation_tests()
                   ": put it back with `import K:\\SAMPLE\\.veriarchive\\r0002.vam`") ==
           "錯誤：此根目錄的媒體副本中有封存 " + uuid +
               " 版次 2 的清單檔：請以 `import K:\\SAMPLE\\.veriarchive\\r0002.vam` 放回該清單檔");
-    CHECK(chinese("error: the root overlaps archive " + uuid + " on the same volume (decision 0001)") ==
-          "錯誤：根目錄與同一磁碟區上的封存 " + uuid + " 重疊（決策紀錄 0001）");
+    CHECK(chinese("error: the root overlaps the root of archive " + uuid +
+                  ", whose latest manifest records this volume's filesystem id and device (decision 0001)") ==
+          "錯誤：根目錄與封存 " + uuid + " 的根目錄重疊，而該封存最新的清單檔所記錄的正是此磁碟區的檔案系統 UUID 與裝置"
+          "（決策紀錄 0001）");
+    // An archive whose root the root given overlaps on a volume that may be a
+    // clone of this one, named before the operator confirms; the match code
+    // translated before it is put in.
+    for (const auto& [code, code_chinese] : {std::pair{"MIGRATED", "已遷移"}, std::pair{"MATCH_WEAK", "弱相符"}}) {
+        CHECK(chinese.format("possibly a clone: this root overlaps the root of archive {} ({}) on a volume that this "
+                             "one matches only as {}: this volume may be a sector-by-sector clone of that archive's, "
+                             "or that archive's own; confirm only where this root is not that archive's",
+                  "ARCH-0002", uuid_b, chinese(code)) ==
+              "可能是複本：此根目錄與封存 ARCH-0002（" + uuid_b + "）的根目錄重疊，而此磁碟區與該封存的磁碟區比對只得到「" +
+                  code_chinese + "」：此磁碟區可能是該封存的磁碟區逐磁區複製出來的複本，也可能就是該封存自己的磁碟區；"
+                  "請只在此根目錄不是該封存的根目錄時才確認");
+    }
     CHECK(chinese("error: --lost-manifest takes none of --label, --new-revision, --force-new-archive and --resume") ==
           "錯誤：--lost-manifest 不能與 --label、--new-revision、--force-new-archive 或 --resume 一起使用");
     CHECK(chinese("error: --confirm is used only with --lost-manifest") == "錯誤：--confirm 只能與 --lost-manifest 一起使用");

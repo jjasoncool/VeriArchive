@@ -682,8 +682,19 @@ constexpr CatalogEntry entries[] = {
         "此根目錄的身分檔案（.veriarchive/identity.json）指向封存 {}，而不是封存 {}"},
     {"the media copy at this root holds the manifest of revision {} of archive {}: put it back with `import {}`",
         "此根目錄的媒體副本中有封存 {1} 版次 {0} 的清單檔：請以 `import {2}` 放回該清單檔"},
-    {"the root overlaps archive {} on the same volume (decision 0001)",
-        "根目錄與同一磁碟區上的封存 {} 重疊（決策紀錄 0001）"},
+    {"the root overlaps the root of archive {}, whose latest manifest records this volume's filesystem id and device "
+        "(decision 0001)",
+        "根目錄與封存 {} 的根目錄重疊，而該封存最新的清單檔所記錄的正是此磁碟區的檔案系統 UUID 與裝置（決策紀錄 0001）"},
+    // src/cli/register_commands.cpp: an archive whose root the root of a
+    // registration over a lost manifest overlaps on a volume that may be a
+    // clone of this one (decision 0028, point 8); the match code is translated
+    // before it is put in.
+    {"possibly a clone: this root overlaps the root of archive {} ({}) on a volume that this one matches only as {}: "
+        "this volume may be a sector-by-sector clone of that archive's, or that archive's own; confirm only where this "
+        "root is not that archive's",
+        "可能是複本：此根目錄與封存 {}（{}）的根目錄重疊，而此磁碟區與該封存的磁碟區比對只得到「{}」：此磁碟區可能是"
+        "該封存的磁碟區逐磁區複製出來的複本，也可能就是該封存自己的磁碟區；請只在此根目錄不是該封存的根目錄時才確認",
+        Match::FormatOnly},
     // src/core/engine/abandon_registration.cpp
     {"archive {} has no unfinished registration", "封存 {} 沒有未完成的註冊"},
     {"the unfinished registration of archive {} is no longer the one shown (it was resumed, finished or "
