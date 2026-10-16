@@ -3,7 +3,8 @@
 // the window, rebuilds it in the other language and back (as a language change
 // does), and exits, so a build can be checked without a desktop.
 // VERIARCHIVE_GUI_SCREENSHOTS=<folder> takes the documentation screenshots into
-// that folder and exits (tools/screenshots).
+// that folder and exits (tools/screenshots); the views then show a sample media
+// identity (displayed_identity).
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -31,6 +32,12 @@ int main(int argc, char* argv[])
     // any name arrives intact (on Linux the bytes are the path).
     if (const char* folder = g_getenv("VERIARCHIVE_GUI_SCREENSHOTS"); folder && *folder) {
         state.screenshot_folder = va::path_from_utf8(folder);
+        // The pictures are published, so from the first frame on the views
+        // show the sample identity, never that of the volumes the sample
+        // archives lie on. The smoke test takes precedence and shows nothing.
+        if (!smoke_test) {
+            state.identity_shown = va::gui::IdentityShown::Sample;
+        }
     }
 
     // Windows has no D-Bus session bus. Without an address GLib would try to

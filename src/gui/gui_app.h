@@ -4,6 +4,7 @@
 // Compare Archives (decision 0020).
 #include "app/unfinished_operations.h"
 #include "app/session.h"
+#include "gui/displayed_identity.h"
 #include "gui/gui_support.h"
 
 #include <chrono>
@@ -61,6 +62,10 @@ struct GuiState {
     // Set from VERIARCHIVE_GUI_SCREENSHOTS: take the documentation screenshots
     // into this folder, then quit (screenshots.cpp).
     std::optional<std::filesystem::path> screenshot_folder;
+    // The media identity the views show, through displayed_identity: Sample
+    // while the screenshot mode runs, as its pictures are published;
+    // otherwise what was recorded.
+    IdentityShown identity_shown = IdentityShown::Recorded;
 
     // The widgets below belong to the current window; a language change
     // replaces them. The Reports are what a view shows, kept so the new window

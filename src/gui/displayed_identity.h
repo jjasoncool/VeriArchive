@@ -1,0 +1,35 @@
+#pragma once
+// The media identity the views show. Normal use shows what was recorded: the
+// volume and its devices as a manifest header or media evidence holds them.
+// The user guide's pictures (screenshot mode, tools/screenshots) are public,
+// and the sample archives in them are folders on a real volume of the
+// computer that takes them, so what was recorded is that volume's own label,
+// its device's model and serial, its capacity. While the screenshot mode runs,
+// every view therefore shows a fixed sample identity instead.
+//
+// Plain C++ without GTK, so the unit tests can check it.
+#include "common/types.h"
+
+namespace va::gui {
+
+enum class IdentityShown {
+    Recorded,  // what was recorded: normal use
+    Sample,    // the fixed sample identity: the screenshot mode
+};
+
+// The volume identity, with its devices, that a view shows for `recorded`.
+// Every view that shows media identity takes it from here, and only shows it:
+// matching and every other decision use what was recorded.
+//
+// Sample: the same values whatever was recorded, plainly sample and never
+// translated, so alike in every interface language: volume label
+// SAMPLE-VOLUME, one device, model SAMPLE-DEVICE, serial SAMPLE0001, a round
+// capacity of 1 TiB, sample values in every other identity field (filesystem
+// type and id, volume GUID, WWN, bus) and no container; whether the device
+// rotates is unknown, so neither HDD nor SSD is shown. Kept from `recorded`
+// are only the mount point and read_only: where and how this computer has the
+// volume attached now. They are runtime state, never part of a recorded
+// identity (§B4.3), and the paths the views show hold the mount point anyway.
+VolumeInfo displayed_identity(const VolumeInfo& recorded, IdentityShown shown);
+
+} // namespace va::gui

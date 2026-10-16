@@ -10,6 +10,7 @@ int main()
     platform_tests();
     unicode_tests();
     identity_tests();
+    displayed_identity_tests();
     hash_tests();
     fs_access_tests();
     scanner_tests();

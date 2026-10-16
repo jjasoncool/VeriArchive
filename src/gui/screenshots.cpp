@@ -11,6 +11,11 @@
 //
 // GTK renders the pictures itself from what the window drew, so they show only
 // the window, never other windows on the desktop, and need no screen access.
+//
+// The pictures are published, and the sample archives are folders on a real
+// volume, whose label, device model and capacity the Archive List would show.
+// So while this mode runs, the views show a fixed sample identity instead
+// (displayed_identity; main turns it on together with the mode).
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -167,6 +172,10 @@ public:
         if (!state_.session) {
             const auto why = state_.session_error ? state_.session_error(app::Text()) : std::string();
             throw std::runtime_error("no repository is open: " + why);
+        }
+        // No picture may show the identity of the volumes the archives lie on.
+        if (state_.identity_shown != IdentityShown::Sample) {
+            throw std::runtime_error("the views show the recorded media identity instead of the sample one");
         }
         reference_ = environment("VERIARCHIVE_SCREENSHOT_REFERENCE");
         copy_ = environment("VERIARCHIVE_SCREENSHOT_COPY");

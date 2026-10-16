@@ -158,6 +158,7 @@ if(VERIARCHIVE_BUILD_GUI)
     add_executable(veriarchive_gui
         src/gui/archive_list_view.cpp
         src/gui/compare_view.cpp
+        src/gui/displayed_identity.cpp
         src/gui/gui_app.cpp
         src/gui/gui_support.cpp
         src/gui/history_view.cpp
@@ -226,6 +227,7 @@ if(BUILD_TESTING)
         tests/unit/archive_store_test.cpp
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
+        tests/unit/displayed_identity_test.cpp
         tests/unit/file_writer_test.cpp
         tests/unit/fs_access_test.cpp
         tests/unit/hash_pipeline_test.cpp
@@ -255,6 +257,9 @@ if(BUILD_TESTING)
         # Pure C++ parser; tested on every OS although only Linux uses it.
         target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp src/platform/linux/vpd.cpp)
     endif()
+    # The GUI's choice of the media identity it shows is plain C++ without
+    # GTK, so it is tested also where the GUI is not built.
+    target_sources(veriarchive_tests PRIVATE src/gui/displayed_identity.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
         # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.

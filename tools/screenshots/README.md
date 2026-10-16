@@ -5,7 +5,7 @@
 | File | What it shows |
 |---|---|
 | `01-settings.png` | Settings: the repository, the config file, the policy |
-| `02-archive-list.png` | Archive List with the two sample archives |
+| `02-archive-list.png` | Archive List with the two sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB) |
 | `03-register.png` | Register Archive with archive A's folder and label typed in (not started) |
 | `04-verify.png` | Verify Archive after a FULL verification of archive A |
 | `05-history.png` | Verification History of archive A, with the history chain checked |
@@ -37,11 +37,12 @@ The repository is public, and so are these pictures. The script makes its own sa
 
 - The GUI finds its config file in `WORK`: the script points `APPDATA` (Windows) or `XDG_CONFIG_HOME` (Linux) there and clears `VERIARCHIVE_REPOSITORY`.
 - A portable install (a `config.json` next to `veriarchive-gui`) would use its own repository instead, so the script refuses such a GUI.
-- The pictures still show the label of the volume `WORK` is on, the model of its device, and the computer's time zone. Check them before publishing.
+- The sample folders lie on a real volume, the one `WORK` is on, so what the registrations record about their carrier is that volume's own identity: its label, its device's model and serial, its capacity. The screenshot mode never shows it: every view shows a fixed sample identity instead (see below).
+- The pictures still show the paths under `WORK`, its drive letter included, and the computer's time zone. Check them before publishing.
 
 ## The screenshot mode
 
-The script sets these variables for the GUI. Setting them by hand works too, against any repository the GUI opens.
+The script sets these variables for the GUI. Setting them by hand works too, against any repository the GUI opens; the views then show that repository's archives with the sample identity, so use a sample repository only.
 
 | Variable | Meaning |
 |---|---|
@@ -50,5 +51,7 @@ The script sets these variables for the GUI. Setting them by hand works too, aga
 | `VERIARCHIVE_SCREENSHOT_COPY` | uuid of archive B: compared with A |
 | `VERIARCHIVE_SCREENSHOT_FOLDER` | archive A's folder: typed into Register Archive and Verify Archive |
 | `VERIARCHIVE_LANG` | The interface language of the pictures |
+
+While the mode runs, every view shows the same sample media identity in place of the recorded one, in every language: volume label `SAMPLE-VOLUME`, device model `SAMPLE-DEVICE`, serial `SAMPLE0001`, capacity 1.0 TiB, and sample values in every other identity field (filesystem type and id, volume GUID, WWN, bus); whether the device rotates (HDD or SSD) is unknown. One function decides which identity the views show: `displayed_identity` in `src/gui/displayed_identity.cpp`. Normal use always shows what was recorded, and the smoke test (`VERIARCHIVE_GUI_SMOKE_TEST`), which takes precedence, shows nothing.
 
 The GUI exits with status 1 and writes the reason to stderr when a step fails, for example when an archive is not in the repository or the verification does not reach a result. The tour is in `src/gui/screenshots.cpp`.

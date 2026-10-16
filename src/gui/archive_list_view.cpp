@@ -675,10 +675,13 @@ void refresh_archive_list(GuiState& state)
         std::string model;
         std::string capacity;
         if (status.header) {
-            volume = status.header->identity.volume_label;
-            capacity = format_bytes(status.header->identity.capacity_bytes);
-            if (!status.header->identity.devices.empty()) {
-                model = status.header->identity.devices.front().model;
+            // The carrier as the latest revision recorded it, or the sample
+            // identity in the screenshot mode.
+            const auto identity = displayed_identity(status.header->identity, state.identity_shown);
+            volume = identity.volume_label;
+            capacity = format_bytes(identity.capacity_bytes);
+            if (!identity.devices.empty()) {
+                model = identity.devices.front().model;
             }
         }
         const bool overdue = status.full_overdue || status.any_overdue;
