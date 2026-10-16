@@ -159,7 +159,13 @@ void show_operations(GuiState& state)
         }
         gtk_box_append(GTK_BOX(progress), operation_cell(shown.progress));
         if (!shown.details.empty()) {
-            gtk_box_append(GTK_BOX(progress), operation_cell(shown.details));
+            // Wraps rather than widen the table: the details may end with why
+            // a total is not known, a whole sentence.
+            GtkWidget* details = operation_cell(shown.details);
+            gtk_label_set_wrap(GTK_LABEL(details), TRUE);
+            gtk_label_set_wrap_mode(GTK_LABEL(details), PANGO_WRAP_WORD_CHAR);
+            gtk_label_set_max_width_chars(GTK_LABEL(details), 64);
+            gtk_box_append(GTK_BOX(progress), details);
         }
         gtk_grid_attach(GTK_GRID(view.operations_grid), progress, 3, row, 1, 1);
 

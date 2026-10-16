@@ -342,6 +342,7 @@ constexpr CatalogEntry entries[] = {
     {"Relocation", "搬移"},
     {"{} of about {} ({}%)", "{} / 約 {}（{}%）", Match::FormatOnly},
     {"{} done", "已完成 {}", Match::FormatOnly},
+    {"total not known: {}", "總量不明：{}", Match::FormatOnly},
     {"{} of {} files", "{} / {} 個檔案", Match::FormatOnly},
     {"{} files", "{} 個檔案", Match::FormatOnly},
     {"waiting for progress...", "等待進度更新……"},

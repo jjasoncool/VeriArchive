@@ -4,6 +4,7 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "core/engine/relocate_engine.h"
+#include "core/manifest/manifest_reader.h"
 #include "engine_fixture.h"
 #include "test_repository.h"
 
@@ -93,6 +94,74 @@ void reads_operations_with_approximate_totals()
     CHECK(whole.bytes_total == 9 * gib && whole.total_is_estimate && whole.files_total == 0);
     // Only the whole volume without totals asked for its used space.
     CHECK(asked.size() == 1 && asked.front() == "Z:\\");
+}
+
+// A verification of a version before decision 0022 records neither its
+// totals nor its root: the header of its revision's manifest has them (its
+// counts and root_hint), never the index's copy of that header (R-14). When
+// the manifest cannot be used (the index's copy differs, or the manifest is
+// gone; sample data), the totals stay unknown and the row says why, last in
+// its details, in either language.
+void an_older_verification_takes_its_totals_from_the_manifest()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    fixture.archive.add_file("b.txt", std::string(1000, 'b'));
+    const auto registered = fixture.register_root(fixture.archive.root());
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    const auto& uuid = registered->archive_uuid;
+    const auto reader = va::ManifestReader::open(*fixture.repository.files, registered->manifest);
+    CHECK(reader.has_value());
+    if (!reader) {
+        return;
+    }
+    const auto& counts = reader->header().counts;
+    CHECK(fixture.store.set_setting(
+        "run:older", R"({"archive_uuid":")" + uuid + R"(","revision":1,"started":"2026-10-14T01:00:00Z"})"));
+    const auto read_older = [&]() -> std::optional<UnfinishedOperation> {
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; });
+        CHECK(read && read->operations.size() == 1);
+        if (!read || read->operations.size() != 1) {
+            return std::nullopt;
+        }
+        return read->operations.front();
+    };
+
+    const auto older = read_older();
+    CHECK(older && older->kind == va::app::OperationKind::Verification && older->run_id == "older");
+    CHECK(older && older->files_total == counts.files + counts.streams && older->files_total == 2 &&
+          older->bytes_total == counts.bytes && older->root == reader->header().root_hint &&
+          older->totals_failure.empty());
+
+    fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
+                               "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"')");
+    const auto index_differs = read_older();
+    const auto differs = "the repository's index differs from the manifest of revision 1 of archive " + uuid +
+                         "; rebuild the index with `repo rebuild-index`";
+    CHECK(index_differs && index_differs->files_total == 0 && index_differs->bytes_total == 0 &&
+          index_differs->root.empty() && index_differs->totals_failure == differs);
+    if (index_differs) {
+        const va::app::Text english;
+        const va::app::Text chinese(va::app::Language::TraditionalChinese);
+        OperationWatch watch;
+        watch.update(*index_differs, Clock::time_point{}, wall_now);
+        const auto row = describe_operation(english, watch, Clock::time_point{}, wall_now);
+        CHECK(row.progress == "0 B done" && row.details == "0 files · total not known: " + differs && !row.fraction);
+        CHECK(describe_operation(chinese, watch, Clock::time_point{}, wall_now).details ==
+              "0 個檔案・總量不明：儲存庫的索引與封存 " + uuid + " 版次 1 的清單檔不符；請以 `repo rebuild-index` 重建索引");
+    }
+    fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
+                               "'\"volume_label\":\"OTHER\"', '\"volume_label\":\"ARCHIVE\"')");
+
+    std::filesystem::remove(registered->manifest);
+    const auto gone = read_older();
+    CHECK(gone && gone->files_total == 0 && gone->root.empty() &&
+          gone->totals_failure.starts_with("cannot use the manifest of revision 1 of archive " + uuid + ": ") &&
+          gone->totals_failure.ends_with("; restore it from a backup of the repository"));
 }
 
 // Watching reads a database, never creates one: a repository folder whose
@@ -1370,6 +1439,7 @@ void words_a_line_for_the_command_line()
 void unfinished_operations_tests()
 {
     reads_operations_with_approximate_totals();
+    an_older_verification_takes_its_totals_from_the_manifest();
     reads_nothing_into_a_missing_database();
     keeps_the_counts_of_a_stopped_verification();
     tells_running_from_stopped();

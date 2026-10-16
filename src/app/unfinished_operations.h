@@ -54,6 +54,9 @@ struct UnfinishedOperation {
     std::uint64_t bytes_done = 0;
     std::uint64_t files_total = 0;     // 0: not known
     std::uint64_t bytes_total = 0;     // 0: not known
+    std::string totals_failure;        // why the totals are not known: a verification of a version before
+                                       // decision 0022, whose revision's manifest holds them but cannot be
+                                       // used (an engine sentence)
     bool total_is_estimate = false;    // bytes_total is the volume's used space, not the bytes to hash
     bool recorded_stopped = false;     // its record says it stopped: a verification recorded INCOMPLETE,
                                        // a registration whose plan says "stopped", a relocation likewise
@@ -106,7 +109,12 @@ std::optional<std::uint64_t> volume_used_bytes(const std::filesystem::path& root
 // ArchiveStore::unfinished_verifications), and the mark of its archives. A
 // registration whose plan has no totals yet, and whose root is a whole volume,
 // gets that volume's used space (`used_bytes`) as its approximate total: every
-// file on it is registered, so the files to hash fill about that much.
+// file on it is registered, so the files to hash fill about that much. A
+// verification of a version before decision 0022, whose record has neither
+// totals nor root, gets them from the header of its revision's manifest (its
+// counts and root_hint, load_recorded_header), never from the index's copy of
+// that header (R-14); when that manifest cannot be used, its totals stay
+// unknown, and totals_failure says why.
 // `previous`: the operations of the read before; a verification recorded
 // INCOMPLETE never changes, so its counts are taken from there. Opens the
 // database read only, so watching never creates or changes it; meant to run
@@ -249,7 +257,8 @@ struct OperationRow {
     std::string progress;            // "3.45 TiB of about 8.55 TiB (40%)", "not counted"
     std::string files;               // the files done where the progress does not count them: "78895 files",
                                      // "1 of 2 files"; empty where they are not counted
-    std::string details;             // "78895 files · 120 MiB/s · about 11-13 hours left"
+    std::string details;             // "78895 files · 120 MiB/s · about 11-13 hours left", and last, when a
+                                     // manifest keeps the total from being known, "total not known: <cause>"
     std::string state;               // "running", "no progress seen for 5 minutes; it may have stopped"
     OperationState state_kind = OperationState::Waiting;
     std::optional<double> fraction;  // for a progress bar

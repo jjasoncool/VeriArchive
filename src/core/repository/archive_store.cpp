@@ -1225,15 +1225,13 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
     // verify_runs holds one row per verification, so this stays small.
     auto history =
         database_.prepare("SELECT rowid, started, finished, result FROM verify_runs WHERE archive_uuid = ?");
-    auto header = database_.prepare(
-        "SELECT header_json FROM archive_revisions WHERE archive_uuid = ? AND revision = ?");
     // Each checkpointed entry's size comes from the files index of the revision,
     // looked up by its primary key.
     auto matched = database_.prepare(
         "SELECT COUNT(*), COALESCE(SUM(f.size), 0) FROM verify_progress AS p "
         "LEFT JOIN files AS f ON f.archive_uuid = ? AND f.revision = ? AND f.path = p.path "
         "AND f.raw_hex = p.raw_hex AND f.stream = p.stream WHERE p.run_id = ?");
-    for (const auto* statement : {&recorded, &archive, &history, &header, &matched}) {
+    for (const auto* statement : {&recorded, &archive, &history, &matched}) {
         if (!*statement) {
             return std::unexpected(statement->error());
         }
@@ -1243,7 +1241,6 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
     // costly part, counting checkpoints, comes last and only for the runs shown.
     struct Candidate {
         UnfinishedVerification run;
-        bool totals_recorded = false;  // the setting has files_total and bytes_total
         std::int64_t row = 0;          // its history row, when recorded INCOMPLETE
         Timestamp stopped;             // when it was recorded INCOMPLETE
     };
@@ -1267,7 +1264,11 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         run.updated = json_text(setting, "updated");
         const auto files_total = json_unsigned(setting, "files_total");
         const auto bytes_total = json_unsigned(setting, "bytes_total");
-        candidate.totals_recorded = files_total && bytes_total;
+        // A run of a version before decision 0022 has neither, nor a root:
+        // its revision's manifest header has them, which this layer, reading
+        // no files, leaves to read_unfinished_operations. The index's copy of
+        // that header is never taken for it (R-14).
+        run.totals_recorded = files_total && bytes_total;
         run.files_total = files_total.value_or(0);
         run.bytes_total = bytes_total.value_or(0);
 
@@ -1413,30 +1414,6 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         }
         auto& candidate = candidates[index];
         auto& run = candidate.run;
-        // Runs from before decision 0022 have no totals and no root in their
-        // setting: the manifest header has the revision's counts (unreadable
-        // entries included) and where it was registered.
-        if (!candidate.totals_recorded || run.root.empty()) {
-            header->bind(1, run.archive_uuid).bind(2, static_cast<std::int64_t>(run.revision));
-            const auto has_header = header->step();
-            if (!has_header) {
-                return std::unexpected(has_header.error());
-            }
-            if (*has_header) {
-                const auto json = nlohmann::json::parse(header->text(0), nullptr, false);
-                const auto counts = json.is_object() ? json.find("counts") : json.end();
-                if (!candidate.totals_recorded && counts != json.end() && counts->is_object()) {
-                    run.files_total = json_unsigned(*counts, "files").value_or(0) +
-                                      json_unsigned(*counts, "streams").value_or(0);
-                    run.bytes_total = json_unsigned(*counts, "bytes").value_or(0);
-                }
-                if (run.root.empty() && json.is_object()) {
-                    run.root = json_text(json, "root_hint");
-                }
-            }
-            header->reset();
-        }
-
         // Not in WAL mode, not counted at all (write_ahead_log). A run
         // recorded INCOMPLETE never changes again: an earlier count holds.
         run.done_counted = count;

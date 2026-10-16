@@ -119,7 +119,8 @@ struct UnfinishedVerification {
     std::string run_id;
     Uuid archive_uuid;
     std::string label;
-    std::string root;                           // where it runs when recorded, else where it was registered
+    std::string root;                           // where it runs, from the setting (UTF-8); empty in the setting
+                                                // of a run of a version before decision 0022
     std::uint32_t revision = 0;                 // the revision being verified
     Timestamp started;
     bool recorded_incomplete = false;           // its history row says INCOMPLETE: it stopped
@@ -127,9 +128,10 @@ struct UnfinishedVerification {
     std::uint64_t files_done = 0;               // files (and streams) read and matched so far
     std::uint64_t bytes_done = 0;               // their registered bytes
     bool done_counted = true;                   // false: the two above were not counted (not in WAL mode)
-    std::uint64_t files_total = 0;              // the files (and streams) with content to read: from the
-                                                // setting, or for older runs the manifest header's counts
-                                                // (which include those unreadable at registration)
+    bool totals_recorded = true;                // the setting has the two below; a run of a version before
+                                                // decision 0022 has neither (nor a root): its revision's
+                                                // manifest header has them (read_unfinished_operations)
+    std::uint64_t files_total = 0;              // the files (and streams) with content to read
     std::uint64_t bytes_total = 0;              // the bytes their hashes cover: the bytes to read
     Timestamp updated;                          // the setting's "updated": when it last said it was working
 };

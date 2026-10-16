@@ -274,10 +274,13 @@ void unfinished_verifications_with_checkpoints()
     const auto& running = runs->back();
     CHECK(running.run_id == "running-1" && !running.recorded_incomplete && running.revision == 1);
     CHECK(running.resumable);
-    CHECK(running.root == "Z:\\範例");  // the setting has no root: where it was registered
     CHECK(running.done_counted && running.files_done == 2 && running.bytes_done == 150);
-    // No totals in the setting (a run of an older version): the header's counts.
-    CHECK(running.files_total == 4 && running.bytes_total == 650);
+    // No root and no totals in the setting (a run of an older version): they
+    // are in its revision's manifest header, which the store does not read,
+    // and never taken from the index's copy of it (R-14).
+    CHECK(running.root.empty() && !running.totals_recorded && running.files_total == 0 &&
+          running.bytes_total == 0);
+    CHECK(!interrupted.totals_recorded); // its setting has a root, but no totals either
 
     // Recorded INCOMPLETE, it never changes: a count from an earlier read is
     // taken as it is, the checkpoints are not counted again. A running one is.
@@ -303,7 +306,7 @@ void unfinished_verification_totals_from_its_record()
     CHECK(runs && runs->size() == 1);
     if (runs && runs->size() == 1) {
         const auto& run = runs->front();
-        CHECK(run.root == "Y:\\範例" && run.files_total == 3 && run.bytes_total == 600);
+        CHECK(run.root == "Y:\\範例" && run.totals_recorded && run.files_total == 3 && run.bytes_total == 600);
         CHECK(run.updated == "2026-10-15T03:30:00Z");
     }
 }
@@ -569,7 +572,7 @@ void reads_without_write_ahead_log()
     repository.execute("PRAGMA journal_mode=DELETE;");
     auto store = repository.store();
     add_verified_archive(store);
-    add_run_setting(store, "run-1", "2026-10-15T03:00:00Z");
+    add_run_setting(store, "run-1", "2026-10-15T03:00:00Z", R"(,"files_total":4,"bytes_total":650)");
     CHECK(store.add_progress("run-1", {va::entry_key(file_entry("a.txt", 0))}));
     CHECK(store.set_setting("registration:" + verified_archive,
         R"({"archive_uuid":")" + verified_archive + R"(","revision":2,"created":"2026-10-15T01:00:00Z"})"));

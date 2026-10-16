@@ -2,7 +2,9 @@
 
 #include "common/time.h"
 #include "common/utf8.h"
+#include "core/engine/recorded_manifest.h"
 #include "core/repository/archive_store.h"
+#include "platform/file_system.h"
 
 #include <nlohmann/json.hpp>
 
@@ -91,6 +93,9 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
     std::vector<PendingRegistration> registrations;
     std::vector<UnfinishedVerification> verifications;
     std::vector<UnfinishedRelocation> relocations;
+    // The revision records of the verifications of a version before decision
+    // 0022, by run: their manifests' headers hold their totals and roots.
+    std::map<std::string, std::optional<RevisionRecord>> older_runs;
     const auto done = store->read_transaction([&]() -> std::expected<void, IoError> {
         auto mark = store->archive_list_mark();
         if (!mark) {
@@ -110,6 +115,16 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
             return std::unexpected(unfinished.error());
         }
         verifications = std::move(*unfinished);
+        for (const auto& verification : verifications) {
+            if (verification.totals_recorded && !verification.root.empty()) {
+                continue;
+            }
+            auto record = store->revision(verification.archive_uuid, verification.revision);
+            if (!record) {
+                return std::unexpected(record.error());
+            }
+            older_runs[verification.run_id] = std::move(*record);
+        }
         auto moving = store->unfinished_relocations();
         if (!moving) {
             return std::unexpected(moving.error());
@@ -132,6 +147,9 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         }
         operations.push_back(std::move(operation));
     }
+    // The manifests of older runs are read here, after the read transaction,
+    // so that it stays short.
+    const auto repository_files = platform::make_file_system_access();
     for (const auto& verification : verifications) {
         UnfinishedOperation operation;
         operation.kind = OperationKind::Verification;
@@ -146,6 +164,29 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         operation.bytes_done = verification.bytes_done;
         operation.files_total = verification.files_total;
         operation.bytes_total = verification.bytes_total;
+        if (const auto older = older_runs.find(verification.run_id); older != older_runs.end()) {
+            // A run of a version before decision 0022: its revision's counts
+            // (which include the entries unreadable at registration) and
+            // where it was registered, as its manifest's line 1 holds them.
+            std::expected<ManifestHeader, IoError> header = std::unexpected(IoError{IoErrorKind::Other, 0,
+                "revision " + std::to_string(verification.revision) + " is not recorded"});
+            if (older->second) {
+                header = load_recorded_header(*repository_files, layout, *older->second);
+            }
+            if (!header) {
+                if (!verification.totals_recorded) {
+                    operation.totals_failure = header.error().message;
+                }
+            } else {
+                if (!verification.totals_recorded) {
+                    operation.files_total = header->counts.files + header->counts.streams;
+                    operation.bytes_total = header->counts.bytes;
+                }
+                if (operation.root.empty()) {
+                    operation.root = header->root_hint;
+                }
+            }
+        }
         operation.recorded_stopped = verification.recorded_incomplete;
         operation.resumable = verification.resumable;
         operation.updated = parse_timestamp(verification.updated);
@@ -549,6 +590,11 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         if (row.fraction) {
             add(format_time_left(text, estimate.time_left()));
         }
+    }
+    // Why there is no total, where a manifest that cannot be used keeps it
+    // from being known; last, as the cause can be long.
+    if (!operation.totals_failure.empty()) {
+        add(text.format("total not known: {}", text(operation.totals_failure)));
     }
     row.details = details;
 
