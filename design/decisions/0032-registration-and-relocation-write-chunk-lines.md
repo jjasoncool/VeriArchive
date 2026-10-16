@@ -90,6 +90,7 @@ Rejected alternatives:
 
 ## Consequences
 
+- Amended by decision 0033: the FULL verify that adds chunk hashes to an archive registered by V1 (point 6) is `verify --full --add-chunk-hashes`; it records the next revision only when every entry matched, with rN's entry lines byte for byte and their chunk lines. The schema version is 3, which adds `verify_progress_chunks`: a program of schema version 2 refuses a repository that a program of decision 0033 has opened.
 - The manifest format and its version (1) are unchanged, and so are the golden manifests that the unit tests write: the engines fill what §B4 has (decision 0031). A registration's manifest now names chunk size 67108864 and a Merkle root, with chunk lines for every file larger than 64 MiB; a relocation's names rN's. So does the golden tree that the end-to-end test registers on every system (R-66, `tests/golden/golden_tree_r0001.vam`): its header gives chunk size 67108864 and the tree's Merkle root, and its entries, none larger than a chunk, keep their bytes.
 - The database schema is version 2, with the tables of version 1. A V1 program cannot open a repository that this version has opened, and there is no way back (R-92: migrations are forward-only); a copy of RepositoryRoot taken before (R-86) is what a V1 program can still open.
 - The index of an archive grows by one row per chunk line: about 150 000 rows for 10 TB in 64 MiB chunks.
