@@ -6,6 +6,7 @@
 // unfinished registration and relocation, one line each (decision 0026).
 #include "cli/commands.h"
 
+#include "app/history.h"
 #include "app/local_time.h"
 #include "app/unfinished_operations.h"
 
@@ -907,6 +908,13 @@ int history_command(const Arguments& arguments)
                 {"started", run.started}, {"finished", run.finished}, {"result", run.result},
                 {"failure_classes", run.failure_classes}, {"host", run.host}};
             entry["coverage_bytes"] = run.coverage_bytes ? nlohmann::json(*run.coverage_bytes) : nullptr;
+            // The relocation a run belongs to (decision 0026): an interrupted
+            // attempt, or the run that recorded the relocation's revision.
+            const auto part = relocation_part(run);
+            entry["relocation"] = part ? nlohmann::json{{"run_id", part->relocation},
+                                             {"from_revision", part->from_revision},
+                                             {"interrupted_attempt", part->interrupted_attempt}}
+                                       : nlohmann::json(nullptr);
             list.push_back(std::move(entry));
         }
         print_json({{"archive_uuid", status->archive.archive_uuid}, {"runs", std::move(list)}});
@@ -918,11 +926,12 @@ int history_command(const Arguments& arguments)
         std::cout << "  " << text("never verified") << '\n';
     }
     for (const auto& run : *runs) {
+        const auto note = app::history_note(text, run);
         std::cout << "  "
                   << text.format("{}  {} VERIFY {}  r{}  {} bytes", app::local_time(run.finished, text),
                          text(run.mode), text(run.result), run.revision, run.coverage_bytes.value_or(0))
                   << (run.failure_classes.empty() ? "" : "  " + failure_classes_text(text, run.failure_classes))
-                  << "  " << run.run_id << '\n';
+                  << "  " << run.run_id << (note.empty() ? "" : "  " + note) << '\n';
     }
     return exit_code::passed;
 }

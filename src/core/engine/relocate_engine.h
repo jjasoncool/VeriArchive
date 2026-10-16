@@ -71,4 +71,19 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     CancelToken& cancel,
     IProgressSink& progress);
 
+// The part a recorded run plays in a relocation (decision 0026), as the
+// relocation wrote it into the run's counts: an interrupted attempt is an
+// INCOMPLETE FULL verification of revision N whose counts name the
+// relocation's run id ("relocation"); the FULL verification that recorded
+// revision N+1 keeps the relocation's run id, and its counts name N
+// ("relocated_from_revision", written since relocation exists).
+struct RelocationPart {
+    std::string relocation;                 // the relocation's run id
+    std::uint32_t from_revision = 0;        // N, the revision it verified the new carrier against
+    bool interrupted_attempt = false;       // an interrupted attempt; otherwise the run that recorded N+1
+};
+
+// Nothing for a run that is no relocation's, such as every verification.
+std::optional<RelocationPart> relocation_part(const VerifyRunRecord& run);
+
 } // namespace va

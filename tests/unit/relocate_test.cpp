@@ -2,6 +2,7 @@
 
 #include "engine_fixture.h"
 
+#include "app/history.h"
 #include "app/unfinished_operations.h"
 #include "common/time.h"
 #include "core/engine/abandon_registration.h"
@@ -1143,6 +1144,65 @@ void an_interrupted_attempt_is_recorded_incomplete()
     CHECK(!ended && ended.error().kind == va::VerifyStop::Kind::NotFound &&
           ended.error().message == "run " + attempt.run_id + " is an interrupted attempt of a relocation of archive " +
                                        fixture.archive_uuid + " that has ended; nothing is left to resume");
+}
+
+// The history says which runs are a relocation's (decision 0026): of a
+// verification of the old carrier, an attempt of a relocation interrupted when
+// the new disk went away, and the FULL verification with which its resume
+// recorded revision 2, the attempt reads "interrupted relocation attempt" and
+// the last "relocation from r1", in both languages, from what the relocation
+// wrote into their counts; the verification reads nothing. A run whose counts
+// say nothing of a relocation, or cannot be read, is no relocation's.
+void the_history_marks_the_runs_of_a_relocation()
+{
+    RelocationFixture fixture(true);
+    const auto verified = fixture.verify(fixture.archive.root() / "old");
+    CHECK(verified && verified->result == "PASSED");
+    const auto run_id = fixture.interrupted_relocation(fixture.processes.self, false);
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 3);
+    if (!runs || runs->size() != 3 || run_id.empty()) {
+        return;
+    }
+    const auto& verification = (*runs)[0];
+    const auto& attempt = (*runs)[1];
+    const auto& relocation = (*runs)[2];
+    CHECK(attempt.result == "INCOMPLETE" && attempt.revision == 1 && attempt.run_id != run_id);
+    CHECK(relocation.run_id == run_id && relocation.revision == 2);
+
+    CHECK(!va::relocation_part(verification));
+    const auto attempt_part = va::relocation_part(attempt);
+    CHECK(attempt_part && attempt_part->relocation == run_id && attempt_part->from_revision == 1 &&
+          attempt_part->interrupted_attempt);
+    const auto recorded_part = va::relocation_part(relocation);
+    CHECK(recorded_part && recorded_part->relocation == run_id && recorded_part->from_revision == 1 &&
+          !recorded_part->interrupted_attempt);
+
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    CHECK(va::app::history_note(english, verification).empty());
+    CHECK(va::app::history_note(chinese, verification).empty());
+    CHECK(va::app::history_note(english, attempt) == "interrupted relocation attempt");
+    CHECK(va::app::history_note(chinese, attempt) == "中斷的搬移嘗試");
+    CHECK(va::app::history_note(english, relocation) == "relocation from r1");
+    CHECK(va::app::history_note(chinese, relocation) == "從 r1 搬移");
+    // The relocation's own run is no interrupted attempt for `verify --resume` either.
+    va::VerifyRequest resume_it;
+    resume_it.root = fixture.archive.root() / "new";
+    resume_it.resume_run = run_id;
+    const auto refused = fixture.verify(resume_it);
+    CHECK(!refused && refused.error().kind == va::VerifyStop::Kind::NotFound &&
+          refused.error().message == "run " + run_id + " is not an interrupted run");
+
+    va::VerifyRunRecord other = verification;
+    other.counts_json = "{\"items\":{\"Verified\":2},\"resumed_from\":\"c0ffee00-0000-4000-8000-000000000001\"}";
+    CHECK(!va::relocation_part(other) && va::app::history_note(english, other).empty());
+    other.counts_json = "not json";
+    CHECK(!va::relocation_part(other));
+    other.counts_json.clear();
+    CHECK(!va::relocation_part(other));
 }
 
 // R-104: a relocation resumes only while its archive is at the revision it
@@ -2363,6 +2423,7 @@ void relocate_tests()
     a_resume_needs_the_volume_it_started_on();
     a_resumed_relocation_names_where_it_reads_and_keeps_its_start();
     an_interrupted_attempt_is_recorded_incomplete();
+    the_history_marks_the_runs_of_a_relocation();
     a_resume_needs_the_revision_it_verifies();
     a_relocation_replaces_a_record_that_can_no_longer_finish();
     a_resume_waits_while_the_attempt_before_runs();

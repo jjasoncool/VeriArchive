@@ -214,6 +214,10 @@ constexpr CatalogEntry entries[] = {
     {"FULL VERIFY {} of the new carrier (run {})", "新載體的完整驗證：{}（執行 {}）"},
     {"never verified", "從未驗證"},
     {"{}  {} VERIFY {}  r{}  {} bytes", "{}  {} {}  r{}  {} 位元組", Match::FormatOnly},
+    // The runs of a relocation in history and the Verification History (decision 0026), from
+    // src/app/history.cpp.
+    {"interrupted relocation attempt", "中斷的搬移嘗試"},
+    {"relocation from r{}", "從 r{} 搬移", Match::FormatOnly},
     {"several archives start with {}", "有多個封存以 {} 開頭"},
     {"no archive {}", "找不到封存 {}"},
     {"usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
@@ -405,6 +409,7 @@ constexpr CatalogEntry entries[] = {
     {"Bytes matched", "相符位元組"},
     {"Failures", "失敗類別"},
     {"Run", "執行"},
+    {"Note", "備註"},
     {"Never verified.", "從未驗證。"},
     {"Cannot check the history: {}", "無法檢查歷程：{}"},
     {"History intact: {} runs, hash chain verified. (V1 detects edited or deleted rows; "

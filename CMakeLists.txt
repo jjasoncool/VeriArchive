@@ -140,6 +140,7 @@ endif()
 
 # Composition-root helpers shared by the CLI and the GUI (R-05).
 add_library(veriarchive_app
+    src/app/history.cpp
     src/app/local_time.cpp
     src/app/progress_estimate.cpp
     src/app/unfinished_operations.cpp

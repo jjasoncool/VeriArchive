@@ -918,4 +918,19 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     return outcome;
 }
 
+std::optional<RelocationPart> relocation_part(const VerifyRunRecord& run)
+{
+    const auto counts = nlohmann::json::parse(run.counts_json, nullptr, false);
+    if (!counts.is_object()) {
+        return std::nullopt;
+    }
+    if (auto relocation = text_member(counts, "relocation"); !relocation.empty()) {
+        return RelocationPart{std::move(relocation), run.revision, true};
+    }
+    if (const auto from = unsigned_member(counts, "relocated_from_revision")) {
+        return RelocationPart{run.run_id, static_cast<std::uint32_t>(*from), false};
+    }
+    return std::nullopt;
+}
+
 } // namespace va

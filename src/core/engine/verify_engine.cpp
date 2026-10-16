@@ -6,6 +6,7 @@
 #include "core/engine/comparison.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/engine/relocate_engine.h"
 #include "core/identity/volume_json.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
@@ -113,18 +114,6 @@ struct ResumePoint {
     std::uint32_t revision = 0;
 };
 
-// The relocation (its run_id) that a run is an interrupted attempt of, as the
-// run's counts name it (decision 0026); empty for any other run.
-std::string relocation_of(const VerifyRunRecord& run)
-{
-    const auto counts = nlohmann::json::parse(run.counts_json, nullptr, false);
-    if (!counts.is_object()) {
-        return {};
-    }
-    const auto found = counts.find("relocation");
-    return found != counts.end() && found->is_string() ? found->get<std::string>() : std::string{};
-}
-
 // An unfinished relocation made for an older revision (decision 0030): the
 // revision it verifies, and the later one its archive has now.
 struct MadeForOlder {
@@ -172,10 +161,10 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
         if (!run) {
             return stop(VerifyStop::Kind::Repository, run.error().message);
         }
-        const auto relocation = *run ? relocation_of(**run) : std::string{};
-        if (!relocation.empty()) {
+        const auto part = *run ? relocation_part(**run) : std::nullopt;
+        if (part && part->interrupted_attempt) {
             const auto& archive_uuid = (*run)->archive_uuid;
-            const auto unfinished = store.relocation_recorded(archive_uuid, relocation);
+            const auto unfinished = store.relocation_recorded(archive_uuid, part->relocation);
             if (!unfinished) {
                 return stop(VerifyStop::Kind::Repository, unfinished.error().message);
             }

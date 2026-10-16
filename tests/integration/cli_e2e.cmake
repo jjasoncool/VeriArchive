@@ -356,6 +356,29 @@ string(JSON relocated_revision GET "${last_output}" revision)
 if(resumed OR NOT relocated_revision EQUAL 3)
     message(FATAL_ERROR "relocate after an abandoned relocation:\n${last_output}")
 endif()
+# The history says which runs are a relocation's (decision 0026): the FULL
+# verifications that recorded revisions 2 and 3, in either language, and
+# --json names the relocation of each, which is the run itself.
+run_cli("0" --lang en history "${moving_prefix}")
+if(NOT last_output MATCHES "  FULL VERIFY PASSED[_A-Z]*  r2  [0-9]+ bytes  [-0-9a-f]+  relocation from r1\n"
+        OR NOT last_output MATCHES "  FULL VERIFY PASSED[_A-Z]*  r3  [0-9]+ bytes  [-0-9a-f]+  relocation from r2\n")
+    message(FATAL_ERROR "history of a relocated archive:\n${last_output}")
+endif()
+run_cli("0" history "${moving_prefix}")
+if(NOT last_output MATCHES "  r2  [0-9]+ 位元組  [-0-9a-f]+  從 r1 搬移\n")
+    message(FATAL_ERROR "history of a relocated archive in zh-TW:\n${last_output}")
+endif()
+run_cli("0" history "${moving_prefix}" --json)
+string(JSON relocation_runs LENGTH "${last_output}" runs)
+string(JSON first_run GET "${last_output}" runs 0 run_id)
+string(JSON first_relocation GET "${last_output}" runs 0 relocation run_id)
+string(JSON first_from GET "${last_output}" runs 0 relocation from_revision)
+string(JSON first_attempt GET "${last_output}" runs 0 relocation interrupted_attempt)
+string(JSON second_from GET "${last_output}" runs 1 relocation from_revision)
+if(NOT relocation_runs EQUAL 2 OR NOT first_relocation STREQUAL first_run OR NOT first_from EQUAL 1
+        OR first_attempt OR NOT second_from EQUAL 2)
+    message(FATAL_ERROR "history --json of a relocated archive:\n${last_output}")
+endif()
 
 # Damage: one changed byte, one deleted file, one new file -> FAILED (exit 3).
 file(WRITE "${ROOT}/readme.txt" "hellp\n")
@@ -378,10 +401,18 @@ run_cli("0" --lang en history "${archive_uuid}")
 if(NOT last_output MATCHES "[0-9]+-[0-9]+-[0-9]+ [0-9]+:[0-9]+:[0-9]+ \\(UTC")
     message(FATAL_ERROR "history does not show local time with its offset:\n${last_output}")
 endif()
+# Verifications are no relocation's: nothing is said beside them.
+if(last_output MATCHES "relocation")
+    message(FATAL_ERROR "history marks a verification as a relocation's:\n${last_output}")
+endif()
 run_cli("0" history "${archive_uuid}" --json)
 string(JSON finished GET "${last_output}" runs 0 finished)
 if(NOT finished MATCHES "^[0-9]+-[0-9]+-[0-9]+T[0-9]+:[0-9]+:[0-9]+Z$")
     message(FATAL_ERROR "--json history is not in UTC: ${finished}")
+endif()
+string(JSON no_relocation TYPE "${last_output}" runs 0 relocation)
+if(NOT no_relocation STREQUAL "NULL")
+    message(FATAL_ERROR "--json history gives a verification a relocation:\n${last_output}")
 endif()
 
 # Decision 0027 (Windows): a folder reached through a drive letter made with

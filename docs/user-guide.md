@@ -268,7 +268,7 @@ An interrupted `archive relocate` keeps what it has matched and is listed with t
 
 The Verification History view, or `veriarchive-cli history <uuid>`, lists every verification of an archive.
 
-An interrupted `archive relocate` is listed there too, as an INCOMPLETE FULL verification of the revision it compared the new carrier with. While the relocation is unfinished, continue it with `archive relocate <uuid> <root> --resume`; `verify --resume` does not continue it, and says so.
+An interrupted `archive relocate` is listed there too, as an INCOMPLETE FULL verification of the revision it compared the new carrier with, marked "interrupted relocation attempt": it read the new carrier, not the archive's carrier. While the relocation is unfinished, continue it with `archive relocate <uuid> <root> --resume`; `verify --resume` does not continue it, and says so. The FULL verification with which a relocation recorded the archive's next revision is marked "relocation from r1", r1 being the revision it compared the new carrier with. The GUI shows these marks in a column "Note", which appears only for an archive that has such runs; `history --json` gives each run `relocation`: null, or the relocation's `run_id`, `from_revision` and `interrupted_attempt`.
 
 The history is a hash chain, so edited or deleted rows are detected:
 

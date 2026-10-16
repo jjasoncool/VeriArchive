@@ -2,7 +2,11 @@
 // of the hash chain that protects the history (R-18, R-90).
 #include "gui/gui_app.h"
 
+#include "app/history.h"
 #include "app/local_time.h"
+
+#include <algorithm>
+#include <vector>
 
 namespace va::gui {
 namespace {
@@ -80,19 +84,26 @@ void show_runs(GuiState& state)
     if (!runs) {
         return;
     }
-    const char* headers[] = {"Finished", "Mode", "Result", "Revision", "Bytes matched", "Failures", "Run"};
-    for (int column = 0; column < 7; ++column) {
+    // The runs of a relocation say so in a last column (decision 0026), shown
+    // only for an archive that has such runs.
+    std::vector<std::string> notes;
+    for (const auto& run : *runs) {
+        notes.push_back(app::history_note(text, run));
+    }
+    const int columns = std::ranges::any_of(notes, [](const auto& note) { return !note.empty(); }) ? 8 : 7;
+    const char* headers[] = {"Finished", "Mode", "Result", "Revision", "Bytes matched", "Failures", "Run", "Note"};
+    for (int column = 0; column < columns; ++column) {
         GtkWidget* header = make_label(text(headers[column]));
         gtk_widget_add_css_class(header, "heading");
         gtk_grid_attach(GTK_GRID(view.grid), header, column, 0, 1, 1);
     }
     int row = 1;
-    for (auto it = runs->rbegin(); it != runs->rend(); ++it, ++row) {
-        const auto& run = *it;
+    for (auto index = runs->size(); index-- > 0; ++row) {
+        const auto& run = (*runs)[index];
         const std::string cells[] = {app::local_time(run.finished, text), text(run.mode), text(run.result),
             "r" + std::to_string(run.revision), format_bytes(run.coverage_bytes.value_or(0)),
-            failure_classes_text(text, run.failure_classes), run.run_id};
-        for (int column = 0; column < 7; ++column) {
+            failure_classes_text(text, run.failure_classes), run.run_id, notes[index]};
+        for (int column = 0; column < columns; ++column) {
             gtk_grid_attach(GTK_GRID(view.grid), make_label(cells[column], true), column, row, 1, 1);
         }
     }
