@@ -5,7 +5,7 @@
 // without them (decision 0033).
 #include "cli/commands.h"
 
-#include "app/chunk_size.h"
+#include "app/adding_chunk_hashes.h"
 #include "app/plain_words.h"
 #include "app/verify_report.h"
 
@@ -83,15 +83,8 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
     }
     // Decision 0033: the revision that records the chunk hashes added, or why
     // there is none.
-    if (outcome.added_revision > 0) {
-        std::cout << "  "
-                  << text.format("chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root "
-                                 "{})",
-                         outcome.added_revision, app::chunk_size_text(outcome.adding_chunk_size),
-                         outcome.added_chunks, outcome.added_merkle_root)
-                  << '\n';
-    } else if (!outcome.not_added.empty()) {
-        std::cout << "  " << text.format("chunk hashes not added: {}", text(outcome.not_added)) << '\n';
+    if (const auto line = app::chunk_hashes_line(text, outcome); !line.empty()) {
+        std::cout << "  " << line << '\n';
     }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::CommandLine)) {
         std::cout << "  " << *advice << '\n';
@@ -149,19 +142,7 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
     };
     // Decision 0033: a run that adds chunk hashes says at which chunk size,
     // and once it has finished, which revision records them, or why none does.
-    if (outcome.adding_chunk_size > 0) {
-        const auto optional_text = [](const std::string& value) {
-            return value.empty() ? nlohmann::json(nullptr) : nlohmann::json(value);
-        };
-        const bool added = outcome.added_revision > 0;
-        document["chunk_hashes"] = {
-            {"chunk_size", outcome.adding_chunk_size},
-            {"added_revision", added ? nlohmann::json(outcome.added_revision) : nlohmann::json(nullptr)},
-            {"chunks", added ? nlohmann::json(outcome.added_chunks) : nlohmann::json(nullptr)},
-            {"merkle_root", optional_text(outcome.added_merkle_root)},
-            {"not_added", optional_text(outcome.not_added)},
-        };
-    }
+    document.update(app::chunk_hashes_member(outcome));
     return document;
 }
 

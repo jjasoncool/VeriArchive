@@ -5,7 +5,6 @@
 // (decision 0033).
 #include "gui/gui_app.h"
 
-#include "app/chunk_size.h"
 #include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "app/verify_report.h"
@@ -65,14 +64,8 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
     }
     // Decision 0033: the revision that records the chunk hashes added, or why
     // there is none.
-    if (outcome.added_revision > 0) {
-        body += "\n" +
-                text.format("Chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
-                    outcome.added_revision, app::chunk_size_text(outcome.adding_chunk_size), outcome.added_chunks,
-                    outcome.added_merkle_root) +
-                "\n";
-    } else if (!outcome.not_added.empty()) {
-        body += "\n" + text.format("Chunk hashes not added: {}", text(outcome.not_added)) + "\n";
+    if (const auto line = app::chunk_hashes_line(text, outcome, true); !line.empty()) {
+        body += "\n" + line + "\n";
     }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::Window)) {
         body += "\n" + *advice + "\n";

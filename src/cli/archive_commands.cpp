@@ -7,6 +7,7 @@
 // unfinished registration and relocation, one line each (decision 0026).
 #include "cli/commands.h"
 
+#include "app/adding_chunk_hashes.h"
 #include "app/chunk_size.h"
 #include "app/history.h"
 #include "app/local_time.h"
@@ -76,7 +77,7 @@ struct UnfinishedOfArchive {
     std::optional<app::UnfinishedOperation> verification;
     nlohmann::json registration_json;  // null when there is none
     nlohmann::json relocation_json;    // null when there is none
-    nlohmann::json verification_json;  // null when there is none
+    nlohmann::json verification_json;  // its member unfinished_verification; null when there is none
 };
 using UnfinishedByArchive = std::map<Uuid, UnfinishedOfArchive>;
 
@@ -178,23 +179,7 @@ std::expected<UnfinishedByArchive, Failure> unfinished_by_archive(ArchiveStore& 
     }
     for (const auto& verification : verifications) {
         auto operation = app::verification_operation(verification, attempts);
-        nlohmann::json json{
-            {"root", verification.root},
-            {"revision", verification.revision},
-            {"run_id", verification.run_id},
-            {"chunk_size", verification.adds_chunk_hashes},
-            {"started", verification.started},
-            {"updated", optional_text(verification.updated)},
-            {"state", app::state_code(app::state_of_one_read(operation, wall_now))},
-            {"resumable", verification.resumable},
-            {"files_done", verification.done_counted ? nlohmann::json(verification.files_done) : nullptr},
-            {"bytes_done", verification.done_counted ? nlohmann::json(verification.bytes_done) : nullptr},
-            {"files_total", verification.files_total},
-            {"bytes_total", verification.bytes_total},
-        };
-        if (operation.process) {
-            json["process"] = process_json(operation);
-        }
+        auto json = app::unfinished_verification_member(verification, operation, wall_now);
         auto& unfinished = result[verification.archive_uuid];
         unfinished.verification = std::move(operation);
         unfinished.verification_json = std::move(json);
@@ -299,7 +284,7 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
         // As print_unfinished: not that of a retired archive whose latest
         // manifest is lost.
         if (!found->second.verification_json.is_null() && !status.manifest_lost) {
-            json["unfinished_verification"] = found->second.verification_json;
+            json.update(found->second.verification_json);
         }
     }
     return json;
@@ -918,21 +903,6 @@ int abandon_relocation_command(const Arguments& arguments)
     return exit_code::passed;
 }
 
-// An unfinished verification that adds chunk hashes as --json shows it,
-// abandoned or to be.
-nlohmann::json abandonable_verification_json(const AbandonableVerification& verification)
-{
-    return {
-        {"archive_uuid", verification.archive_uuid},
-        {"label", verification.label},
-        {"revision", verification.revision},
-        {"root", verification.root},
-        {"run_id", verification.run_id},
-        {"started", verification.started},
-        {"saved_progress", {{"files", verification.files}, {"bytes", verification.bytes}}},
-    };
-}
-
 // `archive abandon-verification <uuid> [--confirm]` (decision 0033): gives up
 // an unfinished FULL verify that adds chunk hashes, which keeps every other
 // operation that creates the archive's next revision from beginning. Its
@@ -970,8 +940,10 @@ int abandon_verification_command(const Arguments& arguments)
         }
         const std::string confirm = "run the command again with --confirm to abandon it";
         if (arguments.json) {
-            print_json({{"error", confirm}, {"exit_code", exit_code::identity_decision},
-                {"verification", abandonable_verification_json(*verification)}});
+            auto json = app::abandonable_verification_member(*verification);
+            json["error"] = confirm;
+            json["exit_code"] = exit_code::identity_decision;
+            print_json(json);
             return exit_code::identity_decision;
         }
         std::cout << text.format("Unfinished verification of {} ({}) that adds chunk hashes, revision {}",
@@ -993,7 +965,7 @@ int abandon_verification_command(const Arguments& arguments)
         return failed(abandoned.error());
     }
     if (arguments.json) {
-        print_json(abandonable_verification_json(*abandoned));
+        print_json(app::abandonable_verification_json(*abandoned));
         return exit_code::passed;
     }
     std::cout << text.format("Abandoned the unfinished verification of {} ({}) that adds chunk hashes: its saved "

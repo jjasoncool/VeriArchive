@@ -2428,6 +2428,61 @@ void leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost()
     CHECK(listed() == std::vector<va::Uuid>{b->archive_uuid});
 }
 
+// A verification that adds chunk hashes and was recorded INCOMPLETE has
+// stopped, whatever the process its record names does (decision 0033): the
+// GUI's window goes on after it cancelled its run. Read by another process
+// (another window) that sees that process still running, it is stopped, can
+// be resumed and is offered for abandoning, in the Archive List and from one
+// read, as --json judges it. Its process is not judged, as a record that says
+// that it stopped needs no judging (UnfinishedOperation::attempt). Sample
+// data.
+void a_verification_that_adds_chunk_hashes_recorded_incomplete_has_stopped()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("a.bin", std::string(200000, 'a')); // sample data
+    fixture.archive.add_file("b.txt", "b (sample data)");
+    va::RegisterRequest request;
+    request.root = fixture.archive.root();
+    request.chunk_size = 0; // as V1 registered it
+    const auto registered = fixture.register_root(request);
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    fixture.archive.node("b.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::VerifyRequest adding;
+    adding.archive_uuid = registered->archive_uuid;
+    adding.add_chunk_hashes = true;
+    adding.chunk_size = 64 * 1024;
+    const auto interrupted = fixture.verify(adding);
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+
+    test::FakeProcessTable window;
+    window.self = {5151, "boot-1:2000", "veriarchive-gui.exe"};
+    window.others = {fixture.processes.self};
+    const va::app::AttemptCheck attempts{&window, "test-host", {}};
+    const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+        [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+    CHECK(read && read->operations.size() == 1);
+    if (!read || read->operations.size() != 1 || !interrupted) {
+        return;
+    }
+    const auto& operation = read->operations.front();
+    CHECK(operation.adds_chunk_hashes && operation.run_id == interrupted->run_id && operation.recorded_stopped &&
+          operation.resumable);
+    CHECK(operation.attempt == va::AttemptState::Unknown && operation.process &&
+          operation.process->process.id == fixture.processes.self.id);
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    CHECK(va::app::state_code(va::app::state_of_one_read(operation, now)) == "stopped");
+    const va::app::Text english;
+    const Clock::time_point start{};
+    OperationWatch watch;
+    watch.update(operation, start, now);
+    const auto row = describe_operation(english, watch, start, now);
+    CHECK(row.state == "stopped; it can be resumed" && row.abandonable &&
+          row.process == "Process: 4242 (veriarchive-cli.exe)");
+}
+
 } // namespace
 
 void unfinished_operations_tests()
@@ -2468,4 +2523,5 @@ void unfinished_operations_tests()
     words_a_line_for_the_command_line();
     a_verification_that_adds_chunk_hashes_is_listed_until_abandoned();
     a_verification_that_adds_chunk_hashes_is_judged_by_its_process();
+    a_verification_that_adds_chunk_hashes_recorded_incomplete_has_stopped();
 }

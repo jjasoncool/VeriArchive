@@ -1614,6 +1614,127 @@ void which_run_resume_continues()
     CHECK(another && another->run_id == other_archive.run_id && another->archive_uuid == other_archive.archive_uuid);
 }
 
+// What the command line gives of adding chunk hashes (decision 0033, points 8
+// to 10), from the outcomes of runs here: in English and Traditional Chinese
+// where people read it, and --json in English. Verify's line and its
+// chunk_hashes for a run that added them, one that added none and one
+// interrupted, nothing for a run that adds none, and the same line in the
+// GUI's report; archive list|show's unfinished_verification of the run
+// interrupted, also with sample values (not counted, without a process, not
+// resumable); and archive abandon-verification's verification.
+void what_the_command_line_gives()
+{
+    using va::app::chunk_hashes_line;
+    using va::app::chunk_hashes_member;
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    // An object of one member, as these functions give it.
+    const auto member = [](const char* name, const nlohmann::json& value) { return nlohmann::json{{name, value}}; };
+    {
+        RegisteredWithout fixture;
+        const auto added = fixture.add();
+        CHECK(added && added->added_revision == 2 && added->added_chunks == 5);
+        if (added) {
+            const auto& root = added->added_merkle_root;
+            CHECK(chunk_hashes_line(english, *added) ==
+                  "chunk hashes added: revision 2 records them (chunk size 64 KiB, 5 chunks, Merkle root " + root + ")");
+            CHECK(chunk_hashes_line(chinese, *added) ==
+                  "已加入區塊雜湊：由版次 2 記錄（區塊大小 64 KiB，5 個區塊，總碼 " + root + "）");
+            CHECK(chunk_hashes_line(english, *added, true) ==
+                  "Chunk hashes added: revision 2 records them (chunk size 64 KiB, 5 chunks, Merkle root " + root + ")");
+            CHECK(chunk_hashes_line(chinese, *added, true) ==
+                  "已加入區塊雜湊：由版次 2 記錄（區塊大小 64 KiB，5 個區塊，總碼 " + root + "）");
+            const nlohmann::json expected{{"chunk_size", test_chunk_size}, {"added_revision", 2}, {"chunks", 5},
+                {"merkle_root", root}, {"not_added", nullptr}};
+            CHECK(chunk_hashes_member(*added) == member("chunk_hashes", expected));
+        }
+    }
+    {
+        RegisteredWithout fixture;
+        fixture.archive.node("b.txt").content = "B (sample data)";
+        const auto failed = fixture.add();
+        CHECK(failed && failed->result == "FAILED");
+        if (failed) {
+            const std::string why = "the verification did not pass; revision 1 stays without chunk hashes";
+            CHECK(chunk_hashes_line(english, *failed) == "chunk hashes not added: " + why);
+            CHECK(chunk_hashes_line(english, *failed, true) == "Chunk hashes not added: " + why);
+            CHECK(chunk_hashes_line(chinese, *failed) == "未加入區塊雜湊：驗證未通過；版次 1 仍不含區塊雜湊");
+            CHECK(chunk_hashes_line(chinese, *failed, true) == "未加入區塊雜湊：驗證未通過；版次 1 仍不含區塊雜湊");
+            const nlohmann::json expected{{"chunk_size", test_chunk_size}, {"added_revision", nullptr},
+                {"chunks", nullptr}, {"merkle_root", nullptr}, {"not_added", why}};
+            CHECK(chunk_hashes_member(*failed) == member("chunk_hashes", expected));
+        }
+    }
+    {
+        RegisteredWithout fixture;
+        const auto plain = fixture.verify(fixture.archive.root());
+        CHECK(plain && plain->adding_chunk_size == 0);
+        if (plain) {
+            CHECK(chunk_hashes_line(english, *plain).empty() && chunk_hashes_line(english, *plain, true).empty());
+            CHECK(chunk_hashes_member(*plain) == nlohmann::json::object());
+        }
+    }
+
+    Halves fixture;
+    const auto interrupted = fixture.interrupted();
+    if (!interrupted) {
+        return;
+    }
+    CHECK(chunk_hashes_line(english, *interrupted).empty() && chunk_hashes_line(english, *interrupted, true).empty());
+    const nlohmann::json reading{{"chunk_size", test_chunk_size}, {"added_revision", nullptr}, {"chunks", nullptr},
+        {"merkle_root", nullptr}, {"not_added", nullptr}};
+    CHECK(chunk_hashes_member(*interrupted) == member("chunk_hashes", reading));
+
+    // Its record last said a while ago that it worked (a sample time).
+    const std::string updated = "2026-10-16T01:02:03Z";
+    fixture.repository.execute(("UPDATE settings SET value = json_set(value, '$.updated', '" + updated +
+                                "') WHERE key = 'run:" + interrupted->run_id + "'")
+                                   .c_str());
+    const auto root = va::path_to_utf8(fixture.archive.root());
+    const auto matched = fixture.a.size() + fixture.b.size() + fixture.c.size();
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto unfinished = fixture.store.unfinished_verifications(now, {}, true);
+    CHECK(unfinished && unfinished->size() == 1);
+    if (unfinished && unfinished->size() == 1) {
+        const auto& verification = unfinished->front();
+        CHECK(!verification.started.empty() && verification.started != updated);
+        const auto operation =
+            va::app::verification_operation(verification, {&fixture.processes, fixture.host.host, {}});
+        nlohmann::json expected{{"root", root}, {"revision", 1}, {"run_id", interrupted->run_id},
+            {"chunk_size", test_chunk_size}, {"started", verification.started}, {"updated", updated},
+            {"state", "stopped"}, {"resumable", true}, {"files_done", 3}, {"bytes_done", matched}, {"files_total", 6},
+            {"bytes_total", matched + fixture.e.size() + fixture.f.size() + fixture.g.size()},
+            {"process", {{"id", 4242}, {"program", "veriarchive-cli.exe"}, {"host", "test-host"}}}};
+        CHECK(va::app::unfinished_verification_member(verification, operation, now) ==
+              member("unfinished_verification", expected));
+
+        auto uncounted = verification;
+        uncounted.done_counted = false;
+        uncounted.resumable = false;
+        uncounted.updated.clear();
+        auto without_process = operation;
+        without_process.process.reset();
+        expected["files_done"] = nullptr;
+        expected["bytes_done"] = nullptr;
+        expected["resumable"] = false;
+        expected["updated"] = nullptr;
+        expected.erase("process");
+        CHECK(va::app::unfinished_verification_member(uncounted, without_process, now) ==
+              member("unfinished_verification", expected));
+    }
+
+    va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandonable = va::abandonable_verification(services, {fixture.archive_uuid, std::nullopt});
+    CHECK(abandonable.has_value());
+    if (abandonable) {
+        const nlohmann::json shown{{"archive_uuid", fixture.archive_uuid}, {"label", "ARCH-0001"}, {"revision", 1},
+            {"root", root}, {"run_id", interrupted->run_id}, {"started", abandonable->started},
+            {"saved_progress", {{"files", 3}, {"bytes", matched}}}};
+        CHECK(va::app::abandonable_verification_json(*abandonable) == shown);
+        CHECK(va::app::abandonable_verification_member(*abandonable) == member("verification", shown));
+    }
+}
+
 // A registration plan whose revision is recorded, and the record of a
 // relocation whose next revision is recorded, can never finish (decisions
 // 0023, 0026): they refuse nothing (sample records written by hand, as an
@@ -1768,6 +1889,7 @@ void add_chunk_hashes_tests()
     a_run_that_cannot_record_itself_says_that_it_stopped();
     what_resume_continues();
     which_run_resume_continues();
+    what_the_command_line_gives();
     what_can_no_longer_finish_refuses_nothing();
     two_resumes_that_found_the_run_at_once();
 }
