@@ -55,9 +55,6 @@ agreed with every file of the 4.3 GB archive, and an archive given by uuid was f
 - **Packaging (R-121).** The Windows package is built and checked locally (`veriarchive_package`:
   the installed tree runs in both languages with only Windows on `PATH` and imports no
   `msys-2.0.dll`); it still has to pass in the GitLab Windows job and on a machine without MSYS2.
-- **CMake 4 deprecation.** CMake ≥ 4 warns that `SQLite::SQLite3` is deprecated in favour of
-  `SQLite3::SQLite3`; switching needs a fallback because CMake 3.28's FindSQLite3 only defines
-  the old name.
 
 ## V1.1 (not started, by design)
 

@@ -17,6 +17,12 @@ if(NOT nlohmann_json_FOUND)
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 find_package(SQLite3 3.40 REQUIRED)
+# From CMake 4.3, FindSQLite3 names its target SQLite3::SQLite3 and marks the
+# old name, SQLite::SQLite3, deprecated. Older versions (3.28) define only the
+# old name, so the new one is made an alias of it.
+if(NOT TARGET SQLite3::SQLite3)
+    add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
+endif()
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(BLAKE3 1.5 CONFIG QUIET)
 if(NOT BLAKE3_FOUND)
@@ -82,7 +88,7 @@ add_library(VeriArchive::core ALIAS veriarchive_core)
 target_include_directories(veriarchive_core PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_features(veriarchive_core PUBLIC cxx_std_23)
 target_link_libraries(veriarchive_core
-    PUBLIC VeriArchive::common SQLite::SQLite3
+    PUBLIC VeriArchive::common SQLite3::SQLite3
     PRIVATE BLAKE3::blake3 OpenSSL::Crypto)
 
 add_library(veriarchive_platform)
