@@ -21,7 +21,9 @@
 #include "common/error.h"
 #include "common/repository_layout.h"
 #include "common/types.h"
+#include "core/engine/register_engine.h"
 #include "core/engine/registration_attempt.h"
+#include "core/engine/verify_engine.h"
 #include "core/repository/archive_store.h"
 
 #include <chrono>
@@ -274,6 +276,10 @@ struct OperationRow {
     std::string key;                 // the operation's key (UnfinishedOperation::key)
     bool abandonable = false;        // a registration (decision 0025) or relocation (decision 0026) shown
                                      // stopped (has_stopped): the operator may abandon it
+    bool offers_resume = false;      // a verification shown "stopped; it can be resumed", or a registration
+                                     // shown stopped (OperationState::Stopped): the list offers Resume, which
+                                     // continues it as its command-line resume does (decision 0022, point 7;
+                                     // verification_resume, registration_resume)
 };
 
 OperationRow describe_operation(const Text& text, const OperationWatch& watch, OperationWatch::Clock::time_point now,
@@ -283,6 +289,21 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
 // those that stopped (has_stopped); the newest first within each.
 std::vector<OperationRow> describe_operations(const Text& text, const std::vector<OperationWatch>& watches,
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
+
+// What Resume on a row of the Archive List runs (decision 0022, point 7): the
+// operation continued exactly as its command-line resume continues it, with
+// the options the GUI then adds as for an operation started there (strict
+// metadata, a media copy).
+//
+// A stopped verification, as `verify --full <archive_uuid> --resume <run_id>`:
+// its archive named by its uuid, and so looked for among the attached volumes
+// (never at the root the run read before), and its run.
+VerifyRequest verification_resume(const UnfinishedOperation& verification);
+// A stopped registration, as `register <root> --resume`: the root its plan
+// names, made as the command line makes a root typed there (typed_root).
+// Before anything of it is read, it is checked as that command checks it
+// (root_not_taken, with the plan's root as typed).
+RegisterRequest registration_resume(const UnfinishedOperation& registration);
 
 // One line about an archive's unfinished registration or relocation, for the
 // command line's `archive list` and `archive show` (decision 0026): the

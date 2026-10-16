@@ -60,4 +60,17 @@ std::optional<std::string> root_refusal(const std::filesystem::path& root)
     return std::nullopt;
 }
 
+std::optional<std::string> root_not_taken(const std::filesystem::path& root, std::string_view typed)
+{
+    if (auto refusal = root_refusal(root)) {
+        return refusal;
+    }
+    // The error_code overload: a root that cannot be checked is reported, not thrown.
+    std::error_code error;
+    if (!std::filesystem::is_directory(root, error)) {
+        return "not a directory: " + std::string(typed);
+    }
+    return std::nullopt;
+}
+
 } // namespace va::app

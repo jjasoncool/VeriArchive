@@ -56,7 +56,11 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
         body += "\n" + text("The run was interrupted; use Resume to continue without re-reading verified files.") +
                 "\n";
     }
-    body += "\n" + text.format("Run: {}", outcome.run_id) + "\n" + text(guarantee) + "\n";
+    body += "\n";
+    if (!outcome.resumed_from.empty()) {
+        body += text.format("Resumed from run: {}", outcome.resumed_from) + "\n";
+    }
+    body += text.format("Run: {}", outcome.run_id) + "\n" + text(guarantee) + "\n";
     return body;
 }
 
@@ -87,6 +91,19 @@ void show_error(GuiState& state, Report report)
     show_report(state, std::move(report));
 }
 
+// Whether a verification started in the window fails metadata differences
+// (R-51): the view's check box, as the command line's --strict-metadata, or
+// the policy.
+bool strict_metadata(const GuiState& state)
+{
+    return gtk_check_button_get_active(GTK_CHECK_BUTTON(state.verify_view.strict)) ||
+           state.session->context.config.policy.strict_metadata;
+}
+
+// Runs `request` as the window's one operation, its progress and report in
+// this view. A run left INCOMPLETE is offered for Resume here.
+void run_verification(GuiState& state, VerifyRequest request);
+
 void start_verification(GuiState& state, bool resume)
 {
     auto& view = state.verify_view;
@@ -96,8 +113,7 @@ void start_verification(GuiState& state, bool resume)
         return;
     }
     VerifyRequest request;
-    request.strict_metadata = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.strict)) ||
-                              state.session->context.config.policy.strict_metadata;
+    request.strict_metadata = strict_metadata(state);
     if (resume) {
         request.resume_run = view.incomplete_run;
         request.root = view.incomplete_root;
@@ -117,7 +133,12 @@ void start_verification(GuiState& state, bool resume)
             }
         }
     }
+    run_verification(state, std::move(request));
+}
 
+void run_verification(GuiState& state, VerifyRequest request)
+{
+    auto& view = state.verify_view;
     set_running(state, true);
     show_report(state, fixed_message("Verifying (reading every registered byte) ..."));
     // Filled by the worker; read by `done`, which runs only after the worker finished.
@@ -189,6 +210,16 @@ void start_verification(GuiState& state, bool resume)
 }
 
 } // namespace
+
+void resume_verification(GuiState& state, const app::UnfinishedOperation& verification)
+{
+    // As `verify --full <archive_uuid> --resume <run_id>`, with strict
+    // metadata as for every verification started here.
+    auto request = app::verification_resume(verification);
+    request.strict_metadata = strict_metadata(state);
+    gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "verify");
+    run_verification(state, std::move(request));
+}
 
 void refresh_archive_choices(GuiState& state)
 {

@@ -1,5 +1,6 @@
 #include "test_support.h"
 
+#include "app/typed_path.h"
 #include "app/unfinished_operations.h"
 #include "common/time.h"
 #include "common/utf8.h"
@@ -1607,6 +1608,199 @@ void words_a_line_for_the_command_line()
           "Unfinished relocation of revision 1 to \"Y:\\範例\": not counted; new carrier differs; abandon it");
 }
 
+// ---- Resume from the list (decision 0022, point 7) -------------------------
+
+// The row of an operation in `state`, as the list shows it at once.
+va::app::OperationRow row_of(const UnfinishedOperation& operation)
+{
+    OperationWatch watch;
+    watch.update(operation, Clock::time_point{}, wall_now);
+    return describe_operation(va::app::Text{}, watch, Clock::time_point{}, wall_now);
+}
+
+// The list offers Resume for a verification that has stopped and can be
+// resumed (R-104), and for a registration that has stopped: not for one that
+// runs, or may (waiting, quiet, not known, held up), not for one that can no
+// longer finish (an archive with a newer or later revision), and never for a
+// relocation, which the GUI does not run.
+void offers_resume_only_where_it_continues()
+{
+    auto verification = registration(3, 300);
+    verification.kind = va::app::OperationKind::Verification;
+    verification.key = "run:c0ffee00-0000-4000-8000-0000000000aa";
+    verification.run_id = "c0ffee00-0000-4000-8000-0000000000aa";
+    verification.recorded_stopped = true;  // recorded INCOMPLETE
+    auto row = row_of(verification);
+    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && !row.abandonable);
+    // Killed, its record silent for minutes: stopped as well.
+    verification.recorded_stopped = false;
+    verification.updated = wall_now - 10min;
+    CHECK(row_of(verification).offers_resume);
+    // Its archive has a newer revision: it cannot be resumed (R-104).
+    verification.resumable = false;
+    row = row_of(verification);
+    CHECK(row.state == "stopped; it cannot be resumed (the archive has a newer revision)" && !row.offers_resume);
+    verification.resumable = true;
+    // It runs, or may: it works now, it was just seen (an older version's
+    // run, which says nothing), or its checkpoints are not counted.
+    verification.updated = wall_now - 20s;
+    row = row_of(verification);
+    CHECK(row.state == "running" && !row.offers_resume);
+    verification.updated.reset();
+    CHECK(row_of(verification).state_kind == OperationState::Waiting && !row_of(verification).offers_resume);
+    OperationWatch quiet;
+    quiet.update(verification, Clock::time_point{}, wall_now);
+    quiet.update(verification, Clock::time_point{} + 5min, wall_now);
+    CHECK(quiet.state(Clock::time_point{} + 5min, wall_now) == OperationState::Quiet);
+    CHECK(!describe_operation(va::app::Text{}, quiet, Clock::time_point{} + 5min, wall_now).offers_resume);
+    verification.done_counted = false;
+    CHECK(row_of(verification).state_kind == OperationState::Unknown && !row_of(verification).offers_resume);
+
+    // A registration that stopped: its stop mark, or its process ended.
+    auto registering = registration(10, 10 * mib);
+    registering.recorded_stopped = true;
+    row = row_of(registering);
+    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && row.abandonable);
+    registering.recorded_stopped = false;
+    registering.attempt = va::AttemptState::Ended;
+    registering.updated = wall_now - 20s;
+    CHECK(row_of(registering).offers_resume);
+    // Running, or held up while its process runs.
+    registering.attempt = va::AttemptState::Running;
+    CHECK(row_of(registering).state == "running" && !row_of(registering).offers_resume);
+    registering.updated = wall_now - 10min;
+    CHECK(row_of(registering).state_kind == OperationState::Silent && !row_of(registering).offers_resume);
+    // Made for an older revision (decision 0030): only abandoned.
+    registering.attempt = va::AttemptState::Unknown;
+    registering.recorded_stopped = true;
+    registering.later_revision = true;
+    row = row_of(registering);
+    CHECK(row.state_kind == OperationState::LaterRevision && !row.offers_resume && row.abandonable);
+
+    // A relocation: abandoned in the list, resumed on the command line.
+    auto relocating = registration(20, 10 * mib);
+    relocating.kind = va::app::OperationKind::Relocation;
+    relocating.key = "relocation:c0ffee00-0000-4000-8000-000000000001";
+    relocating.recorded_stopped = true;
+    row = row_of(relocating);
+    CHECK(row.state == "stopped; it can be resumed" && !row.offers_resume && row.abandonable);
+    relocating.differs = true;
+    relocating.resumable = false;
+    CHECK(row_of(relocating).state_kind == OperationState::Differs && !row_of(relocating).offers_resume);
+}
+
+// The rows of the repository's unfinished operations, read and judged at once
+// as the list's first read does (sample data; no volume's used space asked).
+std::vector<UnfinishedOperation> read_operations(test::EngineFixture& fixture)
+{
+    const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+        [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; });
+    CHECK(read.has_value());
+    return read ? read->operations : std::vector<UnfinishedOperation>{};
+}
+
+// Resume on a stopped verification continues it as `verify --full
+// <archive_uuid> --resume <run_id>` does: the archive named by its uuid, so
+// looked for among the attached volumes rather than at the root the run read,
+// and the run, whose verified entries are not read again. Then nothing is left
+// to resume. (A sample volume, sample files.)
+void a_stopped_verification_resumes_from_the_list_as_on_the_command_line()
+{
+    test::EngineFixture fixture;
+    for (int index = 1; index <= 9; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, static_cast<char>('0' + index)));
+    }
+    const auto registered = fixture.register_root(fixture.archive.root());
+    CHECK(registered.has_value());
+    fixture.archive.node("f5").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.verify(fixture.archive.root());
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+    if (!registered || !interrupted) {
+        return;
+    }
+    fixture.archive.node("f5").open_error.reset();
+
+    const auto operations = read_operations(fixture);
+    CHECK(operations.size() == 1);
+    if (operations.size() != 1) {
+        return;
+    }
+    const auto& operation = operations.front();
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    OperationWatch watch;
+    watch.update(operation, Clock::time_point{}, now);
+    const auto row = describe_operation(va::app::Text{}, watch, Clock::time_point{}, now);
+    CHECK(row.kind == "Verification" && row.state == "stopped; it can be resumed" && row.offers_resume);
+
+    const auto request = va::app::verification_resume(operation);
+    CHECK(request.archive_uuid == registered->archive_uuid && request.resume_run == interrupted->run_id);
+    CHECK(!request.root && !request.strict_metadata && !request.rotational);
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.verify(request);
+    CHECK(resumed && resumed->result == "PASSED" && resumed->resumed_from == interrupted->run_id);
+    CHECK(resumed && resumed->root == fixture.archive.root() && resumed->counts.at("Verified") == 9);
+    CHECK(interrupted->coverage_bytes >= 4000 && fixture.archive.bytes_read == 9000 - interrupted->coverage_bytes);
+    CHECK(read_operations(fixture).empty());
+}
+
+// A root of a sample volume that the command line takes as it is typed: the
+// sample letter K: on Windows, a folder below the root on Linux.
+std::filesystem::path sample_root()
+{
+    return std::filesystem::path::preferred_separator == '\\' ? std::filesystem::path(R"(K:\SAMPLE-resume)")
+                                                               : std::filesystem::path("/SAMPLE-resume");
+}
+
+// Resume on a stopped registration continues it as `register <root> --resume`
+// does: the root its plan names, made as the command line makes a root typed
+// there (here an older version's plan names it with a separator at its end),
+// without a label or the options of a new registration; the files it hashed
+// are not read again, and the registration is recorded. Then nothing is left
+// to resume. (A sample volume, sample files.)
+void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
+{
+    test::EngineFixture fixture(sample_root());
+    for (int index = 1; index <= 6; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, static_cast<char>('a' + index)));
+    }
+    fixture.archive.node("f4").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.register_root(fixture.archive.root());
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("f4").open_error.reset();
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->size() == 1);
+    if (!archives || archives->size() != 1) {
+        return;
+    }
+    const auto archive_uuid = archives->front().archive_uuid;
+    const auto key = "registration:" + archive_uuid;
+    auto plan = nlohmann::json::parse(fixture.store.setting(key).value_or(""), nullptr, false);
+    CHECK(plan.is_object() && plan.value("root", std::string{}) == va::path_to_utf8(sample_root()));
+    plan["root"] = va::path_to_utf8(sample_root()) + (std::filesystem::path::preferred_separator == '\\' ? "\\" : "/");
+    CHECK(fixture.store.set_setting(key, plan.dump()));
+    const auto saved = fixture.store.file_rows(archive_uuid, 1);
+    CHECK(saved && saved->size() >= 3);  // f1..f3 were checkpointed
+
+    const auto operations = read_operations(fixture);
+    CHECK(operations.size() == 1);
+    if (operations.size() != 1) {
+        return;
+    }
+    const auto& operation = operations.front();
+    const auto row = row_of(operation);
+    CHECK(row.kind == "Registration" && row.state == "stopped; it can be resumed" && row.offers_resume);
+
+    const auto request = va::app::registration_resume(operation);
+    CHECK(request.resume && request.root == sample_root() && request.root == va::app::typed_root(operation.root));
+    CHECK(!request.label && !request.copy_of && !request.new_revision && !request.force_new_archive &&
+          !request.write_media_copy && !request.rotational);
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.register_root(request);
+    CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 && resumed->counts.files == 6);
+    CHECK(saved && fixture.archive.bytes_read == 6000 - 1000 * saved->size());
+    CHECK(read_operations(fixture).empty());
+}
+
 } // namespace
 
 void unfinished_operations_tests()
@@ -1627,6 +1821,9 @@ void unfinished_operations_tests()
     restarts_the_estimate_after_a_sleep();
     leaves_out_a_stale_speed();
     shows_100_percent_only_when_done();
+    offers_resume_only_where_it_continues();
+    a_stopped_verification_resumes_from_the_list_as_on_the_command_line();
+    a_stopped_registration_resumes_from_the_list_as_on_the_command_line();
     follows_operations_between_polls();
     words_one_row();
     orders_the_rows();

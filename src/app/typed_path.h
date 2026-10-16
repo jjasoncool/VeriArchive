@@ -32,4 +32,13 @@ std::filesystem::path typed_root(std::string_view text);
 // interface asks this where it takes a root, before its volume is looked up.
 std::optional<std::string> root_refusal(const std::filesystem::path& root);
 
+// Why the root of `register` or `archive relocate`, made by typed_root from
+// `typed`, is not taken, before anything of it is read: refused
+// (root_refusal), or no folder, "not a directory: <typed>", the root named as
+// it was typed. Nothing when it is taken. The command line asks it of the
+// root of both commands, and the Archive List's Resume of a stopped
+// registration of the root its plan names, as `register <root> --resume`
+// asks it (decision 0022, point 7).
+std::optional<std::string> root_not_taken(const std::filesystem::path& root, std::string_view typed);
+
 } // namespace va::app

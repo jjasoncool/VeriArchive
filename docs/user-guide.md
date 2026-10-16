@@ -73,7 +73,7 @@ Options:
 | `--write-media-copy` | Also write the manifest onto the disk (`.veriarchive` folder) as a media copy. By default nothing is written to the archive. |
 | `--new-revision` | The folder or volume is already registered and its content changed on purpose: create a new revision (a new baseline). |
 | `--force-new-archive` | The folder or volume is already registered, but register it as a separate archive. |
-| `--resume` | Continue an interrupted registration without re-reading hashed files. While the program that ran it still runs, it stops and says which one. |
+| `--resume` | Continue an interrupted registration without re-reading hashed files. While the program that ran it still runs, it stops and says which one. In the GUI: "Resume" on its row in the Archive List, or the resume box of the Register Archive view. |
 | `--io hdd` or `--io ssd` | Reading strategy: `hdd` reads sequentially, `ssd` in parallel. Usually detected automatically. |
 
 Registering an already registered folder or volume again stops with exit code 12 and asks you to choose `--new-revision` or `--force-new-archive`.
@@ -147,12 +147,10 @@ Item statuses:
 
 ### Resuming an interrupted run
 
-An interrupted verification ends INCOMPLETE and tells you how to continue:
+An interrupted verification ends INCOMPLETE and can be continued; files already verified are not read again:
 
-- GUI: press "Resume interrupted run" in the window where the verification was interrupted, before another verification runs there or the program is closed.
+- GUI: in the Archive List view, press "Resume" on the verification's row among the unfinished operations. This works for any interrupted verification, also one started on the command line or interrupted before the program was closed. It continues the verification exactly as the command below does: the archive is looked for on the attached disks by its uuid, so a disk that got another drive letter is found too, and the Verify Archive view shows the progress and the result. In the window where the verification was interrupted, "Resume interrupted run" in the Verify Archive view continues it as well.
 - CLI: `veriarchive-cli verify --full <archive_uuid> --resume <RUN_ID>`, for any interrupted verification, also one started in the GUI. Among the unfinished operations of the Archive List, pointing at the label of its row shows the archive's uuid, and pointing at its state shows the run's id.
-
-Files already verified are not read again.
 
 ### When VeriArchive needs your decision (exit code 12)
 
@@ -247,7 +245,7 @@ The Archive List view, or `veriarchive-cli archive list`, shows for each archive
 
 An archive whose manifest in the repository cannot be used (missing, unreadable or changed) is listed too, with a line that says what is wrong and how to fix it (in the Archive List view, in red under its row), and `archive list` then exits with code 2. Verifying that archive (by its uuid, or chosen in the Verify Archive view) records the failure in its history. A manifest that is missing, unreadable or changed is restored from a backup of the repository, or with `veriarchive-cli import` of an export of that revision or of its media copy (in the `.veriarchive` folder on the archive's media): the import checks that the file is the one the repository recorded, and puts it back.
 
-Above the archives, the Archive List view also shows the registrations, verifications and relocations that have not finished, with their progress, also those started from the command line. A stopped registration that can never be finished, for example because its media failed, can be given up there with "Abandon..." (CLI: `veriarchive-cli archive abandon-registration <uuid> --confirm`): its saved progress is lost, while recorded revisions and history stay. A stopped relocation can be given up there the same way, for example when its new carrier failed (CLI: `veriarchive-cli archive abandon-relocation <uuid> --confirm`): its saved progress is lost, while the archive, its revisions and history stay.
+Above the archives, the Archive List view also shows the registrations, verifications and relocations that have not finished, with their progress, also those started from the command line. A stopped verification or registration that can be resumed has "Resume" there: it continues it exactly as `verify --full <uuid> --resume <RUN_ID>` or `register <root> --resume` does, wherever it was started, and the Verify Archive or Register Archive view shows its progress and result ("Strict metadata" and the media copy as ticked there). A stopped relocation is resumed on the command line, with `archive relocate <uuid> <root> --resume`. A stopped registration that can never be finished, for example because its media failed, can be given up there with "Abandon..." (CLI: `veriarchive-cli archive abandon-registration <uuid> --confirm`): its saved progress is lost, while recorded revisions and history stay. A stopped relocation can be given up there the same way, for example when its new carrier failed (CLI: `veriarchive-cli archive abandon-relocation <uuid> --confirm`): its saved progress is lost, while the archive, its revisions and history stay.
 
 `archive list` and `archive show` print an archive's unfinished registration and its unfinished relocation as one more line each under the archive: the revision, the folder or volume it reads, what it has done so far and its state, in the words of the Archive List view (for example "stopped; it can be resumed" or "new carrier differs; abandon it").
 

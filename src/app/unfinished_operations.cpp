@@ -1,5 +1,6 @@
 #include "app/unfinished_operations.h"
 
+#include "app/typed_path.h"
 #include "common/time.h"
 #include "common/utf8.h"
 #include "core/engine/recorded_manifest.h"
@@ -566,6 +567,14 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     // A stopped registration (decision 0025) or relocation (decision 0026)
     // may be given up on purpose; one that runs, or may, may not.
     row.abandonable = operation.kind != OperationKind::Verification && has_stopped(row.state_kind);
+    // Decision 0022, point 7: a verification that has stopped and can be
+    // resumed (R-104), and a registration that has stopped, may be resumed
+    // from the list, as their command-line resumes continue them. Not one
+    // that runs, or may, nor one that can no longer finish (a later revision,
+    // decision 0030). Nor a relocation: the GUI does not relocate, and its
+    // resume stays `archive relocate --resume`.
+    row.offers_resume = operation.kind != OperationKind::Relocation && row.state_kind == OperationState::Stopped &&
+                        operation.resumable;
 
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;
@@ -689,6 +698,25 @@ std::vector<OperationRow> describe_operations(const Text& text, const std::vecto
         rows.push_back(std::move(entry.row));
     }
     return rows;
+}
+
+VerifyRequest verification_resume(const UnfinishedOperation& verification)
+{
+    // As `verify --full <archive_uuid> --resume <run_id>` makes its request:
+    // no root, so the archive is looked for among the attached volumes.
+    VerifyRequest request;
+    request.archive_uuid = verification.archive_uuid;
+    request.resume_run = verification.run_id;
+    return request;
+}
+
+RegisterRequest registration_resume(const UnfinishedOperation& registration)
+{
+    // As `register <root> --resume` makes its request, the root its plan names typed.
+    RegisterRequest request;
+    request.root = typed_root(registration.root);
+    request.resume = true;
+    return request;
 }
 
 std::string describe_for_archive(const Text& text, const UnfinishedOperation& operation,

@@ -100,6 +100,11 @@ run_cli("10" register Missing)
 if(NOT last_errors MATCHES "不是資料夾：Missing")
     message(FATAL_ERROR "a typed path was translated:\n${last_errors}")
 endif()
+# A new root of a relocation that is no folder is a usage error too, named as typed.
+run_cli("10" --lang en archive relocate "${archive_uuid}" Missing)
+if(NOT last_errors STREQUAL "error: not a directory: Missing\n")
+    message(FATAL_ERROR "relocate to a root that is no folder:\n${last_errors}")
+endif()
 # Decision 0029 (Windows): a root on a network share, or one written in the
 # \\?\ form, is refused by register, verify and relocate before anything of
 # it is read (exit 10), in either language, and nothing is recorded. The share

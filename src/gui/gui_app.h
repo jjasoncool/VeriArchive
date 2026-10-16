@@ -156,6 +156,16 @@ void refresh_settings(GuiState& state);
 // Shows the recorded runs of the archive chosen in Verification History.
 void show_runs(GuiState& state);
 
+// Resume on a stopped verification or registration of the Archive List
+// (decision 0022, point 7): continues it exactly as its command-line resume
+// does (app::verification_resume, app::registration_resume), as the window's
+// one operation, in the view where an operation of its kind started in the
+// window shows its progress and report (Verify Archive, Register Archive),
+// which it brings into view. The caller has made sure that a repository is
+// open and that no operation runs.
+void resume_verification(GuiState& state, const app::UnfinishedOperation& verification);
+void resume_registration(GuiState& state, const app::UnfinishedOperation& registration);
+
 // The Settings language drop-down. show_language_in_use selects the language
 // in use. lock_language makes the drop-down unavailable while an operation
 // runs, because a language change rebuilds the window the operation reports into.

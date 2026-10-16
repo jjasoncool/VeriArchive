@@ -3,9 +3,11 @@
 // Above the archives, the registrations, verifications and relocations that
 // have not finished, with their progress, wherever they were started: a
 // registration of a whole volume from the command line takes many hours, and
-// this is where the operator sees how far it is. A registration there that
-// has stopped can be abandoned (decision 0025), as when its media failed, and
-// so can a stopped relocation (decision 0026).
+// this is where the operator sees how far it is. A verification or
+// registration there that has stopped can be resumed (decision 0022, point
+// 7), wherever it was started. A registration that has stopped can be
+// abandoned (decision 0025), as when its media failed, and so can a stopped
+// relocation (decision 0026).
 #include "gui/gui_app.h"
 
 #include "app/local_time.h"
@@ -102,6 +104,41 @@ GtkWidget* operation_cell(const std::string& text, bool bold = false, bool warni
 }
 
 void ask_to_abandon(GuiState& state, const std::string& key);
+void resume_from_list(GuiState& state, const std::string& key);
+
+// What a button of a row of the operations grid does when clicked: `act` on
+// the row's operation, named by its key.
+struct OperationAction {
+    std::string key;
+    void (*act)(GuiState&, const std::string&);
+};
+
+// A button of a row of the operations grid; what it does shows in a message
+// of its own, or in the view it brings into view.
+GtkWidget* operation_button(GuiState& state, const std::string& label, const std::string& key,
+    void (*act)(GuiState&, const std::string&))
+{
+    GtkWidget* button = gtk_button_new_with_label(label.c_str());
+    g_object_set_data_full(G_OBJECT(button), "operation-action", new OperationAction{key, act},
+        +[](gpointer data) { delete static_cast<OperationAction*>(data); });
+    g_signal_connect(button, "clicked",
+        G_CALLBACK(+[](GtkButton* clicked, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            const auto* action =
+                static_cast<const OperationAction*>(g_object_get_data(G_OBJECT(clicked), "operation-action"));
+            guarded(
+                [&] {
+                    if (action) {
+                        action->act(state, action->key);
+                    }
+                },
+                [&](const Report& report) {
+                    gtk_label_set_text(GTK_LABEL(state.archive_list.status), report(state.text).c_str());
+                });
+        }),
+        &state);
+    return button;
+}
 
 // The watches belong to one repository; another one opened in Settings starts afresh.
 void use_session_repository(GuiState& state)
@@ -205,25 +242,21 @@ void show_operations(GuiState& state)
         }
         gtk_grid_attach(GTK_GRID(view.operations_grid), state_cell, 4, row, 1, 1);
 
-        // A stopped registration (decision 0025) or relocation (decision
-        // 0026) can be given up on purpose.
-        if (shown.abandonable) {
-            GtkWidget* abandon = gtk_button_new_with_label(text("Abandon...").c_str());
-            gtk_widget_set_valign(abandon, GTK_ALIGN_START);
-            g_object_set_data_full(G_OBJECT(abandon), "operation-key", new std::string(shown.key),
-                +[](gpointer key) { delete static_cast<std::string*>(key); });
-            g_signal_connect(abandon, "clicked",
-                G_CALLBACK(+[](GtkButton* button, gpointer data) {
-                    auto& state = *static_cast<GuiState*>(data);
-                    const auto* key =
-                        static_cast<const std::string*>(g_object_get_data(G_OBJECT(button), "operation-key"));
-                    guarded([&] { ask_to_abandon(state, key ? *key : std::string{}); },
-                        [&](const Report& report) {
-                            gtk_label_set_text(GTK_LABEL(state.archive_list.status), report(state.text).c_str());
-                        });
-                }),
-                &state);
-            gtk_grid_attach(GTK_GRID(view.operations_grid), abandon, 5, row, 1, 1);
+        // A stopped verification or registration can be resumed here, as on
+        // the command line (decision 0022, point 7); a stopped registration
+        // (decision 0025) or relocation (decision 0026) can be given up on
+        // purpose.
+        if (shown.offers_resume || shown.abandonable) {
+            GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+            gtk_widget_set_valign(actions, GTK_ALIGN_START);
+            if (shown.offers_resume) {
+                gtk_box_append(GTK_BOX(actions), operation_button(state, text("Resume"), shown.key, resume_from_list));
+            }
+            if (shown.abandonable) {
+                gtk_box_append(
+                    GTK_BOX(actions), operation_button(state, text("Abandon..."), shown.key, ask_to_abandon));
+            }
+            gtk_grid_attach(GTK_GRID(view.operations_grid), actions, 5, row, 1, 1);
         }
         ++row;
     }
@@ -448,8 +481,8 @@ Report cannot_open(const IoError& error)
 }
 
 // Shows a report in a message of its own: the section the row was in may be
-// gone once the registration is.
-void show_abandon_result(GuiState& state, const Report& report)
+// gone once its operation is (abandoned, or resumed and finished).
+void show_message(GuiState& state, const Report& report)
 {
     if (!state.window) {
         return;
@@ -466,8 +499,8 @@ bool can_abandon(GuiState& state)
     if (state.session && !state.job.running() && state.archive_list.abandoning) {
         return true;
     }
-    show_abandon_result(state, fixed_message(state.session ? "Another operation is running."
-                                                            : "Open a repository first (Settings)."));
+    show_message(state, fixed_message(state.session ? "Another operation is running."
+                                                    : "Open a repository first (Settings)."));
     return false;
 }
 
@@ -492,7 +525,7 @@ void run_abandon_step(GuiState& state, const std::string& doing, Job::Work work,
                     }
                     done(report);
                 },
-                [&](const Report& failure) { show_abandon_result(state, failure); });
+                [&](const Report& failure) { show_message(state, failure); });
         });
     gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.abandoning), doing.c_str());
 }
@@ -519,7 +552,7 @@ void start_abandon(GuiState& state, const AbandonRequest& request, const std::st
         [&state](const Report& result) {
             refresh_archive_list(state);
             start_poll(state);
-            show_abandon_result(state, result);
+            show_message(state, result);
         });
 }
 
@@ -566,7 +599,7 @@ void confirm_abandon(GuiState& state, const AbandonableRegistration& registratio
                 return;
             }
             guarded([&] { start_abandon(state, choice->request, choice->label); },
-                [&](const Report& report) { show_abandon_result(state, report); });
+                [&](const Report& report) { show_message(state, report); });
         },
         choice);
 }
@@ -608,7 +641,7 @@ void start_relocation_abandon(GuiState& state, const RelocationAbandonRequest& r
         [&state](const Report& result) {
             refresh_archive_list(state);
             start_poll(state);
-            show_abandon_result(state, result);
+            show_message(state, result);
         });
 }
 
@@ -650,7 +683,7 @@ void confirm_relocation_abandon(GuiState& state, const AbandonableRelocation& re
                 return;
             }
             guarded([&] { start_relocation_abandon(state, choice->request, choice->label); },
-                [&](const Report& report) { show_abandon_result(state, report); });
+                [&](const Report& report) { show_message(state, report); });
         },
         choice);
 }
@@ -683,7 +716,7 @@ void ask_to_abandon_relocation(GuiState& state, const app::UnfinishedOperation& 
         },
         [&state, examined](const Report& refused) {
             if (refused) {
-                show_abandon_result(state, refused);
+                show_message(state, refused);
             } else if (*examined) {
                 confirm_relocation_abandon(state, **examined);
             }
@@ -710,9 +743,9 @@ void ask_to_abandon(GuiState& state, const std::string& key)
         return;
     }
     if (key.empty() || found == watches.end() || found->operation().kind != app::OperationKind::Registration) {
-        show_abandon_result(state, fixed_message(key.starts_with("relocation:")
-                                                     ? "This relocation is no longer listed as unfinished."
-                                                     : "This registration is no longer listed as unfinished."));
+        show_message(state, fixed_message(key.starts_with("relocation:")
+                                              ? "This relocation is no longer listed as unfinished."
+                                              : "This registration is no longer listed as unfinished."));
         return;
     }
     const auto& operation = found->operation();
@@ -740,11 +773,44 @@ void ask_to_abandon(GuiState& state, const std::string& key)
         },
         [&state, examined](const Report& refused) {
             if (refused) {
-                show_abandon_result(state, refused);
+                show_message(state, refused);
             } else if (*examined) {
                 confirm_abandon(state, **examined);
             }
         });
+}
+
+// ---- Resuming a verification or registration (decision 0022, point 7) -------
+
+// The operator chose to resume the stopped verification or registration
+// `key` of the latest read. It continues exactly as its command-line resume
+// does, as the window's one operation, its progress and report where an
+// operation of its kind started in this window shows them; what is wrong with
+// it by now (its media not attached, its archive at another revision) the
+// resume itself says there, in the command line's words.
+void resume_from_list(GuiState& state, const std::string& key)
+{
+    if (!state.session || state.job.running()) {
+        show_message(state, fixed_message(state.session ? "Another operation is running."
+                                                        : "Open a repository first (Settings)."));
+        return;
+    }
+    const auto& watches = state.operations.watches;
+    const auto found = std::ranges::find(watches, key,
+        [](const app::OperationWatch& watch) -> const std::string& { return watch.operation().key; });
+    if (key.empty() || found == watches.end() || found->operation().kind == app::OperationKind::Relocation) {
+        show_message(state, fixed_message(key.starts_with("run:")
+                                              ? "This verification is no longer listed as unfinished."
+                                              : "This registration is no longer listed as unfinished."));
+        return;
+    }
+    // A copy: the view it brings into view may have the list read again.
+    const auto operation = found->operation();
+    if (operation.kind == app::OperationKind::Verification) {
+        resume_verification(state, operation);
+    } else {
+        resume_registration(state, operation);
+    }
 }
 
 GtkWidget* build_operations_section(GuiState& state)

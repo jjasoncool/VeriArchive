@@ -65,6 +65,19 @@ void show_error(GuiState& state, Report report)
     show_report(state, std::move(report));
 }
 
+// Whether a registration started in the window writes a media copy (R-89):
+// the view's check box, as the command line's --write-media-copy.
+bool media_copy(const GuiState& state)
+{
+    return gtk_check_button_get_active(GTK_CHECK_BUTTON(state.register_view.media_copy));
+}
+
+// Runs `request` as the window's one operation, its progress and report in
+// this view. `typed`: for Resume in the Archive List (decision 0022, point 7),
+// the root as its plan names it; its root is then checked as `register <root>
+// --resume` checks it (app::root_not_taken), also that it is a folder.
+void run_registration(GuiState& state, RegisterRequest request, std::optional<std::string> typed);
+
 void start_registration(GuiState& state)
 {
     auto& view = state.register_view;
@@ -81,13 +94,18 @@ void start_registration(GuiState& state)
     }
     request.new_revision = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.new_revision));
     request.force_new_archive = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.force_new_archive));
-    request.write_media_copy = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.media_copy));
+    request.write_media_copy = media_copy(state);
     request.resume = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.resume));
     if (request.root.empty()) {
         show_report(state, fixed_message("Choose the folder or volume to register."));
         return;
     }
+    run_registration(state, std::move(request), std::nullopt);
+}
 
+void run_registration(GuiState& state, RegisterRequest request, std::optional<std::string> typed)
+{
+    auto& view = state.register_view;
     set_running(state, true);
     show_report(state, [root = path_to_utf8(request.root)](const app::Text& text) {
         return text.format("Registering {} ...", root);
@@ -95,11 +113,12 @@ void start_registration(GuiState& state)
     // The worker returns its report unworded; it is worded when shown, in the
     // language in use then.
     state.job.start(state.text, view.progress,
-        [&state, request](CancelToken& cancel, IProgressSink& progress) -> Report {
+        [&state, request, typed](CancelToken& cancel, IProgressSink& progress) -> Report {
             // Decision 0029: a root on a network share, or one written in the
-            // \\?\ form, is refused before anything of it is read. Asked here,
-            // off the window's thread: on Linux it reads the root's filesystem.
-            if (auto refusal = app::root_refusal(request.root)) {
+            // \\?\ form, is refused before anything of it is read, and a
+            // resumed one that is no folder too, as on the command line. Asked
+            // here, off the window's thread: on Linux it reads the root's filesystem.
+            if (auto refusal = typed ? app::root_not_taken(request.root, *typed) : app::root_refusal(request.root)) {
                 return [refusal = std::move(*refusal)](const app::Text& text) {
                     return text.format("Not registered: {}", text(refusal));
                 };
@@ -140,6 +159,16 @@ void start_registration(GuiState& state)
 }
 
 } // namespace
+
+void resume_registration(GuiState& state, const app::UnfinishedOperation& registration)
+{
+    // As `register <root> --resume`, the root its plan names, with a media
+    // copy as for every registration started here.
+    auto request = app::registration_resume(registration);
+    request.write_media_copy = media_copy(state);
+    gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "register");
+    run_registration(state, std::move(request), registration.root);
+}
 
 GtkWidget* build_register_view(GuiState& state)
 {

@@ -389,6 +389,9 @@ constexpr CatalogEntry entries[] = {
     {"no progress reported for {} hours; its process is still running", "已 {} 小時未回報進度；其處理程序仍在執行",
         Match::FormatOnly},
     {"Process: {} ({})", "處理程序：{}（{}）", Match::FormatOnly},
+    // Resuming a stopped verification or registration from the list (decision 0022, point 7).
+    {"Resume", "繼續"},
+    {"This verification is no longer listed as unfinished.", "此驗證已不在未完成的作業中。"},
     {"Abandon...", "放棄…"},
     {"Abandon", "放棄"},
     {"Abandon the unfinished registration of {}?", "要放棄 {} 未完成的註冊嗎？"},
@@ -508,6 +511,7 @@ constexpr CatalogEntry entries[] = {
     {"Failure: {}", "失敗：{}"},
     {"The run was interrupted; use Resume to continue without re-reading verified files.",
         "此次執行已中斷；使用「繼續中斷的執行」即可接續，不必重新讀取已驗證的檔案。"},
+    {"Resumed from run: {}", "已從執行 {} 繼續"},
     {"Run: {}", "執行：{}"},
     {"Choose the folder or volume to verify, or pick a registered archive.",
         "請選擇要驗證的資料夾或磁碟區，或挑選已註冊的封存。"},

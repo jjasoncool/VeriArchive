@@ -4,7 +4,9 @@
 #include "app/typed_path.h"
 #include "common/utf8.h"
 
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -86,6 +88,34 @@ void roots_on_shares_are_refused()
     CHECK(dotted && *dotted == R"(write the archive root without \\.\ in front (for example D:\Photos))");
 }
 
+// The root of `register` and `archive relocate`, and the root that Resume in
+// the Archive List takes from a registration's plan (decision 0022, point 7),
+// is taken only when it is a folder and not refused: one that is no folder,
+// or that is missing, says so, naming the root as it was typed, in either
+// language; a refused one says why it is refused. (Sample names, in a folder
+// of their own in the temporary folder.)
+void roots_that_are_no_folder_are_not_taken()
+{
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto folder = std::filesystem::temp_directory_path() / ("va-SAMPLE-root-" + std::to_string(stamp));
+    std::filesystem::create_directories(folder);
+    std::ofstream(folder / "SAMPLE.txt") << "sample data\n";
+    CHECK(!va::app::root_not_taken(va::app::typed_root(va::path_to_utf8(folder)), va::path_to_utf8(folder)));
+    const auto missing = va::app::root_not_taken(folder / "SAMPLE-missing", "SAMPLE-missing/");
+    CHECK(missing && *missing == "not a directory: SAMPLE-missing/");
+    CHECK(missing && chinese(*missing) == "不是資料夾：SAMPLE-missing/");
+    const auto file = va::app::root_not_taken(folder / "SAMPLE.txt", "SAMPLE.txt");
+    CHECK(file && *file == "not a directory: SAMPLE.txt");
+    if (std::filesystem::path::preferred_separator == '\\') {
+        const auto share = va::app::root_not_taken(
+            va::app::typed_root(R"(\\sample-server\sample-share)"), R"(\\sample-server\sample-share)");
+        CHECK(share && *share == va::app::root_refusal(va::app::typed_root(R"(\\sample-server\sample-share)")));
+    }
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+}
+
 } // namespace
 
 void typed_path_tests()
@@ -93,4 +123,5 @@ void typed_path_tests()
     typed_roots_name_their_folders();
     relative_paths_follow_the_working_directory();
     roots_on_shares_are_refused();
+    roots_that_are_no_folder_are_not_taken();
 }

@@ -796,14 +796,10 @@ int relocate(const Arguments& arguments, Opened& opened)
         request.rotational = *io == "hdd";
     }
     // Decision 0029: a new root on a network share, or one written in the
-    // \\?\ form, is refused before anything of it is read.
-    if (const auto refusal = app::root_refusal(request.root)) {
-        return report_failure(arguments, {exit_code::usage, *refusal});
-    }
-    // The error_code overload: a root that cannot be checked is reported, not thrown.
-    std::error_code root_error;
-    if (!std::filesystem::is_directory(request.root, root_error)) {
-        return report_failure(arguments, {exit_code::usage, "not a directory: " + root_text});
+    // \\?\ form, is refused before anything of it is read, and so is one that
+    // is no folder.
+    if (const auto problem = app::root_not_taken(request.root, root_text)) {
+        return report_failure(arguments, {exit_code::usage, *problem});
     }
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();
