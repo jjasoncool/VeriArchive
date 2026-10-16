@@ -435,6 +435,23 @@ void translation_tests()
                   "4 more of 40 do not match" + whole) ==
           "big.bin 的區塊雜湊不可靠：共 40 個區塊，其中區塊 1-3, 5, 8-9, 12, 14, 16, 18, 20, 22, 24 及另外 4 個區塊不符" +
               whole_chinese);
+    // The other half: a file hash that does not match a file whose chunks
+    // all match (decision 0032). The hash's name, the file's and the number
+    // of its chunks are values.
+    const std::string fine_chinese = "；檔案本身沒有問題，建立新版次即可修正";
+    CHECK(chinese("the whole-file BLAKE3 hash of big.bin cannot be relied on: it does not match, while each of the "
+                  "file's 3 chunks matches its chunk hash; the file is fine, and a new revision fixes it") ==
+          "big.bin 的整個檔案 BLAKE3 雜湊不可靠：它不符，但檔案的 3 個區塊都與各自的區塊雜湊相符" + fine_chinese);
+    CHECK(chinese.format("warning: {}",
+              chinese("the whole-file SHA-256 hash of 影片/raw of 2026.mov cannot be relied on: it does not match, "
+                      "while each of the file's 160 chunks matches its chunk hash; the file is fine, and a new "
+                      "revision fixes it")) ==
+          "警告：影片/raw of 2026.mov 的整個檔案 SHA-256 雜湊不可靠：它不符，但檔案的 160 個區塊都與各自的區塊雜湊相符" +
+              fine_chinese);
+    CHECK(chinese("the whole-file BLAKE3 and SHA-256 hashes of big.bin cannot be relied on: they do not match, while "
+                  "each of the file's 3 chunks matches its chunk hash; the file is fine, and a new revision fixes "
+                  "them") == "big.bin 的整個檔案 BLAKE3 和 SHA-256 雜湊不可靠：它們不符，但檔案的 3 個區塊都與各自的區塊雜湊相符" +
+                                 fine_chinese);
     // Adding chunk hashes (decision 0033): the refusal, the revision that
     // records them, why none does, and a run that keeps its saved progress.
     const std::string sample = "c0ffee00-0000-4000-8000-000000000001";

@@ -146,6 +146,24 @@ std::string unreliable_chunk_hashes(const Entry& recorded, const std::vector<std
            ", while the whole file matches its hashes; the file is fine, and a new revision fixes them";
 }
 
+// The other half (decision 0032): a file with chunk lines whose every chunk,
+// read by chunk, matches its recorded hash while its file hash, BLAKE3 or
+// SHA-256, or both, does not. The file is fine, as its chunk hashes, BLAKE3
+// hashes of all of its bytes, show: its manifest was wrong when it was
+// written. The file hash recorded cannot be relied on; a new revision, which
+// reads the file again, records it right.
+std::string unreliable_file_hashes(const Entry& recorded, const HashResult& read)
+{
+    const auto chunks = ", while each of the file's " + std::to_string(recorded.chunks.size()) +
+                        " chunks matches its chunk hash; the file is fine, and a new revision fixes ";
+    if (read.b3 != recorded.b3 && read.sha256 != recorded.sha256) {
+        return "the whole-file BLAKE3 and SHA-256 hashes of " + recorded.path.p +
+               " cannot be relied on: they do not match" + chunks + "them";
+    }
+    return "the whole-file " + std::string(read.b3 != recorded.b3 ? "BLAKE3" : "SHA-256") + " hash of " +
+           recorded.path.p + " cannot be relied on: it does not match" + chunks + "it";
+}
+
 class Classifier {
 public:
     Classifier(ComparisonResult& result, const ComparisonInput& input)
@@ -517,18 +535,27 @@ ComparisonResult compare_with_manifest(
             classify.add(was, "Modified", "size differs", Severity::Failure);
             return true;
         }
-        if (hash.b3 != was.b3 || hash.sha256 != was.sha256 || !was.size) {
-            classify.add(content_differs(was, differing_chunks(was, hash), chunk_size), Severity::Failure);
+        const auto differing = differing_chunks(was, hash);
+        const bool file_hashes_match = hash.b3 == was.b3 && hash.sha256 == was.sha256;
+        // Read by chunk, every chunk of a file with chunk lines matches.
+        const bool chunks_match = !was.chunks.empty() && hash.chunks.size() == was.chunks.size() && differing.empty();
+        if (!was.size || (!file_hashes_match && !chunks_match)) {
+            classify.add(content_differs(was, differing, chunk_size), Severity::Failure);
             return true;
         }
         result.coverage_bytes += hash.size; // read and matched
         classify.verified_or_metadata(was, is);
         result.current_entries.push_back(carried_entry(was, is));
-        // Both file hashes match, so the content does: a chunk hash that does
-        // not proves the manifest wrong, not the file (decision 0032).
-        if (const auto differing = differing_chunks(was, hash); !differing.empty()) {
+        // The content matches, by both file hashes or by every chunk: a hash
+        // recorded that does not proves the manifest wrong, not the file
+        // (decision 0032). Not checkpointed: a resume reads it again, and
+        // warns again (R-104).
+        if (!file_hashes_match) {
+            unreliable.emplace_back(&was, unreliable_file_hashes(was, hash));
+            return true;
+        }
+        if (!differing.empty()) {
             unreliable.emplace_back(&was, unreliable_chunk_hashes(was, differing));
-            // Not checkpointed: a resume reads it again, and warns again (R-104).
             return true;
         }
         // The chunk hashes to add, of content that matched (decision 0033),

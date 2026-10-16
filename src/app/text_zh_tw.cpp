@@ -1170,6 +1170,16 @@ constexpr CatalogEntry entries[] = {
         "matches its hashes; the file is fine, and a new revision fixes them",
         "{0} 的區塊雜湊不可靠：共 {3} 個區塊，其中區塊 {1} 及另外 {2} 個區塊不符，但整個檔案與其雜湊相符；"
         "檔案本身沒有問題，建立新版次即可修正"},
+    // The other half: a file whose every chunk matches while a file hash of
+    // it does not. The hash's name (BLAKE3, SHA-256) is a value.
+    {"the whole-file {} hash of {} cannot be relied on: it does not match, while each of the file's {} chunks "
+        "matches its chunk hash; the file is fine, and a new revision fixes it",
+        "{1} 的整個檔案 {0} 雜湊不可靠：它不符，但檔案的 {2} 個區塊都與各自的區塊雜湊相符；"
+        "檔案本身沒有問題，建立新版次即可修正"},
+    {"the whole-file BLAKE3 and SHA-256 hashes of {} cannot be relied on: they do not match, while each of the "
+        "file's {} chunks matches its chunk hash; the file is fine, and a new revision fixes them",
+        "{0} 的整個檔案 BLAKE3 和 SHA-256 雜湊不可靠：它們不符，但檔案的 {1} 個區塊都與各自的區塊雜湊相符；"
+        "檔案本身沒有問題，建立新版次即可修正"},
     // src/core/engine/compare_archives.cpp: its failures, and the item details
     // that verification does not use (it shares the others above). Each
     // "unreadable in A (<reason>)" is an entry of its own: a template would

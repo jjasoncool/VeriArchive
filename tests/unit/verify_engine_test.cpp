@@ -24,6 +24,7 @@
 #include <chrono>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <set>
@@ -2578,12 +2579,11 @@ void whole_files_are_compared_as_before()
     CHECK(unchunked.archive.bytes_read == unchunked.big.size() + std::string("notes (sample data)").size());
 }
 
-// Writes revision 1 of `fixture`'s archive again with the hash of each chunk
-// of big.bin in `wrong` replaced, and rebuilds the index from it: a manifest
-// valid in itself, its body hash and Merkle root those of what it holds, but
-// written wrong, as by a fault of the computer that registered it (sample
-// data).
-void write_wrong_chunk_hashes(Chunked& fixture, std::initializer_list<std::size_t> wrong)
+// Writes revision 1 of `fixture`'s archive again with its entry of big.bin
+// as `edit` makes it, and rebuilds the index from it: a manifest valid in
+// itself, its body hash and Merkle root those of what it holds, but written
+// wrong, as by a fault of the computer that registered it (sample data).
+void write_big_wrong(Chunked& fixture, const std::function<void(va::Entry&)>& edit)
 {
     auto loaded = va::load_recorded_manifest(
         fixture.store, *fixture.repository.files, fixture.repository.context.repo, fixture.archive_uuid, 1);
@@ -2593,10 +2593,7 @@ void write_wrong_chunk_hashes(Chunked& fixture, std::initializer_list<std::size_
     }
     for (auto& entry : loaded->entries) {
         if (entry.path.p == "big.bin") {
-            entry.chunks = test::chunk_hashes(fixture.big, test_chunk_size);
-            for (const auto idx : wrong) {
-                entry.chunks.at(idx) = va::blake3_hex("not chunk " + std::to_string(idx) + " (sample data)");
-            }
+            edit(entry);
         }
     }
     const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
@@ -2609,6 +2606,29 @@ void write_wrong_chunk_hashes(Chunked& fixture, std::initializer_list<std::size_
     const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo,
         test::not_cancelled(), test::no_progress());
     CHECK(rebuilt && rebuilt->revisions == 1 && rebuilt->skipped.empty());
+}
+
+// Revision 1 written again with the hash of each chunk of big.bin in `wrong`
+// replaced (sample data).
+void write_wrong_chunk_hashes(Chunked& fixture, std::initializer_list<std::size_t> wrong)
+{
+    write_big_wrong(fixture, [&](va::Entry& entry) {
+        entry.chunks = test::chunk_hashes(fixture.big, test_chunk_size);
+        for (const auto idx : wrong) {
+            entry.chunks.at(idx) = va::blake3_hex("not chunk " + std::to_string(idx) + " (sample data)");
+        }
+    });
+}
+
+// Revision 1 written again with big.bin's whole-file BLAKE3, its SHA-256 or
+// both replaced, and its chunk hashes as they were read (sample data).
+void write_wrong_file_hashes(Chunked& fixture, bool blake3, bool sha256)
+{
+    write_big_wrong(fixture, [&](va::Entry& entry) {
+        entry.chunks = test::chunk_hashes(fixture.big, test_chunk_size);
+        entry.b3 = blake3 ? va::blake3_hex("not big.bin (sample data)") : va::blake3_hex(fixture.big);
+        entry.sha256 = sha256 ? va::sha256_hex("not big.bin (sample data)") : va::sha256_hex(fixture.big);
+    });
 }
 
 // A file whose content matches both its file hashes while a chunk hash of it
@@ -2652,6 +2672,105 @@ void chunk_hashes_that_do_not_match_a_file_that_matches_warn()
     CHECK(fixture.register_root(next).has_value());
     outcome = fixture.verify(fixture.archive.root());
     CHECK(outcome && outcome->revision == 2 && outcome->result == "PASSED" && outcome->warnings.empty());
+}
+
+// The warning of a file whose whole-file `hash` (BLAKE3 or SHA-256) cannot be
+// relied on, while each of its 3 chunks matches (decision 0032).
+std::string unreliable_file_hash(const std::string& hash)
+{
+    return "the whole-file " + hash + " hash of big.bin cannot be relied on: it does not match, while each of the "
+           "file's 3 chunks matches its chunk hash; the file is fine, and a new revision fixes it";
+}
+
+// The other half (decision 0032): a file with chunk lines whose every chunk
+// hash matches what was read while its whole-file BLAKE3, its SHA-256 or both
+// do not is fine as well: its manifest was written wrong. It is Verified, its
+// bytes read once and matched, and the run warns that the whole-file hash
+// cannot be relied on and that a new revision fixes it, which makes it
+// PASSED_WITH_WARNINGS, also beside a difference of its metadata. A file
+// whose chunks do not all match stays Modified, naming them, whatever its
+// file hashes. A new revision records hashes that match the file.
+void a_file_hash_that_does_not_match_a_file_whose_chunks_match_warns()
+{
+    Chunked fixture;
+    write_wrong_file_hashes(fixture, true, false);
+    fixture.archive.bytes_read = 0;
+    auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "PASSED_WITH_WARNINGS" && outcome->items.empty() &&
+          outcome->counts.at("Verified") == 2 && outcome->coverage_bytes == outcome->registered_bytes);
+    CHECK(outcome && outcome->warnings == std::vector<std::string>{unreliable_file_hash("BLAKE3")});
+    if (outcome && outcome->warnings != std::vector<std::string>{unreliable_file_hash("BLAKE3")}) {
+        for (const auto& warning : outcome->warnings) {
+            std::cerr << "  warning: " << warning << '\n';
+        }
+    }
+    CHECK(fixture.archive.bytes_read == fixture.big.size() + std::string("notes (sample data)").size());
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->back().result == "PASSED_WITH_WARNINGS");
+
+    write_wrong_file_hashes(fixture, false, true);
+    fixture.archive.node("big.bin").mtime_ns += 5'000'000'000;
+    outcome = fixture.verify(fixture.archive.root());
+    const auto* big = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    CHECK(outcome && outcome->result == "PASSED_WITH_WARNINGS" && big && big->status == "MetadataMismatch" &&
+          outcome->warnings == std::vector<std::string>{unreliable_file_hash("SHA-256")});
+
+    write_wrong_file_hashes(fixture, true, true);
+    outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "PASSED_WITH_WARNINGS" &&
+          outcome->warnings == std::vector<std::string>{"the whole-file BLAKE3 and SHA-256 hashes of big.bin cannot "
+                                                        "be relied on: they do not match, while each of the file's "
+                                                        "3 chunks matches its chunk hash; the file is fine, and a new "
+                                                        "revision fixes them"});
+
+    // Chunks that do not all match: Modified, whatever the file hashes say.
+    fixture.change_big({test_chunk_size + 1000});
+    outcome = fixture.verify(fixture.archive.root());
+    big = outcome ? item_of(*outcome, "big.bin") : nullptr;
+    CHECK(outcome && outcome->result == "FAILED" && outcome->warnings.empty() && big && big->status == "Modified" &&
+          big->detail == "content differs: chunk 1 of 3 differs, from byte 65,536");
+
+    fixture.archive.node("big.bin").content = fixture.big;
+    va::RegisterRequest next;
+    next.root = fixture.archive.root();
+    next.new_revision = true;
+    CHECK(fixture.register_root(next).has_value());
+    outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->revision == 2 && outcome->result == "PASSED" && outcome->warnings.empty());
+}
+
+// R-104 with the other half (decision 0032): a file whose whole-file hash
+// cannot be relied on is not checkpointed, so that the resume of a run
+// interrupted after it (the device gone at the file after the next) reads it
+// again, and only it and the file not reached (by bytes), and warns again.
+void a_resumed_verification_warns_again_of_a_file_hash()
+{
+    const std::string last = "last (sample data)";
+    Chunked fixture(test_chunk_size, {{"z.txt", last}});
+    write_wrong_file_hashes(fixture, false, true);
+    fixture.archive.node("z.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.verify(fixture.archive.root());
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+    if (!interrupted) {
+        return;
+    }
+    va::Entry notes;
+    notes.path.p = "notes.txt";
+    const auto saved = fixture.store.progress(interrupted->run_id);
+    CHECK(saved && *saved == std::set<std::string>{va::entry_key(notes)});
+
+    fixture.archive.node("z.txt").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    request.resume_run = interrupted->run_id;
+    const auto resumed = fixture.verify(request);
+    CHECK(resumed && resumed->result == "PASSED_WITH_WARNINGS" && resumed->resumed_from == interrupted->run_id);
+    if (!resumed) {
+        return;
+    }
+    CHECK(fixture.archive.bytes_read == fixture.big.size() + last.size());
+    CHECK(resumed->warnings == std::vector<std::string>{unreliable_file_hash("SHA-256")});
 }
 
 // R-104 with decision 0032: a resumed FULL verify compares by chunk. A run
@@ -2806,6 +2925,8 @@ void verify_engine_tests()
     the_chunks_that_differ_are_named_in_runs();
     whole_files_are_compared_as_before();
     chunk_hashes_that_do_not_match_a_file_that_matches_warn();
+    a_file_hash_that_does_not_match_a_file_whose_chunks_match_warns();
+    a_resumed_verification_warns_again_of_a_file_hash();
     a_resumed_verification_compares_by_chunk();
     item_rules();
 }

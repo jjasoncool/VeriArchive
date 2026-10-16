@@ -28,8 +28,9 @@ struct ComparisonInput {
     // well. Its chunk hashes come from the read that hashes the whole file
     // (R-101), at the revision's chunk size, so a revision without one (0, as
     // V1 registered) does no chunk work. A file whose content differs names
-    // the chunks that differ; one whose content matches while a chunk hash
-    // does not gives a warning (ComparisonResult::warnings). A FULL verify
+    // the chunks that differ; one whose content matches its file hashes
+    // while a chunk hash does not, or every chunk hash while a file hash
+    // does not, gives a warning (ComparisonResult::warnings). A FULL verify
     // compares by chunk; a relocation compares whole files, and carries the
     // chunk hashes of the revision it verifies (decision 0032, point 5).
     bool compare_chunks = false;
@@ -44,12 +45,12 @@ struct ComparisonInput {
     // R-104 resume: entry keys whose content already matched in the run being resumed.
     std::set<std::string> content_verified;
     // Called with keys of entries whose content matched, in batches
-    // (checkpoints): compared by chunk, every chunk hash of it too, so that a
-    // resume reads again a file whose chunk hashes cannot be relied on, and
-    // warns again (decision 0032). Returning false stops the comparison, as a
-    // cancel does (the result is incomplete): the operation found that it can
-    // no longer finish, such as a relocation whose revision another operation
-    // recorded (decision 0026).
+    // (checkpoints): compared by chunk, every chunk hash and both file hashes
+    // of it, so that a resume reads again a file whose chunk hashes or file
+    // hash cannot be relied on, and warns again (decision 0032). Returning
+    // false stops the comparison, as a cancel does (the result is
+    // incomplete): the operation found that it can no longer finish, such as
+    // a relocation whose revision another operation recorded (decision 0026).
     std::function<bool(const std::vector<std::string>&)> checkpoint;
     // Called on the comparison's thread for each entry as it is classified
     // with a status other than Verified, with whether that status fails the
@@ -76,8 +77,9 @@ struct ComparisonResult {
     std::vector<VerifyItemRecord> items;    // non-Verified items (run_id left empty)
     // Warnings of the run, in the canonical order of the files they name:
     // compared by chunk, each file whose content matches both its file hashes
-    // while a chunk hash of it does not (decision 0032). The file is fine
-    // and counts as Verified; its chunk hashes cannot be relied on.
+    // while a chunk hash of it does not, or matches every chunk hash while a
+    // file hash does not (decision 0032). The file is fine and counts as
+    // Verified; the hash recorded that does not match cannot be relied on.
     std::vector<std::string> warnings;
     std::uint64_t coverage_bytes = 0;       // bytes whose content matched
     // The media as it is now, with recorded hashes (chunk hashes included)
