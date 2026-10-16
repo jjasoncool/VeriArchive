@@ -795,6 +795,113 @@ void an_earlier_revision_whose_manifest_is_gone_is_left_out()
     CHECK(!by_old_root && by_old_root.error().identity.result == va::MatchResult::PreviousCarrier);
 }
 
+// Decision 0028: repo rebuild-index never sets an archive below the latest
+// revision that a verification of it which read its media names; the
+// verification history is no index, so it keeps that revision where an older
+// version's rebuild took the archive back for want of its manifest. Sample
+// data: an archive registered twice and verified at revision 2, which an
+// older rebuild set back to revision 1 (its manifest of revision 2 gone, the
+// record and rows of revision 2 dropped, the archive's record at revision 1,
+// as that version left them). A run that read no media naming revision 3
+// (as one that failed on its manifest records) counts for nothing. This
+// version's rebuild puts the archive at revision 2, as one of which the index
+// has no record, says so, lists it with the step to restore the manifest and
+// then rebuild, and fails it by its uuid at revision 2 without reading the
+// media, never verifying it against revision 1; imported from its export, the
+// manifest of revision 2 is recorded and verifies. Where nothing else is left
+// of the archive's revisions, the history still raises its record to the
+// revision it names, and never lowers it.
+void the_history_keeps_an_archive_from_an_earlier_revision()
+{
+    test::EngineFixture fixture;
+    const auto archive_uuid = registered_twice(fixture);
+    const auto& layout = fixture.repository.context.repo;
+    const auto exported = va::export_archive(fixture.store, *fixture.repository.files, *fixture.repository.writer,
+        layout, archive_uuid, layout.root.parent_path() / "export");
+    CHECK(exported.has_value());
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = archive_uuid;
+    const auto verified = fixture.verify(by_uuid);
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2 && verified->media_read);
+    va::VerifyRunRecord unread;
+    unread.run_id = "c0ffee00-0000-4000-8000-000000000003";
+    unread.archive_uuid = archive_uuid;
+    unread.revision = 3;
+    unread.mode = "FULL";
+    unread.started = "2026-10-16T02:00:00Z";
+    unread.finished = "2026-10-16T02:00:00Z";
+    unread.result = "FAILED";
+    unread.coverage_bytes = 0;
+    unread.counts_json = R"({"items":{},"media_read":false})";
+    unread.failure_classes = "RepositoryError";
+    unread.host = "sample-host";
+    unread.app_version = "0.1.0";
+    CHECK(fixture.store.append_verify_run(unread, fixture.repository.context.repository_uuid).has_value());
+    if (!exported) {
+        return;
+    }
+
+    // What an older version's rebuild left.
+    const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+    std::filesystem::remove(second);
+    fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; DELETE FROM files WHERE revision = 2; "
+                               "UPDATE archives SET current_revision = 1");
+
+    const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(report && report->revisions == 1 && report->revisions_kept.empty() && report->skipped.empty() &&
+          report->revisions_not_indexed.size() == 1);
+    if (report && report->revisions_not_indexed.size() == 1) {
+        const auto& not_indexed = report->revisions_not_indexed.front();
+        CHECK(not_indexed.archive_uuid == archive_uuid && not_indexed.revision == 2 && !not_indexed.cause &&
+              not_indexed.manifest == "manifests/" + archive_uuid + "/r0002.vam");
+    }
+    auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+    const auto no_record = "the repository's index has no record of the manifest of revision 2 (manifests/" +
+                           archive_uuid +
+                           "/r0002.vam), which is missing; restore it from a backup of the repository, then rebuild "
+                           "the index with `repo rebuild-index`";
+    const auto status = listed(fixture);
+    CHECK(status && status->unusable_manifest && va::plain_message(*status->unusable_manifest) == no_record);
+    fixture.media.error = va::IoError{va::IoErrorKind::Other, 0, "the media is not looked for (sample)"};
+    const auto failed = fixture.verify(by_uuid);
+    CHECK(failed && failed->result == "FAILED" && !failed->media_read && failed->revision == 2 &&
+          failed->warnings == std::vector<std::string>{"manifest: " + no_record});
+    fixture.media.error.reset();
+    const auto imported = va::import_manifest(fixture.store, *fixture.repository.files, *fixture.repository.writer,
+        layout, exported->manifest, false);
+    CHECK(imported && imported->revision == 2 && !imported->restored);
+    const auto restored = fixture.verify(by_uuid);
+    CHECK(restored && restored->result == "PASSED" && restored->revision == 2);
+
+    // Nothing else left of its revisions (the manifests moved away and the
+    // records removed by hand, sample damage): the history raises the
+    // archive's record from revision 1 to revision 2, and leaves revision 3
+    // as it is.
+    const auto away = layout.root.parent_path() / "away";
+    std::filesystem::create_directories(away);
+    const auto first = va::manifest_path(layout.manifests(), archive_uuid, 1);
+    std::filesystem::rename(first, away / "r0001.vam");
+    std::filesystem::rename(second, away / "r0002.vam");
+    fixture.repository.execute(
+        "DELETE FROM archive_revisions; DELETE FROM files; UPDATE archives SET current_revision = 1");
+    const auto raised = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(raised && raised->revisions_not_indexed.size() == 1);
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+    fixture.repository.execute("UPDATE archives SET current_revision = 3");
+    const auto kept = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(kept && kept->revisions_not_indexed.empty());
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 3);
+    std::filesystem::rename(away / "r0001.vam", first);
+    std::filesystem::rename(away / "r0002.vam", second);
+    const auto back = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(back && back->revisions == 2 && back->revisions_not_indexed.empty());
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+}
+
 } // namespace
 
 void rebuild_index_tests()
@@ -807,4 +914,5 @@ void rebuild_index_tests()
     the_archive_keeps_the_root_of_its_revision();
     an_import_restores_the_manifest_recorded();
     an_earlier_revision_whose_manifest_is_gone_is_left_out();
+    the_history_keeps_an_archive_from_an_earlier_revision();
 }

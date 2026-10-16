@@ -177,6 +177,36 @@ std::expected<RebuildReport, IoError> rebuild_index(
                 }
             }
         }
+        // Nor below the latest revision that a verification of the archive
+        // which read its media names: that verification compared the media
+        // with the manifest of that revision, which the repository had
+        // recorded (R-14). The verification history (R-18) is no index, and
+        // no rebuild changes it, so it still names the revision where an
+        // older version's rebuild set the archive back for want of that
+        // manifest. A verification that read no media (read_no_media) names
+        // the revision that the archive's record said, which proves nothing
+        // of it. An archive of which nothing else is left keeps its record's
+        // revision where the history names no later one.
+        for (const auto& [archive_uuid, archive] : existing) {
+            const auto runs = store.verify_runs(archive_uuid);
+            if (!runs) {
+                return std::unexpected(runs.error());
+            }
+            std::uint32_t verified = 0;
+            for (const auto& run : *runs) {
+                if (!read_no_media(run.counts_json)) {
+                    verified = std::max(verified, run.revision);
+                }
+            }
+            if (verified == 0) {
+                continue;
+            }
+            if (const auto named = latest.find(archive_uuid); named != latest.end()) {
+                named->second = std::max(named->second, verified);
+            } else if (verified > archive.current_revision) {
+                latest[archive_uuid] = verified;
+            }
+        }
         // What the report says of a revision whose manifest this rebuild
         // could not read: the archive, the revision, its manifest's place, and
         // why the file there could not be read, unless it is missing.

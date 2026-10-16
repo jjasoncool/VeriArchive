@@ -9,11 +9,12 @@
 // 0026); that of verifications and relocations is in verify_progress, which is
 // never touched either. Each archive is at the latest revision that a
 // manifest in its folder, read or not, or a record of a revision whose
-// manifest it cannot read names (decision 0028); that revision, where its
-// manifest cannot be read (missing, or skipped), keeps its record and its
-// index as they were, as no manifest can rebuild them. The record of an
-// earlier revision whose manifest it cannot read goes with its index, as
-// every record that no manifest rebuilds.
+// manifest it cannot read names, and never below the latest revision that a
+// verification of it which read its media names (decision 0028); that
+// revision, where its manifest cannot be read (missing, or skipped), keeps
+// its record and its index as they were, as no manifest can rebuild them.
+// The record of an earlier revision whose manifest it cannot read goes with
+// its index, as every record that no manifest rebuilds.
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
 
@@ -43,8 +44,9 @@ struct RebuildReport {
     // Of the revisions whose manifest could not be read (decision 0028): the
     // archive's revision, whose record and index stayed as they were; an
     // earlier revision, whose record and index went; and the archive's
-    // revision of which no record is left (a file names it, but cannot be
-    // read), which the index then has no record of.
+    // revision of which no record is left (a file names it but cannot be
+    // read, or only its verification history names it), which the index then
+    // has no record of.
     std::vector<UnreadRevision> revisions_kept;
     std::vector<UnreadRevision> revisions_left_out;
     std::vector<UnreadRevision> revisions_not_indexed;
