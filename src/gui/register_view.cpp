@@ -162,12 +162,12 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
 
 void resume_registration(GuiState& state, const app::UnfinishedOperation& registration)
 {
-    // As `register <root> --resume`, the root its plan names, with a media
-    // copy as for every registration started here.
-    auto request = app::registration_resume(registration);
-    request.write_media_copy = media_copy(state);
+    // Exactly `register <root> --resume`, the root its plan names: no media
+    // copy, whatever this view's box says, which is not where Resume is
+    // clicked (decision 0022, point 7). A resume with a media copy is started
+    // here, with the resume box and the media copy box.
     gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "register");
-    run_registration(state, std::move(request), registration.root);
+    run_registration(state, app::registration_resume(registration), registration.root);
 }
 
 GtkWidget* build_register_view(GuiState& state)

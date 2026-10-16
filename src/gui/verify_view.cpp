@@ -213,12 +213,11 @@ void run_verification(GuiState& state, VerifyRequest request)
 
 void resume_verification(GuiState& state, const app::UnfinishedOperation& verification)
 {
-    // As `verify --full <archive_uuid> --resume <run_id>`, with strict
-    // metadata as for every verification started here.
-    auto request = app::verification_resume(verification);
-    request.strict_metadata = strict_metadata(state);
+    // Exactly `verify --full <archive_uuid> --resume <run_id>`: strict
+    // metadata as the policy sets it, whatever this view's box says, which is
+    // not where Resume is clicked (decision 0022, point 7).
     gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "verify");
-    run_verification(state, std::move(request));
+    run_verification(state, app::verification_resume(verification, state.session->context.config.policy));
 }
 
 void refresh_archive_choices(GuiState& state)

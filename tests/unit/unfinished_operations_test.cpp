@@ -1702,8 +1702,10 @@ std::vector<UnfinishedOperation> read_operations(test::EngineFixture& fixture)
 // Resume on a stopped verification continues it as `verify --full
 // <archive_uuid> --resume <run_id>` does: the archive named by its uuid, so
 // looked for among the attached volumes rather than at the root the run read,
-// and the run, whose verified entries are not read again. Then nothing is left
-// to resume. (A sample volume, sample files.)
+// and the run, whose verified entries are not read again; strict metadata
+// only where the policy sets it, as without --strict-metadata, for no check
+// box of the GUI takes part. Then nothing is left to resume. (A sample
+// volume, sample files.)
 void a_stopped_verification_resumes_from_the_list_as_on_the_command_line()
 {
     test::EngineFixture fixture;
@@ -1732,9 +1734,14 @@ void a_stopped_verification_resumes_from_the_list_as_on_the_command_line()
     const auto row = describe_operation(va::app::Text{}, watch, Clock::time_point{}, now);
     CHECK(row.kind == "Verification" && row.state == "stopped; it can be resumed" && row.offers_resume);
 
-    const auto request = va::app::verification_resume(operation);
+    const auto request = va::app::verification_resume(operation, va::Policy{});
     CHECK(request.archive_uuid == registered->archive_uuid && request.resume_run == interrupted->run_id);
     CHECK(!request.root && !request.strict_metadata && !request.rotational);
+    va::Policy strict_policy;
+    strict_policy.strict_metadata = true;
+    const auto strict = va::app::verification_resume(operation, strict_policy);
+    CHECK(strict.strict_metadata && strict.archive_uuid == request.archive_uuid &&
+          strict.resume_run == request.resume_run && !strict.root && !strict.rotational);
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.verify(request);
     CHECK(resumed && resumed->result == "PASSED" && resumed->resumed_from == interrupted->run_id);
@@ -1754,9 +1761,10 @@ std::filesystem::path sample_root()
 // Resume on a stopped registration continues it as `register <root> --resume`
 // does: the root its plan names, made as the command line makes a root typed
 // there (here an older version's plan names it with a separator at its end),
-// without a label or the options of a new registration; the files it hashed
-// are not read again, and the registration is recorded. Then nothing is left
-// to resume. (A sample volume, sample files.)
+// without a label or the options of a new registration, and without a media
+// copy, for no check box of the GUI takes part: nothing is written on the
+// media (R-03). The files it hashed are not read again, and the registration
+// is recorded. Then nothing is left to resume. (A sample volume, sample files.)
 void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
 {
     test::EngineFixture fixture(sample_root());

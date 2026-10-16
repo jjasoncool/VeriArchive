@@ -158,11 +158,12 @@ void show_runs(GuiState& state);
 
 // Resume on a stopped verification or registration of the Archive List
 // (decision 0022, point 7): continues it exactly as its command-line resume
-// does (app::verification_resume, app::registration_resume), as the window's
-// one operation, in the view where an operation of its kind started in the
-// window shows its progress and report (Verify Archive, Register Archive),
-// which it brings into view. The caller has made sure that a repository is
-// open and that no operation runs.
+// does, with the request that app::verification_resume and
+// app::registration_resume make, as they make it: no check box of the views
+// takes part. It runs as the window's one operation, in the view where an
+// operation of its kind started in the window shows its progress and report
+// (Verify Archive, Register Archive), which it brings into view. The caller
+// has made sure that a repository is open and that no operation runs.
 void resume_verification(GuiState& state, const app::UnfinishedOperation& verification);
 void resume_registration(GuiState& state, const app::UnfinishedOperation& registration);
 

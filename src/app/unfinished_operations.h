@@ -18,6 +18,7 @@
 // whether the attempt does.
 #include "app/progress_estimate.h"
 #include "app/text.h"
+#include "common/config.h"
 #include "common/error.h"
 #include "common/repository_layout.h"
 #include "common/types.h"
@@ -291,18 +292,21 @@ std::vector<OperationRow> describe_operations(const Text& text, const std::vecto
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
 
 // What Resume on a row of the Archive List runs (decision 0022, point 7): the
-// operation continued exactly as its command-line resume continues it, with
-// the options the GUI then adds as for an operation started there (strict
-// metadata, a media copy).
+// operation continued exactly as its command-line resume continues it given
+// no option, the whole request made here. The GUI runs it as it is: the check
+// boxes of the views where operations start take no part, as they are not
+// where Resume is clicked.
 //
 // A stopped verification, as `verify --full <archive_uuid> --resume <run_id>`:
 // its archive named by its uuid, and so looked for among the attached volumes
-// (never at the root the run read before), and its run.
-VerifyRequest verification_resume(const UnfinishedOperation& verification);
+// (never at the root the run read before), and its run; strict metadata only
+// where `policy` sets it, as on the command line without --strict-metadata.
+VerifyRequest verification_resume(const UnfinishedOperation& verification, const Policy& policy);
 // A stopped registration, as `register <root> --resume`: the root its plan
-// names, made as the command line makes a root typed there (typed_root).
-// Before anything of it is read, it is checked as that command checks it
-// (root_not_taken, with the plan's root as typed).
+// names, made as the command line makes a root typed there (typed_root), and
+// no media copy (R-03), as without --write-media-copy. Before anything of the
+// root is read, it is checked as that command checks it (root_not_taken, with
+// the plan's root as typed).
 RegisterRequest registration_resume(const UnfinishedOperation& registration);
 
 // One line about an archive's unfinished registration or relocation, for the

@@ -700,22 +700,26 @@ std::vector<OperationRow> describe_operations(const Text& text, const std::vecto
     return rows;
 }
 
-VerifyRequest verification_resume(const UnfinishedOperation& verification)
+VerifyRequest verification_resume(const UnfinishedOperation& verification, const Policy& policy)
 {
     // As `verify --full <archive_uuid> --resume <run_id>` makes its request:
-    // no root, so the archive is looked for among the attached volumes.
+    // no root, so the archive is looked for among the attached volumes, and
+    // strict metadata as the policy sets it, for no --strict-metadata is given.
     VerifyRequest request;
     request.archive_uuid = verification.archive_uuid;
     request.resume_run = verification.run_id;
+    request.strict_metadata = policy.strict_metadata;
     return request;
 }
 
 RegisterRequest registration_resume(const UnfinishedOperation& registration)
 {
-    // As `register <root> --resume` makes its request, the root its plan names typed.
+    // As `register <root> --resume` makes its request, the root its plan
+    // names typed, and no --write-media-copy: nothing is written on the media.
     RegisterRequest request;
     request.root = typed_root(registration.root);
     request.resume = true;
+    request.write_media_copy = false;
     return request;
 }
 

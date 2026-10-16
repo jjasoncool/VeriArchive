@@ -248,7 +248,7 @@ veriarchive-cli archive compare 0d0ce48d a82ebd4e
 
 儲存庫裡的清單檔無法使用（遺失、無法讀取或已被變更）的封存也會列出，並多一行說明問題和修復方法（「封存列表」頁以紅字顯示在該列下方），這時 `archive list` 的結束代碼是 2。驗證這個封存（用它的 uuid，或在「驗證封存」頁選它），會在它的歷程記錄這次失敗。遺失、無法讀取或已被變更的清單檔，可以從儲存庫的備份還原，也可以用 `veriarchive-cli import` 匯入該版次的匯出檔或媒體副本（封存所在媒體上 `.veriarchive` 資料夾裡的檔案）：匯入時會確認這個檔案就是儲存庫所記錄的那一份，再把它放回原位。
 
-「封存列表」頁還會在封存上方列出尚未完成的註冊、驗證與搬移及其進度，從命令列啟動的也包括在內。已停止、可以繼續的驗證或註冊，該列會有「繼續」：它和 `verify --full <uuid> --resume <RUN_ID>` 或 `register <根目錄> --resume` 一樣接著做，不論當初在哪裡啟動，進度和結果顯示在「驗證封存」或「註冊封存」頁（「嚴格中繼資料」和媒體副本依照那一頁的勾選）。已停止的搬移請用命令列 `archive relocate <uuid> <根目錄> --resume` 繼續。已停止、而且再也無法完成的註冊（例如硬碟壞了），可以在這裡按「放棄…」放棄它（命令列：`veriarchive-cli archive abandon-registration <uuid> --confirm`）：已儲存的進度會遺失，已記錄的版次與歷程不受影響。已停止的搬移也可以在這裡用同樣的方式放棄，例如新載體壞了（命令列：`veriarchive-cli archive abandon-relocation <uuid> --confirm`）：已儲存的進度會遺失，封存、它的版次與歷程不受影響。
+「封存列表」頁還會在封存上方列出尚未完成的註冊、驗證與搬移及其進度，從命令列啟動的也包括在內。已停止、可以繼續的驗證或註冊，該列會有「繼續」：它和 `verify --full <uuid> --resume <RUN_ID>` 或 `register <根目錄> --resume` 一樣接著做，不論當初在哪裡啟動，進度和結果顯示在「驗證封存」或「註冊封存」頁（那兩頁的勾選不會採用：和命令一樣，「繼續」不寫入媒體副本，也只在設定檔的 `policy` 設定了 `strict_metadata` 時才使用嚴格中繼資料）。已停止的搬移請用命令列 `archive relocate <uuid> <根目錄> --resume` 繼續。已停止、而且再也無法完成的註冊（例如硬碟壞了），可以在這裡按「放棄…」放棄它（命令列：`veriarchive-cli archive abandon-registration <uuid> --confirm`）：已儲存的進度會遺失，已記錄的版次與歷程不受影響。已停止的搬移也可以在這裡用同樣的方式放棄，例如新載體壞了（命令列：`veriarchive-cli archive abandon-relocation <uuid> --confirm`）：已儲存的進度會遺失，封存、它的版次與歷程不受影響。
 
 `archive list` 與 `archive show` 會在封存下方，為它未完成的註冊與未完成的搬移各多列一行：版次、正在讀取的資料夾或磁碟區、目前的進度和狀態，用語和「封存列表」頁相同（例如「已停止；可以繼續」或「新載體上的內容不符；請放棄它」）。
 
