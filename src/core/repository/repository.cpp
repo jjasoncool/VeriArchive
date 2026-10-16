@@ -17,6 +17,7 @@
 #include <optional>
 #include <sqlite3.h>
 #include <system_error>
+#include <thread>
 
 namespace va {
 namespace {
@@ -340,17 +341,59 @@ std::expected<std::filesystem::path, IoError> keep_copy_before_upgrade(
     return copy;
 }
 
+// Takes the write lock (BEGIN IMMEDIATE) on `database`, of an older schema
+// version, to upgrade it. Another connection may hold the lock for long: an
+// open of the same repository in another process holds it while it copies the
+// database to upgrade it (keep_copy_before_upgrade), seconds for a database of
+// a few gigabytes, and longer on a hard disk. So after each try, which waits
+// as long as wait.each_try (busy_timeout), it reads the version again: outside
+// a transaction a read sees the last commit, also while another connection
+// holds the lock (WAL, R-91). Once another process has upgraded the database,
+// there is nothing to do (false), however long the lock stays taken.
+// Otherwise it tries again until wait.patience has passed, as the record of
+// an operation waits for the lock (decision 0023), and then fails with
+// SQLite's cause ("database is locked").
+std::expected<bool, IoError> lock_for_upgrade(
+    const repository_detail::SqliteDatabase& database, const UpgradeLockWait& wait)
+{
+    if (auto configured = database.execute("PRAGMA busy_timeout=" + std::to_string(wait.each_try.count()) + ";");
+        !configured) {
+        return std::unexpected(configured.error());
+    }
+    const auto until = std::chrono::steady_clock::now() + wait.patience;
+    for (;;) {
+        auto begun = database.execute("BEGIN IMMEDIATE;");
+        if (begun) {
+            return true;
+        }
+        // SQLITE_BUSY: another connection still held the lock when this
+        // try's wait was over.
+        if ((begun.error().native_code & 0xff) != SQLITE_BUSY) {
+            return std::unexpected(begun.error());
+        }
+        if (const auto version = read_schema_version(database); version && !upgradable(*version)) {
+            return false;
+        }
+        if (std::chrono::steady_clock::now() >= until) {
+            return std::unexpected(begun.error());
+        }
+        // A pause, in case a try ever fails without waiting.
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
 // Brings the database of a repository of an older schema version to
 // schema_version (R-92) in one write transaction, so that a crash leaves the
 // old version or the new one. The version is read first without the write
 // lock, which an operation of another process may hold for long: a
 // repository at this version, at a later one, or one that cannot be read is
-// left as it is, for validate_schema to judge. Before it changes anything,
-// the transaction keeps a copy of the database as it is (keep_copy_before_upgrade);
-// when the copy cannot be made, nothing is upgraded. Returns the upgrade, or
-// nothing when there was none.
+// left as it is, for validate_schema to judge. The lock is waited for as
+// `wait` says (lock_for_upgrade). Before it changes anything, the transaction
+// keeps a copy of the database as it is (keep_copy_before_upgrade); when the
+// copy cannot be made, nothing is upgraded. Returns the upgrade, or nothing
+// when there was none.
 std::expected<std::optional<SchemaUpgrade>, IoError> migrate_schema(
-    const RepositoryLayout& layout, std::chrono::year_month_day today)
+    const RepositoryLayout& layout, std::chrono::year_month_day today, const UpgradeLockWait& wait)
 {
     {
         auto database = repository_detail::SqliteDatabase::open(layout.database(), true);
@@ -370,8 +413,12 @@ std::expected<std::optional<SchemaUpgrade>, IoError> migrate_schema(
         return std::unexpected(repository_error("cannot upgrade the repository database to schema version " +
                                                 std::to_string(schema_version) + ": " + error.message));
     };
-    if (auto begun = database->execute("PRAGMA busy_timeout=5000; BEGIN IMMEDIATE;"); !begun) {
-        return failed(begun.error());
+    const auto locked = lock_for_upgrade(*database, wait);
+    if (!locked) {
+        return failed(locked.error());
+    }
+    if (!*locked) {
+        return std::nullopt; // upgraded by another process meanwhile
     }
     // Again under the lock: another process may have upgraded it meanwhile.
     const auto version = read_schema_version(*database);
@@ -633,7 +680,8 @@ std::string unusable_database_message(const RepositoryLayout& layout, DatabaseSt
     return {};
 }
 
-std::expected<void, IoError> open_repository(AppContext& context, std::chrono::year_month_day today)
+std::expected<void, IoError> open_repository(
+    AppContext& context, std::chrono::year_month_day today, const UpgradeLockWait& wait)
 {
     context.schema_upgrade.reset();
     const auto uuid = read_repository_uuid(context.repo.root);
@@ -652,7 +700,7 @@ std::expected<void, IoError> open_repository(AppContext& context, std::chrono::y
     if (*state != DatabaseState::Usable) {
         return std::unexpected(repository_error(unusable_database_message(context.repo, *state)));
     }
-    auto migrated = migrate_schema(context.repo, today);
+    auto migrated = migrate_schema(context.repo, today, wait);
     if (!migrated) {
         return std::unexpected(migrated.error());
     }
@@ -986,7 +1034,7 @@ std::expected<std::optional<ReplacedDatabase>, IoError> marked_replacement(const
 } // namespace
 
 std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(
-    AppContext& context, std::chrono::year_month_day today)
+    AppContext& context, std::chrono::year_month_day today, const UpgradeLockWait& wait)
 {
     context.schema_upgrade.reset();
     const auto uuid = read_repository_uuid(context.repo.root);
@@ -1028,7 +1076,7 @@ std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebui
         // repository upgrades it, keeping a copy of it first, so that the
         // rebuild fills an index of this version (decision 0032). A database
         // made again now has this version's schema.
-        auto migrated = migrate_schema(layout, today);
+        auto migrated = migrate_schema(layout, today, wait);
         if (!migrated) {
             return std::unexpected(migrated.error());
         }

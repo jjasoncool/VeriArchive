@@ -2,6 +2,7 @@
 #include "app/app_context.h"
 #include "common/error.h"
 #include "core/interfaces.h"
+#include "core/repository/archive_store.h"
 #include "core/repository/database_state.h"
 #include <chrono>
 #include <expected>
@@ -47,6 +48,16 @@ std::expected<AppContext, IoError> resolve_repository(
 // already is opened (open_repository, `today`).
 std::expected<void, IoError> initialise_repository(
     AppContext& context, IFileWriter& writer, std::chrono::year_month_day today);
+// How long an open waits for the write lock that upgrading the repository's
+// database takes while another connection holds it (decision 0032): each try
+// as long as a statement waits (busy_timeout); then, while the database stays
+// at its older version, it tries again for up to `patience`, as the record of
+// an operation waits for the lock (decision 0023). Shorter only in tests.
+struct UpgradeLockWait {
+    std::chrono::milliseconds each_try = statement_lock_wait;
+    std::chrono::steady_clock::duration patience = record_lock_wait;
+};
+
 // Opens an existing repository: reads repository.json and checks the
 // database's schema. A database that is missing, empty, not a database or
 // damaged, or one that a rebuild made again and did not fill
@@ -57,11 +68,15 @@ std::expected<void, IoError> initialise_repository(
 // decisions 0032 and 0033), which first keeps a copy of it as it is beside
 // it, named for its version and `today`, the local date:
 // veriarchive-schema-1-before-upgrade-2026-10-17.db (decision 0032). Where
-// that copy cannot be made, nothing is upgraded and the open fails.
+// that copy cannot be made, nothing is upgraded and the open fails. While
+// another process holds the write lock, as one that upgrades the same
+// database does while it copies it, the open waits as `wait` says, and once
+// that process has upgraded the database it opens it without upgrading.
 // context.schema_upgrade says what was upgraded, and where the copy is, or
 // nothing. A database of a version this program does not know is refused
 // ("unsupported repository schema") and left as it is.
-std::expected<void, IoError> open_repository(AppContext& context, std::chrono::year_month_day today);
+std::expected<void, IoError> open_repository(
+    AppContext& context, std::chrono::year_month_day today, const UpgradeLockWait& wait = {});
 // R-83 step 5, for the pinned repository only (decision 0037): when
 // repository.json's uuid differs from the one recorded in the config, sets
 // context.previous_repository_uuid (the caller warns) and records the new uuid
@@ -85,12 +100,13 @@ std::expected<void, IoError> validate_schema(const RepositoryLayout& layout);
 // one beside it, which is taken up. A database that can be used, or that a
 // rebuild made again, at an older schema version is raised to this
 // program's, as open_repository raises it, keeping its copy named for
-// `today` first (context.schema_upgrade), so that the rebuild fills an index
-// of this version (decision 0032). The repository keeps its uuid. Gives the
-// mark's database put aside, made now or by a rebuild that did not finish;
-// nothing where the database can be used and holds no mark; an error, with
-// nothing moved, where it cannot be read for another reason (database_state).
+// `today` first (context.schema_upgrade), waiting for the write lock as
+// `wait` says, so that the rebuild fills an index of this version (decision
+// 0032). The repository keeps its uuid. Gives the mark's database put aside,
+// made now or by a rebuild that did not finish; nothing where the database can
+// be used and holds no mark; an error, with nothing moved, where it cannot be
+// read for another reason (database_state).
 std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(
-    AppContext& context, std::chrono::year_month_day today);
+    AppContext& context, std::chrono::year_month_day today, const UpgradeLockWait& wait = {});
 
 } // namespace va

@@ -10,12 +10,17 @@
 
 #include <algorithm>
 #include <chrono>
+#include <expected>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <optional>
+#include <semaphore>
 #include <set>
 #include <optional>
 #include <sqlite3.h>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -1167,33 +1172,159 @@ void an_upgrade_that_fails_keeps_no_copy()
     CHECK(stored_schema_version(layout) == 2 && copies_in(layout.root).empty() && !context->schema_upgrade);
 }
 
-// The copy is made in the transaction that upgrades the database, under its
-// write lock (decision 0032), so that it is the very database upgraded, which
-// no other process changes meanwhile. While another connection holds that
-// lock, the open waits for it, then fails without a copy and without the
-// upgrade; once the lock is free, the open copies and upgrades.
-void an_upgrade_copies_under_the_write_lock()
+// Another process's connection to the repository's database, which holds the
+// write lock from a thread of its own while `work` runs (sample data): as an
+// open of the same repository in another process holds it while it copies
+// the database to upgrade it. `work` gets the connection, in its write
+// transaction, and ends it.
+class LockHolder {
+public:
+    LockHolder(const va::RepositoryLayout& layout, std::function<void(sqlite3*)> work)
+    {
+        thread_ = std::thread([this, name = layout.database().u8string(), work = std::move(work)] {
+            sqlite3* connection = nullptr;
+            CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &connection) == SQLITE_OK);
+            CHECK(sqlite3_exec(connection, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) == SQLITE_OK);
+            held_.release();
+            work(connection);
+            sqlite3_close(connection);
+        });
+        CHECK(held_.try_acquire_for(std::chrono::seconds(60)));
+    }
+
+    ~LockHolder() { thread_.join(); }
+
+    LockHolder(const LockHolder&) = delete;
+    LockHolder& operator=(const LockHolder&) = delete;
+
+private:
+    std::binary_semaphore held_{0};
+    std::thread thread_;
+};
+
+// A repository whose database V1 left (version 1), for the tests of the lock.
+std::optional<va::AppContext> repository_of_version_1(const TemporaryDirectory& temporary)
 {
-    TemporaryDirectory temporary("schema-copy-lock");
     auto options = make_options(temporary.path());
     auto context = va::resolve_repository(options, always_writable_local);
     CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
     if (!context) {
+        return std::nullopt;
+    }
+    lower_schema(context->repo, 1);
+    return std::move(*context);
+}
+
+// Ten tries of 100 ms each a second, and a patience the tests never reach.
+constexpr va::UpgradeLockWait short_tries{std::chrono::milliseconds(100), std::chrono::seconds(30)};
+
+// The copy is made in the transaction that upgrades the database, under its
+// write lock (decision 0032), so that it is the very database upgraded, which
+// no other process changes meanwhile. While another connection holds that
+// lock, longer than one try of a statement's wait, the open waits for it, and
+// once the lock is free, copies and upgrades.
+void an_upgrade_waits_for_the_write_lock()
+{
+    TemporaryDirectory temporary("schema-copy-lock");
+    auto context = repository_of_version_1(temporary);
+    if (!context) {
         return;
     }
     const auto& layout = context->repo;
-    lower_schema(layout, 1);
-    sqlite3* holder = nullptr;
-    const auto name = layout.database().u8string();
-    CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &holder) == SQLITE_OK);
-    CHECK(sqlite3_exec(holder, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) == SQLITE_OK);
-    const auto locked = va::open_repository(*context, test::today);
-    CHECK(!locked && locked.error().message.starts_with("cannot upgrade the repository database to schema version "
-                                                        "3: "));
-    CHECK(copies_in(layout.root).empty() && stored_schema_version(layout) == 1);
-    CHECK(sqlite3_exec(holder, "ROLLBACK", nullptr, nullptr, nullptr) == SQLITE_OK);
-    sqlite3_close(holder);
-    CHECK(va::open_repository(*context, test::today).has_value());
+    std::chrono::steady_clock::duration waited{};
+    std::expected<void, va::IoError> opened;
+    {
+        const LockHolder holder(layout, [](sqlite3* connection) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            CHECK(sqlite3_exec(connection, "ROLLBACK", nullptr, nullptr, nullptr) == SQLITE_OK);
+        });
+        const auto started = std::chrono::steady_clock::now();
+        opened = va::open_repository(*context, test::today, short_tries);
+        waited = std::chrono::steady_clock::now() - started;
+    }
+    CHECK(opened.has_value() && waited >= std::chrono::milliseconds(500));
+    if (!opened) {
+        std::cerr << "  failed: " << opened.error().message << '\n';
+    }
+    CHECK(context->schema_upgrade && stored_schema_version(layout) == 3);
+    CHECK(copies_in(layout.root) == std::set<std::string>{"veriarchive-schema-1-before-upgrade-2026-10-17.db"});
+}
+
+// While another process upgrades the database, an open of it waits, and once
+// that process has upgraded it, opens it without upgrading it again: no copy
+// of its own and nothing to tell. It reads the version between its tries, so
+// it goes on also while another connection takes the lock next, as the same
+// one does here at once.
+void an_open_waits_for_another_upgrade()
+{
+    TemporaryDirectory temporary("schema-other-upgrade");
+    auto context = repository_of_version_1(temporary);
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    std::binary_semaphore opened_meanwhile{0};
+    std::chrono::steady_clock::duration waited{};
+    std::expected<void, va::IoError> opened;
+    {
+        const LockHolder holder(layout, [&](sqlite3* connection) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            // The upgrade of version 1 to 3, as the other process makes it.
+            CHECK(sqlite3_exec(connection,
+                      "CREATE TABLE verify_progress_chunks (run_id TEXT NOT NULL,path TEXT NOT NULL,raw_hex TEXT NOT "
+                      "NULL DEFAULT '',stream TEXT NOT NULL DEFAULT '',idx INTEGER NOT NULL,b3 TEXT NOT NULL,PRIMARY "
+                      "KEY(run_id,path,raw_hex,stream,idx)) WITHOUT ROWID; UPDATE schema_version SET version = 3; "
+                      "COMMIT; BEGIN IMMEDIATE",
+                      nullptr, nullptr, nullptr) == SQLITE_OK);
+            // The lock taken again, until the open is done, or 10 seconds.
+            (void)opened_meanwhile.try_acquire_for(std::chrono::seconds(10));
+            CHECK(sqlite3_exec(connection, "ROLLBACK", nullptr, nullptr, nullptr) == SQLITE_OK);
+        });
+        const auto started = std::chrono::steady_clock::now();
+        opened = va::open_repository(*context, test::today, short_tries);
+        waited = std::chrono::steady_clock::now() - started;
+        opened_meanwhile.release();
+    }
+    CHECK(opened.has_value() && waited < std::chrono::seconds(5));
+    if (!opened) {
+        std::cerr << "  failed: " << opened.error().message << '\n';
+    }
+    CHECK(!context->schema_upgrade && copies_in(layout.root).empty() && stored_schema_version(layout) == 3);
+}
+
+// When the lock stays taken longer than the open's patience, the open fails
+// with SQLite's cause, without a copy and without the upgrade, and an open
+// once the lock is free copies and upgrades. The open's own patience is 2
+// minutes, as a record waits for the lock (decision 0023), in tries of 5
+// seconds, as a statement waits.
+void an_upgrade_gives_up_after_its_patience()
+{
+    CHECK(va::UpgradeLockWait{}.each_try == std::chrono::seconds(5) &&
+          va::UpgradeLockWait{}.patience == std::chrono::minutes(2));
+    TemporaryDirectory temporary("schema-lock-patience");
+    auto context = repository_of_version_1(temporary);
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    {
+        const LockHolder holder(layout, [](sqlite3* connection) {
+            std::this_thread::sleep_for(std::chrono::seconds(4));
+            CHECK(sqlite3_exec(connection, "ROLLBACK", nullptr, nullptr, nullptr) == SQLITE_OK);
+        });
+        const auto started = std::chrono::steady_clock::now();
+        const auto locked = va::open_repository(
+            *context, test::today, {std::chrono::milliseconds(100), std::chrono::milliseconds(500)});
+        const auto waited = std::chrono::steady_clock::now() - started;
+        CHECK(!locked && locked.error().message == "cannot upgrade the repository database to schema version 3: "
+                                                   "cannot execute SQL: database is locked");
+        if (locked || locked.error().message.find("database is locked") == std::string::npos) {
+            std::cerr << "  opened while the lock was held: " << (locked ? "upgraded" : locked.error().message) << '\n';
+        }
+        CHECK(waited < std::chrono::seconds(3));
+        CHECK(copies_in(layout.root).empty() && stored_schema_version(layout) == 1 && !context->schema_upgrade);
+    }
+    CHECK(va::open_repository(*context, test::today, short_tries).has_value());
     CHECK(copies_in(layout.root) == std::set<std::string>{"veriarchive-schema-1-before-upgrade-2026-10-17.db"});
 }
 
@@ -1385,6 +1516,8 @@ void repository_tests()
     a_copy_before_an_upgrade_never_replaces_a_file();
     an_upgrade_without_its_copy_is_refused();
     an_upgrade_that_fails_keeps_no_copy();
-    an_upgrade_copies_under_the_write_lock();
+    an_upgrade_waits_for_the_write_lock();
+    an_open_waits_for_another_upgrade();
+    an_upgrade_gives_up_after_its_patience();
     opening_a_current_repository_takes_no_write_lock();
 }
