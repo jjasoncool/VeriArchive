@@ -340,6 +340,12 @@ void translation_tests()
     CHECK(chinese("error: Trusted keys must be an array") == "錯誤：設定檔中的 trusted_keys 必須是 JSON 陣列");
     CHECK(chinese("Finish or cancel the running operation before changing the language.") ==
           "請先完成或取消正在執行的作業，再切換語言。");
+    // Register and Verify name their target a folder or volume: a volume root
+    // registers the whole volume.
+    CHECK(chinese("Choose the folder or volume to register.") == "請選擇要註冊的資料夾或磁碟區。");
+    CHECK(chinese("Register as a separate archive even though this folder or volume is registered") ==
+          "即使此資料夾或磁碟區已註冊，仍註冊為另一個封存");
+    CHECK(chinese("The folder or volume above") == "上方的資料夾或磁碟區");
     // English stays byte-identical.
     CHECK(english("cannot run SQL: database is locked") == "cannot run SQL: database is locked");
     CHECK(english("first-run:home") == "first-run:home");

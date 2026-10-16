@@ -89,7 +89,7 @@ struct GuiState {
 
     struct {
         GtkWidget* folder = nullptr;
-        GtkWidget* archive = nullptr;      // drop-down: "the folder above" or a registered archive
+        GtkWidget* archive = nullptr;      // drop-down: "the folder or volume above" or a registered archive
         GtkWidget* strict = nullptr;
         GtkWidget* start = nullptr;
         GtkWidget* resume = nullptr;

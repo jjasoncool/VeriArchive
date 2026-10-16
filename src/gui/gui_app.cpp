@@ -105,7 +105,7 @@ struct Kept {
     bool register_finished = false;
     std::string verify_folder;
     bool strict = false;
-    std::optional<Uuid> verify_archive;  // empty: "The folder above"
+    std::optional<Uuid> verify_archive;  // empty: "The folder or volume above"
     double verify_fraction = 0.0;
     bool verify_finished = false;
     std::optional<Uuid> compare_reference;

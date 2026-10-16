@@ -1,6 +1,6 @@
-// Verify Archive (§B17): FULL verification of a folder or of a registered
-// archive found on the attached volumes, with progress, cancel and resume. The
-// result always carries its mode (R-21) and the V1 guarantee (R-02).
+// Verify Archive (§B17): FULL verification of a folder or volume, or of a
+// registered archive found on the attached volumes, with progress, cancel and
+// resume. The result always carries its mode (R-21) and the V1 guarantee (R-02).
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -105,7 +105,8 @@ void start_verification(GuiState& state, bool resume)
         } else {
             request.root = entry_path(view.folder);
             if (request.root->empty()) {
-                show_report(state, fixed_message("Choose the folder to verify, or pick a registered archive."));
+                show_report(state,
+                    fixed_message("Choose the folder or volume to verify, or pick a registered archive."));
                 return;
             }
         }
@@ -197,7 +198,7 @@ void refresh_archive_choices(GuiState& state)
         g_object_unref(model);
     };
 
-    std::vector<std::string> verify_items{state.text("The folder above")};
+    std::vector<std::string> verify_items{state.text("The folder or volume above")};
     verify_items.insert(verify_items.end(), labels.begin(), labels.end());
     set_choices(state.verify_view.archive, verify_items);
     state.verify_view.archive_uuids = uuids;
@@ -243,7 +244,8 @@ GtkWidget* build_verify_view(GuiState& state)
         auto& state = *static_cast<GuiState*>(data);
         guarded(
             [&] {
-                choose_folder(state.window, state.verify_view.folder, state.text("Choose the archive folder"));
+                choose_folder(state.window, state.verify_view.folder,
+                    state.text("Choose the archive folder or volume"));
             },
             [&](Report error) { show_error(state, std::move(error)); });
     }), &state);
@@ -253,7 +255,7 @@ GtkWidget* build_verify_view(GuiState& state)
 
     GtkWidget* archive_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(archive_row), make_row_label(state.text("Verify:")));
-    const auto folder_above = state.text("The folder above");
+    const auto folder_above = state.text("The folder or volume above");
     const char* initial[] = {folder_above.c_str(), nullptr};
     view.archive = gtk_drop_down_new_from_strings(initial);
     gtk_box_append(GTK_BOX(archive_row), view.archive);

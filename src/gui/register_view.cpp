@@ -1,5 +1,5 @@
-// Register Archive (§B17): choose a folder, register it (or a new revision),
-// with progress, cancel and resume for an interrupted registration.
+// Register Archive (§B17): choose a folder or volume, register it (or a new
+// revision), with progress, cancel and resume for an interrupted registration.
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -82,7 +82,7 @@ void start_registration(GuiState& state)
     request.write_media_copy = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.media_copy));
     request.resume = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.resume));
     if (request.root.empty()) {
-        show_report(state, fixed_message("Choose the folder to register."));
+        show_report(state, fixed_message("Choose the folder or volume to register."));
         return;
     }
 
@@ -137,9 +137,9 @@ GtkWidget* build_register_view(GuiState& state)
     set_margins(box, 16);
     gtk_box_append(GTK_BOX(box), make_heading(state.text("Register Archive")));
     gtk_box_append(GTK_BOX(box), make_label(state.text(
-        "Registration reads every file of the folder and records its fingerprints (BLAKE3 and "
-        "SHA-256) as the baseline that later verifications compare against. Nothing is written to "
-        "the archive unless you ask for a media copy.")));
+        "Registration reads every file of the folder or volume and records its fingerprints "
+        "(BLAKE3 and SHA-256) as the baseline that later verifications compare against. Nothing is "
+        "written to the archive unless you ask for a media copy.")));
 
     GtkWidget* folder_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     view.folder = gtk_entry_new();
@@ -150,7 +150,8 @@ GtkWidget* build_register_view(GuiState& state)
         auto& state = *static_cast<GuiState*>(data);
         guarded(
             [&] {
-                choose_folder(state.window, state.register_view.folder, state.text("Choose the archive folder"));
+                choose_folder(state.window, state.register_view.folder,
+                    state.text("Choose the archive folder or volume"));
             },
             [&](Report error) { show_error(state, std::move(error)); });
     }), &state);
@@ -163,13 +164,13 @@ GtkWidget* build_register_view(GuiState& state)
     gtk_box_append(GTK_BOX(box), view.label);
 
     view.new_revision = gtk_check_button_new_with_label(
-        state.text("New revision of the archive registered at this folder").c_str());
+        state.text("New revision of the archive registered at this folder or volume").c_str());
     view.force_new_archive = gtk_check_button_new_with_label(
-        state.text("Register as a separate archive even though this folder is registered").c_str());
+        state.text("Register as a separate archive even though this folder or volume is registered").c_str());
     view.media_copy = gtk_check_button_new_with_label(
         state.text("Also write a manifest copy to the media (.veriarchive)").c_str());
     view.resume = gtk_check_button_new_with_label(
-        state.text("Resume an interrupted registration of this folder").c_str());
+        state.text("Resume an interrupted registration of this folder or volume").c_str());
     gtk_box_append(GTK_BOX(box), view.new_revision);
     gtk_box_append(GTK_BOX(box), view.force_new_archive);
     gtk_box_append(GTK_BOX(box), view.media_copy);

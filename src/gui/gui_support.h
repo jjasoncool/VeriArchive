@@ -47,7 +47,7 @@ void clear_grid(GtkWidget* grid);
 std::filesystem::path entry_path(GtkWidget* entry);
 
 // The archive chosen in a drop-down whose item `offset + i` is uuids[i], or
-// nothing when another item (such as "The folder above") is chosen.
+// nothing when another item (such as "The folder or volume above") is chosen.
 std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset);
 
 // Chooses `archive` again, if the drop-down still lists it.

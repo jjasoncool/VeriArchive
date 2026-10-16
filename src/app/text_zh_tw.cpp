@@ -370,26 +370,27 @@ constexpr CatalogEntry entries[] = {
     {"Media copy: {}", "媒體副本：{}"},
     {"Another operation is running.", "已有其他作業正在執行。"},
     {"Open a repository first (Settings).", "請先開啟儲存庫（見「設定」）。"},
-    {"Choose the folder to register.", "請選擇要註冊的資料夾。"},
+    {"Choose the folder or volume to register.", "請選擇要註冊的資料夾或磁碟區。"},
     {"Registering {} ...", "正在註冊 {}……"},
     {"Cannot open the repository: {}", "無法開啟儲存庫：{}"},
     {"Not registered: {}", "未能註冊：{}"},
     {"Done", "完成"},
-    {"Registration reads every file of the folder and records its fingerprints (BLAKE3 and "
-        "SHA-256) as the baseline that later verifications compare against. "
+    {"Registration reads every file of the folder or volume and records its fingerprints "
+        "(BLAKE3 and SHA-256) as the baseline that later verifications compare against. "
         "Nothing is written to the archive unless you ask for a media copy.",
-        "註冊會讀取資料夾中的每個檔案，並記錄其指紋（BLAKE3 與 SHA-256）作為基準，"
+        "註冊會讀取資料夾或磁碟區中的每個檔案，並記錄其指紋（BLAKE3 與 SHA-256）作為基準，"
         "供日後驗證比對。除非您要求寫入媒體副本，否則不會對封存寫入任何內容。"},
     {"Archive folder or volume root", "封存資料夾或磁碟區根目錄"},
     {"Choose...", "選擇…"},
-    {"Choose the archive folder", "選擇封存資料夾"},
+    {"Choose the archive folder or volume", "選擇封存資料夾或磁碟區"},
     {"Label (optional, e.g. ARCH-0012)", "標籤（選填，例如 ARCH-0012）"},
-    {"New revision of the archive registered at this folder", "為此資料夾已註冊的封存建立新版次"},
-    {"Register as a separate archive even though this folder is registered",
-        "即使此資料夾已註冊，仍註冊為另一個封存"},
+    {"New revision of the archive registered at this folder or volume",
+        "為此資料夾或磁碟區已註冊的封存建立新版次"},
+    {"Register as a separate archive even though this folder or volume is registered",
+        "即使此資料夾或磁碟區已註冊，仍註冊為另一個封存"},
     {"Also write a manifest copy to the media (.veriarchive)",
         "同時將清單檔寫入媒體作為媒體副本（.veriarchive）"},
-    {"Resume an interrupted registration of this folder", "繼續此資料夾中斷的註冊"},
+    {"Resume an interrupted registration of this folder or volume", "繼續此資料夾或磁碟區中斷的註冊"},
     {"Register", "註冊"},
     {"Cancel", "取消"},
     // src/gui/verify_view.cpp
@@ -404,11 +405,11 @@ constexpr CatalogEntry entries[] = {
     {"The run was interrupted; use Resume to continue without re-reading verified files.",
         "此次執行已中斷；使用「繼續中斷的執行」即可接續，不必重新讀取已驗證的檔案。"},
     {"Run: {}", "執行：{}"},
-    {"Choose the folder to verify, or pick a registered archive.",
-        "請選擇要驗證的資料夾，或挑選已註冊的封存。"},
+    {"Choose the folder or volume to verify, or pick a registered archive.",
+        "請選擇要驗證的資料夾或磁碟區，或挑選已註冊的封存。"},
     {"Verifying (reading every registered byte) ...", "正在驗證（讀取每個已註冊的位元組）……"},
     {"Not verified: {}", "未能驗證：{}"},
-    {"The folder above", "上方的資料夾"},
+    {"The folder or volume above", "上方的資料夾或磁碟區"},
     {"FULL verification re-reads every registered file from the medium and compares it with "
         "the baseline. Only FULL VERIFY PASSED means 100% of the registered content was read and "
         "matched.",

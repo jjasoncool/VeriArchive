@@ -71,12 +71,12 @@ Options:
 | Option | Purpose |
 |---|---|
 | `--write-media-copy` | Also write the manifest onto the disk (`.veriarchive` folder) as a media copy. By default nothing is written to the archive. |
-| `--new-revision` | The folder is already registered and its content changed on purpose: create a new revision (a new baseline). |
-| `--force-new-archive` | The folder is already registered, but register it as a separate archive. |
+| `--new-revision` | The folder or volume is already registered and its content changed on purpose: create a new revision (a new baseline). |
+| `--force-new-archive` | The folder or volume is already registered, but register it as a separate archive. |
 | `--resume` | Continue an interrupted registration without re-reading hashed files. |
 | `--io hdd` or `--io ssd` | Reading strategy: `hdd` reads sequentially, `ssd` in parallel. Usually detected automatically. |
 
-Registering an already registered folder again stops with exit code 12 and asks you to choose `--new-revision` or `--force-new-archive`.
+Registering an already registered folder or volume again stops with exit code 12 and asks you to choose `--new-revision` or `--force-new-archive`.
 
 Files that cannot be read at registration (permission, media errors) are recorded without hashes and are never reported as verified.
 
@@ -96,7 +96,7 @@ The CLI writes it to stderr, and not at all with `--json`.
 
 ## Verifying an archive
 
-GUI, Verify Archive view: choose the folder, or pick a registered archive in the "Verify:" drop-down, then press "Verify (FULL)".
+GUI, Verify Archive view: choose the folder or volume, or pick a registered archive in the "Verify:" drop-down, then press "Verify (FULL)".
 
 CLI, by path or by archive uuid:
 
@@ -174,7 +174,7 @@ veriarchive-cli register G:\ --copy-of <uuid of F's archive>
 
 - `--copy-of` is optional: it records that G is a copy of F, for display only. It needs the full uuid, which `archive list` shows.
 - Register the folder that corresponds to F's root, so the paths line up: if the copy of F sits in `G:\Backup\F`, register `G:\Backup\F`. Anything else in the folder registered on G shows up as New.
-- A sector-by-sector clone of F has F's filesystem id, so registering it stops with exit code 12 (MIGRATED). Add `--force-new-archive` (GUI: "Register as a separate archive even though this folder is registered") to register it as an archive of its own.
+- A sector-by-sector clone of F has F's filesystem id, so registering it stops with exit code 12 (MIGRATED). Add `--force-new-archive` (GUI: "Register as a separate archive even though this folder or volume is registered") to register it as an archive of its own.
 
 ### 2. Compare
 
