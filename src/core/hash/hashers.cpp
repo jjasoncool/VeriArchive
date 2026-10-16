@@ -28,6 +28,12 @@ void Blake3Hasher::update(std::span<const std::byte> data)
 
 std::string Blake3Hasher::finish_hex()
 {
+    return current_hex();
+}
+
+// blake3_hasher_finalize leaves the hasher as it was, so input can go on.
+std::string Blake3Hasher::current_hex() const
+{
     Blake3Digest digest{};
     blake3_hasher_finalize(&state_->hasher, reinterpret_cast<std::uint8_t*>(digest.data()),
         digest.size());

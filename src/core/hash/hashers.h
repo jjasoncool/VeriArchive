@@ -1,7 +1,8 @@
 #pragma once
 // Streaming hashers for file content (R-101). Feed bytes with update() in any
 // number of pieces, then call finish() once; the result is the same as hashing
-// all bytes at once.
+// all bytes at once. A BLAKE3 hasher can also tell the hash of the bytes so
+// far and go on (current_hex()).
 //  - BLAKE3: fast primary hash, also used for manifest bodies and history rows.
 //  - SHA-256: second, widely available hash so archives can be checked with
 //    standard tools (`sha256sum -c`, R-67).
@@ -27,6 +28,8 @@ public:
     void update(std::span<const std::byte> data);
     // Lowercase hex of the 32-byte digest.
     std::string finish_hex();
+    // The same for the bytes given so far; more may follow.
+    std::string current_hex() const;
 
 private:
     struct State;                  // hides the C library's struct from callers

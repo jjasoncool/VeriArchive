@@ -62,6 +62,54 @@ private:
     va::IFileSystemAccess& inner_;
 };
 
+// Reads like `inner`, but gives fewer bytes than asked for, in a repeating
+// pattern of odd sizes: a buffered read may do that before the end of a file.
+class ShortReadFileSystem final : public va::IFileSystemAccess {
+public:
+    explicit ShortReadFileSystem(va::IFileSystemAccess& inner) : inner_(inner) {}
+
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        auto source = inner_.open(file, options);
+        if (!source) {
+            return std::unexpected(source.error());
+        }
+        return std::make_unique<Source>(std::move(*source));
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    class Source final : public va::IByteSource {
+    public:
+        explicit Source(std::unique_ptr<va::IByteSource> inner) : inner_(std::move(inner)) {}
+        std::expected<std::size_t, va::IoError> read(std::uint64_t offset, std::span<std::byte> output) override
+        {
+            static constexpr std::size_t pattern[] = {1, 4093, 65537, 7, 30000, 65535};
+            const auto most = pattern[reads_++ % std::size(pattern)];
+            return inner_->read(offset, output.first(std::min(output.size(), most)));
+        }
+        std::uint64_t size() const override { return inner_->size(); }
+        std::size_t alignment() const override { return inner_->alignment(); }
+
+    private:
+        std::unique_ptr<va::IByteSource> inner_;
+        std::size_t reads_ = 0;
+    };
+    va::IFileSystemAccess& inner_;
+};
+
 std::string content_of(std::size_t index)
 {
     std::string content(index * 9973 % 300000, '\0');
@@ -75,7 +123,7 @@ va::HashPipelineOptions small_buffers(std::size_t readers)
 {
     va::HashPipelineOptions options;
     options.readers = readers;
-    options.buffer_size = 4096;   // many chunks per file
+    options.buffer_size = 4096;   // many buffers per file
     options.buffers_per_reader = 2;
     return options;
 }
@@ -338,6 +386,126 @@ void the_rotational_override_goes_by_serial()
     CHECK(va::default_reader_count(true) == 1 && va::default_reader_count(std::nullopt) == 1);
 }
 
+constexpr std::uint64_t test_chunk_size = 64 * 1024;
+
+// Bytes that differ in every chunk, so a hash of the wrong bytes shows.
+std::string patterned(std::size_t size, std::size_t seed)
+{
+    std::string content(size, '\0');
+    for (std::size_t offset = 0; offset < size; ++offset) {
+        content[offset] = static_cast<char>((offset * 131 + offset / 997 + seed) & 0xFF);
+    }
+    return content;
+}
+
+// The chunk hashes of `content` straight from their definition: chunk n is
+// the bytes from n * chunk_size; a file no larger than one chunk has none
+// (R-31).
+std::vector<std::string> chunks_of(const std::string& content)
+{
+    std::vector<std::string> chunks;
+    if (content.size() <= test_chunk_size) {
+        return chunks;
+    }
+    for (std::size_t offset = 0; offset < content.size(); offset += test_chunk_size) {
+        chunks.push_back(va::blake3_hex(content.substr(offset, test_chunk_size)));
+    }
+    return chunks;
+}
+
+// Sizes around the chunk boundaries, one file each.
+const std::vector<std::size_t>& boundary_sizes()
+{
+    static const std::vector<std::size_t> sizes{0, 1, test_chunk_size - 1, test_chunk_size,
+        test_chunk_size + 1, 2 * test_chunk_size, 2 * test_chunk_size + 1, 3 * test_chunk_size + 12345};
+    return sizes;
+}
+
+// Hashes the boundary files through `files` and checks every result against
+// the definition: the chunks and, unchanged, the whole file's hashes.
+void check_boundary_files(test::FakeFileSystem& fake, va::IFileSystemAccess& files,
+    std::size_t buffer_size, std::size_t readers)
+{
+    std::vector<va::HashJob> jobs;
+    std::vector<std::string> contents;
+    for (std::size_t index = 0; index < boundary_sizes().size(); ++index) {
+        const auto name = "chunked" + std::to_string(index);
+        contents.push_back(patterned(boundary_sizes()[index], index));
+        fake.add_file(name, contents.back());
+        jobs.push_back({index, fake.root() / name, contents.back().size()});
+    }
+    auto options = small_buffers(readers);
+    options.buffer_size = buffer_size;
+    options.chunk_size = test_chunk_size;
+
+    va::CancelToken cancel;
+    test::NullProgress progress;
+    std::map<std::size_t, va::HashResult> results;
+    CHECK(va::hash_files(files, jobs, options, cancel, progress, [&](va::HashResult&& result) {
+        results[result.id] = std::move(result);
+        return true;
+    }));
+    CHECK(results.size() == jobs.size());
+    for (const auto& [id, result] : results) {
+        const auto& content = contents[id];
+        const bool right = !result.error && result.size == content.size() &&
+                           result.b3 == va::blake3_hex(content) && result.sha256 == va::sha256_hex(content) &&
+                           result.chunks == chunks_of(content);
+        CHECK(right);
+        if (!right) {
+            std::cerr << "  file of " << content.size() << " bytes, buffers of " << buffer_size << '\n';
+        }
+    }
+}
+
+// Chunks end at multiples of the chunk size from the start of the file, not
+// where a buffer ends: buffers that divide the chunk size, that do not, and
+// that hold more than one chunk give the same hashes.
+void chunks_are_cut_at_file_offsets()
+{
+    for (const std::size_t buffer_size : {std::size_t{4096}, std::size_t{10000}, std::size_t{200000}}) {
+        test::FakeFileSystem files("/archive");
+        check_boundary_files(files, files, buffer_size, 2);
+    }
+}
+
+// Nor where a read ends: reads that return fewer bytes than asked for (but
+// more than nothing) move no chunk boundary.
+void short_reads_do_not_move_chunk_boundaries()
+{
+    test::FakeFileSystem fake("/archive");
+    ShortReadFileSystem files(fake);
+    check_boundary_files(fake, files, 100000, 1);
+}
+
+// Without a chunk size (V1), and for a file that could not be read to its
+// end, there are no chunk hashes.
+void no_chunk_hashes_without_a_chunk_size_or_a_whole_file()
+{
+    test::FakeFileSystem files("/archive");
+    files.add_file("large", patterned(3 * test_chunk_size, 1));
+    files.add_file("bad-sector", patterned(3 * test_chunk_size, 2)).read_error_offset = 2 * test_chunk_size + 5;
+    const std::vector<va::HashJob> jobs{{0, files.root() / "large"}, {1, files.root() / "bad-sector"}};
+
+    va::CancelToken cancel;
+    test::NullProgress progress;
+    std::map<std::size_t, va::HashResult> results;
+    const auto collect = [&](va::HashResult&& result) {
+        results[result.id] = std::move(result);
+        return true;
+    };
+    CHECK(va::hash_files(files, jobs, small_buffers(1), cancel, progress, collect));
+    CHECK(results.size() == 2 && !results[0].error && results[0].chunks.empty());
+
+    auto options = small_buffers(1);
+    options.chunk_size = test_chunk_size;
+    results.clear();
+    CHECK(va::hash_files(files, jobs, options, cancel, progress, collect));
+    CHECK(results.size() == 2 && results[0].chunks.size() == 3);
+    CHECK(results[1].error && results[1].error->kind == va::IoErrorKind::MediaError);
+    CHECK(results[1].chunks.empty() && results[1].b3.empty());
+}
+
 } // namespace
 
 void hash_pipeline_tests()
@@ -350,4 +518,7 @@ void hash_pipeline_tests()
     progress_counts_bytes_against_the_sizes();
     cancelled_progress_keeps_the_sizes_not_reached();
     progress_moves_within_a_large_file();
+    chunks_are_cut_at_file_offsets();
+    short_reads_do_not_move_chunk_boundaries();
+    no_chunk_hashes_without_a_chunk_size_or_a_whole_file();
 }

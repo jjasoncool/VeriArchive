@@ -83,10 +83,10 @@ private:
 // (End), the error that ended its reading (Failed, whatever the error's kind),
 // a file whose reading the pipeline's stop interrupted (Interrupted: it has no
 // result, and a resume reads it again), or the reader's own end (Stop).
-struct Chunk {
+struct Message {
     enum class Kind { Data, End, Failed, Interrupted, Stop };
 
-    explicit Chunk(Kind kind_, std::size_t job_ = 0, std::byte* data_ = nullptr,
+    explicit Message(Kind kind_, std::size_t job_ = 0, std::byte* data_ = nullptr,
         std::size_t size_ = 0, std::optional<IoError> error_ = std::nullopt)
         : kind(kind_), job(job_), data(data_), size(size_), error(std::move(error_))
     {
@@ -97,6 +97,68 @@ struct Chunk {
     std::byte* data;
     std::size_t size;
     std::optional<IoError> error;
+};
+
+// The hashes of one file, fed with its bytes in whatever pieces the reads
+// gave: BLAKE3 and SHA-256 of the whole file and, with a chunk size, the
+// BLAKE3 of each chunk (R-101). A chunk ends at every multiple of the chunk
+// size from the start of the file (R-31), wherever a buffer ends.
+class FileHashes {
+public:
+    explicit FileHashes(std::uint64_t chunk_size) : chunk_size_(chunk_size) {}
+
+    void update(std::span<const std::byte> bytes)
+    {
+        while (!bytes.empty()) {
+            auto piece = bytes;
+            if (chunk_size_ > 0) {
+                const auto to_boundary = chunk_size_ - size_ % chunk_size_;
+                piece = bytes.first(static_cast<std::size_t>(std::min<std::uint64_t>(to_boundary, bytes.size())));
+            }
+            blake3_.update(piece);
+            sha256_.update(piece);
+            // The first chunk is the file's first chunk_size bytes: its hash
+            // is the file's BLAKE3 at that point, so only later chunks need a
+            // hasher of their own.
+            if (chunk_size_ > 0 && size_ >= chunk_size_) {
+                if (!chunk_) {
+                    chunk_.emplace();
+                }
+                chunk_->update(piece);
+            }
+            size_ += piece.size();
+            bytes = bytes.subspan(piece.size());
+            if (chunk_size_ > 0 && size_ % chunk_size_ == 0) {
+                chunks_.push_back(size_ == chunk_size_ ? blake3_.current_hex() : chunk_->finish_hex());
+                chunk_.reset();
+            }
+        }
+    }
+
+    std::uint64_t size() const { return size_; }
+
+    // The hashes of a file read to its end.
+    void finish(HashResult& result)
+    {
+        result.b3 = blake3_.finish_hex();
+        result.sha256 = sha256_.finish_hex();
+        if (chunk_) {
+            chunks_.push_back(chunk_->finish_hex()); // the last chunk, shorter than the others
+        }
+        // A file no larger than the chunk size is one chunk, the whole file,
+        // and gets no chunk hashes of its own (R-31).
+        if (chunk_size_ > 0 && size_ > chunk_size_) {
+            result.chunks = std::move(chunks_);
+        }
+    }
+
+private:
+    std::uint64_t chunk_size_;
+    std::uint64_t size_ = 0;
+    Blake3Hasher blake3_;
+    Sha256Hasher sha256_;
+    std::optional<Blake3Hasher> chunk_; // the chunk being read, after the first
+    std::vector<std::string> chunks_;
 };
 
 class AlignedBuffer {
@@ -166,7 +228,7 @@ private:
         }
         std::vector<std::unique_ptr<AlignedBuffer>> buffers;
         BoundedQueue<std::byte*> free;
-        BoundedQueue<Chunk> filled;
+        BoundedQueue<Message> filled;
     };
 
     void read_loop(Lane& lane)
@@ -178,7 +240,7 @@ private:
             }
             read_file(lane, index);
         }
-        lane.filled.push(Chunk{Chunk::Kind::Stop});
+        lane.filled.push(Message{Message::Kind::Stop});
     }
 
     void read_file(Lane& lane, std::size_t index)
@@ -186,14 +248,14 @@ private:
         const auto& job = jobs_[index];
         auto source = files_.open(job.native, ReadOptions{options_.uncached, true});
         if (!source) {
-            lane.filled.push(Chunk{Chunk::Kind::Failed, index, nullptr, 0, source.error()});
+            lane.filled.push(Message{Message::Kind::Failed, index, nullptr, 0, source.error()});
             return;
         }
         const bool unbuffered = (*source)->alignment() > 1;
         std::uint64_t offset = 0;
         for (;;) {
             if (stopping()) {
-                lane.filled.push(Chunk{Chunk::Kind::Interrupted, index});
+                lane.filled.push(Message{Message::Kind::Interrupted, index});
                 return;
             }
             auto buffer = lane.free.pop();
@@ -203,14 +265,14 @@ private:
             const auto count = (*source)->read(offset, std::span(*buffer, options_.buffer_size));
             if (!count) {
                 lane.free.push(*buffer);
-                lane.filled.push(Chunk{Chunk::Kind::Failed, index, nullptr, 0, count.error()});
+                lane.filled.push(Message{Message::Kind::Failed, index, nullptr, 0, count.error()});
                 return;
             }
             if (*count == 0) {
                 lane.free.push(*buffer);
                 break;
             }
-            lane.filled.push(Chunk{Chunk::Kind::Data, index, *buffer, *count, std::nullopt});
+            lane.filled.push(Message{Message::Kind::Data, index, *buffer, *count, std::nullopt});
             offset += *count;
             // An unbuffered short read can only be the end of the file, and the
             // next offset would not be sector-aligned anyway.
@@ -218,55 +280,45 @@ private:
                 break;
             }
         }
-        lane.filled.push(Chunk{Chunk::Kind::End, index, nullptr, 0, std::nullopt});
+        lane.filled.push(Message{Message::Kind::End, index, nullptr, 0, std::nullopt});
     }
 
     void hash_loop(Lane& lane)
     {
-        std::optional<Blake3Hasher> blake3;
-        std::optional<Sha256Hasher> sha256;
-        std::uint64_t size = 0;
-        while (auto chunk = lane.filled.pop()) {
-            if (chunk->kind == Chunk::Kind::Stop) {
+        std::optional<FileHashes> file;
+        while (auto message = lane.filled.pop()) {
+            if (message->kind == Message::Kind::Stop) {
                 break;
             }
-            if (chunk->kind == Chunk::Kind::Interrupted) {
+            if (message->kind == Message::Kind::Interrupted) {
                 // No result: the file keeps its expected size in the total to
                 // hash, as the bytes it did not reach are not done.
-                blake3.reset();
-                sha256.reset();
+                file.reset();
                 continue;
             }
-            if (!blake3) {
-                blake3.emplace();
-                sha256.emplace();
-                size = 0;
+            if (!file) {
+                file.emplace(options_.chunk_size);
             }
-            if (chunk->kind == Chunk::Kind::Data) {
-                const auto bytes = std::span<const std::byte>(chunk->data, chunk->size);
-                blake3->update(bytes);
-                sha256->update(bytes);
-                size += chunk->size;
-                bytes_hashed_.fetch_add(chunk->size);
-                lane.free.push(chunk->data);
+            if (message->kind == Message::Kind::Data) {
+                file->update(std::span<const std::byte>(message->data, message->size));
+                bytes_hashed_.fetch_add(message->size);
+                lane.free.push(message->data);
                 continue;
             }
             HashResult result;
-            result.id = jobs_[chunk->job].id;
-            result.size = size;
-            if (chunk->kind == Chunk::Kind::End) {
-                result.b3 = blake3->finish_hex();
-                result.sha256 = sha256->finish_hex();
+            result.id = jobs_[message->job].id;
+            result.size = file->size();
+            if (message->kind == Message::Kind::End) {
+                file->finish(result);
             } else {
-                result.error = chunk->error;
+                result.error = message->error; // no hashes, not even of the chunks read
             }
             // The file is done (read to its end, or as far as it could be read):
             // the total to hash now counts what was read instead of what the
             // scan expected.
-            size_difference_.fetch_add(static_cast<std::int64_t>(size) -
-                                       static_cast<std::int64_t>(jobs_[chunk->job].size));
-            blake3.reset();
-            sha256.reset();
+            size_difference_.fetch_add(static_cast<std::int64_t>(result.size) -
+                                       static_cast<std::int64_t>(jobs_[message->job].size));
+            file.reset();
             results_.push(std::move(result));
         }
         if (active_hashers_.fetch_sub(1) == 1) {
@@ -369,7 +421,7 @@ std::expected<void, IoError> hash_files(
         if (result) {
             // Every result is a file's own, failed files included, whatever
             // their error: a file whose reading a stop interrupted makes none
-            // (Chunk::Kind::Interrupted).
+            // (Message::Kind::Interrupted).
             if (!consumer_stopped) {
                 ++items_done;
                 if (!on_result(std::move(*result))) {
