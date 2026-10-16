@@ -612,6 +612,9 @@ constexpr CatalogEntry entries[] = {
         "later revision ({}); the registration can no longer finish: abandon it with `archive abandon-registration {}`",
         "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成："
         "請以 `archive abandon-registration {}` 放棄它"},
+    {"revision {} of archive {} was recorded by another operation before this registration could begin; nothing was "
+        "changed (run `register --new-revision` again)",
+        "封存 {1} 的版次 {0} 已在這次註冊開始前由其他作業記錄；未做任何變更（請再執行一次 `register --new-revision`）"},
     // src/core/engine/abandon_registration.cpp
     {"archive {} has no unfinished registration", "封存 {} 沒有未完成的註冊"},
     {"the unfinished registration of archive {} is no longer the one shown (it was resumed, finished or "
@@ -775,6 +778,9 @@ constexpr CatalogEntry entries[] = {
         "relocate again",
         "封存 {} 未完成的搬移（至「{}」）驗證的是版次 {}，但封存現在已有較新的版次（{}）；這次搬移再也無法完成："
         "請以 `archive abandon-relocation {}` 放棄它，再重新搬移"},
+    {"revision {} of archive {} was recorded by another operation before this relocation could begin; nothing was "
+        "changed (run `archive relocate` again)",
+        "封存 {1} 的版次 {0} 已在這次搬移開始前由其他作業記錄；未做任何變更（請再執行一次 `archive relocate`）"},
     {"cannot start the relocation: {}", "無法開始搬移：{}", Match::Cause},
     {"the unfinished relocation of archive {} was abandoned while this attempt ran; nothing was changed",
         "封存 {} 未完成的搬移已在這次執行期間被放棄；未做任何變更"},

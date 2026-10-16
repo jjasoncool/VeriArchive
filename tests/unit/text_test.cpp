@@ -408,6 +408,15 @@ void translation_tests()
                   "longer finish: abandon it with `archive abandon-relocation " + uuid + "`, then relocate again") ==
           "錯誤：執行 " + run + " 是封存 " + uuid + " 未完成的搬移中斷時留下的紀錄，該搬移驗證的是版次 1，但封存現在已有"
           "較新的版次（3）；該搬移再也無法完成：請以 `archive abandon-relocation " + uuid + "` 放棄它，再重新搬移");
+    // A registration or relocation that another operation overtakes before it
+    // begins (decision 0030): the revision and the archive change places.
+    CHECK(chinese("error: revision 3 of archive " + uuid + " was recorded by another operation before this "
+                  "registration could begin; nothing was changed (run `register --new-revision` again)") ==
+          "錯誤：封存 " + uuid + " 的版次 3 已在這次註冊開始前由其他作業記錄；未做任何變更（請再執行一次 "
+          "`register --new-revision`）");
+    CHECK(chinese("revision 2 of archive " + uuid + " was recorded by another operation before this relocation could "
+                  "begin; nothing was changed (run `archive relocate` again)") ==
+          "封存 " + uuid + " 的版次 2 已在這次搬移開始前由其他作業記錄；未做任何變更（請再執行一次 `archive relocate`）");
     // A cause that a hint follows is translated too, and the uuid after it is
     // carried over.
     CHECK(chinese.format("RELOCATION REFUSED: {}",

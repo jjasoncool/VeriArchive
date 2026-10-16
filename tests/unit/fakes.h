@@ -393,12 +393,14 @@ private:
     std::function<void()> on_naming_;
 };
 
-// Passes everything to a view of the media, and runs `hook` once, when the
-// file named `name` is opened: in the middle of hashing.
+// Passes everything to `inner`, and runs `hook` once, when a file named `name`
+// is opened for the `nth` time (the first by default): on a view of the
+// media, in the middle of hashing; on the repository's files, as a manifest
+// is read.
 class HookedFiles final : public va::IFileSystemAccess {
 public:
-    HookedFiles(va::IFileSystemAccess& inner, std::string name, std::function<void()> hook)
-        : inner_(inner), name_(std::move(name)), hook_(std::move(hook))
+    HookedFiles(va::IFileSystemAccess& inner, std::string name, std::function<void()> hook, int nth = 1)
+        : inner_(inner), name_(std::move(name)), hook_(std::move(hook)), nth_(nth)
     {
     }
     std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
@@ -408,7 +410,7 @@ public:
     std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
         const std::filesystem::path& file, va::ReadOptions options) override
     {
-        if (hook_ && va::path_to_utf8(file.filename()) == name_) {
+        if (hook_ && va::path_to_utf8(file.filename()) == name_ && ++opened_ == nth_) {
             const auto hook = std::move(hook_);
             hook_ = nullptr;
             hook();
@@ -428,6 +430,8 @@ private:
     va::IFileSystemAccess& inner_;
     std::string name_;
     std::function<void()> hook_;
+    int nth_;
+    int opened_ = 0;
 };
 
 // Passes everything to `inner`, except that the `nth` opening of a file named

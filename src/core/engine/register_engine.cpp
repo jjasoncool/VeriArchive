@@ -133,6 +133,20 @@ std::expected<std::optional<std::uint32_t>, IoError> later_than_planned(
     return store.later_revision(archive_uuid, revision - 1);
 }
 
+// A registration of an archive is made for the revision the archive is at
+// when it starts (decision 0030, point 6): it creates the next one. When
+// another operation, such as an import, records a later revision before the
+// plan is written, the registration would be made for an older revision, or
+// create a revision recorded already, which it could never record. It writes
+// nothing, and is run again, for the revision the archive has then.
+std::unexpected<RegisterFailure> recorded_before_it_began(const Uuid& archive_uuid, std::uint32_t revision)
+{
+    return fail(RegisterFailure::Kind::Refused,
+        "revision " + std::to_string(revision) + " of archive " + archive_uuid +
+            " was recorded by another operation before this registration could begin; nothing was changed (run "
+            "`register --new-revision` again)");
+}
+
 // An attempt that stops without finishing (cancelled, its device removed)
 // says to go on with `register --resume`, unless its plan was made for an
 // older revision by now (decision 0030): another operation, such as an
@@ -631,6 +645,20 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                               : another_registration(plan.archive_uuid, **other).error();
                 store.rollback();
                 return {};
+            }
+            // Still at the revision it was at when this registration read
+            // it (decision 0030, point 6): another operation may have
+            // recorded a later one since.
+            if (existing) {
+                const auto now = store.find_archive(plan.archive_uuid);
+                if (!now) {
+                    return std::unexpected(now.error());
+                }
+                if (*now && (*now)->current_revision > existing->current_revision) {
+                    refused = recorded_before_it_began(plan.archive_uuid, (*now)->current_revision).error();
+                    store.rollback();
+                    return {};
+                }
             }
             if (plan.new_archive) {
                 ArchiveRecord archive{plan.archive_uuid, plan.label, plan.created, 0,

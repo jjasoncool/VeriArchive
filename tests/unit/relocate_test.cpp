@@ -2297,6 +2297,51 @@ void a_relocation_stopped_by_a_failure_after_an_import_says_to_abandon_it()
     CHECK(!run_id.empty() && fixture.saved(run_id).files == 40);
 }
 
+// Decision 0030, point 6: a relocation that is not a resume is made against
+// the revision the archive is at when it starts. Here another operation
+// records a later revision after the relocation read the archive at revision
+// 1, as it reads the manifest of revision 1 (the second opening of
+// r0001.vam), before it writes its record: an import of revision 3, which
+// would leave the relocation made for an older revision, or of revision 2,
+// the one it would create. The transaction that would write the record finds
+// the archive at that revision: it writes nothing, reads nothing of the new
+// carrier, records no run, and says to run it again, which then verifies
+// that revision and records the one after it.
+void a_relocation_overtaken_before_its_record_writes_nothing()
+{
+    for (const std::uint32_t imported : {3u, 2u}) {
+        RelocationFixture fixture(true);
+        fixture.copy_to_new_disk();
+        test::HookedFiles hooked(
+            *fixture.repository.files, "r0001.vam",
+            [&] {
+                auto store = fixture.repository.store(); // another process's connection
+                test::import_later_revision(fixture, store, fixture.archive_uuid, imported);
+            },
+            2);
+        va::RelocateServices services{fixture.archive, hooked, *fixture.repository.writer, fixture.media,
+            fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+            fixture.processes};
+        fixture.archive.bytes_read = 0;
+        const auto relocated = va::relocate_archive(services,
+            {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+        const auto refusal = "revision " + std::to_string(imported) + " of archive " + fixture.archive_uuid +
+                             " was recorded by another operation before this relocation could begin; nothing was "
+                             "changed (run `archive relocate` again)";
+        CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused &&
+              relocated.error().message == refusal);
+        if (!relocated && relocated.error().message != refusal) {
+            std::cerr << "  overtaken by revision " << imported << ": " << relocated.error().message << '\n';
+        }
+        CHECK(fixture.archive.bytes_read == 0);
+        CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
+        const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+        CHECK(runs && runs->empty());
+        const auto again = fixture.relocate(fixture.archive.root() / "new");
+        CHECK(again && again->revision == imported + 1 && fixture.archive.bytes_read == sample_bytes);
+    }
+}
+
 } // namespace
 
 void relocate_tests()
@@ -2343,4 +2388,5 @@ void relocate_tests()
     a_relocation_meets_a_later_revision_at_its_record();
     an_interrupted_relocation_made_for_an_older_revision_says_to_abandon_it();
     a_relocation_stopped_by_a_failure_after_an_import_says_to_abandon_it();
+    a_relocation_overtaken_before_its_record_writes_nothing();
 }

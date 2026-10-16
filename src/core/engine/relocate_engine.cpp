@@ -291,6 +291,25 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                 store.rollback();
                 return {};
             }
+            // A relocation is made against the revision the archive was at
+            // when it started, whose manifest it read (decision 0030, point
+            // 6). When another operation, such as an import, has recorded a
+            // later one since, it would be made for an older revision, or
+            // create a revision recorded already, which it could never
+            // record: it writes nothing, and is run again.
+            const auto now = store.find_archive(uuid);
+            if (!now) {
+                return std::unexpected(now.error());
+            }
+            if (*now && (*now)->current_revision > previous_revision) {
+                refused = RelocateFailure{Kind::Refused,
+                    "revision " + std::to_string((*now)->current_revision) + " of archive " + uuid +
+                        " was recorded by another operation before this relocation could begin; nothing was "
+                        "changed (run `archive relocate` again)",
+                    {}};
+                store.rollback();
+                return {};
+            }
             run_id = generate_uuid();
             started = current_timestamp();
             attempt_started = started;
