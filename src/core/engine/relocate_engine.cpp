@@ -546,6 +546,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     const bool carrier_differs = differs || (comparison.content_failure && !comparison.incomplete);
     if (carrier_differs) {
         mark_differs();
+        // Interrupted after it found such an entry, the attempt read the new
+        // carrier as an interrupted verification reads its carrier: it is
+        // recorded INCOMPLETE as every interrupted attempt is (below), with
+        // the entries found so far, which claims nothing for the archive.
+        if (comparison.incomplete) {
+            record_interruption(comparison);
+        }
         const auto removed = [&]() -> std::expected<void, IoError> {
             if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
                 return begun;

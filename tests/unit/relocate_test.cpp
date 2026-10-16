@@ -524,16 +524,26 @@ void a_differs_mark_is_written_at_a_later_chance()
 // An attempt interrupted after it found an entry that differs (here Ctrl+C
 // while it hashes, after a photo was found missing from the copy) ends the
 // relocation as a copy that differs does, with the entries found so far: it
-// is not left for --resume, which could never finish it (decision 0026). The
-// copy completed, a new relocation reads the whole carrier.
+// is not left for --resume, which could never finish it (decision 0026). It
+// is recorded INCOMPLETE as every interrupted attempt is: a run of its own of
+// revision 1, naming the relocation, with the entry found missing and the new
+// carrier's evidence. That claims nothing for the archive, which still has no
+// last verify. The copy completed, a new relocation reads the whole carrier.
 void a_relocation_interrupted_after_its_copy_differed_ends()
 {
     RelocationFixture fixture(true);
     fixture.copy_to_new_disk();
     const auto missing = fixture.archive.node("new/photos/p101.bin");
     fixture.archive.remove("new/photos/p101.bin"); // left out of the copy (sample data)
+    const auto evidence_before = count_rows(fixture, "media_evidence");
     va::CancelToken cancel;
-    test::HookedFiles hooked(fixture.archive, "v130.bin", [&] { cancel.cancel(); });
+    std::string run_id;
+    test::HookedFiles hooked(fixture.archive, "v130.bin", [&] {
+        auto store = fixture.repository.store();
+        const auto record = nlohmann::json::parse(store.setting(fixture.key()).value_or(""), nullptr, false);
+        run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
+        cancel.cancel();
+    });
     va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
         fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
         fixture.processes};
@@ -544,6 +554,24 @@ void a_relocation_interrupted_after_its_copy_differed_ends()
           relocated.error().items.front().path.p == "photos/p101.bin");
     CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
     CHECK(count_rows(fixture, "verify_progress") == 0);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1);
+    if (runs && runs->size() == 1) {
+        const auto& attempt = runs->front();
+        const auto noted = nlohmann::json::parse(attempt.counts_json, nullptr, false);
+        CHECK(attempt.result == "INCOMPLETE" && attempt.mode == "FULL" && attempt.revision == 1 &&
+              !run_id.empty() && attempt.run_id != run_id && noted.is_object() &&
+              noted.value("relocation", std::string{}) == run_id && noted["items"].value("Missing", 0) == 1);
+        const auto items = fixture.store.verify_items(attempt.run_id);
+        CHECK(items && items->size() == 1 && items->front().path.p == "photos/p101.bin" &&
+              items->front().status == "Missing");
+    }
+    CHECK(count_rows(fixture, "media_evidence") == evidence_before + 1);
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto statuses = va::archive_statuses(fixture.store, va::Policy{}, now);
+    CHECK(statuses && statuses->size() == 1 && !statuses->front().last_any && !statuses->front().last_full);
+    const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
+    CHECK(chain && chain->runs == 1 && !chain->first_broken_run);
 
     fixture.archive.add_file("new/photos/p101.bin", missing.content);
     fixture.archive.bytes_read = 0;
