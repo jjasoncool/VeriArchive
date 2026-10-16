@@ -288,27 +288,17 @@ std::expected<VerifyOutcome, VerifyStop> failed_on_its_manifest(VerifyServices& 
 // and its root; matching without it could take the root for another
 // archive's, or for no archive's. Unless the root is plainly another
 // archive's, the verification stops, saying which archive, why, and how to
-// go on: a verification of that archive by its uuid
-// records the failure, then its manifest is restored or the index rebuilt,
-// or, where the index has no record of the manifest, both, as the case is.
+// go on: a verification of that archive by its uuid records the failure,
+// then the steps of the plain message, its manifest put back with `import`
+// (which records it where the index has no record of it) and, where nothing
+// holds it, the last resort, or the index rebuilt where only it is wrong.
 std::string root_may_belong_to(const CandidatesFailure& failure)
 {
     const auto& unusable = *failure.unusable;
-    const auto what = "this root may belong to archive " + failure.label + " (" + unusable.archive_uuid +
-                      "), whose manifest cannot be used: " + what_is_wrong_with(unusable) +
-                      "; verify that archive by its uuid (`verify --full " + unusable.archive_uuid +
-                      "`) to record the failure, then ";
-    const bool rebuild = unusable.kind == UnusableManifest::Kind::IndexDiffers ||
-                         unusable.kind == UnusableManifest::Kind::NotIndexed;
-    const bool restore = unusable.kind != UnusableManifest::Kind::IndexDiffers &&
-                         (unusable.kind != UnusableManifest::Kind::NotIndexed ||
-                             unusable.file != UnusableManifest::File::Readable);
-    if (restore && rebuild) {
-        return what + "restore its manifest from a backup of the repository and rebuild the index with "
-                      "`repo rebuild-index`";
-    }
-    return what + (rebuild ? "rebuild the index with `repo rebuild-index`"
-                           : "restore its manifest from a backup of the repository");
+    return "this root may belong to archive " + failure.label + " (" + unusable.archive_uuid +
+           "), whose manifest cannot be used: " + what_is_wrong_with(unusable) +
+           "; verify that archive by its uuid (`verify --full " + unusable.archive_uuid +
+           "`) to record the failure, then " + how_to_fix(unusable, "its manifest");
 }
 
 // R-89: a manifest copy on the media is compared with the repository copy. A

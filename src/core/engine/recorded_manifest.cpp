@@ -187,32 +187,37 @@ std::string what_is_wrong_with(const UnusableManifest& unusable)
     return "the repository's index differs from the manifest of revision " + revision + " (" + unusable.manifest + ")";
 }
 
-std::string plain_message(const UnusableManifest& unusable)
+std::string how_to_fix(const UnusableManifest& unusable, std::string_view it)
 {
     // An index that differs from an intact manifest, or has no record of one
     // that reads as the manifest of its revision, is rebuilt from the
     // manifests (R-80): nothing of the manifest is lost.
     if (unusable.kind == UnusableManifest::Kind::IndexDiffers ||
         (unusable.kind == UnusableManifest::Kind::NotIndexed && unusable.file == UnusableManifest::File::Readable)) {
-        return what_is_wrong_with(unusable) + "; rebuild the index with `repo rebuild-index`";
+        return "rebuild the index with `repo rebuild-index`";
     }
     // A manifest that is missing, cannot be read or has changed is put back
     // first, with `import` of its file, wherever one is kept (R-86, R-87,
     // R-89): the import puts back the manifest recorded, or records it where
     // the index has no record of it (decision 0028, point 7).
     const auto revision = std::to_string(unusable.revision);
-    auto message = what_is_wrong_with(unusable) + "; put it back with `import <folder>/" +
-                   std::format("r{:04}.vam", unusable.revision) + "` from a backup of the repository, an export of revision " +
-                   revision + ", or the media copy in the archive's .veriarchive folder, where registration wrote one";
+    auto steps = "put " + std::string(it) + " back with `import <folder>/" +
+                 std::format("r{:04}.vam", unusable.revision) + "` from a backup of the repository, an export of revision " +
+                 revision + ", or the media copy in the archive's .veriarchive folder, where registration wrote one";
     // Of the latest revision, the last resort where none of these holds it
     // (decision 0028, point 8). An earlier revision has another revision
     // after it already.
     if (unusable.latest) {
-        message += "; if none of these holds it, register revision " + std::to_string(unusable.revision + 1) +
-                   " from what the archive's root holds now with `register <root_path> --lost-manifest " +
-                   unusable.archive_uuid + "`";
+        steps += "; if none of these holds it, register revision " + std::to_string(unusable.revision + 1) +
+                 " from what the archive's root holds now with `register <root_path> --lost-manifest " +
+                 unusable.archive_uuid + "`";
     }
-    return message;
+    return steps;
+}
+
+std::string plain_message(const UnusableManifest& unusable)
+{
+    return what_is_wrong_with(unusable) + "; " + how_to_fix(unusable, "it");
 }
 
 std::string manifest_relpath_of(const Uuid& archive_uuid, std::uint32_t revision)

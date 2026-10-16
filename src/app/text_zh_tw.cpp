@@ -1045,22 +1045,23 @@ constexpr CatalogEntry entries[] = {
     {"the repository's index has no record of the manifest of revision {} ({})",
         "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄"},
     // src/core/engine/verify_engine.cpp: by root, the archive whose manifest
-    // cannot be used may be the one at the root (decision 0028).
+    // cannot be used may be the one at the root (decision 0028): verify it by
+    // its uuid, then the steps of the plain message, the manifest put back
+    // (which records it where the index has no record of it) and the last
+    // resort, or the index rebuilt where only it is wrong.
     {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
-        "(`verify --full {}`) to record the failure, then restore its manifest from a backup of the repository",
-        "此根目錄可能屬於封存 {}（{}），而它的清單檔無法使用：{}；請先以 uuid 驗證該封存（`verify --full {}`）以記錄這次失敗，"
-        "再從儲存庫的備份還原它的清單檔",
+        "(`verify --full {}`) to record the failure, then put its manifest back with `import <folder>/{}` from a "
+        "backup of the repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, "
+        "where registration wrote one; if none of these holds it, register revision {} from what the archive's root "
+        "holds now with `register <root_path> --lost-manifest {}`",
+        "此根目錄可能屬於封存 {0}（{1}），而它的清單檔無法使用：{2}；請先以 uuid 驗證該封存（`verify --full {3}`）以記錄這次"
+        "失敗，再以 `import <folder>/{4}` 從儲存庫的備份、版次 {5} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體"
+        "副本放回它的清單檔；若這些都沒有，請以 `register <root_path> --lost-manifest {7}` 用封存根目錄目前的內容註冊版次 {6}",
         Match::Cause},
     {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
         "(`verify --full {}`) to record the failure, then rebuild the index with `repo rebuild-index`",
         "此根目錄可能屬於封存 {}（{}），而它的清單檔無法使用：{}；請先以 uuid 驗證該封存（`verify --full {}`）以記錄這次失敗，"
         "再以 `repo rebuild-index` 重建索引",
-        Match::Cause},
-    {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
-        "(`verify --full {}`) to record the failure, then restore its manifest from a backup of the repository and "
-        "rebuild the index with `repo rebuild-index`",
-        "此根目錄可能屬於封存 {}（{}），而它的清單檔無法使用：{}；請先以 uuid 驗證該封存（`verify --full {}`）以記錄這次失敗，"
-        "再從儲存庫的備份還原它的清單檔，並以 `repo rebuild-index` 重建索引",
         Match::Cause},
     // src/core/engine/rebuild_index.cpp
     {"cannot list the manifests of archive {}: {}", "無法列出封存 {} 的清單檔：{}", Match::Cause},

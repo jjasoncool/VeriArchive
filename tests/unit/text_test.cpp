@@ -585,13 +585,21 @@ void translation_tests()
               "）已被變更：再次讀取時得到不同的內容" + restore_chinese);
     // A verification by root stops naming the archive that may be at the root
     // (decision 0028): what is wrong with its manifest, then to verify it by
-    // its uuid to record the failure, then to fix the manifest.
+    // its uuid to record the failure, then to fix the manifest as the plain
+    // message says: put it back with `import`, or the last resort.
     const auto may_be = "this root may belong to archive ARCH-0002 (" + uuid + "), whose manifest cannot be used: ";
     const auto may_be_chinese = "此根目錄可能屬於封存 ARCH-0002（" + uuid + "），而它的清單檔無法使用：";
     const auto record_it = "; verify that archive by its uuid (`verify --full " + uuid + "`) to record the failure, then ";
     const auto record_it_chinese = "；請先以 uuid 驗證該封存（`verify --full " + uuid + "`）以記錄這次失敗，再";
-    const std::string restore_it = "restore its manifest from a backup of the repository";
-    const std::string restore_it_chinese = "從儲存庫的備份還原它的清單檔";
+    const std::string restore_it = "put its manifest back with `import <folder>/r0002.vam` from a backup of the "
+                                   "repository, an export of revision 2, or the media copy in the archive's "
+                                   ".veriarchive folder, where registration wrote one; if none of these holds it, "
+                                   "register revision 3 from what the archive's root holds now with `register "
+                                   "<root_path> --lost-manifest " + uuid + "`";
+    const std::string restore_it_chinese = "以 `import <folder>/r0002.vam` 從儲存庫的備份、版次 2 的匯出檔，或封存 "
+                                           ".veriarchive 資料夾中註冊時寫入的媒體副本放回它的清單檔；若這些都沒有，請以 "
+                                           "`register <root_path> --lost-manifest " + uuid +
+                                           "` 用封存根目錄目前的內容註冊版次 3";
     CHECK(chinese("error: " + may_be + "the manifest of revision 2 (" + manifest + ") is missing" + record_it +
                   restore_it) ==
           "錯誤：" + may_be_chinese + "版次 2 的清單檔（" + manifest + "）已遺失" + record_it_chinese + restore_it_chinese);
@@ -624,15 +632,13 @@ void translation_tests()
           no_record_chinese + "，而且無法讀取該清單檔：清單檔主體與其標頭不符（清單檔雜湊不符）" + restore_chinese);
     CHECK(chinese("error: " + may_be + no_record + record_it + "rebuild the index with `repo rebuild-index`") ==
           "錯誤：" + may_be_chinese + no_record_chinese + record_it_chinese + "以 `repo rebuild-index` 重建索引");
-    const std::string restore_and_rebuild =
-        "restore its manifest from a backup of the repository and rebuild the index with `repo rebuild-index`";
-    const std::string restore_and_rebuild_chinese = "從儲存庫的備份還原它的清單檔，並以 `repo rebuild-index` 重建索引";
-    CHECK(chinese(may_be + no_record + ", which is missing" + record_it + restore_and_rebuild) ==
-          may_be_chinese + no_record_chinese + "，而該清單檔已遺失" + record_it_chinese + restore_and_rebuild_chinese);
+    // Put back, the manifest is recorded by the import: no rebuild follows.
+    CHECK(chinese(may_be + no_record + ", which is missing" + record_it + restore_it) ==
+          may_be_chinese + no_record_chinese + "，而該清單檔已遺失" + record_it_chinese + restore_it_chinese);
     CHECK(chinese(may_be + no_record + ", which cannot be read: CreateFileW failed (Win32 error 5)" + record_it +
-                  restore_and_rebuild) ==
+                  restore_it) ==
           may_be_chinese + no_record_chinese + "，而且無法讀取該清單檔：CreateFileW 失敗（Win32 錯誤 5）" +
-              record_it_chinese + restore_and_rebuild_chinese);
+              record_it_chinese + restore_it_chinese);
     // Each revision whose manifest `repo rebuild-index` could not read, by
     // what became of its record (decision 0028), the archive's words carried
     // over and what is wrong translated.

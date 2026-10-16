@@ -819,16 +819,18 @@ std::string rebuild_message(const va::Uuid& archive_uuid, std::uint32_t revision
 constexpr const char* first_line_changed = "has changed: its first line differs from what the repository recorded";
 
 // Decision 0028: how a verification by root stops when the latest manifest of
-// archive `label` (`archive_uuid`) cannot be used, `what` being wrong with it:
-// which archive, why, and to verify it by its uuid, then fix its manifest.
+// archive `label` (`archive_uuid`), of revision 1, cannot be used, `what`
+// being wrong with it: which archive, why, and to verify it by its uuid, then
+// the steps of the plain message, its manifest put back with `import` and the
+// last resort, or the index rebuilt.
 std::string root_may_belong_to(const std::string& label, const va::Uuid& archive_uuid, const std::string& what,
     bool rebuild = false)
 {
     return "this root may belong to archive " + label + " (" + archive_uuid +
            "), whose manifest cannot be used: " + what + "; verify that archive by its uuid (`verify --full " +
            archive_uuid + "`) to record the failure, then " +
-           (rebuild ? "rebuild the index with `repo rebuild-index`"
-                    : "restore its manifest from a backup of the repository");
+           (rebuild ? std::string("rebuild the index with `repo rebuild-index`")
+                    : test::put_back_steps(archive_uuid, 1, true, "its manifest"));
 }
 
 std::string manifest_of(const va::Uuid& archive_uuid)
@@ -924,9 +926,10 @@ void an_index_that_differs_from_its_manifest_is_never_taken()
 // manifest, and the index's copy of its header is no manifest. Verification
 // by root stops (decision 0028): the root may be this archive's, whose
 // carrier only that manifest records. It names the archive and what is
-// wrong, and says to verify it by its uuid to record the failure, then to
-// restore its manifest from a backup of the repository, never to rebuild the
-// index, which would take a changed manifest for the truth. A new revision
+// wrong, and says to verify it by its uuid to record the failure, then to put
+// its manifest back with `import`, or where nothing holds it to register its
+// next revision over the lost manifest, never to rebuild the index, which
+// would take a changed manifest for the truth. A new revision
 // stops with the plain message, and the archive list lists the archive with
 // it. Nothing is recorded.
 void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
@@ -975,7 +978,8 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
 // unreadable (it cannot be opened, or opens and then cannot be read, as on a
 // bad sector) fails with RepositoryError, one whose header line or body has
 // changed with ManifestHashMismatch (sample data: one byte each). The failure
-// names the manifest and says to restore it from a backup of the repository.
+// names the manifest and says to put it back with `import`, or where nothing
+// holds it to register its next revision over the lost manifest.
 // The run is recorded as FULL FAILED of the archive's revision, with nothing
 // covered and nothing to resume, in an intact hash chain. With the manifest
 // restored, the archive verifies.
@@ -1061,7 +1065,7 @@ void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
 // what the file at its place is says how to fix it, read as rebuild-index
 // reads a manifest: it reads as the manifest of revision 2 (rebuild the
 // index), it is gone, it is another revision's (a copy of revision 1's), or
-// it cannot be opened (restore it, then rebuild the index). Named by its uuid,
+// it cannot be opened (put it back with `import`, which records it). Named by its uuid,
 // the archive FAILS at revision 2 with RepositoryError, without reading the
 // media (here it cannot even be listed), recorded; by root it stops naming
 // the archive and both steps; a new revision, an export and a comparison stop
@@ -1129,10 +1133,10 @@ void an_archive_at_a_revision_the_index_has_no_record_of()
         va::VerifyRequest by_root;
         by_root.root = fixture.archive.root();
         const auto stopped = va::verify_full(services, by_root, fixture.cancel, fixture.progress);
+        // Put back, which records it, unless the file reads as the manifest.
         const auto steps = what == Case::Readable
                                ? std::string("rebuild the index with `repo rebuild-index`")
-                               : std::string("restore its manifest from a backup of the repository and rebuild the "
-                                             "index with `repo rebuild-index`");
+                               : test::put_back_steps(fixture.archive_uuid, 2, true, "its manifest");
         const auto may_belong = "this root may belong to archive ARCH-0001 (" + fixture.archive_uuid +
                                 "), whose manifest cannot be used: " + what_is_wrong +
                                 "; verify that archive by its uuid (`verify --full " + fixture.archive_uuid +

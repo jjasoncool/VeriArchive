@@ -96,6 +96,14 @@ std::string what_is_wrong_with(const UnusableManifest& unusable);
 // --lost-manifest <archive_uuid>` (decision 0028, point 8).
 std::string plain_message(const UnusableManifest& unusable);
 
+// How to fix it, as the plain message ends after what is wrong: "rebuild the
+// index with `repo rebuild-index`", or "put `it` back with `import
+// <folder>/r0002.vam` from a backup of the repository, ..." and the last
+// resort for the latest revision. `it` names the manifest: "it" in the plain
+// message, "its manifest" where the sentence before names the archive, as a
+// verification by root that stops on it (decision 0028, point 4).
+std::string how_to_fix(const UnusableManifest& unusable, std::string_view it);
+
 // The place of the manifest of `revision` of the archive in the repository
 // (R-63), '/'-separated, as a revision's record names it (manifest_relpath):
 // "manifests/<archive_uuid>/r0002.vam".
