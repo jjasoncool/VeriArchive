@@ -2,7 +2,8 @@
 // [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> |
 // abandon-relocation <uuid>` and `history <uuid>`. Archives are always shown
 // with their last FULL verify and last verify of any mode, with dates and
-// OVERDUE flags, never a bare "integrity status" (R-21).
+// OVERDUE flags, never a bare "integrity status" (R-21), and with their
+// unfinished registration and relocation, one line each (decision 0026).
 #include "cli/commands.h"
 
 #include "app/local_time.h"
@@ -22,6 +23,9 @@
 #include <chrono>
 #include <iostream>
 #include <map>
+#include <optional>
+#include <string_view>
+#include <vector>
 
 namespace va::cli {
 namespace {
@@ -71,27 +75,81 @@ nlohmann::json run_json(const std::optional<VerifyRunRecord>& run)
         {"finished", run->finished}};
 }
 
-// The archives' unfinished relocations (decision 0026) as --json shows them,
-// by archive: where each reads, its progress from its checkpoints, and its
-// state from this one read, its attempt judged through this computer's
-// process table (decision 0024). Read only.
-using RelocationsJson = std::map<Uuid, nlohmann::json>;
+// An archive's unfinished registration and relocation (decisions 0022, 0026),
+// each as the Archive List judges it from one read, its attempt judged
+// through this computer's process table (decision 0024), and as --json gives
+// it: where it reads, its progress from its checkpoints, and its state.
+struct UnfinishedOfArchive {
+    std::optional<app::UnfinishedOperation> registration;
+    std::optional<app::UnfinishedOperation> relocation;
+    nlohmann::json registration_json;  // null when there is none
+    nlohmann::json relocation_json;    // null when there is none
+};
+using UnfinishedByArchive = std::map<Uuid, UnfinishedOfArchive>;
 
-std::expected<RelocationsJson, Failure> unfinished_relocations_json(ArchiveStore& store)
+nlohmann::json optional_text(const std::string& text)
 {
-    const auto relocations = store.unfinished_relocations();
-    if (!relocations) {
-        return std::unexpected(Failure{exit_code::repository, relocations.error().message});
+    return text.empty() ? nlohmann::json(nullptr) : nlohmann::json(text);
+}
+
+nlohmann::json process_json(const app::UnfinishedOperation& operation)
+{
+    return {{"id", operation.process->process.id}, {"program", operation.process->process.program},
+        {"host", operation.process->host}};
+}
+
+// The unfinished registrations and relocations of the repository, by
+// archive, read in one read transaction. Read only.
+std::expected<UnfinishedByArchive, Failure> unfinished_by_archive(ArchiveStore& store)
+{
+    std::vector<PendingRegistration> registrations;
+    std::vector<UnfinishedRelocation> relocations;
+    const auto read = store.read_transaction([&]() -> std::expected<void, IoError> {
+        auto pending = store.pending_registrations();
+        if (!pending) {
+            return std::unexpected(pending.error());
+        }
+        registrations = std::move(*pending);
+        auto moving = store.unfinished_relocations();
+        if (!moving) {
+            return std::unexpected(moving.error());
+        }
+        relocations = std::move(*moving);
+        return {};
+    });
+    if (!read) {
+        return std::unexpected(Failure{exit_code::repository, read.error().message});
     }
     const auto processes = platform::make_process_table();
     const app::AttemptCheck attempts{processes.get(), host_info().host, {}};
     const auto wall_now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    const auto optional_text = [](const std::string& text) {
-        return text.empty() ? nlohmann::json(nullptr) : nlohmann::json(text);
+    const auto optional_count = [](const std::optional<std::uint64_t>& count) {
+        return count ? nlohmann::json(*count) : nlohmann::json(nullptr);
     };
-    RelocationsJson result;
-    for (const auto& relocation : *relocations) {
-        const auto operation = app::relocation_operation(relocation, attempts);
+    UnfinishedByArchive result;
+    for (const auto& registration : registrations) {
+        auto operation = app::registration_operation(registration, attempts);
+        nlohmann::json json{
+            {"root", registration.root},
+            {"revision", registration.revision},
+            {"started", registration.started},
+            {"updated", optional_text(registration.updated)},
+            {"stopped", optional_text(registration.stopped)},
+            {"state", app::state_code(app::state_of_one_read(operation, wall_now))},
+            {"files_done", registration.done_counted ? nlohmann::json(registration.files_done) : nullptr},
+            {"bytes_done", registration.done_counted ? nlohmann::json(registration.bytes_done) : nullptr},
+            {"files_total", optional_count(registration.files_total)},
+            {"bytes_total", optional_count(registration.bytes_total)},
+        };
+        if (operation.process) {
+            json["process"] = process_json(operation);
+        }
+        auto& unfinished = result[registration.archive_uuid];
+        unfinished.registration = std::move(operation);
+        unfinished.registration_json = std::move(json);
+    }
+    for (const auto& relocation : relocations) {
+        auto operation = app::relocation_operation(relocation, attempts);
         nlohmann::json json{
             {"root", relocation.root},
             {"revision", relocation.revision},
@@ -108,15 +166,33 @@ std::expected<RelocationsJson, Failure> unfinished_relocations_json(ArchiveStore
             {"bytes_total", relocation.bytes_total},
         };
         if (operation.process) {
-            json["process"] = {{"id", operation.process->process.id},
-                {"program", operation.process->process.program}, {"host", operation.process->host}};
+            json["process"] = process_json(operation);
         }
-        result[relocation.archive_uuid] = std::move(json);
+        auto& unfinished = result[relocation.archive_uuid];
+        unfinished.relocation = std::move(operation);
+        unfinished.relocation_json = std::move(json);
     }
     return result;
 }
 
-nlohmann::json status_json(const ArchiveStatus& status, const RelocationsJson& relocations)
+// The lines of an archive's unfinished registration and relocation, as
+// `archive list` and `archive show` print them under the archive.
+void print_unfinished(const app::Text& text, const UnfinishedByArchive& unfinished, const Uuid& archive_uuid,
+    std::string_view indent)
+{
+    const auto found = unfinished.find(archive_uuid);
+    if (found == unfinished.end()) {
+        return;
+    }
+    const auto wall_now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    for (const auto* operation : {&found->second.registration, &found->second.relocation}) {
+        if (*operation) {
+            std::cout << indent << app::describe_for_archive(text, **operation, wall_now) << '\n';
+        }
+    }
+}
+
+nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchive& unfinished)
 {
     nlohmann::json json{
         {"archive_uuid", status.archive.archive_uuid},
@@ -140,8 +216,13 @@ nlohmann::json status_json(const ArchiveStatus& status, const RelocationsJson& r
             json["copy_of"] = *status.header->copy_of;
         }
     }
-    if (const auto relocation = relocations.find(status.archive.archive_uuid); relocation != relocations.end()) {
-        json["unfinished_relocation"] = relocation->second;
+    if (const auto found = unfinished.find(status.archive.archive_uuid); found != unfinished.end()) {
+        if (!found->second.registration_json.is_null()) {
+            json["unfinished_registration"] = found->second.registration_json;
+        }
+        if (!found->second.relocation_json.is_null()) {
+            json["unfinished_relocation"] = found->second.relocation_json;
+        }
     }
     return json;
 }
@@ -192,14 +273,14 @@ std::expected<Opened, Failure> open_statuses(const Arguments& arguments)
 
 int list(const Arguments& arguments, Opened& opened)
 {
+    const auto unfinished = unfinished_by_archive(opened.store);
+    if (!unfinished) {
+        return report_failure(arguments, unfinished.error());
+    }
     if (arguments.json) {
-        const auto relocations = unfinished_relocations_json(opened.store);
-        if (!relocations) {
-            return report_failure(arguments, relocations.error());
-        }
         auto list = nlohmann::json::array();
         for (const auto& status : opened.statuses) {
-            list.push_back(status_json(status, *relocations));
+            list.push_back(status_json(status, *unfinished));
         }
         print_json({{"archives", std::move(list)}});
         return exit_code::passed;
@@ -219,6 +300,7 @@ int list(const Arguments& arguments, Opened& opened)
         }
         std::cout << "\n    " << last_verify_line(text, status.last_full, false, status.full_overdue)
                   << "\n    " << last_verify_line(text, status.last_any, true, status.any_overdue) << '\n';
+        print_unfinished(text, *unfinished, status.archive.archive_uuid, "    ");
     }
     return exit_code::passed;
 }
@@ -233,12 +315,12 @@ int show(const Arguments& arguments, Opened& opened)
     if (!revisions) {
         return report_failure(arguments, {exit_code::repository, revisions.error().message});
     }
+    const auto unfinished = unfinished_by_archive(opened.store);
+    if (!unfinished) {
+        return report_failure(arguments, unfinished.error());
+    }
     if (arguments.json) {
-        const auto relocations = unfinished_relocations_json(opened.store);
-        if (!relocations) {
-            return report_failure(arguments, relocations.error());
-        }
-        auto json = status_json(*status, *relocations);
+        auto json = status_json(*status, *unfinished);
         auto list = nlohmann::json::array();
         for (const auto& revision : *revisions) {
             list.push_back({{"revision", revision.revision}, {"created", revision.created},
@@ -283,8 +365,9 @@ int show(const Arguments& arguments, Opened& opened)
         }
     }
     std::cout << "  " << last_verify_line(text, status->last_full, false, status->full_overdue) << "\n  "
-              << last_verify_line(text, status->last_any, true, status->any_overdue) << "\n  "
-              << text("revisions:") << '\n';
+              << last_verify_line(text, status->last_any, true, status->any_overdue) << '\n';
+    print_unfinished(text, *unfinished, status->archive.archive_uuid, "  ");
+    std::cout << "  " << text("revisions:") << '\n';
     for (const auto& revision : *revisions) {
         std::cout << "    r" << revision.revision << "  " << app::local_time(revision.created, text) << "  "
                   << revision.manifest_relpath << '\n';

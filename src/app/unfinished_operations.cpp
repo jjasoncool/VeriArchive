@@ -123,36 +123,12 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
 
     auto& operations = read.operations;
     for (const auto& registration : registrations) {
-        UnfinishedOperation operation;
-        operation.kind = OperationKind::Registration;
-        operation.key = "registration:" + registration.archive_uuid;
-        operation.archive_uuid = registration.archive_uuid;
-        operation.label = registration.label;
-        operation.root = registration.root;
-        operation.started = registration.started;
-        operation.files_done = registration.files_done;
-        operation.bytes_done = registration.bytes_done;
-        operation.files_total = registration.files_total.value_or(0);
-        operation.bytes_total = registration.bytes_total.value_or(0);
+        auto operation = registration_operation(registration, attempts);
         if (!registration.bytes_total && registration.volume_root && !registration.root.empty()) {
             if (const auto used = used_bytes(path_from_utf8(registration.root))) {
                 operation.bytes_total = *used;
                 operation.total_is_estimate = true;
             }
-        }
-        operation.updated = parse_timestamp(registration.updated);
-        // An attempt that ended without finishing says so in its plan.
-        operation.recorded_stopped = !registration.stopped.empty();
-        operation.done_counted = registration.done_counted;
-        operation.revision = registration.revision;
-        // Otherwise the process its plan names tells whether it still runs
-        // (decision 0024): one that has ended has stopped at once, not when
-        // its plan has said nothing for minutes.
-        const auto plan = nlohmann::json::parse(registration.plan, nullptr, false);
-        operation.process = recorded_attempt(plan);
-        if (attempts.processes && !operation.recorded_stopped) {
-            operation.attempt =
-                judge_attempt(plan, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
         }
         operations.push_back(std::move(operation));
     }
@@ -184,6 +160,35 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
     // same second.
     std::ranges::stable_sort(operations, std::ranges::greater{}, &UnfinishedOperation::started);
     return read;
+}
+
+UnfinishedOperation registration_operation(const PendingRegistration& registration, const AttemptCheck& attempts)
+{
+    UnfinishedOperation operation;
+    operation.kind = OperationKind::Registration;
+    operation.key = "registration:" + registration.archive_uuid;
+    operation.archive_uuid = registration.archive_uuid;
+    operation.label = registration.label;
+    operation.root = registration.root;
+    operation.started = registration.started;
+    operation.files_done = registration.files_done;
+    operation.bytes_done = registration.bytes_done;
+    operation.files_total = registration.files_total.value_or(0);
+    operation.bytes_total = registration.bytes_total.value_or(0);
+    operation.updated = parse_timestamp(registration.updated);
+    // An attempt that ended without finishing says so in its plan.
+    operation.recorded_stopped = !registration.stopped.empty();
+    operation.done_counted = registration.done_counted;
+    operation.revision = registration.revision;
+    // Otherwise the process its plan names tells whether it still runs
+    // (decision 0024): one that has ended has stopped at once, not when its
+    // plan has said nothing for minutes.
+    const auto plan = nlohmann::json::parse(registration.plan, nullptr, false);
+    operation.process = recorded_attempt(plan);
+    if (attempts.processes && !operation.recorded_stopped) {
+        operation.attempt = judge_attempt(plan, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+    }
+    return operation;
 }
 
 UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation, const AttemptCheck& attempts)
@@ -526,12 +531,12 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     // it moves. An operation that says it works can still go minutes without
     // a step (a large file): its speed and time left would then be those of
     // minutes ago, so they are left out until it moves again.
-    std::string details;
     if (operation.done_counted && !by_files) {
-        details = operation.files_total > 0
-                      ? text.format("{} of {} files", operation.files_done, operation.files_total)
-                      : text.format("{} files", operation.files_done);
+        row.files = operation.files_total > 0
+                        ? text.format("{} of {} files", operation.files_done, operation.files_total)
+                        : text.format("{} files", operation.files_done);
     }
+    std::string details = row.files;
     const auto add = [&](const std::string& part) {
         details = details.empty() ? part : text.format("{} · {}", details, part);
     };
@@ -616,6 +621,23 @@ std::vector<OperationRow> describe_operations(const Text& text, const std::vecto
         rows.push_back(std::move(entry.row));
     }
     return rows;
+}
+
+std::string describe_for_archive(const Text& text, const UnfinishedOperation& operation,
+    std::chrono::sys_seconds wall_now)
+{
+    // One read, as state_of_one_read judges it.
+    OperationWatch watch;
+    const auto now = OperationWatch::Clock::now();
+    watch.update(operation, now, wall_now);
+    const auto row = describe_operation(text, watch, now, wall_now);
+    const auto done = row.files.empty() ? row.progress : text.format("{} · {}", row.progress, row.files);
+    // Two calls: the compiler checks each literal template against its values.
+    return operation.kind == OperationKind::Relocation
+               ? text.format("Unfinished relocation of revision {} to \"{}\": {}; {}", operation.revision,
+                     operation.root, done, row.state)
+               : text.format("Unfinished registration of revision {} from \"{}\": {}; {}", operation.revision,
+                     operation.root, done, row.state);
 }
 
 } // namespace va::app

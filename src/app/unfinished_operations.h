@@ -118,9 +118,16 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         volume_used_bytes,
     const AttemptCheck& attempts = {});
 
+// An unfinished registration as an operation of the list, its attempt judged
+// as `attempts` says (decision 0024), its totals those of its plan, once its
+// scan has counted them. read_unfinished_operations uses it, and adds the
+// approximate total of a whole volume; so does the command line for
+// `archive list|show`, without it.
+UnfinishedOperation registration_operation(const PendingRegistration& registration, const AttemptCheck& attempts);
+
 // An unfinished relocation (decision 0026) as an operation of the list, its
 // attempt judged as `attempts` says. read_unfinished_operations uses it, and
-// so does the command line for `archive list|show --json`.
+// so does the command line for `archive list|show`.
 UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation, const AttemptCheck& attempts);
 
 enum class OperationState {
@@ -240,6 +247,8 @@ struct OperationRow {
     std::string root;
     std::string kind;                // "Registration", "Verification", "Relocation"
     std::string progress;            // "3.45 TiB of about 8.55 TiB (40%)", "not counted"
+    std::string files;               // the files done where the progress does not count them: "78895 files",
+                                     // "1 of 2 files"; empty where they are not counted
     std::string details;             // "78895 files · 120 MiB/s · about 11-13 hours left"
     std::string state;               // "running", "no progress seen for 5 minutes; it may have stopped"
     OperationState state_kind = OperationState::Waiting;
@@ -260,5 +269,14 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
 // those that stopped (has_stopped); the newest first within each.
 std::vector<OperationRow> describe_operations(const Text& text, const std::vector<OperationWatch>& watches,
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
+
+// One line about an archive's unfinished registration or relocation, for the
+// command line's `archive list` and `archive show` (decision 0026): the
+// revision it creates or verifies, where it reads, what it has done and its
+// state, judged from one read as --json judges it (state_of_one_read), and
+// worded in `text`'s language as the Archive List words its row; no speed or
+// time left, which one read cannot tell.
+std::string describe_for_archive(const Text& text, const UnfinishedOperation& operation,
+    std::chrono::sys_seconds wall_now);
 
 } // namespace va::app

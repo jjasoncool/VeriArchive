@@ -196,6 +196,12 @@ constexpr CatalogEntry entries[] = {
         "內容：{} 個檔案、{} 個空資料夾、{} 個連結、{} 位元組"},
     {"copy of: {}", "副本來源：{}"},
     {"revisions:", "版次："},
+    // The archive's unfinished registration and relocation in archive list and show (decision 0026), from
+    // src/app/unfinished_operations.cpp; the progress and state are the Archive List's words.
+    {"Unfinished registration of revision {} from \"{}\": {}; {}", "未完成的註冊（版次 {}，根目錄「{}」）：{}；{}",
+        Match::FormatOnly},
+    {"Unfinished relocation of revision {} to \"{}\": {}; {}", "未完成的搬移（版次 {}，至「{}」）：{}；{}",
+        Match::FormatOnly},
     {"Retired {} ({}). It is no longer expected to be verified, "
         "is still recognised when attached, and keeps its history.",
         "已停用 {}（{}）。此封存不再需要定期驗證，接上時仍會被辨識，並保留其歷程。"},

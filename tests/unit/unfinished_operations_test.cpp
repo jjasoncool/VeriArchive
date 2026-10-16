@@ -1304,6 +1304,67 @@ void a_relocation_whose_new_carrier_differs_waits_to_be_abandoned()
           rows[1].state_kind == OperationState::Differs);
 }
 
+// `archive list` and `archive show` give an archive's unfinished registration
+// and relocation one line each (decision 0026): the revision it creates or
+// verifies, where it reads, what it has done, and its state judged from one
+// read, as --json judges it, in the Archive List's words and in both
+// languages; no speed or time left.
+void words_a_line_for_the_command_line()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    auto registering = registration(1200, 3 * gib);
+    registering.revision = 2;
+    registering.files_total = 3000;
+    registering.bytes_total = 8 * gib;
+    registering.recorded_stopped = true;
+    CHECK(va::app::describe_for_archive(english, registering, wall_now) ==
+          "Unfinished registration of revision 2 from \"Z:\\\": 3.00 GiB of 8.00 GiB (37%) · 1200 of 3000 files; "
+          "stopped; it can be resumed");
+    CHECK(va::app::describe_for_archive(chinese, registering, wall_now) ==
+          "未完成的註冊（版次 2，根目錄「Z:\\」）：3.00 GiB / 8.00 GiB（37%）・1200 / 3000 個檔案；已停止；可以繼續");
+    // A scan that has not counted the files yet, working.
+    auto scanning = registration(0, 0);
+    scanning.revision = 1;
+    scanning.updated = wall_now - 10s;
+    CHECK(va::app::describe_for_archive(english, scanning, wall_now) ==
+          "Unfinished registration of revision 1 from \"Z:\\\": 0 B done · 0 files; running");
+    // A plan of an older version, which says nothing of its state: as --json
+    // judges it from one read ("waiting"), not as a window that has watched
+    // it for minutes.
+    auto older = registration(5, 5 * mib);
+    older.revision = 1;
+    CHECK(va::app::state_code(va::app::state_of_one_read(older, wall_now)) == "waiting");
+    CHECK(va::app::describe_for_archive(english, older, wall_now) ==
+          "Unfinished registration of revision 1 from \"Z:\\\": 5.00 MiB done · 5 files; waiting for progress...");
+
+    UnfinishedOperation relocating;
+    relocating.kind = va::app::OperationKind::Relocation;
+    relocating.key = "relocation:c0ffee00-0000-4000-8000-000000000003";
+    relocating.archive_uuid = "c0ffee00-0000-4000-8000-000000000003";
+    relocating.label = "ARCH-0003";
+    relocating.root = "Y:\\範例";
+    relocating.revision = 1;
+    relocating.started = "2026-10-15T03:00:00Z";
+    relocating.files_done = 20;
+    relocating.bytes_done = 10 * mib;
+    relocating.files_total = 40;
+    relocating.bytes_total = 20 * mib;
+    relocating.updated = wall_now - 20s;
+    relocating.attempt = va::AttemptState::Running;
+    CHECK(va::app::describe_for_archive(english, relocating, wall_now) ==
+          "Unfinished relocation of revision 1 to \"Y:\\範例\": 10.0 MiB of 20.0 MiB (50%) · 20 of 40 files; running");
+    CHECK(va::app::describe_for_archive(chinese, relocating, wall_now) ==
+          "未完成的搬移（版次 1，至「Y:\\範例」）：10.0 MiB / 20.0 MiB（50%）・20 / 40 個檔案；執行中");
+    // Not counted (the rollback-journal mode, decision 0022): only the state
+    // its record gives, here that its new carrier differs.
+    relocating.done_counted = false;
+    relocating.recorded_stopped = true;
+    relocating.differs = true;
+    CHECK(va::app::describe_for_archive(english, relocating, wall_now) ==
+          "Unfinished relocation of revision 1 to \"Y:\\範例\": not counted; new carrier differs; abandon it");
+}
+
 } // namespace
 
 void unfinished_operations_tests()
@@ -1331,4 +1392,5 @@ void unfinished_operations_tests()
     a_registration_taken_up_after_its_process_ended_runs();
     lists_an_unfinished_relocation();
     a_relocation_whose_new_carrier_differs_waits_to_be_abandoned();
+    words_a_line_for_the_command_line();
 }
