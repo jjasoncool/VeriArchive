@@ -166,6 +166,50 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
     return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>()};
 }
 
+// Decision 0028: the archive is known, and the manifest of its current
+// revision cannot be used. The verification FAILED before anything was
+// looked for on the media: it reads nothing and records no media evidence,
+// and its run joins the history's hash chain like any run (R-18, R-90). A run
+// it was to resume stays as it was, for a resume once the manifest is restored.
+std::expected<VerifyOutcome, VerifyStop> failed_on_its_manifest(VerifyServices& services,
+    const ArchiveRecord& archive, const ManifestLoadFailure& failure, const Timestamp& started)
+{
+    VerifyOutcome outcome;
+    outcome.run_id = generate_uuid();
+    outcome.archive_uuid = archive.archive_uuid;
+    outcome.label = archive.label;
+    outcome.revision = archive.current_revision;
+    outcome.result = "FAILED";
+    outcome.media_read = false;
+    outcome.failure_classes.push_back(failure.failure_class);
+    outcome.warnings.push_back("manifest: " + failure.message);
+
+    VerifyRunRecord run;
+    run.run_id = outcome.run_id;
+    run.archive_uuid = outcome.archive_uuid;
+    run.revision = outcome.revision;
+    run.mode = "FULL";
+    run.started = started;
+    run.finished = current_timestamp();
+    run.result = outcome.result;
+    run.coverage_bytes = 0;
+    run.counts_json = nlohmann::json{{"items", outcome.counts}}.dump();
+    run.failure_classes = failure.failure_class;
+    run.host = services.host.host;
+    run.app_version = services.host.app_version;
+    const auto recorded = services.store.write_transaction([&]() -> std::expected<void, IoError> {
+        if (auto appended = services.store.append_verify_run(run, services.repository_uuid); !appended) {
+            return std::unexpected(appended.error());
+        }
+        return {};
+    });
+    if (!recorded) {
+        return stop(VerifyStop::Kind::Repository,
+            "verification finished as FAILED but could not be recorded: " + recorded.error().message);
+    }
+    return outcome;
+}
+
 // R-89: a manifest copy on the media is compared with the repository copy. A
 // different copy of the same revision is a warning; a valid copy of a *newer*
 // revision means the repository may have been rolled back, which fails the run.
@@ -228,6 +272,24 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     // AMBIGUOUS): it is the one candidate, and no other archive's manifest is
     // read. A root alone is matched against every archive's latest carrier.
     const auto selected = resume ? std::optional(resume->archive_uuid) : request.archive_uuid;
+    // Decision 0028: a named archive is known before anything is looked for
+    // on the media, and so is the manifest of its current revision. One that
+    // cannot be used fails the verification at once, which is recorded; one
+    // that can is read again with its entries once the media is found.
+    if (selected) {
+        const auto checking_since = current_timestamp();
+        const auto archive = store.find_archive(*selected);
+        if (!archive) {
+            return stop(VerifyStop::Kind::Repository, archive.error().message);
+        }
+        if (*archive && (*archive)->current_revision > 0) {
+            const auto checked = check_recorded_manifest(store, services.repository_files, services.layout,
+                (*archive)->archive_uuid, (*archive)->current_revision);
+            if (!checked && checked.error().unusable) {
+                return failed_on_its_manifest(services, **archive, checked.error(), checking_since);
+            }
+        }
+    }
     auto candidates = load_candidates(store, services.repository_files, services.layout, selected);
     if (!candidates) {
         return stop(VerifyStop::Kind::Repository, candidates.error().message);

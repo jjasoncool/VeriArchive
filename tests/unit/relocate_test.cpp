@@ -303,9 +303,9 @@ void an_earlier_revision_is_read_only_where_matching_needs_it()
         std::cerr << "  relocate B: " << b_moved.error().message << '\n';
     }
 
-    const std::string prefix = "cannot use the manifest of revision 1 of archive " + fixture.archive_uuid + ": ";
     const auto names_first = [&](const std::string& message) {
-        return message.starts_with(prefix) && message.ends_with("; restore it from a backup of the repository");
+        return message == "the manifest of revision 1 (manifests/" + fixture.archive_uuid +
+                              "/r0001.vam) is missing; restore it from a backup of the repository";
     };
     const auto old = fixture.verify(fixture.archive.root() / "old");
     CHECK(!old && old.error().kind == va::VerifyStop::Kind::Repository && names_first(old.error().message));

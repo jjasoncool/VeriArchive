@@ -161,6 +161,8 @@ constexpr CatalogEntry entries[] = {
     {"coverage: {} of {} registered bytes read and matched",
         "涵蓋範圍：已註冊的 {1} 位元組中，有 {0} 位元組已讀取且相符"},
     {"items:", "項目："},
+    // A run that failed on its manifest before the media was looked for (decision 0028).
+    {"media: not read, as the manifest of this revision cannot be used", "媒體：未讀取，因為這個版次的清單檔無法使用"},
     {"failure: {}", "失敗：{}"},
     {"resume with: veriarchive-cli verify --full {} --resume {}",
         "若要繼續，請執行：veriarchive-cli verify --full {} --resume {}"},
@@ -478,6 +480,7 @@ constexpr CatalogEntry entries[] = {
     {"Coverage: {} of {} registered bytes read and matched",
         "涵蓋範圍：已註冊的 {1} 中，有 {0} 已讀取且相符"},
     {"Items:", "項目："},
+    {"Media: not read, as the manifest of this revision cannot be used", "媒體：未讀取，因為這個版次的清單檔無法使用"},
     {"Failure: {}", "失敗：{}"},
     {"The run was interrupted; use Resume to continue without re-reading verified files.",
         "此次執行已中斷；使用「繼續中斷的執行」即可接續，不必重新讀取已驗證的檔案。"},
@@ -827,12 +830,20 @@ constexpr CatalogEntry entries[] = {
     {"revision {} is not recorded", "版次 {} 沒有紀錄"},
     {"the manifest differs from the repository record", "清單檔與儲存庫的紀錄不符"},
     {"revision {} is older than the known revision {}", "版次 {} 比已知的版次 {} 舊"},
-    // The index's copy of a header is never taken for the manifest's (R-14).
-    {"cannot use the manifest of revision {} of archive {}: {}; restore it from a backup of the repository",
-        "無法使用封存 {1} 版次 {0} 的清單檔：{2}；請從儲存庫的備份還原該清單檔", Match::Cause},
-    {"the repository's index differs from the manifest of revision {} of archive {}; rebuild the index with "
+    // A manifest that cannot be used, and how to fix it (decision 0028). The
+    // index's copy of a header is never taken for the manifest's (R-14).
+    {"the manifest of revision {} ({}) is missing; restore it from a backup of the repository",
+        "版次 {} 的清單檔（{}）已遺失；請從儲存庫的備份還原該清單檔"},
+    {"the manifest of revision {} ({}) cannot be read: {}; restore it from a backup of the repository",
+        "無法讀取版次 {} 的清單檔（{}）：{}；請從儲存庫的備份還原該清單檔", Match::Cause},
+    {"the manifest of revision {} ({}) has changed: {}; restore it from a backup of the repository",
+        "版次 {} 的清單檔（{}）已被變更：{}；請從儲存庫的備份還原該清單檔", Match::Cause},
+    {"the repository's index differs from the manifest of revision {} ({}); rebuild the index with "
         "`repo rebuild-index`",
-        "儲存庫的索引與封存 {1} 版次 {0} 的清單檔不符；請以 `repo rebuild-index` 重建索引"},
+        "儲存庫的索引與版次 {} 的清單檔（{}）不符；請以 `repo rebuild-index` 重建索引"},
+    {"its first line differs from what the repository recorded", "其第一行與儲存庫所記錄的不同"},
+    {"its body does not match its header", "其主體與標頭不符"},
+    {"it gave other bytes when it was read again", "再次讀取時得到不同的內容"},
     // src/core/engine/rebuild_index.cpp
     {"cannot list the manifests of archive {}: {}", "無法列出封存 {} 的清單檔：{}", Match::Cause},
     {"cannot read manifest {}/{}: {}", "無法讀取清單檔 {}/{}：{}", Match::Cause},

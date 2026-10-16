@@ -127,7 +127,7 @@ A result always carries its mode and date: only FULL VERIFY PASSED means 100% of
 |---|---|---|
 | PASSED | every registered byte was read and matched | 0 |
 | PASSED_WITH_WARNINGS | content matched, but something needs attention (no hardware serial to compare, an unreadable filesystem id, metadata differences) | 2 |
-| FAILED | files were modified, missing or unreadable, or the manifest or media identity is wrong | 3 |
+| FAILED | files were modified, missing or unreadable, or the media identity is wrong, or the archive's manifest in the repository cannot be used (missing, unreadable or changed: then the media is not read at all, and the result says how to fix the manifest) | 3 |
 | INCOMPLETE | the verification was interrupted (cancelled, disk removed); it can be resumed | 4 |
 
 Item statuses:

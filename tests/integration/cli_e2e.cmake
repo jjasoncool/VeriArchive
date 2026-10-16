@@ -523,10 +523,13 @@ if(NOT imported_revision EQUAL 2 OR imported_before)
 endif()
 
 # R-14: what is known of a recorded revision comes from its manifest, never
-# from the index's copy of its header. A manifest whose header line is not
-# the one recorded (its revision written otherwise, sample data) stops the
-# archive list and a verification of its archive with a repository error
-# (exit 11) that names the archive and the revision, and says how to go on.
+# from the index's copy of its header. Here the manifest of the archive's
+# revision 2 has a header line that is not the one recorded (its revision
+# written otherwise, sample data). Named by its uuid, the archive is known:
+# its verification FAILS on its manifest (decision 0028, exit 3) without
+# reading the media, says why plainly in either language, and is recorded in
+# its history. The archive list and a verification by root stop with a
+# repository error (exit 11) that names the manifest and says how to fix it.
 # A command about another archive reads no manifest but that archive's: the
 # copy verifies by its uuid, and shows its status and history; so does the
 # damaged archive's history, which needs no manifest. Restored, all work again.
@@ -541,18 +544,40 @@ run_cli("11" --lang en archive list)
 set(listed "${last_errors}")
 run_cli("11" --lang en verify --full "${ROOT}")
 set(verified "${last_errors}")
-run_cli("11" verify --full "${archive_uuid}")
-set(verified_chinese "${last_errors}")
+run_cli("3" --lang en verify --full "${archive_uuid}" --json)
+set(failed_json "${last_output}")
+run_cli("3" verify --full "${archive_uuid}")
+set(failed_chinese "${last_output}")
 run_cli("0;2" verify --full "${copy_uuid}")
 run_cli("0" archive show "${copy_prefix}")
 run_cli("0" history "${copy_prefix}")
-run_cli("0" history "${archive_prefix}")
+run_cli("0" history "${archive_prefix}" --json)
+set(history_json "${last_output}")
 file(RENAME "${RECORDED}.kept" "${RECORDED}")
-set(changed_manifest "cannot use the manifest of revision 2 of archive ${archive_uuid}: the manifest differs from the repository record; restore it from a backup of the repository")
-if(changed_bytes STREQUAL recorded_bytes OR NOT listed MATCHES "${changed_manifest}"
-        OR NOT verified MATCHES "${changed_manifest}"
-        OR NOT verified_chinese MATCHES "無法使用封存 ${archive_uuid} 版次 2 的清單檔：清單檔與儲存庫的紀錄不符；請從儲存庫的備份還原該清單檔")
-    message(FATAL_ERROR "a manifest that is not the one recorded:\n${listed}\n${verified}\n${verified_chinese}")
+set(changed_manifest "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; restore it from a backup of the repository")
+set(changed_chinese "版次 2 的清單檔（manifests/${archive_uuid}/r0002.vam）已被變更：其第一行與儲存庫所記錄的不同；請從儲存庫的備份還原該清單檔")
+string(FIND "${listed}" "${changed_manifest}" in_list)
+string(FIND "${verified}" "${changed_manifest}" in_verify)
+string(FIND "${failed_chinese}" "完整驗證 失敗" failed_line)
+string(FIND "${failed_chinese}" "媒體：未讀取，因為這個版次的清單檔無法使用" unread_line)
+string(FIND "${failed_chinese}" "${changed_chinese}" in_chinese)
+string(JSON failed_result GET "${failed_json}" result)
+string(JSON failed_read GET "${failed_json}" media_read)
+string(JSON failed_root TYPE "${failed_json}" root)
+string(JSON failed_class GET "${failed_json}" failure_classes 0)
+string(JSON failed_warning GET "${failed_json}" warnings 0)
+string(JSON run_count LENGTH "${history_json}" runs)
+math(EXPR last_run "${run_count} - 1")
+string(JSON last_result GET "${history_json}" runs ${last_run} result)
+string(JSON last_classes GET "${history_json}" runs ${last_run} failure_classes)
+if(changed_bytes STREQUAL recorded_bytes OR in_list EQUAL -1 OR in_verify EQUAL -1)
+    message(FATAL_ERROR "a manifest that is not the one recorded, by root and listed:\n${listed}\n${verified}")
+endif()
+if(NOT failed_result STREQUAL "FAILED" OR failed_read OR NOT failed_root STREQUAL "NULL"
+        OR NOT failed_class STREQUAL "ManifestHashMismatch" OR NOT failed_warning STREQUAL "manifest: ${changed_manifest}"
+        OR failed_line EQUAL -1 OR unread_line EQUAL -1 OR in_chinese EQUAL -1
+        OR NOT last_result STREQUAL "FAILED" OR NOT last_classes STREQUAL "ManifestHashMismatch")
+    message(FATAL_ERROR "a manifest that is not the one recorded, by uuid:\n${failed_json}\n${failed_chinese}\n${history_json}")
 endif()
 run_cli("0" archive list)
 run_cli("0;2" verify --full "${ROOT}")

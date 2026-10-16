@@ -10,7 +10,7 @@ namespace {
 
 ManifestFailure io_failure(const IoError& error)
 {
-    return {ManifestFailure::Kind::Io, error.message};
+    return {ManifestFailure::Kind::Io, error.message, error.kind};
 }
 
 ManifestFailure malformed(std::string message)

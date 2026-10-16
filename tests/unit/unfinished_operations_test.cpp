@@ -140,8 +140,8 @@ void an_older_verification_takes_its_totals_from_the_manifest()
     fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
                                "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"')");
     const auto index_differs = read_older();
-    const auto differs = "the repository's index differs from the manifest of revision 1 of archive " + uuid +
-                         "; rebuild the index with `repo rebuild-index`";
+    const auto differs = "the repository's index differs from the manifest of revision 1 (manifests/" + uuid +
+                         "/r0001.vam); rebuild the index with `repo rebuild-index`";
     CHECK(index_differs && index_differs->files_total == 0 && index_differs->bytes_total == 0 &&
           index_differs->root.empty() && index_differs->totals_failure == differs);
     if (index_differs) {
@@ -152,7 +152,8 @@ void an_older_verification_takes_its_totals_from_the_manifest()
         const auto row = describe_operation(english, watch, Clock::time_point{}, wall_now);
         CHECK(row.progress == "0 B done" && row.details == "0 files · total not known: " + differs && !row.fraction);
         CHECK(describe_operation(chinese, watch, Clock::time_point{}, wall_now).details ==
-              "0 個檔案・總量不明：儲存庫的索引與封存 " + uuid + " 版次 1 的清單檔不符；請以 `repo rebuild-index` 重建索引");
+              "0 個檔案・總量不明：儲存庫的索引與版次 1 的清單檔（manifests/" + uuid +
+                  "/r0001.vam）不符；請以 `repo rebuild-index` 重建索引");
     }
     fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
                                "'\"volume_label\":\"OTHER\"', '\"volume_label\":\"ARCHIVE\"')");
@@ -160,8 +161,8 @@ void an_older_verification_takes_its_totals_from_the_manifest()
     std::filesystem::remove(registered->manifest);
     const auto gone = read_older();
     CHECK(gone && gone->files_total == 0 && gone->root.empty() &&
-          gone->totals_failure.starts_with("cannot use the manifest of revision 1 of archive " + uuid + ": ") &&
-          gone->totals_failure.ends_with("; restore it from a backup of the repository"));
+          gone->totals_failure == "the manifest of revision 1 (manifests/" + uuid +
+                                      "/r0001.vam) is missing; restore it from a backup of the repository");
 }
 
 // Watching reads a database, never creates one: a repository folder whose

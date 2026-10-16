@@ -12,10 +12,46 @@ namespace {
 
 std::unexpected<ManifestLoadFailure> fail(std::string failure_class, std::string message)
 {
-    return std::unexpected(ManifestLoadFailure{std::move(failure_class), std::move(message)});
+    return std::unexpected(ManifestLoadFailure{std::move(failure_class), std::move(message), std::nullopt});
 }
 
-constexpr const char* differs_from_record = "the manifest differs from the repository record";
+// The manifest cannot be used (decision 0028): the failure says so in its
+// plain words and with its failure class.
+std::unexpected<ManifestLoadFailure> fail(const UnusableManifest& unusable)
+{
+    return std::unexpected(ManifestLoadFailure{failure_class_of(unusable), plain_message(unusable), unusable});
+}
+
+// What has changed, when a manifest is not the one recorded.
+constexpr const char* first_line_differs = "its first line differs from what the repository recorded";
+constexpr const char* body_differs = "its body does not match its header";
+constexpr const char* read_otherwise = "it gave other bytes when it was read again";
+
+UnusableManifest unusable_manifest(const RevisionRecord& record, UnusableManifest::Kind kind, std::string cause = {})
+{
+    return {kind, record.archive_uuid, record.revision, record.manifest_relpath, std::move(cause)};
+}
+
+// What a failure of the reader says of a recorded manifest. `entries`: the
+// failure came while the entries were read, after the body was validated.
+UnusableManifest unusable_manifest(const RevisionRecord& record, const ManifestFailure& failure, bool entries)
+{
+    using Kind = UnusableManifest::Kind;
+    switch (failure.kind) {
+    case ManifestFailure::Kind::Io:
+        return failure.io_kind == IoErrorKind::NotFound ? unusable_manifest(record, Kind::Missing)
+                                                        : unusable_manifest(record, Kind::Unreadable, failure.message);
+    case ManifestFailure::Kind::HeaderMismatch:
+        return unusable_manifest(record, Kind::Changed, first_line_differs);
+    case ManifestFailure::Kind::BodyMismatch:
+        return unusable_manifest(record, Kind::Changed, entries ? read_otherwise : body_differs);
+    case ManifestFailure::Kind::Malformed:
+        break;
+    }
+    // Bytes that are the ones recorded and still do not parse: no reading of
+    // them gives entries.
+    return unusable_manifest(record, Kind::Unreadable, failure.message);
+}
 
 // Whether a manifest's line 1, by its BLAKE3, and the header parsed from it
 // are the ones `record` was recorded with: the same bytes, naming the same
@@ -26,22 +62,15 @@ bool recorded_as(const RevisionRecord& record, const std::string& header_blake3,
            header.archive_uuid == record.archive_uuid && header.revision == record.revision;
 }
 
-// The index's copy of a revision's header is not its manifest's line 1,
-// though the manifest is the one recorded: the index is wrong, and is
-// rebuilt from the manifests (R-80).
-std::string index_differs(const RevisionRecord& record)
-{
-    return "the repository's index differs from the manifest of revision " + std::to_string(record.revision) +
-           " of archive " + record.archive_uuid + "; rebuild the index with `repo rebuild-index`";
-}
+// The recorded manifest of `revision`, opened and checked against its record
+// up to its body's hash (R-14, R-62, R-15), and the record.
+struct OpenedManifest {
+    ManifestReader reader;
+    RevisionRecord record;
+};
 
-} // namespace
-
-std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
-    ArchiveStore& store,
-    IFileSystemAccess& repository_files,
-    const RepositoryLayout& layout,
-    const Uuid& archive_uuid,
+std::expected<OpenedManifest, ManifestLoadFailure> open_recorded(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Uuid& archive_uuid,
     std::uint32_t revision)
 {
     const auto record = store.revision(archive_uuid, revision);
@@ -55,18 +84,14 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
     // a header changed into text that no longer parses has changed as well.
     auto reader = ManifestReader::open(repository_files, path, (*record)->header_blake3);
     if (!reader) {
-        const auto kind = reader.error().kind;
-        return fail(kind == ManifestFailure::Kind::BodyMismatch || kind == ManifestFailure::Kind::HeaderMismatch
-                        ? "ManifestHashMismatch"
-                        : "RepositoryError",
-            reader.error().message);
+        return fail(unusable_manifest(**record, reader.error(), false));
     }
     if (!recorded_as(**record, reader->header_blake3(), reader->header())) {
-        return fail("ManifestHashMismatch", differs_from_record);
+        return fail(unusable_manifest(**record, UnusableManifest::Kind::Changed, first_line_differs));
     }
     // The index's copy of the header is the manifest's own (CLAUDE.md rule 3).
     if (reader->header_line() != (*record)->header_json) {
-        return fail("RepositoryError", index_differs(**record));
+        return fail(unusable_manifest(**record, UnusableManifest::Kind::IndexDiffers));
     }
     const auto highest = std::max_element(all->begin(), all->end(),
         [](const RevisionRecord& left, const RevisionRecord& right) { return left.revision < right.revision; });
@@ -75,17 +100,61 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
             "revision " + std::to_string(revision) + " is older than the known revision " +
                 std::to_string(highest->revision));
     }
+    return OpenedManifest{std::move(*reader), **record};
+}
 
+} // namespace
+
+std::string failure_class_of(const UnusableManifest& unusable)
+{
+    return unusable.kind == UnusableManifest::Kind::Changed ? "ManifestHashMismatch" : "RepositoryError";
+}
+
+std::string what_is_wrong_with(const UnusableManifest& unusable)
+{
+    const auto revision = std::to_string(unusable.revision);
+    const auto manifest = "the manifest of revision " + revision + " (" + unusable.manifest + ")";
+    switch (unusable.kind) {
+    case UnusableManifest::Kind::Missing:
+        return manifest + " is missing";
+    case UnusableManifest::Kind::Unreadable:
+        return manifest + " cannot be read: " + unusable.cause;
+    case UnusableManifest::Kind::Changed:
+        return manifest + " has changed: " + unusable.cause;
+    case UnusableManifest::Kind::IndexDiffers:
+        break;
+    }
+    return "the repository's index differs from the manifest of revision " + revision + " (" + unusable.manifest + ")";
+}
+
+std::string plain_message(const UnusableManifest& unusable)
+{
+    // A manifest that is missing or has changed is only in the repository's
+    // backup (R-86); an index that differs is rebuilt from the manifests (R-80).
+    return what_is_wrong_with(unusable) + (unusable.kind == UnusableManifest::Kind::IndexDiffers
+                                                  ? "; rebuild the index with `repo rebuild-index`"
+                                                  : "; restore it from a backup of the repository");
+}
+
+std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
+    ArchiveStore& store,
+    IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout,
+    const Uuid& archive_uuid,
+    std::uint32_t revision)
+{
+    auto opened = open_recorded(store, repository_files, layout, archive_uuid, revision);
+    if (!opened) {
+        return std::unexpected(opened.error());
+    }
     RecordedManifest manifest;
-    manifest.header = reader->header();
+    manifest.header = opened->reader.header();
     for (;;) {
-        auto next = reader->next();
+        auto next = opened->reader.next();
         if (!next) {
             // The entries come from a second read of the manifest, checked at
             // the end of the body as the first was.
-            return fail(next.error().kind == ManifestFailure::Kind::BodyMismatch ? "ManifestHashMismatch"
-                                                                                : "RepositoryError",
-                next.error().message);
+            return fail(unusable_manifest(opened->record, next.error(), true));
         }
         if (!*next) {
             return manifest;
@@ -94,40 +163,50 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
     }
 }
 
-std::expected<ManifestHeader, IoError> load_recorded_header(
+std::expected<ManifestHeader, ManifestLoadFailure> check_recorded_manifest(
+    ArchiveStore& store,
+    IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout,
+    const Uuid& archive_uuid,
+    std::uint32_t revision)
+{
+    auto opened = open_recorded(store, repository_files, layout, archive_uuid, revision);
+    if (!opened) {
+        return std::unexpected(opened.error());
+    }
+    return opened->reader.header();
+}
+
+std::expected<ManifestHeader, UnusableManifest> load_recorded_header(
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const RevisionRecord& revision)
 {
-    // The manifest is gone, cannot be read, or is not the one recorded: only
-    // the repository's backup still holds it (R-86). Rebuilding the index
-    // would take whatever the file holds now for the truth.
-    const auto cannot_use = [&](const std::string& cause) {
-        return std::unexpected(IoError{IoErrorKind::Other, 0,
-            "cannot use the manifest of revision " + std::to_string(revision.revision) + " of archive " +
-                revision.archive_uuid + ": " + cause + "; restore it from a backup of the repository"});
-    };
+    using Kind = UnusableManifest::Kind;
     const auto line =
         ManifestReader::read_header_line(repository_files, layout.root / path_from_utf8(revision.manifest_relpath));
     if (!line) {
         // A line 1 that ends without a newline, or an empty file, is not the
         // line recorded either (decision 0028).
-        return cannot_use(line.error().kind == ManifestFailure::Kind::Io ? line.error().message : differs_from_record);
+        return std::unexpected(line.error().kind == ManifestFailure::Kind::Io
+                                   ? unusable_manifest(revision, line.error(), false)
+                                   : unusable_manifest(revision, Kind::Changed, first_line_differs));
     }
     // The record's hash first: line 1 of a changed manifest may not parse.
     const auto line_blake3 = blake3_hex(*line);
     if (line_blake3 != revision.header_blake3) {
-        return cannot_use(differs_from_record);
+        return std::unexpected(unusable_manifest(revision, Kind::Changed, first_line_differs));
     }
     ManifestHeader header;
     try {
         header = header_from_json(nlohmann::json::parse(*line));
     } catch (const std::exception& error) {
-        return cannot_use("invalid manifest header: " + json_error_text(error));
+        return std::unexpected(
+            unusable_manifest(revision, Kind::Unreadable, "invalid manifest header: " + json_error_text(error)));
     }
     if (!recorded_as(revision, line_blake3, header)) {
-        return cannot_use(differs_from_record);
+        return std::unexpected(unusable_manifest(revision, Kind::Changed, first_line_differs));
     }
     if (*line != revision.header_json) {
-        return std::unexpected(IoError{IoErrorKind::Other, 0, index_differs(revision)});
+        return std::unexpected(unusable_manifest(revision, Kind::IndexDiffers));
     }
     return header;
 }

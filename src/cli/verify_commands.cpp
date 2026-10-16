@@ -38,17 +38,22 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
 {
     // R-21: the mode stays on the result line in every language.
     std::cout << text.format("FULL VERIFY {}  {} ({}) revision {}", text(outcome.result), outcome.label,
-                     outcome.archive_uuid, outcome.revision)
-              << "\n  " << text.format("root: {}", path_to_utf8(outcome.root))
-              << "\n  " << text.format("identity: {}", text(to_string(outcome.identity.result)))
-              << "\n  "
-              << text.format("coverage: {} of {} registered bytes read and matched", outcome.coverage_bytes,
-                     outcome.registered_bytes)
-              << "\n  " << text("items:");
-    for (const auto& [status, count] : outcome.counts) {
-        std::cout << "  " << text(status) << " " << count;
+                     outcome.archive_uuid, outcome.revision);
+    if (!outcome.media_read) {
+        // Decision 0028: failed on its manifest before the media was looked for.
+        std::cout << "\n  " << text("media: not read, as the manifest of this revision cannot be used") << '\n';
+    } else {
+        std::cout << "\n  " << text.format("root: {}", path_to_utf8(outcome.root))
+                  << "\n  " << text.format("identity: {}", text(to_string(outcome.identity.result)))
+                  << "\n  "
+                  << text.format("coverage: {} of {} registered bytes read and matched", outcome.coverage_bytes,
+                         outcome.registered_bytes)
+                  << "\n  " << text("items:");
+        for (const auto& [status, count] : outcome.counts) {
+            std::cout << "  " << text(status) << " " << count;
+        }
+        std::cout << '\n';
     }
-    std::cout << '\n';
     for (const auto& failure : outcome.failure_classes) {
         std::cout << "  " << text.format("failure: {}", text(failure)) << '\n';
     }
@@ -78,6 +83,11 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
     for (const auto& item : outcome.items) {
         items.push_back({{"p", item.path.p}, {"status", item.status}, {"detail", item.detail}});
     }
+    // Decision 0028: a run that read no media has no root and no identity.
+    const auto root = outcome.media_read ? nlohmann::json(path_to_utf8(outcome.root)) : nlohmann::json(nullptr);
+    const auto identity = outcome.media_read ? nlohmann::json{{"result", to_string(outcome.identity.result)},
+                                                   {"details", outcome.identity.details}}
+                                             : nlohmann::json(nullptr);
     return {
         {"run_id", outcome.run_id},
         {"resumed_from", outcome.resumed_from},
@@ -86,8 +96,9 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
         {"revision", outcome.revision},
         {"mode", "FULL"},
         {"result", outcome.result},
-        {"root", path_to_utf8(outcome.root)},
-        {"identity", {{"result", to_string(outcome.identity.result)}, {"details", outcome.identity.details}}},
+        {"media_read", outcome.media_read},
+        {"root", root},
+        {"identity", identity},
         {"failure_classes", outcome.failure_classes},
         {"warnings", outcome.warnings},
         {"counts", outcome.counts},

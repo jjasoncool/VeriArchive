@@ -509,7 +509,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     const auto header =
                         load_recorded_header(services.repository_files, services.layout, **previous);
                     if (!header) {
-                        return fail(Kind::Repository, header.error().message);
+                        return fail(Kind::Repository, plain_message(header.error()));
                     }
                     plan.copy_of = header->copy_of;
                 }

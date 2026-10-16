@@ -21,18 +21,23 @@ constexpr const char* guarantee =
 
 std::string report(const app::Text& text, const VerifyOutcome& outcome)
 {
-    std::string body =
-        text.format("FULL VERIFY {}", text(outcome.result)) + "\n\n" +
-        text.format("{} ({}) revision {}", outcome.label, outcome.archive_uuid, outcome.revision) + "\n" +
-        text.format("Root: {}", path_to_utf8(outcome.root)) + "\n" +
-        text.format("Identity: {}", text(to_string(outcome.identity.result))) + "\n" +
-        text.format("Coverage: {} of {} registered bytes read and matched", format_bytes(outcome.coverage_bytes),
-            format_bytes(outcome.registered_bytes)) +
-        "\n" + text("Items:");
-    for (const auto& [status, count] : outcome.counts) {
-        body += "  " + text(status) + " " + std::to_string(count);
+    std::string body = text.format("FULL VERIFY {}", text(outcome.result)) + "\n\n" +
+                       text.format("{} ({}) revision {}", outcome.label, outcome.archive_uuid, outcome.revision) +
+                       "\n";
+    if (!outcome.media_read) {
+        // Decision 0028: failed on its manifest before the media was looked for.
+        body += text("Media: not read, as the manifest of this revision cannot be used") + "\n";
+    } else {
+        body += text.format("Root: {}", path_to_utf8(outcome.root)) + "\n" +
+                text.format("Identity: {}", text(to_string(outcome.identity.result))) + "\n" +
+                text.format("Coverage: {} of {} registered bytes read and matched",
+                    format_bytes(outcome.coverage_bytes), format_bytes(outcome.registered_bytes)) +
+                "\n" + text("Items:");
+        for (const auto& [status, count] : outcome.counts) {
+            body += "  " + text(status) + " " + std::to_string(count);
+        }
+        body += "\n";
     }
-    body += "\n";
     for (const auto& failure : outcome.failure_classes) {
         body += text.format("Failure: {}", text(failure)) + "\n";
     }
@@ -144,6 +149,11 @@ void start_verification(GuiState& state, bool resume)
             }
             if (outcome->result == "INCOMPLETE") {
                 *interrupted = Interrupted{outcome->run_id, outcome->archive_uuid};
+            } else if (request.resume_run && !outcome->media_read) {
+                // Decision 0028: a resume that failed on the manifest left the
+                // run it was to resume as it was, so Resume stays offered for
+                // that run, for once the manifest is restored.
+                *interrupted = Interrupted{*request.resume_run, outcome->archive_uuid};
             }
             return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
         },

@@ -168,14 +168,18 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
             // A run of a version before decision 0022: its revision's counts
             // (which include the entries unreadable at registration) and
             // where it was registered, as its manifest's line 1 holds them.
-            std::expected<ManifestHeader, IoError> header = std::unexpected(IoError{IoErrorKind::Other, 0,
-                "revision " + std::to_string(verification.revision) + " is not recorded"});
+            std::expected<ManifestHeader, std::string> header = std::unexpected(
+                "revision " + std::to_string(verification.revision) + " is not recorded");
             if (older->second) {
-                header = load_recorded_header(*repository_files, layout, *older->second);
+                if (auto loaded = load_recorded_header(*repository_files, layout, *older->second)) {
+                    header = std::move(*loaded);
+                } else {
+                    header = std::unexpected(plain_message(loaded.error()));
+                }
             }
             if (!header) {
                 if (!verification.totals_recorded) {
-                    operation.totals_failure = header.error().message;
+                    operation.totals_failure = header.error();
                 }
             } else {
                 if (!verification.totals_recorded) {

@@ -207,8 +207,9 @@ void a_new_revision_reads_the_latest_header_from_its_manifest()
     next.new_revision = true;
     const auto registered = va::register_archive(services, next, fixture.cancel, fixture.progress);
     CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
-          registered.error().message == "cannot use the manifest of revision 1 of archive " + first->archive_uuid +
-                                            ": denied (sample); restore it from a backup of the repository");
+          registered.error().message == "the manifest of revision 1 (manifests/" + first->archive_uuid +
+                                            "/r0001.vam) cannot be read: denied (sample); restore it from a backup "
+                                            "of the repository");
     const auto plans = fixture.store.settings_with_prefix("registration:");
     CHECK(plans && plans->empty());
 }

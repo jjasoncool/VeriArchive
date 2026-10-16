@@ -13,6 +13,7 @@
 #include "core/manifest/manifest_writer.h"
 
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include <algorithm>
 #include <chrono>
@@ -453,20 +454,99 @@ std::expected<std::vector<va::ArchiveStatus>, va::IoError> statuses_of(Registere
         va::Policy{}, std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
 }
 
+std::string file_bytes(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+void write_bytes(const std::filesystem::path& path, const std::string& bytes)
+{
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+}
+
+// The rows of `table` in the fixture's database.
+std::int64_t count_rows(EngineFixture& fixture, const std::string& table)
+{
+    sqlite3* database = nullptr;
+    const auto name = fixture.repository.context.repo.database().u8string();
+    std::int64_t rows = -1;
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY, nullptr) ==
+        SQLITE_OK) {
+        sqlite3_stmt* statement = nullptr;
+        const auto sql = "SELECT COUNT(*) FROM " + table;
+        if (sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) == SQLITE_OK &&
+            sqlite3_step(statement) == SQLITE_ROW) {
+            rows = sqlite3_column_int64(statement, 0);
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return rows;
+}
+
+// The repository's files, except that the file named `name` cannot be opened
+// (sample: access denied), as a manifest that this process may not read.
+class DeniedOpen final : public va::IFileSystemAccess {
+public:
+    DeniedOpen(va::IFileSystemAccess& inner, std::string name) : inner_(inner), name_(std::move(name)) {}
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        if (va::path_to_utf8(file.filename()) == name_) {
+            return std::unexpected(va::IoError{va::IoErrorKind::PermissionDenied, 5, "access denied (sample)"});
+        }
+        return inner_.open(file, options);
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    va::IFileSystemAccess& inner_;
+    std::string name_;
+};
+
+// Decision 0028: the plain message of the manifest of revision 1 of
+// `archive_uuid` that cannot be used: what is wrong with it, naming it by its
+// place in the repository, then how to fix it.
+std::string restore_message(const va::Uuid& archive_uuid, const std::string& what)
+{
+    return "the manifest of revision 1 (manifests/" + archive_uuid + "/r0001.vam) " + what +
+           "; restore it from a backup of the repository";
+}
+
+std::string rebuild_message(const va::Uuid& archive_uuid)
+{
+    return "the repository's index differs from the manifest of revision 1 (manifests/" + archive_uuid +
+           "/r0001.vam); rebuild the index with `repo rebuild-index`";
+}
+
+constexpr const char* first_line_changed = "has changed: its first line differs from what the repository recorded";
+
 // CLAUDE.md rule 3: validated manifest bytes are the truth, the database is
 // an index. Here the index's copy of the header of revision 1 names another
 // volume label than the manifest (sample data), while the record's hashes
-// still name the manifest. Neither header is taken: verification by root and
-// by uuid, a new revision of the archive, the archive list and loading the
-// manifest each stop with a repository error that names the archive and the
-// revision and how to fix it, and no verification is recorded. Rebuilt from
-// the manifests, the index holds the manifest's header again, and the archive
+// still name the manifest. Neither header is taken. Named by its uuid, the
+// archive is known, and its verification FAILS with a RepositoryError whose
+// message says to rebuild the index, recorded without reading the media
+// (decision 0028); by root, a new revision of the archive, the archive list
+// and loading the manifest stop with that message. Rebuilt from the
+// manifests, the index holds the manifest's header again, and the archive
 // verifies.
-void an_index_that_differs_from_its_manifest_stops_every_use()
+void an_index_that_differs_from_its_manifest_is_never_taken()
 {
     Registered fixture;
-    const std::string message = "the repository's index differs from the manifest of revision 1 of archive " +
-                                fixture.archive_uuid + "; rebuild the index with `repo rebuild-index`";
+    const auto message = rebuild_message(fixture.archive_uuid);
     fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
                                "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"')");
     const auto record = fixture.store.revision(fixture.archive_uuid, 1);
@@ -477,9 +557,12 @@ void an_index_that_differs_from_its_manifest_stops_every_use()
     va::VerifyRequest by_uuid;
     by_uuid.archive_uuid = fixture.archive_uuid;
     const auto named = fixture.verify(by_uuid);
-    CHECK(!named && named.error().kind == va::VerifyStop::Kind::Repository && named.error().message == message);
+    CHECK(named && named->result == "FAILED" && !named->media_read &&
+          named->failure_classes == std::vector<std::string>{"RepositoryError"} &&
+          named->warnings == std::vector<std::string>{"manifest: " + message});
     const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
-    CHECK(runs && runs->empty());
+    CHECK(runs && runs->size() == 1 && runs->front().result == "FAILED" &&
+          runs->front().failure_classes == "RepositoryError");
 
     va::RegisterRequest next;
     next.root = fixture.archive.root();
@@ -492,7 +575,8 @@ void an_index_that_differs_from_its_manifest_stops_every_use()
     CHECK(!statuses && statuses.error().message == message);
     const auto loaded = va::load_recorded_manifest(
         fixture.store, *fixture.repository.files, fixture.repository.context.repo, fixture.archive_uuid, 1);
-    CHECK(!loaded && loaded.error().failure_class == "RepositoryError" && loaded.error().message == message);
+    CHECK(!loaded && loaded.error().failure_class == "RepositoryError" && loaded.error().message == message &&
+          loaded.error().unusable && loaded.error().unusable->kind == va::UnusableManifest::Kind::IndexDiffers);
 
     const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
     CHECK(rebuilt && rebuilt->revisions == 1 && rebuilt->skipped.empty());
@@ -506,10 +590,11 @@ void an_index_that_differs_from_its_manifest_stops_every_use()
 // The manifest is not the one recorded: one byte of its header line changed
 // (sample data), it is gone, or its record names another body. The record no
 // longer vouches for the manifest, and the index's copy of its header is no
-// manifest: every use of the revision stops with a repository error that
-// names the archive, the revision and the cause, without offering to rebuild
-// the index, which would take a changed manifest for the truth.
-void a_manifest_that_is_not_the_one_recorded_stops_every_use()
+// manifest: verification by root, the archive list and a new revision stop
+// with its plain message, which names the manifest and says to restore it
+// from a backup of the repository, never to rebuild the index, which would
+// take a changed manifest for the truth; and record nothing.
+void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
 {
     enum class Case { HeaderChanged, Gone, RecordNamesAnotherBody };
     for (const auto what : {Case::HeaderChanged, Case::Gone, Case::RecordNamesAnotherBody}) {
@@ -519,41 +604,161 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use()
         if (gone) {
             std::filesystem::remove(path);
         } else if (what == Case::HeaderChanged) {
-            std::string bytes;
-            {
-                std::ifstream input(path, std::ios::binary);
-                bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-            }
+            auto bytes = file_bytes(path);
             bytes[bytes.find("\"volume_label\":\"ARCHIVE\"") + 16] ^= 0x01; // "ARCHIVE" -> "@RCHIVE"
-            std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+            write_bytes(path, bytes);
         } else {
             fixture.repository.execute("UPDATE archive_revisions SET body_blake3 = "
                                        "'0000000000000000000000000000000000000000000000000000000000000000'");
         }
-        const std::string prefix =
-            "cannot use the manifest of revision 1 of archive " + fixture.archive_uuid + ": ";
-        const std::string way_on = "; restore it from a backup of the repository";
-        const auto names_it = [&](const std::string& message) {
-            return message.starts_with(prefix) && message.ends_with(way_on) && !message.contains("rebuild-index") &&
-                   (gone || message == prefix + "the manifest differs from the repository record" + way_on);
-        };
+        const auto message = restore_message(fixture.archive_uuid, gone ? "is missing" : first_line_changed);
         const auto verified = fixture.verify(fixture.archive.root());
         CHECK(!verified && verified.error().kind == va::VerifyStop::Kind::Repository &&
-              names_it(verified.error().message));
-        if (!verified && !names_it(verified.error().message)) {
+              verified.error().message == message);
+        if (!verified && verified.error().message != message) {
             std::cerr << "  verify: " << verified.error().message << '\n';
         }
         const auto statuses = statuses_of(fixture);
-        CHECK(!statuses && names_it(statuses.error().message));
+        CHECK(!statuses && statuses.error().message == message);
         va::RegisterRequest next;
         next.root = fixture.archive.root();
         next.new_revision = true;
         const auto registered = fixture.register_root(next);
         CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
-              names_it(registered.error().message));
+              registered.error().message == message);
         const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
         CHECK(runs && runs->empty());
     }
+}
+
+// Decision 0028: an archive named by its uuid is known before anything is
+// looked for on the media, and so is the manifest of its current revision.
+// When that manifest cannot be used, the verification FAILS at once, without
+// reading the media (here the fake media cannot even be listed, and no byte
+// of the archive is read) and without media evidence: a manifest missing or
+// unreadable fails with RepositoryError, one whose header line or body has
+// changed with ManifestHashMismatch (sample data: one byte each). The failure
+// names the manifest and says to restore it from a backup of the repository.
+// The run is recorded as FULL FAILED of the archive's revision, with nothing
+// covered and nothing to resume, in an intact hash chain. With the manifest
+// restored, the archive verifies.
+void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
+{
+    enum class Case { Missing, Unreadable, HeaderChanged, BodyChanged };
+    for (const auto what : {Case::Missing, Case::Unreadable, Case::HeaderChanged, Case::BodyChanged}) {
+        Registered fixture;
+        const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
+        const auto kept = file_bytes(path);
+        auto changed = kept;
+        std::string failure_class = "RepositoryError";
+        std::string message;
+        if (what == Case::Missing) {
+            std::filesystem::remove(path);
+            message = restore_message(fixture.archive_uuid, "is missing");
+        } else if (what == Case::Unreadable) {
+            message = restore_message(fixture.archive_uuid, "cannot be read: access denied (sample)");
+        } else if (what == Case::HeaderChanged) {
+            changed[changed.find("\"volume_label\":\"ARCHIVE\"") + 16] ^= 0x01; // "ARCHIVE" -> "@RCHIVE"
+            failure_class = "ManifestHashMismatch";
+            message = restore_message(fixture.archive_uuid, first_line_changed);
+        } else {
+            changed[changed.size() - 5] ^= 0x01;
+            failure_class = "ManifestHashMismatch";
+            message = restore_message(fixture.archive_uuid, "has changed: its body does not match its header");
+        }
+        if (changed != kept) {
+            write_bytes(path, changed);
+        }
+        fixture.media.error = va::IoError{va::IoErrorKind::Other, 0, "the media is not looked for (sample)"};
+        fixture.archive.bytes_read = 0;
+        const auto evidence_before = count_rows(fixture, "media_evidence");
+
+        DeniedOpen denied(*fixture.repository.files, "r0001.vam");
+        va::IFileSystemAccess& repository_files =
+            what == Case::Unreadable ? static_cast<va::IFileSystemAccess&>(denied) : *fixture.repository.files;
+        va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store,
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = fixture.archive_uuid;
+        const auto outcome = va::verify_full(services, by_uuid, fixture.cancel, fixture.progress);
+        CHECK(outcome && outcome->result == "FAILED" && !outcome->media_read &&
+              outcome->archive_uuid == fixture.archive_uuid && outcome->revision == 1 &&
+              outcome->failure_classes == std::vector<std::string>{failure_class} &&
+              outcome->warnings == std::vector<std::string>{"manifest: " + message} && outcome->items.empty() &&
+              outcome->coverage_bytes == 0);
+        if (!outcome) {
+            std::cerr << "  by uuid stopped: " << outcome.error().message << '\n';
+        } else if (outcome->warnings != std::vector<std::string>{"manifest: " + message}) {
+            std::cerr << "  warnings: " << (outcome->warnings.empty() ? "" : outcome->warnings.front()) << '\n';
+        }
+        CHECK(fixture.archive.bytes_read == 0);
+        CHECK(count_rows(fixture, "media_evidence") == evidence_before);
+        const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+        CHECK(runs && runs->size() == 1);
+        if (outcome && runs && runs->size() == 1) {
+            const auto& run = runs->front();
+            CHECK(run.run_id == outcome->run_id && run.mode == "FULL" && run.result == "FAILED" &&
+                  run.revision == 1 && run.coverage_bytes == 0u && run.failure_classes == failure_class);
+        }
+        const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
+        CHECK(chain && chain->runs == 1 && !chain->first_broken_run);
+        const auto resumable = fixture.store.settings_with_prefix("run:");
+        CHECK(resumable && resumable->empty());
+
+        write_bytes(path, kept);
+        fixture.media.error.reset();
+        const auto restored = fixture.verify(by_uuid);
+        CHECK(restored && restored->result == "PASSED" && restored->media_read);
+    }
+}
+
+// A resumed run (`verify --resume`) names its archive too. When the manifest
+// of the archive's revision cannot be used (here it is missing), the resume
+// FAILS at once, recorded as above, and leaves the interrupted run as it was:
+// its record and its checkpoints stay. With the manifest restored, the run
+// resumes without reading again what it verified.
+void a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run()
+{
+    EngineFixture fixture;
+    for (int index = 1; index <= 9; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, static_cast<char>('0' + index)));
+    }
+    const auto registered = fixture.register_root(fixture.archive.root());
+    CHECK(registered.has_value());
+    fixture.archive.node("f5").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.verify(fixture.archive.root());
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+    if (!registered || !interrupted) {
+        return;
+    }
+    fixture.archive.node("f5").open_error.reset();
+    const auto checkpoints = fixture.store.progress(interrupted->run_id);
+    CHECK(checkpoints && !checkpoints->empty());
+
+    const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), registered->archive_uuid, 1);
+    const auto kept = file_bytes(path);
+    std::filesystem::remove(path);
+    fixture.archive.bytes_read = 0;
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    request.resume_run = interrupted->run_id;
+    const auto failed = fixture.verify(request);
+    CHECK(failed && failed->result == "FAILED" && !failed->media_read && failed->resumed_from.empty() &&
+          failed->failure_classes == std::vector<std::string>{"RepositoryError"} &&
+          failed->warnings ==
+              std::vector<std::string>{"manifest: " + restore_message(registered->archive_uuid, "is missing")});
+    CHECK(fixture.archive.bytes_read == 0);
+    const auto record = fixture.store.setting("run:" + interrupted->run_id);
+    CHECK(record && !record->empty());
+    const auto still = fixture.store.progress(interrupted->run_id);
+    CHECK(still && checkpoints && *still == *checkpoints);
+
+    write_bytes(path, kept);
+    const auto resumed = fixture.verify(request);
+    CHECK(resumed && resumed->result == "PASSED" && resumed->resumed_from == interrupted->run_id);
+    CHECK(fixture.archive.bytes_read == 9000 - interrupted->coverage_bytes);
+    const auto runs = fixture.store.verify_runs(registered->archive_uuid);
+    CHECK(runs && runs->size() == 3);
 }
 
 // Two archives on one volume (sample data): A at /vol/a and B at /vol/b. A's
@@ -561,10 +766,10 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use()
 // uuid, B is the one candidate and no other archive's manifest is read: it
 // verifies, and its status reads with its header, as `archive show` reads it,
 // and every archive's label without one, as `history` and the GUI's archive
-// choices read them. A named by its uuid stops, naming its revision and how
-// to go on, and records nothing. By root, every archive's latest carrier is
-// needed (A's root, which only its manifest names, may be this one): B's
-// verification by root stops the same way.
+// choices read them. A named by its uuid FAILS on its manifest, recorded
+// (decision 0028). By root, every archive's latest carrier is needed (A's
+// root, which only its manifest names, may be this one): B's verification by
+// root stops, naming A's manifest, and records nothing.
 void a_named_archive_reads_no_other_manifest()
 {
     for (const bool gone : {true, false}) {
@@ -581,13 +786,9 @@ void a_named_archive_reads_no_other_manifest()
         if (gone) {
             std::filesystem::remove(path);
         } else {
-            std::string bytes;
-            {
-                std::ifstream input(path, std::ios::binary);
-                bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-            }
+            auto bytes = file_bytes(path);
             bytes[bytes.find("\"volume_label\":\"ARCHIVE\"") + 16] ^= 0x01; // "ARCHIVE" -> "@RCHIVE"
-            std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
+            write_bytes(path, bytes);
         }
 
         va::VerifyRequest b_by_uuid;
@@ -607,32 +808,19 @@ void a_named_archive_reads_no_other_manifest()
         CHECK(labels && labels->size() == 2 &&
               std::ranges::none_of(*labels, [](const va::ArchiveStatus& status) { return status.header.has_value(); }));
 
-        const std::string prefix = "cannot use the manifest of revision 1 of archive " + a->archive_uuid + ": ";
-        const auto names_a = [&](const std::string& message) {
-            return message.starts_with(prefix) && message.ends_with("; restore it from a backup of the repository");
-        };
+        const auto message = restore_message(a->archive_uuid, gone ? "is missing" : first_line_changed);
         va::VerifyRequest a_by_uuid;
         a_by_uuid.archive_uuid = a->archive_uuid;
         const auto own = fixture.verify(a_by_uuid);
-        CHECK(!own && own.error().kind == va::VerifyStop::Kind::Repository && names_a(own.error().message));
+        CHECK(own && own->archive_uuid == a->archive_uuid && own->result == "FAILED" && !own->media_read &&
+              own->warnings == std::vector<std::string>{"manifest: " + message});
         const auto b_by_root = fixture.verify(fixture.archive.root() / "b");
         CHECK(!b_by_root && b_by_root.error().kind == va::VerifyStop::Kind::Repository &&
-              names_a(b_by_root.error().message));
+              b_by_root.error().message == message);
         const auto a_runs = fixture.store.verify_runs(a->archive_uuid);
         const auto b_runs = fixture.store.verify_runs(b->archive_uuid);
-        CHECK(a_runs && a_runs->empty() && b_runs && b_runs->size() == 1);
+        CHECK(a_runs && a_runs->size() == 1 && a_runs->front().result == "FAILED" && b_runs && b_runs->size() == 1);
     }
-}
-
-std::string file_bytes(const std::filesystem::path& path)
-{
-    std::ifstream input(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-}
-
-void write_bytes(const std::filesystem::path& path, const std::string& bytes)
-{
-    std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
 }
 
 // Decision 0028: line 1 of a recorded manifest is compared with the BLAKE3
@@ -641,8 +829,10 @@ void write_bytes(const std::filesystem::path& path, const std::string& bytes)
 // before its newline, and an empty manifest are changed manifests: wherever
 // a whole manifest is loaded (verification, comparison, export) they fail
 // with ManifestHashMismatch, never as a malformed manifest or with a
-// RepositoryError, and line 1 alone (the archive lists, identity matching)
-// says that the manifest differs from its record, not why it does not parse.
+// RepositoryError, and so does a verification of the archive by its uuid,
+// which is recorded; line 1 alone (the archive lists, identity matching)
+// says that its first line differs from what the repository recorded, not
+// why it does not parse.
 void a_first_line_that_no_longer_parses_has_changed()
 {
     enum class Case { Unparseable, CutOff, Empty };
@@ -659,11 +849,11 @@ void a_first_line_that_no_longer_parses_has_changed()
             bytes.clear();
         }
         write_bytes(path, bytes);
+        const auto message = restore_message(fixture.archive_uuid, first_line_changed);
 
         const auto loaded =
             va::load_recorded_manifest(fixture.store, *fixture.repository.files, layout, fixture.archive_uuid, 1);
-        CHECK(!loaded && loaded.error().failure_class == "ManifestHashMismatch" &&
-              loaded.error().message == "the manifest differs from the repository record");
+        CHECK(!loaded && loaded.error().failure_class == "ManifestHashMismatch" && loaded.error().message == message);
         if (!loaded && loaded.error().failure_class != "ManifestHashMismatch") {
             std::cerr << "  loaded: " << loaded.error().failure_class << ": " << loaded.error().message << '\n';
         }
@@ -672,16 +862,19 @@ void a_first_line_that_no_longer_parses_has_changed()
         CHECK(!compared && compared.error().failure_class == "ManifestHashMismatch");
         const auto exported = va::export_archive(fixture.store, *fixture.repository.files,
             *fixture.repository.writer, layout, fixture.archive_uuid, layout.root.parent_path() / "export");
-        CHECK(!exported && exported.error() == "ManifestHashMismatch: the manifest differs from the repository record");
+        CHECK(!exported && exported.error() == "ManifestHashMismatch: " + message);
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = fixture.archive_uuid;
+        const auto verified = fixture.verify(by_uuid);
+        CHECK(verified && verified->result == "FAILED" &&
+              verified->failure_classes == std::vector<std::string>{"ManifestHashMismatch"});
 
         const auto revision = fixture.store.revision(fixture.archive_uuid, 1);
         CHECK(revision && *revision);
         if (revision && *revision) {
             const auto header = va::load_recorded_header(*fixture.repository.files, layout, **revision);
-            CHECK(!header && header.error().message == "cannot use the manifest of revision 1 of archive " +
-                                                           fixture.archive_uuid +
-                                                           ": the manifest differs from the repository record; "
-                                                           "restore it from a backup of the repository");
+            CHECK(!header && va::plain_message(header.error()) == message &&
+                  va::failure_class_of(header.error()) == "ManifestHashMismatch");
         }
     }
 }
@@ -714,6 +907,11 @@ void entries_read_otherwise_than_validated_fail()
     CHECK(repository_files.differed());
     CHECK(outcome && outcome->result == "FAILED" &&
           outcome->failure_classes == std::vector<std::string>{"ManifestHashMismatch"} && outcome->items.empty());
+    // By root, the media was looked at to find the archive (decision 0028).
+    CHECK(outcome && outcome->media_read &&
+          outcome->warnings == std::vector<std::string>{"manifest: " + restore_message(fixture.archive_uuid,
+                                                                       "has changed: it gave other bytes when it "
+                                                                       "was read again")});
     const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
     CHECK(runs && runs->size() == 1 && runs->front().failure_classes == "ManifestHashMismatch");
 }
@@ -770,8 +968,10 @@ void verify_engine_tests()
     resume_refused_after_new_revision();
     run_record_says_where_and_how_much();
     archive_found_by_uuid_is_read_at_its_folder();
-    an_index_that_differs_from_its_manifest_stops_every_use();
-    a_manifest_that_is_not_the_one_recorded_stops_every_use();
+    an_index_that_differs_from_its_manifest_is_never_taken();
+    a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root();
+    a_known_archive_whose_manifest_cannot_be_used_fails_unread();
+    a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run();
     a_named_archive_reads_no_other_manifest();
     a_first_line_that_no_longer_parses_has_changed();
     entries_read_otherwise_than_validated_fail();

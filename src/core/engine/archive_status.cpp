@@ -46,7 +46,7 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
             if (*revision) {
                 auto header = load_recorded_header(repository_files, layout, **revision);
                 if (!header) {
-                    return std::unexpected(header.error());
+                    return std::unexpected(IoError{IoErrorKind::Other, 0, plain_message(header.error())});
                 }
                 status.header = std::move(*header);
             }

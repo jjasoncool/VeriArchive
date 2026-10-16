@@ -2,6 +2,7 @@
 // The .vam manifest format, version 1 (HANDOFF §B4). Line 1 is the header,
 // every following line is one entry, all canonical JSON. The validated bytes of
 // this file, not the database, are the integrity truth (R-14).
+#include "common/error.h"
 #include "common/types.h"
 #include "core/manifest/entry.h"
 
@@ -59,6 +60,7 @@ struct ManifestFailure {
     enum class Kind { Io, Malformed, BodyMismatch, HeaderMismatch };
     Kind kind;
     std::string message;
+    IoErrorKind io_kind = IoErrorKind::Other;  // Io: what the file system said, such as NotFound
 };
 
 } // namespace va

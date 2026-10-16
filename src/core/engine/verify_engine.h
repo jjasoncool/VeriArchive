@@ -49,10 +49,19 @@ struct VerifyOutcome {
     std::vector<VerifyItemRecord> items;        // every non-Verified item (D7)
     std::uint64_t coverage_bytes = 0;           // bytes read and hashed in this run
     std::uint64_t registered_bytes = 0;
+    // False when the run FAILED before the media was looked for, as the
+    // manifest of the archive's revision cannot be used (decision 0028):
+    // nothing was read, no media evidence recorded, and `root` and
+    // `identity` say nothing.
+    bool media_read = true;
 };
 
 // Verification could not start: the media needs an operator decision
 // (MIGRATED, AMBIGUOUS, UNKNOWN, previous carrier) or something is missing.
+// An archive named by its uuid, or by the run of it to resume, is known
+// before the media is looked for: when the manifest of its current revision
+// cannot be used, the verification does not stop but FAILS, and is recorded
+// (decision 0028).
 struct VerifyStop {
     enum class Kind { Decision, NotFound, Repository };
     Kind kind;

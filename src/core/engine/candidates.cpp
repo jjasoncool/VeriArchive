@@ -34,7 +34,7 @@ std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveSto
         if (latest != revisions->end()) {
             const auto header = load_recorded_header(repository_files, layout, *latest);
             if (!header) {
-                return std::unexpected(header.error());
+                return std::unexpected(IoError{IoErrorKind::Other, 0, plain_message(header.error())});
             }
             candidate.identity = header->identity;
             candidate.root_subpath = header->root_subpath;
@@ -70,7 +70,7 @@ std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSy
             }
             const auto header = load_recorded_header(repository_files, layout, revision);
             if (!header) {
-                return std::unexpected(header.error());
+                return std::unexpected(IoError{IoErrorKind::Other, 0, plain_message(header.error())});
             }
             candidate.previous_carriers.push_back({header->identity, header->root_subpath});
         }

@@ -130,6 +130,8 @@ Every result is prefixed by its mode. Only `FULL VERIFY PASSED` means "100 % of 
 
 ### Run-level failure classes
 
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: a manifest that cannot be used fails its verification with `ManifestHashMismatch` when it has changed (its line 1 or its body is not the one recorded) and with `RepositoryError` when it is missing or cannot be read, or the index's copy of its header differs; a verification of an archive named by its uuid or by the run it resumes fails so before it looks for the media, `FAILED` without reading it, and says so.
+
 `MediaIdentityMismatch`, `MediaIdentityAmbiguous`, `ManifestSignatureFailure`, `ManifestHashMismatch`, `ManifestRevisionRollback`, `ChangeTrackerContinuityLost`, `FilesystemAccessError`, `RepositoryError`.
 
 - R-21 The UI MUST NOT display a bare "integrity status". It displays "Last FULL verify: <result> on <date>" and "Last verify (<mode>): <result> on <date>" plus an `OVERDUE` flag from policy (§B11.5). A two-year-old PASS is not a current state.
@@ -626,6 +628,7 @@ class IEntropySource { public: virtual ~IEntropySource() = default;
 > Amended by `docs/decisions/0003-retired-archives.md`: retired archives remain match candidates.
 > Amended by `docs/decisions/0018-unreadable-filesystem-id.md`: a `filesystem_uuid` unavailable on either side with a matching device is `MATCH_WEAK` when the volume capacity agrees within 1 %, otherwise `MISMATCH`.
 > Amended by `docs/decisions/0021-linux-without-udev.md`: a kernel filesystem id (`fsid-…`, §B1.3) compared with a UUID or volume serial counts as unavailable, so decision 0018 applies; two `fsid-…` ids compare like UUIDs.
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: R-96: a verification that failed on its manifest before it looked for the media records no media evidence, as it observed none.
 
 Evidence at verify time (`MediaEvidence`) is compared against every registered archive's latest `identity` snapshot. Primary evidence: `filesystem_uuid` (per §B1.3) and device `serial`/`wwn` (either matching counts as a device match).
 
@@ -644,6 +647,8 @@ Evidence at verify time (`MediaEvidence`) is compared against every registered a
 - R-97 Registration MUST refuse to register a volume whose evidence already yields `MATCH`/`MATCH_WEAK` for an existing archive unless `--new-revision` (legitimate re-baseline, increments `revision`) or `--force-new-archive` is given.
 
 ## B11. Verification modes
+
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: an archive named by its uuid or by the run it resumes is known before its media is looked for: the manifest of its current revision is checked first (R-14, R-62), and one that cannot be used fails the verification at once, recorded as `FAILED` with nothing covered, without reading the media; a run being resumed stays resumable.
 
 | Mode | Checks | Claim |
 |---|---|---|
@@ -768,6 +773,7 @@ VeriArchive/
 > Amended by `docs/decisions/0025-abandoning-an-unfinished-registration.md`: `archive abandon-registration <uuid> [--confirm] [--json]` abandons the archive's unfinished registration; without `--confirm` it shows what would be lost and exits `12`; exit `0` abandoned · `12` refused (nothing to abandon, another registration by now, an attempt that runs) · `10` unknown or ambiguous uuid · `11` repository. `register` exits `12` while another registration of the archive is unfinished, also one through another root path.
 > Amended by `docs/decisions/0026-relocation-resumes.md`: `archive relocate <uuid> <root_path> --resume` (or `--resume <root_path>`) exits `12` with nothing to resume, while the attempt before runs, on another volume or folder than it started on, when the archive is at another revision, or when the relocation found that its new carrier differs; without `--resume`, `12` while a relocation of the archive is unfinished; `4` when cancelled or its device removed, and `11` when its scan, manifest or record failed, both of which `--resume` continues, as the message says; `--json` says `resumed`. `archive abandon-relocation <uuid> [--confirm] [--json]`, exit codes as `abandon-registration`'s. `archive list --json` and `archive show <uuid> --json` give an archive with an unfinished relocation `unfinished_relocation` (its root, revision, progress and state, `differs` once its new carrier was found to differ), and one with an unfinished registration `unfinished_registration` (its root, the revision it creates, progress and state); without `--json` they show one line for each under the archive.
 > Amended by `docs/decisions/0030-import-names-its-manifest-in-the-record-transaction.md`: `import` exits `12` when another operation recorded its revision while it ran, or an unfinished registration with saved files creates that revision.
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: `verify --full <archive_uuid>` and `verify --resume` exit `3` with a recorded `FAILED` run when the manifest of the archive's current revision cannot be used, saying that the media was not read and how to fix the manifest; every verification's `--json` gives `media_read` (`false` then, with `root` and `identity` null).
 
 ```text
 veriarchive-cli repo init [--repository P] | info | rebuild-index | verify-history
@@ -793,6 +799,7 @@ Exit codes: `0` PASSED · `2` PASSED_WITH_WARNINGS · `3` FAILED · `4` INCOMPLE
 > Amended by `docs/decisions/0024-attempts-record-their-process.md`: a registration whose attempt's process has ended reads `stopped; it can be resumed` at once; one whose process still runs, but whose plan has said nothing for minutes, reads `no progress reported for N minutes; its process is still running`.
 > Amended by `docs/decisions/0025-abandoning-an-unfinished-registration.md`: the row of a stopped registration has **Abandon...**, which reads what abandoning removes with the CLI's check, then asks first, saying that the saved progress will be lost.
 > Amended by `docs/decisions/0026-relocation-resumes.md`: the unfinished operations include relocations ("Relocation"), wherever they were started, with their progress and a state judged as a registration's (decision 0024), and `new carrier differs; abandon it` for a stopped one whose new carrier was found to differ; a stopped one has **Abandon...**, as a registration's row.
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: Verify Archive verifies a registered archive chosen by its uuid, so when its manifest cannot be used the report says `FULL VERIFY FAILED`, that the media was not read, and how to fix the manifest.
 
 Views: Register Archive, Verify Archive, Archive List, Verification History, Settings.
 Archive List columns: label, short uuid, volume label, model, capacity, last FULL (result/date), last verify (mode/result/date), OVERDUE, revision.
