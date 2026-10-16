@@ -10,6 +10,7 @@
 #include "core/engine/archive_status.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/rebuild_index.h"
+#include "core/engine/registration_attempt.h"
 #include "core/engine/relocate_engine.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
@@ -2162,6 +2163,48 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     }
 }
 
+// Register Archive's own registration ends without finishing (here its device
+// went away; a cancel ends it the same way), and the stop mark of that attempt
+// cannot be written, as when the database stayed locked: its plan names the
+// window's process and says nothing of a stop (sample data: the mark taken out
+// of the plan). At the next Register of that root, the window, whose one
+// operation is the registration refused, which wrote no plan, takes the plan
+// for one of an attempt that has ended (decision 0024) and names its ways on
+// (decision 0033), while another process, which sees the window's running,
+// takes the registration for running. The resume it names goes ahead.
+void the_window_takes_its_own_registration_without_a_stop_mark_for_stopped()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    const auto key = "registration:" + archive_uuid;
+    fixture.repository.execute(
+        ("UPDATE settings SET value = json_remove(value, '$.stopped') WHERE key = '" + key + "'").c_str());
+    const auto plan = nlohmann::json::parse(fixture.store.setting(key).value_or(""), nullptr, false);
+    const auto attempt = va::recorded_attempt(plan);
+    CHECK(plan.is_object() && !plan.contains("stopped") && attempt &&
+          attempt->process.id == fixture.processes.self.id && attempt->host == fixture.host.host);
+    const auto refused = fixture.run(at("/vol"));
+    CHECK(!refused && refused.error().refusing && refused.error().refusing->this_root);
+    if (refused || !refused.error().refusing) {
+        return;
+    }
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    CHECK(va::app::register_message_in_window(refused.error(), fixture.store, fixture.processes, fixture.host.host,
+              now) == "an interrupted registration of this root exists (archive " + archive_uuid +
+                          "); finish it by ticking Resume an interrupted registration of this folder or volume and "
+                          "pressing Register again, or abandon it with Abandon... in the Archive List");
+    test::FakeProcessTable another;
+    another.self = {7000, "boot-1:7000", "veriarchive-cli.exe"};
+    another.others = {fixture.processes.self};
+    const auto from_another =
+        va::app::refusing_operation_stopped(fixture.store, *refused.error().refusing, {&another, fixture.host.host, {}}, now);
+    CHECK(from_another && !*from_another);
+    auto resume = at("/vol");
+    resume.resume = true;
+    const auto resumed = fixture.run(resume);
+    CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+}
+
 // ---- A plan made for an older revision (decision 0030) ---------------------
 
 // How a registration made for an older revision is refused.
@@ -3846,6 +3889,7 @@ void register_engine_tests()
     an_attempt_abandoned_while_it_writes_its_manifest_records_nothing();
     an_abandoned_attempt_leaves_the_next_registration_alone();
     a_registration_never_replaces_another_unfinished_one_of_its_archive();
+    the_window_takes_its_own_registration_without_a_stop_mark_for_stopped();
     a_registration_made_for_an_older_revision_never_records();
     a_registration_meets_a_later_revision_at_its_record();
     a_registration_made_for_an_older_revision_stops_reading();

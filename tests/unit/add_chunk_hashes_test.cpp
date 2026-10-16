@@ -1841,6 +1841,110 @@ void what_the_refusal_in_the_window_says()
     }
 }
 
+// The windows judge the operation that refuses them in the app
+// (register_message_in_window and stop_message_in_window, given the
+// repository, this computer's process table, its name and the time), as
+// refusing_operation_stopped judges it, with two rules of the window's own
+// (decision 0033). Records written by hand (sample data, as the engines write
+// them), the window a process of its own: a verification that adds chunk
+// hashes, which said a moment ago that it works in a process that the window
+// sees running, still runs in both views; while the repository cannot be read
+// (its table of runs renamed away for a moment), the window cannot judge it
+// and names its ways on; silent for minutes on another computer, as the
+// window's clock tells, it has stopped. A registration's plan that names the
+// window's own process and says nothing of a stop, as the window leaves its
+// own registration when it ended and the stop mark could not be written, is
+// of an attempt that has ended, as the window's one operation is the one
+// refused (decision 0024): both views name their ways on, though another
+// process, which sees the window's running, takes it for running. A refusal
+// that no other operation makes reads as it is.
+void the_window_judges_the_operation_that_refuses_it()
+{
+    using namespace std::chrono_literals;
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto timestamp = [](std::chrono::sys_seconds time) { return std::format("{:%Y-%m-%dT%H:%M:%SZ}", time); };
+    Halves fixture;
+    const auto interrupted = fixture.interrupted();
+    if (!interrupted) {
+        return;
+    }
+    const auto refused = fixture.add();
+    CHECK(!refused && refused.error().refusing);
+    if (refused || !refused.error().refusing) {
+        return;
+    }
+    const auto& uuid = fixture.archive_uuid;
+    const auto& host = fixture.host.host;
+    test::FakeProcessTable window;
+    window.self = {5151, "boot-1:2000", "veriarchive-gui.exe"};
+    window.others = {fixture.processes.self};
+
+    auto verification = *refused.error().refusing;
+    verification.run_id = "c0ffee00-0000-4000-8000-0000000000e4";
+    verification.record["updated"] = timestamp(now - 10s);
+    verification.record.erase("process");
+    va::record_attempt(verification.record, {fixture.processes.self, host});
+    const va::VerifyStop stopped_by_verification{va::VerifyStop::Kind::Refused, "refused (sample)", {}, {}, verification};
+    const va::RegisterFailure refused_by_verification{
+        va::RegisterFailure::Kind::Refused, "refused (sample)", std::nullopt, verification};
+    const auto verify_archive_says = [&](const va::VerifyStop& stop) {
+        return va::app::stop_message_in_window(stop, fixture.store, window, host, now);
+    };
+    const auto register_archive_says = [&](const va::RegisterFailure& failure) {
+        return va::app::register_message_in_window(failure, fixture.store, window, host, now);
+    };
+    CHECK(verify_archive_says(stopped_by_verification) == runs_in_window(uuid, verification.run_id));
+    CHECK(register_archive_says(refused_by_verification) ==
+          waits_for_in_register_archive(uuid, verification.run_id, false));
+    const auto ways_on_in_verify_archive = "an unfinished verification of archive " + uuid +
+                                           " that adds chunk hashes (run " + verification.run_id +
+                                           ") is creating revision 2; nothing was changed (finish it first with "
+                                           "Resume interrupted run once the archive is chosen above, or abandon it "
+                                           "with Abandon... in the Archive List)";
+    fixture.repository.execute("ALTER TABLE verify_runs RENAME TO verify_runs_away");
+    CHECK(!fixture.store.verify_run(verification.run_id).has_value());
+    CHECK(verify_archive_says(stopped_by_verification) == ways_on_in_verify_archive);
+    CHECK(register_archive_says(refused_by_verification) ==
+          waits_for_in_register_archive(uuid, verification.run_id, true));
+    fixture.repository.execute("ALTER TABLE verify_runs_away RENAME TO verify_runs");
+    CHECK(verify_archive_says(stopped_by_verification) == runs_in_window(uuid, verification.run_id));
+    // Silent for minutes on another computer, as the window's clock tells.
+    auto elsewhere = verification;
+    elsewhere.record["updated"] = timestamp(now - 10min);
+    va::record_attempt(elsewhere.record, {fixture.processes.self, "another-computer"});
+    CHECK(verify_archive_says({va::VerifyStop::Kind::Refused, "refused (sample)", {}, {}, elsewhere}) ==
+          ways_on_in_verify_archive);
+
+    auto registration = va::refusing_registration(uuid,
+        nlohmann::json{{"archive_uuid", uuid}, {"revision", 2u}, {"label", "ARCH-0001"},
+            {"created", timestamp(now - 1h)}, {"new_archive", false}, {"root", "K:/SAMPLE"},
+            {"updated", timestamp(now - 10s)}});
+    va::record_attempt(registration.record, {window.self, host});
+    const va::VerifyStop stopped_by_registration{va::VerifyStop::Kind::Refused, "refused (sample)", {}, {}, registration};
+    const va::RegisterFailure refused_by_registration{
+        va::RegisterFailure::Kind::Refused, "refused (sample)", std::nullopt, registration};
+    const auto creating = "an unfinished registration of archive " + uuid +
+                          " (root \"K:/SAMPLE\") is creating revision 2; nothing was changed (finish it first ";
+    CHECK(verify_archive_says(stopped_by_registration) ==
+          creating + "in Register Archive by entering its root, ticking Resume an interrupted registration of this "
+                     "folder or volume and pressing Register, or abandon it with Abandon... in the Archive List)");
+    CHECK(register_archive_says(refused_by_registration) ==
+          creating + "by entering its root above, ticking Resume an interrupted registration of this folder or "
+                     "volume and pressing Register, or abandon it with Abandon... in the Archive List)");
+    test::FakeProcessTable outside;
+    outside.self = {7000, "boot-1:7000", "veriarchive-cli.exe"};
+    outside.others = {window.self};
+    const auto from_outside =
+        va::app::refusing_operation_stopped(fixture.store, registration, {&outside, host, {}}, now);
+    CHECK(from_outside && !*from_outside);
+
+    const va::VerifyStop of_its_own{va::VerifyStop::Kind::Refused, "a refusal of its own (sample)", {}, {}, std::nullopt};
+    const va::RegisterFailure failed_on_its_own{
+        va::RegisterFailure::Kind::Refused, "a refusal of its own (sample)", std::nullopt, std::nullopt};
+    CHECK(verify_archive_says(of_its_own) == "a refusal of its own (sample)");
+    CHECK(register_archive_says(failed_on_its_own) == "a refusal of its own (sample)");
+}
+
 // Which run Verify Archive's Resume continues (decision 0033): the run
 // interrupted last in the window while its archive is chosen, also one that
 // adds no chunk hashes; the chosen archive's stopped verification that adds
@@ -2141,6 +2245,7 @@ void add_chunk_hashes_tests()
     what_resume_continues();
     which_run_resume_continues();
     what_the_refusal_in_the_window_says();
+    the_window_judges_the_operation_that_refuses_it();
     what_the_command_line_gives();
     what_can_no_longer_finish_refuses_nothing();
     two_resumes_that_found_the_run_at_once();

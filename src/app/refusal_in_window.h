@@ -54,4 +54,25 @@ std::string stop_message_in_window(const VerifyStop& stop, bool stopped);
 std::expected<bool, IoError> refusing_operation_stopped(ArchiveStore& store, const RefusingOperation& refusing,
     const AttemptCheck& attempts, std::chrono::sys_seconds wall_now);
 
+// What Register Archive says of a registration that does not begin: as
+// register_message_in_window says it, the operation that refuses it, if one
+// does, judged by the window as refusing_operation_stopped judges it, from
+// the repository `store`, through this computer's process table `processes`
+// on this computer (`host`, HostInfo::host), at the time `now`. The window's
+// own process runs no operation of its own then: the window's one operation
+// is the registration refused, which wrote no plan or record, so a plan or
+// record that names this process is of an attempt that has ended (decision
+// 0024), as a registration that the window cancelled and whose stop mark it
+// could not write. Where it cannot be judged, as when the repository cannot
+// be read, the window names its ways on.
+std::string register_message_in_window(const RegisterFailure& failure, ArchiveStore& store,
+    IProcessTable& processes, const std::string& host, std::chrono::sys_seconds now);
+
+// What Verify Archive says of a verification that does not begin: as
+// stop_message_in_window says it, the operation that refuses it judged as
+// Register Archive judges it (register_message_in_window). The window's one
+// operation is then the verification refused, which wrote no record.
+std::string stop_message_in_window(const VerifyStop& stop, ArchiveStore& store, IProcessTable& processes,
+    const std::string& host, std::chrono::sys_seconds now);
+
 } // namespace va::app

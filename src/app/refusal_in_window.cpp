@@ -185,4 +185,33 @@ std::expected<bool, IoError> refusing_operation_stopped(ArchiveStore& store, con
     return has_stopped(state_of_one_read(operation, wall_now));
 }
 
+namespace {
+
+// Whether the window takes `refusing` for one that has stopped, and names its
+// ways on: as refusing_operation_stopped judges it, with this process taken
+// for one that runs no operation (judge_attempt without
+// `runs_an_operation`), and where it cannot be judged.
+bool stopped_as_the_window_judges(ArchiveStore& store, const RefusingOperation& refusing, IProcessTable& processes,
+    const std::string& host, std::chrono::sys_seconds now)
+{
+    const auto stopped = refusing_operation_stopped(store, refusing, AttemptCheck{&processes, host, {}}, now);
+    return !stopped || *stopped;
+}
+
+} // namespace
+
+std::string register_message_in_window(const RegisterFailure& failure, ArchiveStore& store,
+    IProcessTable& processes, const std::string& host, std::chrono::sys_seconds now)
+{
+    return register_message_in_window(failure,
+        !failure.refusing || stopped_as_the_window_judges(store, *failure.refusing, processes, host, now));
+}
+
+std::string stop_message_in_window(const VerifyStop& stop, ArchiveStore& store, IProcessTable& processes,
+    const std::string& host, std::chrono::sys_seconds now)
+{
+    return stop_message_in_window(
+        stop, !stop.refusing || stopped_as_the_window_judges(store, *stop.refusing, processes, host, now));
+}
+
 } // namespace va::app
