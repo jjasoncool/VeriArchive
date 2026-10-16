@@ -33,8 +33,8 @@ struct PreparedCatalog {
         std::vector<std::string> literals;  // the text around the "{}": one more than the values
         std::string translation;
         std::size_t length;
-        bool translates_cause;   // Match::Cause: the last value is itself a message
-        bool may_match_a_cause;  // may match inside a cause (see Text::translate)
+        std::optional<std::size_t> cause;  // Match::Cause: the value that is itself a message
+        bool may_match_a_cause;            // may match inside a cause (see Text::translate)
     };
     std::unordered_map<std::string, std::string> exact;
     std::vector<Pattern> patterns;
@@ -56,8 +56,8 @@ PreparedCatalog prepare(std::span<const CatalogEntry> entries)
         if (!is_template || entry.match == Match::FormatOnly) {
             continue;
         }
-        PreparedCatalog::Pattern pattern{{}, std::string(entry.translation), entry.english.size(),
-            entry.match == Match::Cause, false};
+        PreparedCatalog::Pattern pattern{{}, std::string(entry.translation), entry.english.size(), std::nullopt,
+            false};
         std::size_t start = 0;
         for (auto found = entry.english.find("{}"); found != std::string_view::npos;
              found = entry.english.find("{}", start)) {
@@ -65,6 +65,17 @@ PreparedCatalog prepare(std::span<const CatalogEntry> entries)
             start = found + 2;
         }
         pattern.literals.emplace_back(entry.english.substr(start));
+        // The cause is the value after ": " ("context: {}"), the last such
+        // value: usually the last of all, but a hint may follow it ("context:
+        // {}; continue it with ..."). Each literal but the last comes before
+        // the value of the same index.
+        if (entry.match == Match::Cause) {
+            for (std::size_t index = 0; index + 1 < pattern.literals.size(); ++index) {
+                if (pattern.literals[index].ends_with(": ")) {
+                    pattern.cause = index;
+                }
+            }
+        }
         // Platform errors start with the name of the call that failed
         // ("CreateFileW failed (Win32 error 5)", "open failed: Permission denied").
         // They are the usual cause, so they may match one although they start
@@ -218,12 +229,13 @@ std::string Text::operator()(std::string_view english) const
 }
 
 // Engine errors wrap their cause: "cannot scan the root: FindFirstFileExW failed
-// (Win32 error 5)". A template marked Match::Cause translates its last value as
-// a message of its own; all other values (paths, labels, uuids, numbers) are
-// carried over unchanged. Inside a cause (depth > 0) only exact messages,
-// templates that start with literal text, and platform errors may match: any
-// other template that starts with a value matches every text with the same
-// ending, which is too loose for a piece of another message.
+// (Win32 error 5)". A template marked Match::Cause translates its cause (the
+// value after ": ", usually the last) as a message of its own; all other values
+// (paths, labels, uuids, numbers) are carried over unchanged. Inside a cause
+// (depth > 0) only exact messages, templates that start with literal text, and
+// platform errors may match: any other template that starts with a value
+// matches every text with the same ending, which is too loose for a piece of
+// another message.
 std::string Text::translate(std::string_view english, int depth) const
 {
     const auto& catalog = catalog_for(language_);
@@ -241,8 +253,9 @@ std::string Text::translate(std::string_view english, int depth) const
         if (!values) {
             continue;
         }
-        if (pattern.translates_cause && depth < 4) {
-            values->back() = translate(values->back(), depth + 1);
+        if (pattern.cause && depth < 4) {
+            auto& cause = (*values)[*pattern.cause];
+            cause = translate(cause, depth + 1);
         }
         return fill(pattern.translation, *values);
     }

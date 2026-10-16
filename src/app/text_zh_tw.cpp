@@ -3,11 +3,12 @@
 // appear the same number of times on both sides ("{0}", "{1}" when the Chinese
 // word order differs). Terms follow the table in decision 0017.
 //
-// An entry may add a match mode (text.h): Match::Cause for a wrapper whose last
-// value is an engine message ("context: {}"), Match::FormatOnly for a template
-// used only through Text::format. Without one, values are carried over as they
-// are. Library and system messages (SQLite, JSON, strerror) have entries too:
-// they arrive as the cause inside engine messages.
+// An entry may add a match mode (text.h): Match::Cause for a wrapper whose value
+// after ": " is an engine message ("context: {}", which a hint may follow),
+// Match::FormatOnly for a template used only through Text::format. Without one,
+// values are carried over as they are. Library and system messages (SQLite,
+// JSON, strerror) have entries too: they arrive as the cause inside engine
+// messages.
 #include "app/text.h"
 
 #include <span>
@@ -760,6 +761,12 @@ constexpr CatalogEntry entries[] = {
         "nothing was changed (use `register --new-revision` to re-baseline changed content)",
         "新載體上的內容與記錄不符；未做任何變更（若內容已變更，"
         "請使用 `register --new-revision` 重新建立基準）"},
+    {"the new carrier does not hold the recorded content; nothing was changed, but the relocation's saved "
+        "progress could not be removed: {}; abandon the relocation with `archive abandon-relocation {}` before "
+        "relocating again",
+        "新載體上的內容與記錄不符；未做任何變更，但無法刪除搬移已儲存的進度：{}；請先以 "
+        "`archive abandon-relocation {}` 放棄這次搬移，再重新搬移",
+        Match::Cause},
     {"cannot record the relocation: {}", "無法記錄搬移：{}", Match::Cause},
     {"revision {} of archive {} was recorded by another operation while this relocation ran; "
         "nothing was changed",

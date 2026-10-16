@@ -221,6 +221,103 @@ void differing_copy_is_refused()
     CHECK(fixture.archive.bytes_read == sample_bytes);
 }
 
+std::string differs_message()
+{
+    return "the new carrier does not hold the recorded content; nothing was changed (use `register "
+           "--new-revision` to re-baseline changed content)";
+}
+
+// Decision 0026: a copy that differs ends the relocation also while another
+// operation holds the write lock for longer than a statement waits for it
+// (`repo rebuild-index`, the record of a large archive): its record and saved
+// progress go in a transaction that waits for the lock, as its record would.
+// Left behind, they would let a resume accept a second copy without reading
+// again what matched in this one. Here a resumed relocation finds the copy
+// different while another connection holds the lock (scaled down: the
+// relocation's statements wait 100 ms, the lock is held 1 s). The operator
+// copies again, and the copy now damages a photo that matched before, keeping
+// its size (sample data): the next relocation reads the whole carrier and
+// finds it.
+void a_differing_copy_ends_the_relocation_while_the_lock_is_held()
+{
+    RelocationFixture fixture(true);
+    const auto run_id = fixture.interrupted_relocation(fixture.processes.self, false);
+    CHECK(fixture.saved(run_id).files == 20);
+    fixture.archive.node("new/videos/v139.bin").content[7] ^= 0x01; // a corrupted copy (sample data)
+    std::thread holder;
+    std::binary_semaphore held{0};
+    // When the last file is opened, another process takes the write lock.
+    test::HookedFiles hooked(fixture.archive, "v139.bin", [&] {
+        holder = std::thread([&] {
+            auto store = fixture.repository.store();
+            CHECK(store.begin());
+            held.release();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            CHECK(store.commit());
+        });
+        CHECK(held.try_acquire_for(std::chrono::seconds(60)));
+    });
+    auto store = fixture.repository.store(std::chrono::milliseconds(100));
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto differs = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt, true}, fixture.cancel, fixture.progress);
+    if (holder.joinable()) {
+        holder.join();
+    }
+    CHECK(!differs && differs.error().kind == va::RelocateFailure::Kind::Differs &&
+          differs.error().message == differs_message());
+    CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
+    CHECK(count_rows(fixture, "verify_progress") == 0);
+
+    fixture.archive.node("new/videos/v139.bin").content[7] ^= 0x01;
+    fixture.archive.node("new/photos/p100.bin").content[3] ^= 0x01; // damaged by the second copy (sample data)
+    fixture.archive.bytes_read = 0;
+    const auto again = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!again && again.error().kind == va::RelocateFailure::Kind::Differs && again.error().items.size() == 1 &&
+          again.error().items.front().path.p == "photos/p100.bin");
+    CHECK(fixture.archive.bytes_read == sample_bytes);
+    const auto archive = fixture.store.find_archive(fixture.archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 1);
+}
+
+// When the record and saved progress of a relocation whose copy differs still
+// cannot be removed (here a trigger makes the removal fail, standing in for a
+// lock held for longer than the record waits), the refusal says so, with the
+// cause, and how to go on: abandon the relocation before relocating again.
+// Abandoned, the next relocation reads the whole carrier.
+void a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it()
+{
+    RelocationFixture fixture(true);
+    const auto run_id = fixture.interrupted_relocation(fixture.processes.self, false);
+    fixture.archive.node("new/videos/v139.bin").content[7] ^= 0x01; // a corrupted copy (sample data)
+    fixture.repository.execute("CREATE TRIGGER sample_failure BEFORE DELETE ON verify_progress "
+                               "BEGIN SELECT RAISE(ABORT, 'sample failure'); END;");
+    const auto differs = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!differs && differs.error().kind == va::RelocateFailure::Kind::Differs &&
+          differs.error().items.size() == 1);
+    CHECK(!differs && differs.error().message ==
+                          "the new carrier does not hold the recorded content; nothing was changed, but the "
+                          "relocation's saved progress could not be removed: cannot run SQL: sample failure; "
+                          "abandon the relocation with `archive abandon-relocation " +
+                              fixture.archive_uuid + "` before relocating again");
+    // Nothing of it went: the 20 photos matched before, and the 19 videos
+    // that matched now.
+    CHECK(fixture.record().is_object());
+    CHECK(fixture.saved(run_id).files == 39);
+    fixture.repository.execute("DROP TRIGGER sample_failure;");
+
+    va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandoned = va::abandon_relocation(services, {fixture.archive_uuid, run_id});
+    CHECK(abandoned && abandoned->files == 39);
+    fixture.archive.node("new/videos/v139.bin").content[7] ^= 0x01;
+    fixture.archive.bytes_read = 0;
+    const auto again = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(again && again->revision == 2 && !again->resumed);
+    CHECK(fixture.archive.bytes_read == sample_bytes);
+}
+
 // Decision 0010: entries unreadable at registration travel unchanged.
 void known_unreadable_entries_are_carried()
 {
@@ -1112,6 +1209,8 @@ void relocate_tests()
 {
     relocation_keeps_identity_and_history();
     differing_copy_is_refused();
+    a_differing_copy_ends_the_relocation_while_the_lock_is_held();
+    a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it();
     known_unreadable_entries_are_carried();
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();

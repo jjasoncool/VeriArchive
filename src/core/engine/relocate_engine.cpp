@@ -433,11 +433,35 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     // exist there would silently drop out of the baseline, so they block too.
     // That ends the relocation: what the operator does next (copy again)
     // changes the carrier, so what matched before says nothing any more, and
-    // a new relocation reads it all (decision 0026).
+    // a new relocation reads it all (decision 0026). Its record and
+    // checkpoints go in a transaction that waits for the write lock, as its
+    // record would (decision 0023): another operation may hold the lock for
+    // longer than a statement waits, and a record left behind would let
+    // `--resume` accept a second copy without reading again what matched in
+    // this one.
     const bool unrepresentable = comparison.counts.contains("Unrepresentable");
     if (comparison.content_failure || unrepresentable) {
-        const auto removed = store.write_transaction([&] { return store.remove_relocation(uuid, run_id); });
-        stop_mark.ended = removed.has_value();
+        const auto removed = [&]() -> std::expected<void, IoError> {
+            if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
+                return begun;
+            }
+            if (auto gone = store.remove_relocation(uuid, run_id); !gone) {
+                return gone;
+            }
+            return store.commit();
+        }();
+        if (!removed) {
+            // Still there: the operator abandons it, so that the next
+            // relocation reads the whole carrier.
+            store.rollback();
+            return fail(Kind::Differs,
+                "the new carrier does not hold the recorded content; nothing was changed, but the relocation's "
+                "saved progress could not be removed: " +
+                    removed.error().message + "; abandon the relocation with `archive abandon-relocation " + uuid +
+                    "` before relocating again",
+                comparison.items);
+        }
+        stop_mark.ended = true;
         return fail(Kind::Differs,
             "the new carrier does not hold the recorded content; nothing was changed (use "
             "`register --new-revision` to re-baseline changed content)",

@@ -11,8 +11,10 @@
 // still translates them: a catalog template "cannot scan the root: {}" matches
 // the sentence and the value is carried over into the translation. Values are
 // data (paths, labels, uuids, numbers) and are never translated. The one
-// exception is a template marked Match::Cause: a wrapper whose last value is
-// itself an engine message (the cause), which is translated too.
+// exception is a template marked Match::Cause: a wrapper "context: {}" whose
+// value after ": " is itself an engine message (the cause), which is
+// translated too. The cause is usually the last value; a hint may follow it
+// ("context: {}; continue it with ...").
 //
 // A translation may refer to values by position ("{1}...{0}") when Chinese
 // word order differs from English.
@@ -85,7 +87,7 @@ private:
 // How a catalog template takes part in translating engine sentences.
 enum class Match {
     Values,      // the values (paths, labels, uuids, numbers) are carried over unchanged
-    Cause,       // a wrapper "context: {}": the last value is an engine message, translated too
+    Cause,       // a wrapper "context: {}": the value after ": " is an engine message, translated too
     FormatOnly,  // used only through Text::format, never matched against sentences
 };
 

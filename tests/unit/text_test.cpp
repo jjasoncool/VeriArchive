@@ -83,11 +83,12 @@ void catalog_tests()
             std::cerr << "  placeholder other than {} or {N}: " << entry.english << '\n';
         }
 
-        // A Cause entry wraps a message: "context: {}". A FormatOnly entry must be
-        // a template; a message without values is never matched against sentences.
+        // A Cause entry wraps a message: "context: {}", which a hint may follow.
+        // A FormatOnly entry must be a template; a message without values is
+        // never matched against sentences.
         bool match_fits = true;
         if (entry.match == Match::Cause) {
-            match_fits = entry.english.ends_with(": {}");
+            match_fits = entry.english.contains(": {}");
         } else if (entry.match == Match::FormatOnly) {
             match_fits = entry.english.contains("{}");
         }
@@ -358,6 +359,21 @@ void translation_tests()
           "`register --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration " + uuid +
               "` 放棄該註冊後，以 `archive relocate " + uuid + " <root_path> --resume` 繼續這次搬移）");
     CHECK(chinese.format("Abandon the unfinished relocation of {}?", "ARCH-0007") == "要放棄 ARCH-0007 未完成的搬移嗎？");
+    // A cause that a hint follows is translated too, and the uuid after it is
+    // carried over.
+    CHECK(chinese.format("RELOCATION REFUSED: {}",
+              chinese("the new carrier does not hold the recorded content; nothing was changed, but the "
+                      "relocation's saved progress could not be removed: cannot execute SQL: database is locked; "
+                      "abandon the relocation with `archive abandon-relocation " + uuid +
+                      "` before relocating again")) ==
+          "拒絕搬移：新載體上的內容與記錄不符；未做任何變更，但無法刪除搬移已儲存的進度：無法執行 SQL：資料庫已被鎖定；"
+          "請先以 `archive abandon-relocation " + uuid + "` 放棄這次搬移，再重新搬移");
+    CHECK(english("the new carrier does not hold the recorded content; nothing was changed, but the relocation's "
+                  "saved progress could not be removed: CreateFileW failed (Win32 error 5); abandon the relocation "
+                  "with `archive abandon-relocation " + uuid + "` before relocating again") ==
+          "the new carrier does not hold the recorded content; nothing was changed, but the relocation's saved "
+          "progress could not be removed: CreateFileW failed (Win32 error 5); abandon the relocation with `archive "
+          "abandon-relocation " + uuid + "` before relocating again");
 
     // Comparing archives (CLI `archive compare`, GUI Compare Archives). The
     // result line keeps its mode word in every language, as verification's does.
