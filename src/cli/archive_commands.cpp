@@ -506,8 +506,8 @@ int retire(const Arguments& arguments, Opened& opened)
                                  "folder or volume with `register <root_path> --lost-manifest {}`. The archive keeps "
                                  "its verification history and its hash chain, but can no longer be verified or take "
                                  "a new revision. It no longer stops the registration of a new folder or volume or a "
-                                 "relocation: a retired archive whose latest manifest is lost is no longer taken as a "
-                                 "possible owner of one.",
+                                 "relocation: retired, it is no longer taken as a possible owner of one, as identity "
+                                 "matching cannot use its latest manifest.",
                          retirement.revision, retirement.archive_uuid)
                   << '\n';
         return report_failure(arguments, {code, failure.message});

@@ -128,11 +128,10 @@ void an_archive_whose_manifest_can_be_used_is_retired_at_once()
 }
 
 // Decision 0028, point 9: archive A at /vol/a (sample data), registered twice
-// and verified at revision 2, whose manifest of revision 2 is lost: gone, its
-// first line changed, its body changed (skipped and marked by a rebuild), or
-// gone with its record, so that the index has no record of it. Meanwhile a
-// registration of a new folder stops on it, except where only its body
-// changed, which matching does not read. Retiring A without a confirmation
+// and verified at revision 2, whose manifest of revision 2 is lost where
+// matching reads it: gone, its first line changed, or gone with its record,
+// so that the index has no record of it. Meanwhile a registration of a new
+// folder stops on it. Retiring A without a confirmation
 // says what it would retire, and writes nothing; confirmed, A is retired, and
 // a new folder registers. A is listed retired with its manifest lost, its
 // plain message ending with the import, as it takes no new revision: the
@@ -142,8 +141,8 @@ void an_archive_whose_manifest_can_be_used_is_retired_at_once()
 // nothing.
 void an_archive_whose_manifest_is_lost_is_retired_once_confirmed()
 {
-    enum class Case { Missing, FirstLine, Body, NotIndexed };
-    for (const auto what : {Case::Missing, Case::FirstLine, Case::Body, Case::NotIndexed}) {
+    enum class Case { Missing, FirstLine, NotIndexed };
+    for (const auto what : {Case::Missing, Case::FirstLine, Case::NotIndexed}) {
         test::EngineFixture fixture;
         const auto archive_uuid = registered_twice(fixture);
         va::VerifyRequest by_uuid;
@@ -163,14 +162,6 @@ void an_archive_whose_manifest_is_lost_is_retired_once_confirmed()
             kind = va::UnusableManifest::Kind::Changed;
             what_is_wrong = "the manifest of revision 2 (manifests/" + archive_uuid +
                             "/r0002.vam) has changed: its first line differs from what the repository recorded";
-        } else {
-            bytes[bytes.size() - 5] ^= 0x01;
-            std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
-            kind = va::UnusableManifest::Kind::Changed;
-            what_is_wrong = "the manifest of revision 2 (manifests/" + archive_uuid +
-                            "/r0002.vam) has changed: its body does not match its header";
-            const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
-            CHECK(rebuilt && rebuilt->revisions_kept.size() == 1);
         }
         if (what == Case::NotIndexed) {
             fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; "
@@ -182,7 +173,7 @@ void an_archive_whose_manifest_is_lost_is_retired_once_confirmed()
         fixture.archive.add_file("b/SAMPLE-three.txt", "three (sample data)");
         fixture.archive.add_file("c/SAMPLE-four.txt", "four (sample data)");
         const auto stopped = fixture.register_root(fixture.archive.root() / "b");
-        CHECK(stopped.has_value() == (what == Case::Body));
+        CHECK(!stopped);
 
         // Not confirmed: what it would retire, and nothing written.
         const auto asked = retire(fixture, archive_uuid, false);
@@ -239,6 +230,60 @@ void an_archive_whose_manifest_is_lost_is_retired_once_confirmed()
         CHECK(again && again->already_retired && again->lost_manifest &&
               va::plain_message(*again->lost_manifest) == what_is_wrong + put_back_only(2));
     }
+}
+
+// Decision 0028, point 9: a manifest changed only in its body is lost, but
+// matching reads it by its line 1, which is intact, and keeps its archive a
+// candidate. Archive A at /vol/a, registered twice and verified (sample
+// data), one byte of the body of its manifest of revision 2 changed (sample
+// damage). Retiring A changes nothing of matching: it is retired at once, as
+// any archive, without a confirmation and without its manifest named as lost.
+// Retired, A is still recognised: a verification of its root matches it and
+// fails on the body, reading the media, its folder takes no new archive, and
+// a new folder registers. Once a rebuild has skipped the manifest, the lists,
+// which read it whole then, show A retired with its manifest lost; retiring
+// it again changes nothing.
+void an_archive_whose_manifest_changed_only_in_its_body_is_retired_at_once()
+{
+    test::EngineFixture fixture;
+    const auto archive_uuid = registered_twice(fixture);
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = archive_uuid;
+    const auto verified = fixture.verify(by_uuid);
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+    const auto& layout = fixture.repository.context.repo;
+    const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+    auto bytes = read_bytes(second);
+    bytes[bytes.size() - 5] ^= 0x01;
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
+
+    const auto retired = retire(fixture, archive_uuid, false);
+    CHECK(retired && !retired->lost_manifest && !retired->already_retired && retired->revision == 2);
+    if (!retired) {
+        std::cerr << "  retiring a manifest changed only in its body: " << retired.error().message << '\n';
+    }
+    CHECK(status_of(fixture, archive_uuid) == "RETIRED");
+    const auto by_root = fixture.verify(fixture.archive.root() / "a");
+    CHECK(by_root && by_root->archive_uuid == archive_uuid && by_root->result == "FAILED" && by_root->media_read);
+    if (!by_root) {
+        std::cerr << "  its root after the retirement: " << by_root.error().message << '\n';
+    }
+    const auto again = fixture.register_root(fixture.archive.root() / "a");
+    CHECK(!again && again.error().kind == va::RegisterFailure::Kind::Refused &&
+          again.error().message.starts_with("already registered as archive " + archive_uuid));
+    fixture.archive.add_file("c/SAMPLE-four.txt", "four (sample data)");
+    const auto c = fixture.register_root(fixture.archive.root() / "c");
+    CHECK(c && c->revision == 1);
+
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(rebuilt && rebuilt->revisions_kept.size() == 1);
+    const auto shown = listed(fixture, archive_uuid);
+    CHECK(shown && shown->manifest_lost && shown->unusable_manifest &&
+          va::plain_message(*shown->unusable_manifest) ==
+              "the manifest of revision 2 (manifests/" + archive_uuid +
+                  "/r0002.vam) has changed: its body does not match its header" + put_back_only(2));
+    const auto once_more = retire(fixture, archive_uuid, false);
+    CHECK(once_more && once_more->already_retired && !once_more->lost_manifest);
 }
 
 // Decision 0028, point 9: a retired archive whose latest manifest is lost is
@@ -354,9 +399,9 @@ void a_retired_archive_whose_manifest_is_lost_owns_no_root()
 // skips such a manifest and keeps the index as it was, so no rebuild repairs
 // it. While A is not retired, a new folder and a relocation of B stop on it
 // with what line 1 alone tells (rebuild the index), and A is listed so.
-// Retired once confirmed (or, with the entry that does not parse, retired
-// before its manifest was lost: the state alone decides), A is no candidate
-// of matching: the new folder registers and B relocates, and A is listed
+// Retired once confirmed, as `archive retire` judges the manifest as
+// matching does once A is retired, A is no candidate of matching: the new
+// folder registers and B relocates, and A is listed
 // with its manifest lost and what the whole manifest says, which ends with
 // the import; so after a rebuild as well, after which another new folder
 // registers.
@@ -433,24 +478,16 @@ void a_lost_manifest_behind_a_wrong_index_leaves_matching_once_retired()
         CHECK(before && before->unusable_manifest && !before->manifest_lost &&
               va::plain_message(*before->unusable_manifest) == line_1_says);
 
-        if (what == Case::EntryBehindIndexDiffers) {
-            // Retired before its manifest was lost: the state alone decides.
-            auto archive = fixture.store.find_archive(archive_uuid);
-            CHECK(archive && *archive);
-            if (archive && *archive) {
-                (*archive)->status = "RETIRED";
-                CHECK(fixture.store.update_archive(**archive));
-            }
-        } else {
-            // Retired once confirmed, as the whole manifest is lost.
-            const auto asked = retire(fixture, archive_uuid, false);
-            CHECK(!asked && asked.error().kind == va::RetireFailure::Kind::Unconfirmed && asked.error().retirement &&
-                  asked.error().retirement->lost_manifest &&
-                  va::what_is_wrong_with(*asked.error().retirement->lost_manifest) == whole_says);
-            const auto retired = retire(fixture, archive_uuid, true);
-            CHECK(retired && retired->lost_manifest &&
-                  va::what_is_wrong_with(*retired->lost_manifest) == whole_says);
+        // Retired once confirmed, as the whole manifest is lost.
+        const auto asked = retire(fixture, archive_uuid, false);
+        CHECK(!asked && asked.error().kind == va::RetireFailure::Kind::Unconfirmed && asked.error().retirement &&
+              asked.error().retirement->lost_manifest &&
+              va::what_is_wrong_with(*asked.error().retirement->lost_manifest) == whole_says);
+        if (asked) {
+            std::cerr << "  retired without a confirmation: lost " << asked->lost_manifest.has_value() << '\n';
         }
+        const auto retired = retire(fixture, archive_uuid, true);
+        CHECK(retired && retired->lost_manifest && va::what_is_wrong_with(*retired->lost_manifest) == whole_says);
 
         // No candidate of matching any more.
         const auto c = fixture.register_root(fixture.archive.root() / "c");
@@ -574,6 +611,7 @@ void retire_archive_tests()
 {
     an_archive_whose_manifest_can_be_used_is_retired_at_once();
     an_archive_whose_manifest_is_lost_is_retired_once_confirmed();
+    an_archive_whose_manifest_changed_only_in_its_body_is_retired_at_once();
     a_retired_archive_whose_manifest_is_lost_owns_no_root();
     a_lost_manifest_behind_a_wrong_index_leaves_matching_once_retired();
     retiring_writes_nothing_beside_a_registration_or_a_later_revision();

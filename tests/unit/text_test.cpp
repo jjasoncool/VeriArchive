@@ -745,15 +745,15 @@ void translation_tests()
                          "`import`, or register the archive's next revision from its folder or volume with `register "
                          "<root_path> --lost-manifest {}`. The archive keeps its verification history and its hash "
                          "chain, but can no longer be verified or take a new revision. It no longer stops the "
-                         "registration of a new folder or volume or a relocation: a retired archive whose latest "
-                         "manifest is lost is no longer taken as a possible owner of one.",
+                         "registration of a new folder or volume or a relocation: retired, it is no longer taken as "
+                         "a possible owner of one, as identity matching cannot use its latest manifest.",
               2, uuid) ==
           "停用此封存，就是宣告該清單檔再也無法取回：只有在儲存庫的備份、版次 2 的匯出檔和媒體副本中都沒有該清單檔，而且存放"
           "此封存的裝置也已不在（損壞、遺失或已清除）時，才這麼做；否則請以 `import` 放回該清單檔，或以 `register "
           "<root_path> --lost-manifest " + uuid +
               "` 用封存的資料夾或磁碟區目前的內容註冊它的下一個版次。封存會保留它的驗證歷程及其雜湊鏈，但再也無法驗證，"
-              "也不再接受新的版次。它不再讓註冊新的資料夾或磁碟區、或搬移停下來：清單檔已無法取回的已停用封存，不再被視為"
-              "可能擁有它們的封存。");
+              "也不再接受新的版次。它不再讓註冊新的資料夾或磁碟區、或搬移停下來：停用之後，因為比對媒體身分時無法使用它最新"
+              "的清單檔，它不再被視為可能擁有它們的封存。");
     CHECK(chinese("error: run the command again with --confirm to retire the archive") ==
           "錯誤：若要停用此封存，請加上 --confirm 再執行一次");
     CHECK(chinese.format("Retired {} ({}), whose manifest of revision {} is lost. It keeps its verification history and "

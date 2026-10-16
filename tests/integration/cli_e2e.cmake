@@ -1184,7 +1184,7 @@ set(gone_manifest "manifests/${gone_uuid}/r0001.vam")
 string(FIND "${retired_listed}" "\n    manifest lost: the manifest of revision 1 (${gone_manifest}) is missing; put it back with `import <folder>/r0001.vam` from a backup of the repository, an export of revision 1, or the media copy in the archive's .veriarchive folder, where registration wrote one\n" lost_line)
 string(FIND "${retired_listed_chinese}" "\n    清單檔無法取回：版次 1 的清單檔（${gone_manifest}）已遺失；請以 `import <folder>/r0001.vam` 從儲存庫的備份、版次 1 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔\n" lost_line_chinese)
 if(NOT retire_asked MATCHES "^Lost manifest of ${gone_label} \\(${gone_uuid}\\), revision 1\n  the manifest of revision 1 \\(manifests/${gone_uuid}/r0001[.]vam\\) is missing\nRetiring the archive declares that manifest lost for good: "
-        OR NOT retire_asked MATCHES "a retired archive whose latest manifest is lost is no longer taken as a possible owner of one[.]\n$"
+        OR NOT retire_asked MATCHES "retired, it is no longer taken as a possible owner of one, as identity matching cannot use its latest manifest[.]\n$"
         OR NOT retire_asked_error STREQUAL "error: run the command again with --confirm to retire the archive\n"
         OR NOT retire_asked_chinese MATCHES "^無法取回的清單檔：${gone_label}（${gone_uuid}），版次 1\n"
         OR NOT retire_asked_chinese MATCHES "錯誤：若要停用此封存，請加上 --confirm 再執行一次\n$"
@@ -1303,6 +1303,34 @@ if(SQLITE3_PROGRAM)
 else()
     message(STATUS "a retired archive whose lost manifest the index differs from: skipped, as the sqlite3 command that "
         "changes the index (sample damage) is not installed")
+endif()
+# A manifest changed only in its body (sample damage) keeps its archive a
+# candidate of matching, which reads the first line: retiring the archive
+# changes nothing of matching, so `archive retire` retires it at once (exit
+# 0), as any archive, saying that it is still recognised when attached. A
+# verification of its folder by its root still matches it, and fails on the
+# body (exit 3); registering its folder needs a decision (exit 12).
+set(BODY "${WORK}/body-only-sample")
+file(WRITE "${BODY}/a.txt" "body only sample a\n")
+run_cli("0" register "${BODY}" --json)
+string(JSON body_uuid GET "${last_output}" archive_uuid)
+string(SUBSTRING "${body_uuid}" 0 8 body_prefix)
+set(body_file "${WORK}/repo4/manifests/${body_uuid}/r0001.vam")
+file(READ "${body_file}" body_bytes)
+string(REPLACE "\"p\":\"a.txt\"" "\"p\":\"q.txt\"" body_bytes "${body_bytes}")
+file(CONFIGURE OUTPUT "${body_file}" CONTENT "${body_bytes}" @ONLY NEWLINE_STYLE UNIX)
+run_cli("0" --lang en archive retire "${body_prefix}")
+set(body_retired "${last_output}")
+run_cli("3" verify --full "${BODY}" --json)
+string(JSON body_verified GET "${last_output}" archive_uuid)
+string(JSON body_result GET "${last_output}" result)
+run_cli("12" --lang en register "${BODY}")
+set(body_registered "${last_errors}")
+if(NOT body_retired MATCHES "^Retired [^\n]+ \\(${body_uuid}\\)[.] It is no longer expected to be verified, is still recognised when attached, and keeps its history[.]\n$"
+        OR NOT body_verified STREQUAL body_uuid OR NOT body_result STREQUAL "FAILED"
+        OR NOT body_registered MATCHES "^error: already registered as archive ")
+    message(FATAL_ERROR "retiring an archive whose manifest changed only in its body: verified ${body_verified} "
+        "(${body_result})\n${body_retired}\n${body_registered}")
 endif()
 set(GLOBAL --config "${WORK}/config.json")
 

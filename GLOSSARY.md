@@ -15,7 +15,7 @@ The directory where an archive's file tree starts; recorded relative to its volu
 _Avoid_: mount point (a mount point is runtime-only)
 
 **Retired archive**:
-An archive the operator no longer expects to verify; it takes no new revision and keeps its history. It is still recognised when its media reappears, unless its latest manifest is lost: then it is no longer taken for a possible owner of a folder or volume.
+An archive the operator no longer expects to verify; it takes no new revision and keeps its history. It is still recognised when its media reappears, unless its latest manifest is lost so that identity matching cannot use it (not only in its body): then it is no longer taken for a possible owner of a folder or volume.
 _Avoid_: deleted, removed archive
 
 **Carrier**:

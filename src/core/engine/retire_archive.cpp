@@ -1,5 +1,7 @@
 #include "core/engine/retire_archive.h"
 
+#include "core/engine/candidates.h"
+
 #include <nlohmann/json.hpp>
 
 namespace va {
@@ -63,22 +65,33 @@ std::expected<Retirement, RetireFailure> retire_archive(ArchiveStore& store, IFi
     Retirement retirement{archive.archive_uuid, archive.label, archive.current_revision, std::nullopt,
         archive.status == "RETIRED"};
 
-    // Lost, as a registration over a lost manifest tells one (decision 0028,
-    // point 8): the manifest of the archive's revision checked as a
-    // verification of the archive by its uuid checks it, cannot be used, and
-    // not only the index is wrong of it, which a rebuild repairs. A revision
-    // older than one recorded (R-15) is no manifest that cannot be used.
+    // Lost, as matching judges the latest manifest of a retired archive
+    // (decision 0028, point 9), so that retiring the archive takes it out of
+    // matching: its manifest read as matching reads it, line 1 alone
+    // (load_candidate_pool of this archive alone), cannot be used, and is
+    // lost (lost_by_a_retired_archive, as the archive will be retired: where
+    // line 1 alone says that only the index is wrong, the whole manifest). A
+    // manifest that matching can use, also one changed only in its body,
+    // keeps the archive a candidate, and one of which only the index is
+    // wrong stops matching until a rebuild repairs it: the archive is
+    // retired as before.
     if (archive.current_revision > 0) {
-        const auto checked =
-            check_recorded_manifest(store, repository_files, layout, uuid, archive.current_revision);
-        if (!checked) {
-            const auto& failure = checked.error();
-            if (failure.unusable) {
-                if (!only_the_index_is_wrong(*failure.unusable)) {
-                    retirement.lost_manifest = *failure.unusable;
-                }
-            } else if (failure.failure_class != "ManifestRevisionRollback") {
-                return fail(Kind::Repository, failure.message);
+        const auto pool = load_candidate_pool(store, repository_files, layout, uuid);
+        if (!pool) {
+            return fail(Kind::Repository, pool.error().message);
+        }
+        if (!pool->unusable.empty() && pool->unusable.front().unusable) {
+            auto manifest = *pool->unusable.front().unusable;
+            manifest.retired = true;
+            const auto lost = lost_by_a_retired_archive(store, repository_files, layout, manifest);
+            if (!lost) {
+                return fail(Kind::Repository, lost.error().message);
+            }
+            if (*lost) {
+                // Its message as the archive is when this is read: before
+                // it is retired, it names the last resort, the other way out.
+                manifest.retired = retirement.already_retired;
+                retirement.lost_manifest = std::move(manifest);
             }
         }
     }
