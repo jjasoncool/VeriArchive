@@ -1135,4 +1135,69 @@ if(media_usable EQUAL -1 OR media_last_resort EQUAL -1 OR media_import_named EQU
         "\n${media_asked}\n${media_asked_error}\n${media_asked_chinese}")
 endif()
 
+# Decision 0028, point 9: the device is gone as well. A sample folder,
+# registered, whose manifest is then gone from the repository: `archive list`
+# exits 2, and registering another sample folder stops on it (exit 11).
+# `archive retire` without --confirm says what retiring it means and changes
+# nothing (exit 12), in either language and in --json. With --confirm it
+# retires the archive: `archive list` and `archive show` exit 0 and show it
+# retired with its manifest lost (`manifest_lost` in --json), the other folder
+# registers, and a registration over the lost manifest is refused (exit 12),
+# as a retired archive takes no new revision.
+set(GONE "${WORK}/gone-sample")
+set(AFTER_GONE "${WORK}/after-gone-sample")
+file(WRITE "${GONE}/a.txt" "gone sample a\n")
+file(WRITE "${AFTER_GONE}/b.txt" "after gone sample b\n")
+run_cli("0" register "${GONE}" --json)
+string(JSON gone_uuid GET "${last_output}" archive_uuid)
+string(JSON gone_label GET "${last_output}" label)
+string(SUBSTRING "${gone_uuid}" 0 8 gone_prefix)
+file(REMOVE "${WORK}/repo/manifests/${gone_uuid}/r0001.vam")
+run_cli("2" archive list)
+run_cli("11" register "${AFTER_GONE}")
+run_cli("12" --lang en archive retire "${gone_prefix}")
+set(retire_asked "${last_output}")
+set(retire_asked_error "${last_errors}")
+run_cli("12" archive retire "${gone_prefix}")
+set(retire_asked_chinese "${last_output}${last_errors}")
+run_cli("12" archive retire "${gone_prefix}" --json)
+string(JSON retire_asked_revision GET "${last_output}" retirement revision)
+string(JSON retire_asked_kind GET "${last_output}" retirement manifest_problem kind)
+run_cli("2" archive show "${gone_prefix}" --json)
+string(JSON retire_unchanged GET "${last_output}" status)
+run_cli("0" archive retire "${gone_prefix}" --confirm --json)
+string(JSON retired_status GET "${last_output}" status)
+string(JSON retired_lost GET "${last_output}" manifest_lost)
+run_cli("0" --lang en archive list)
+set(retired_listed "${last_output}")
+run_cli("0" archive list)
+set(retired_listed_chinese "${last_output}")
+run_cli("0" archive show "${gone_prefix}" --json)
+string(JSON shown_status GET "${last_output}" status)
+string(JSON shown_lost GET "${last_output}" manifest_lost)
+run_cli("0" register "${AFTER_GONE}")
+run_cli("12" --lang en register "${GONE}" --lost-manifest "${gone_prefix}" --confirm)
+set(retired_refused "${last_errors}")
+set(gone_manifest "manifests/${gone_uuid}/r0001.vam")
+string(FIND "${retired_listed}" "\n    manifest lost: the manifest of revision 1 (${gone_manifest}) is missing; put it back with `import <folder>/r0001.vam` from a backup of the repository, an export of revision 1, or the media copy in the archive's .veriarchive folder, where registration wrote one\n" lost_line)
+string(FIND "${retired_listed_chinese}" "\n    清單檔無法取回：版次 1 的清單檔（${gone_manifest}）已遺失；請以 `import <folder>/r0001.vam` 從儲存庫的備份、版次 1 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔\n" lost_line_chinese)
+if(NOT retire_asked MATCHES "^Lost manifest of ${gone_label} \\(${gone_uuid}\\), revision 1\n  the manifest of revision 1 \\(manifests/${gone_uuid}/r0001[.]vam\\) is missing\nRetiring the archive declares that manifest lost for good: "
+        OR NOT retire_asked MATCHES "a retired archive whose latest manifest is lost is no longer taken as a possible owner of one[.]\n$"
+        OR NOT retire_asked_error STREQUAL "error: run the command again with --confirm to retire the archive\n"
+        OR NOT retire_asked_chinese MATCHES "^無法取回的清單檔：${gone_label}（${gone_uuid}），版次 1\n"
+        OR NOT retire_asked_chinese MATCHES "錯誤：若要停用此封存，請加上 --confirm 再執行一次\n$"
+        OR NOT retire_asked_revision EQUAL 1 OR NOT retire_asked_kind STREQUAL "missing"
+        OR NOT retire_unchanged STREQUAL "REGISTERED"
+        OR NOT retired_status STREQUAL "RETIRED" OR NOT retired_lost
+        OR NOT retired_listed MATCHES "\n${gone_label}  ${gone_prefix}  r1  RETIRED\n"
+        OR lost_line EQUAL -1 OR lost_line_chinese EQUAL -1
+        OR NOT shown_status STREQUAL "RETIRED" OR NOT shown_lost
+        OR NOT retired_refused STREQUAL "error: a retired archive takes no new revisions (decision 0003)\n")
+    message(FATAL_ERROR "retiring an archive whose manifest is lost: asked r${retire_asked_revision} "
+        "(${retire_asked_kind}), status ${retire_unchanged}; retired ${retired_status} (lost ${retired_lost}), "
+        "shown ${shown_status} (lost ${shown_lost}), line ${lost_line} / ${lost_line_chinese}"
+        "\n${retire_asked}\n${retire_asked_error}\n${retire_asked_chinese}\n${retired_listed}\n"
+        "${retired_listed_chinese}\n${retired_refused}")
+endif()
+
 message(STATUS "veriarchive-cli end-to-end test passed")

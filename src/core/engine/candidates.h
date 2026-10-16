@@ -35,7 +35,10 @@ struct CandidatesFailure {
 // latest revision that cannot be used (the archives in the order of their
 // labels), also one of which the index has no record (manifest_not_indexed):
 // matching against what is left would be matching without that archive,
-// whose carrier and root only that manifest records.
+// whose carrier and root only that manifest records. A retired archive whose
+// latest manifest is lost (lost_by_a_retired_archive) is left out instead,
+// neither a candidate nor a manifest that cannot be used: it is no possible
+// owner of a folder or volume (decision 0028, point 9).
 std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout,
     const std::optional<Uuid>& only = std::nullopt);

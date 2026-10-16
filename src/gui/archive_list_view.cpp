@@ -74,13 +74,16 @@ GtkWidget* cell(const std::string& text, bool bold = false, bool warning = false
 
 // A line of the table that says what is wrong with an archive's latest
 // manifest and how to fix it (decision 0028): red, as the table's warnings
-// are, wrapping rather than widening the table, and selectable, so that the
-// manifest's path can be copied.
-GtkWidget* problem_cell(const std::string& text)
+// are, but for a retired archive whose latest manifest is lost (`warning`
+// false), which needs nothing of the operator any more (point 9); wrapping
+// rather than widening the table, and selectable, so that the manifest's path
+// can be copied.
+GtkWidget* problem_cell(const std::string& text, bool warning)
 {
     GtkWidget* label = gtk_label_new(nullptr);
     gchar* escaped = g_markup_escape_text(text.c_str(), -1);
-    const std::string markup = std::string("<span foreground=\"#c01c28\">") + escaped + "</span>";
+    const std::string markup =
+        warning ? std::string("<span foreground=\"#c01c28\">") + escaped + "</span>" : std::string(escaped);
     g_free(escaped);
     gtk_label_set_markup(GTK_LABEL(label), markup.c_str());
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
@@ -924,10 +927,14 @@ void refresh_archive_list(GuiState& state)
         // Decision 0028: an archive whose latest manifest cannot be used is
         // listed like the others, with what is wrong and how to fix it under
         // its row, from the volume on (its manifest names no volume now). It
-        // stays one to choose in Verify Archive, which then records the failure.
+        // stays one to choose in Verify Archive, which then records the
+        // failure. A retired archive whose latest manifest is lost shows as
+        // retired with its manifest lost (point 9).
         if (status.unusable_manifest) {
-            const auto problem = text.format("Problem: {}", text(plain_message(*status.unusable_manifest)));
-            gtk_grid_attach(GTK_GRID(view.grid), problem_cell(problem), 2, row, 8, 1);
+            const auto message = text(plain_message(*status.unusable_manifest));
+            const auto problem =
+                status.manifest_lost ? text.format("Manifest lost: {}", message) : text.format("Problem: {}", message);
+            gtk_grid_attach(GTK_GRID(view.grid), problem_cell(problem, !status.manifest_lost), 2, row, 8, 1);
             ++row;
         }
     }

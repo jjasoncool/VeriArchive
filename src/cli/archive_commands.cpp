@@ -1,6 +1,6 @@
-// `archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>
-// [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> |
-// abandon-relocation <uuid>` and `history <uuid>`. Archives are always shown
+// `archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid>
+// <root_path> [--resume] | compare <uuid> <uuid> | abandon-registration
+// <uuid> | abandon-relocation <uuid>` and `history <uuid>`. Archives are always shown
 // with their last FULL verify and last verify of any mode, with dates and
 // OVERDUE flags, never a bare "integrity status" (R-21), and with their
 // unfinished registration and relocation, one line each (decision 0026).
@@ -17,6 +17,7 @@
 #include "core/engine/compare_archives.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/engine/relocate_engine.h"
+#include "core/engine/retire_archive.h"
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
 #include "platform/media_enumerator.h"
@@ -196,12 +197,19 @@ void print_unfinished(const app::Text& text, const UnfinishedByArchive& unfinish
 }
 
 // An archive whose latest manifest cannot be used is listed with that
-// problem, in the plain message that ends with how to fix it (decision 0028).
+// problem, in the plain message that ends with how to fix it (decision 0028);
+// a retired archive whose latest manifest is lost, as retired with its
+// manifest lost, which is no problem the operator owes the repository any
+// more (point 9).
 void print_manifest_problem(const app::Text& text, const ArchiveStatus& status, std::string_view indent)
 {
-    if (status.unusable_manifest) {
-        std::cout << indent << text.format("problem: {}", text(plain_message(*status.unusable_manifest))) << '\n';
+    if (!status.unusable_manifest) {
+        return;
     }
+    const auto message = text(plain_message(*status.unusable_manifest));
+    std::cout << indent
+              << (status.manifest_lost ? text.format("manifest lost: {}", message) : text.format("problem: {}", message))
+              << '\n';
 }
 
 // A manifest that cannot be used, as --json gives it (decision 0028).
@@ -246,6 +254,12 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
     }
     if (status.unusable_manifest) {
         json["manifest_problem"] = manifest_problem_json(*status.unusable_manifest);
+    }
+    // Only a retired archive whose latest manifest is lost has it (decision
+    // 0028, point 9), as only an archive whose manifest cannot be used has
+    // `manifest_problem`.
+    if (status.manifest_lost) {
+        json["manifest_lost"] = true;
     }
     if (const auto found = unfinished.find(status.archive.archive_uuid); found != unfinished.end()) {
         if (!found->second.registration_json.is_null()) {
@@ -321,11 +335,14 @@ std::expected<Opened, Failure> open_statuses(const Arguments& arguments,
 
 // Decision 0028: the listing worked, but an archive's latest manifest cannot
 // be used, or (in `archive show`) an earlier one, which the operator must
-// fix: exit 2, as rebuild-index exits after skipping a manifest.
+// fix: exit 2, as rebuild-index exits after skipping a manifest. Not for the
+// latest manifest of a retired archive that is lost (point 9): the operator
+// declared it so, and it stops nothing; an earlier revision's is still left
+// out of the index by `repo rebuild-index` (point 6).
 int listed_code(const std::vector<ArchiveStatus>& statuses)
 {
     const bool problem = std::ranges::any_of(statuses, [](const ArchiveStatus& status) {
-        return status.unusable_manifest.has_value() || !status.earlier_unusable.empty();
+        return (status.unusable_manifest.has_value() && !status.manifest_lost) || !status.earlier_unusable.empty();
     });
     return problem ? exit_code::passed_with_warnings : exit_code::passed;
 }
@@ -446,23 +463,74 @@ int show(const Arguments& arguments, Opened& opened)
     return listed_code({*status});
 }
 
+// `archive retire <uuid> [--confirm]` (decision 0003): the archive is no
+// longer expected to be verified. Where its latest manifest is lost, retiring
+// it declares that its device is gone as well, and so needs --confirm after
+// saying what it means; without it nothing is written (exit 12, decision
+// 0028, point 9).
 int retire(const Arguments& arguments, Opened& opened)
 {
     const auto status = find_status(opened.statuses, arguments.words[2]);
     if (!status) {
         return report_failure(arguments, status.error());
     }
-    auto archive = status->archive;
-    archive.status = "RETIRED";
-    if (auto updated = opened.store.update_archive(archive); !updated) {
-        return report_failure(arguments, {exit_code::repository, updated.error().message});
+    const auto repository_files = platform::make_file_system_access();
+    const auto retired = retire_archive(opened.store, *repository_files, opened.session.context.repo,
+        RetireRequest{status->archive.archive_uuid, arguments.has("--confirm")});
+    const auto& text = arguments.text;
+    if (!retired) {
+        const auto& failure = retired.error();
+        const int code =
+            failure.kind == RetireFailure::Kind::Repository ? exit_code::repository : exit_code::identity_decision;
+        if (failure.kind != RetireFailure::Kind::Unconfirmed || !failure.retirement ||
+            !failure.retirement->lost_manifest) {
+            return report_failure(arguments, {code, failure.message});
+        }
+        // What retiring the archive means, as a registration over the lost
+        // manifest says what it would register before it is confirmed.
+        const auto& retirement = *failure.retirement;
+        const auto& lost = *retirement.lost_manifest;
+        if (arguments.json) {
+            print_json({{"error", failure.message}, {"exit_code", code},
+                {"retirement", {{"archive_uuid", retirement.archive_uuid}, {"label", retirement.label},
+                                   {"revision", retirement.revision}, {"manifest_problem", manifest_problem_json(lost)}}}});
+            return code;
+        }
+        std::cout << text.format("Lost manifest of {} ({}), revision {}", retirement.label, retirement.archive_uuid,
+                         retirement.revision)
+                  << "\n  " << text(what_is_wrong_with(lost)) << '\n'
+                  << text.format("Retiring the archive declares that manifest lost for good: do this only where no "
+                                 "backup of the repository, export of revision {} or media copy holds it, and the "
+                                 "device that held the archive is gone as well (broken, lost or wiped); otherwise put "
+                                 "the manifest back with `import`, or register the archive's next revision from its "
+                                 "folder or volume with `register <root_path> --lost-manifest {}`. The archive keeps "
+                                 "its verification history and its hash chain, but can no longer be verified or take "
+                                 "a new revision. It no longer stops the registration of a new folder or volume or a "
+                                 "relocation: a retired archive whose latest manifest is lost is no longer taken as a "
+                                 "possible owner of one.",
+                         retirement.revision, retirement.archive_uuid)
+                  << '\n';
+        return report_failure(arguments, {code, failure.message});
     }
     if (arguments.json) {
-        print_json({{"archive_uuid", archive.archive_uuid}, {"status", archive.status}});
+        nlohmann::json json{{"archive_uuid", retired->archive_uuid}, {"status", "RETIRED"}};
+        // Only a retirement of an archive whose latest manifest is lost has
+        // them, as `archive list` gives them (decision 0028, point 9).
+        if (retired->lost_manifest) {
+            json["manifest_lost"] = true;
+            json["manifest_problem"] = manifest_problem_json(*retired->lost_manifest);
+        }
+        print_json(json);
+    } else if (retired->lost_manifest) {
+        std::cout << text.format("Retired {} ({}), whose manifest of revision {} is lost. It keeps its verification "
+                                 "history and its hash chain; it can no longer be verified or take a new revision, "
+                                 "and no longer stops the registration of a new folder or volume or a relocation.",
+                         display_label(*status), retired->archive_uuid, retired->revision)
+                  << '\n';
     } else {
-        std::cout << arguments.text.format("Retired {} ({}). It is no longer expected to be verified, is still "
-                                           "recognised when attached, and keeps its history.",
-                         display_label(*status), archive.archive_uuid)
+        std::cout << text.format("Retired {} ({}). It is no longer expected to be verified, is still "
+                                 "recognised when attached, and keeps its history.",
+                         display_label(*status), retired->archive_uuid)
                   << '\n';
     }
     return exit_code::passed;
@@ -860,10 +928,14 @@ int archive_command(const Arguments& arguments)
     const bool abandon_command = arguments.words.size() == 3 && arguments.words[1] == "abandon-registration";
     const bool relocation_abandon_command =
         arguments.words.size() == 3 && arguments.words[1] == "abandon-relocation";
+    // `retire` takes --confirm, needed where the archive's latest manifest is
+    // lost (decision 0028, point 9).
+    const bool retire_command = arguments.words.size() == 3 && arguments.words[1] == "retire";
+    const bool confirmed_command = abandon_command || relocation_abandon_command || retire_command;
     if (const auto problem = check_options(arguments,
-            abandon_command || relocation_abandon_command ? std::initializer_list<std::string_view>{"--confirm"}
-            : relocate_command                            ? std::initializer_list<std::string_view>{"--resume"}
-                                                          : std::initializer_list<std::string_view>{},
+            confirmed_command  ? std::initializer_list<std::string_view>{"--confirm"}
+            : relocate_command ? std::initializer_list<std::string_view>{"--resume"}
+                               : std::initializer_list<std::string_view>{},
             relocate_command ? std::initializer_list<std::string_view>{"--io", "--resume"}
                              : std::initializer_list<std::string_view>{})) {
         return report_failure(arguments, *problem);
@@ -875,9 +947,9 @@ int archive_command(const Arguments& arguments)
     if (!list_command && !uuid_command && !relocate_command && !compare_command && !abandon_command &&
         !relocation_abandon_command) {
         return report_failure(arguments, {exit_code::usage,
-            "usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--io hdd|ssd] "
-            "[--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | abandon-relocation "
-            "<uuid> [--confirm]"});
+            "usage: archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid> <root_path> [--io "
+            "hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
+            "abandon-relocation <uuid> [--confirm]"});
     }
     // Compare needs no verification status of every archive, only the two
     // manifests; abandoning only the archive's unfinished registration or

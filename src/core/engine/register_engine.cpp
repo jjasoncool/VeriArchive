@@ -397,6 +397,11 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
     return target;
 }
 
+// A retired archive takes no new revision (decision 0003), not even in a
+// registration over its lost manifest (decision 0028, point 9), in a
+// relocation's words.
+constexpr const char* retired_takes_no_revision = "a retired archive takes no new revisions (decision 0003)";
+
 // The archive named for a registration over its lost manifest (decision 0028,
 // point 8), what is wrong with the manifest of its revision, and the archives
 // whose root the root given overlaps on a volume that may be a clone.
@@ -405,14 +410,6 @@ struct LostManifest {
     UnusableManifest manifest;
     std::vector<PossibleClone> possible_clones;
 };
-
-// What only the index gets wrong of an intact manifest: rebuilt from the
-// manifests (R-80), it is used again, so nothing of it is lost.
-bool intact(const UnusableManifest& unusable)
-{
-    return unusable.kind == UnusableManifest::Kind::IndexDiffers ||
-           (unusable.kind == UnusableManifest::Kind::NotIndexed && unusable.file == UnusableManifest::File::Readable);
-}
 
 // The media copy of the lost revision's manifest at the root (R-89), in its
 // .veriarchive folder, when `import` would put it back: of a recorded
@@ -480,6 +477,12 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
     if ((*archive)->current_revision == 0) {
         return fail(Kind::Refused, "archive " + uuid + " has no revision yet");
     }
+    // A retired archive takes no new revision (decision 0003), not even over
+    // its lost manifest: where its device is gone as well, the operator
+    // retired it so, and it stops nothing (decision 0028, point 9).
+    if ((*archive)->status == "RETIRED") {
+        return fail(Kind::Refused, retired_takes_no_revision);
+    }
     const auto revision = (*archive)->current_revision;
     // Checked as a verification of the archive by its uuid checks it before
     // it looks for the media (decision 0028, point 3).
@@ -494,7 +497,9 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
         return fail(Kind::Repository, checked.error().message);
     }
     const auto& unusable = *checked.error().unusable;
-    if (intact(unusable)) {
+    // What only the index gets wrong of an intact manifest: rebuilt from the
+    // manifests (R-80), it is used again, so nothing of it is lost.
+    if (only_the_index_is_wrong(unusable)) {
         return fail(Kind::Refused, "the manifest of revision " + std::to_string(revision) + " of archive " + uuid +
                                        " is not lost: " + plain_message(unusable));
     }
@@ -659,6 +664,24 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 refused = made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, **later).error();
                 store.rollback();
                 return {};
+            }
+            // A registration over the lost manifest of an archive that is
+            // retired by now, as a version before decision 0028, point 9
+            // let one begin: a retired archive takes no new revision, so it
+            // can no longer finish, and waits to be abandoned.
+            if (plan.lost_revision) {
+                const auto archive = store.find_archive(plan.archive_uuid);
+                if (!archive) {
+                    return std::unexpected(archive.error());
+                }
+                if (*archive && (*archive)->status == "RETIRED") {
+                    refused = RegisterFailure{Kind::Refused,
+                        "archive " + plan.archive_uuid + " is retired and takes no new revisions (decision 0003): "
+                        "abandon its unfinished registration with `archive abandon-registration " +
+                            plan.archive_uuid + "`"};
+                    store.rollback();
+                    return {};
+                }
             }
             if (const auto judged = judge_attempt(record, services.processes, services.host.host);
                 judged.state == AttemptState::Running) {
@@ -887,6 +910,13 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 }
                 if (*now && (*now)->current_revision > existing->current_revision) {
                     refused = recorded_before_it_began(plan.archive_uuid, (*now)->current_revision).error();
+                    store.rollback();
+                    return {};
+                }
+                // Retired since it was named (decision 0028, point 9): the
+                // archive takes no new revision over its lost manifest.
+                if (lost && *now && (*now)->status == "RETIRED") {
+                    refused = RegisterFailure{Kind::Refused, retired_takes_no_revision};
                     store.rollback();
                     return {};
                 }
@@ -1234,11 +1264,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             archive = {plan.archive_uuid, plan.label, plan.created, 0, "", "", ""};
         }
         archive.current_revision = plan.revision;
-        // A retired archive registered over its lost manifest stays retired
-        // (decision 0028, point 8).
-        if (!plan.lost_revision || archive.status != "RETIRED") {
-            archive.status = "REGISTERED";
-        }
+        archive.status = "REGISTERED";
         archive.root_subpath = *root_subpath;
         if (auto updated = store.update_archive(archive); !updated) {
             return updated;

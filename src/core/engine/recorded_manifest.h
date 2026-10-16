@@ -64,7 +64,31 @@ struct UnusableManifest {
     // point 8); an earlier one is left out of the index by `repo
     // rebuild-index` (point 6).
     bool latest = true;
+    // The archive is retired (decision 0003): it takes no new revision, so
+    // its lost latest manifest has no last resort, and where that manifest
+    // is lost, matching no longer takes the archive for a possible owner of
+    // a folder or volume (decision 0028, point 9).
+    bool retired = false;
 };
+
+// Whether only the index is wrong of a manifest that is intact (decision
+// 0028): the index differs from a manifest whose line 1 is the one recorded
+// (IndexDiffers), or has no record of one that reads as the manifest of its
+// revision (NotIndexed, File::Readable). Rebuilt from the manifests (R-80),
+// the index gives it back: such a manifest is never lost. Every other
+// manifest that cannot be used is missing, cannot be read or has changed, and
+// only putting it back fixes it.
+bool only_the_index_is_wrong(const UnusableManifest& unusable);
+
+// Whether `unusable`, the manifest of an archive's latest revision, is the
+// lost manifest of a retired archive (decision 0028, point 9): the archive is
+// retired, and that manifest is missing, cannot be read or has changed, not
+// only an index that a rebuild repairs. Where the device that held the
+// archive is gone as well, the operator retires it so (`archive retire`).
+// Matching no longer takes such an archive for a possible owner of a folder
+// or volume, so it stops nothing, and the archive lists show it retired with
+// its manifest lost, which needs nothing of the operator any more.
+bool lost_by_a_retired_archive(const UnusableManifest& unusable);
 
 // The run-level failure class (§A6) of a verification whose manifest cannot
 // be used: ManifestHashMismatch for a manifest that has changed,
@@ -94,16 +118,17 @@ std::string what_is_wrong_with(const UnusableManifest& unusable);
 // 0028, point 7). For the latest revision (`latest`) the message ends with
 // the last resort where none of these holds it: the archive's next revision,
 // registered from what its root holds now with `register <root_path>
-// --lost-manifest <archive_uuid>` (decision 0028, point 8); for an earlier
-// revision, with `repo rebuild-index`, which leaves that revision out of the
-// index (point 6).
+// --lost-manifest <archive_uuid>` (decision 0028, point 8), but for a retired
+// archive (`retired`), which takes no new revision: its message ends with the
+// import (point 9). For an earlier revision it ends with `repo
+// rebuild-index`, which leaves that revision out of the index (point 6).
 std::string plain_message(const UnusableManifest& unusable);
 
 // How to fix it, as the plain message ends after what is wrong: "rebuild the
 // index with `repo rebuild-index`", or "put `it` back with `import
 // <folder>/r0002.vam` from a backup of the repository, ..." and the last
-// resort for the latest revision, or the rebuild that leaves an earlier
-// revision out of the index. `it` names the manifest: "it" in the plain
+// resort for the latest revision of an archive that is not retired, or the
+// rebuild that leaves an earlier revision out of the index. `it` names the manifest: "it" in the plain
 // message, "its manifest" where the sentence before names the archive, as a
 // verification by root that stops on it (decision 0028, point 4).
 std::string how_to_fix(const UnusableManifest& unusable, std::string_view it);

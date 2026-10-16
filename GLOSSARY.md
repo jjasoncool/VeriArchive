@@ -15,7 +15,7 @@ The directory where an archive's file tree starts; recorded relative to its volu
 _Avoid_: mount point (a mount point is runtime-only)
 
 **Retired archive**:
-An archive the operator no longer expects to verify; it is still recognised when its media reappears and keeps its history.
+An archive the operator no longer expects to verify; it takes no new revision and keeps its history. It is still recognised when its media reappears, unless its latest manifest is lost: then it is no longer taken for a possible owner of a folder or volume.
 _Avoid_: deleted, removed archive
 
 **Carrier**:
@@ -43,7 +43,7 @@ The `.vam` file holding one revision's header and entries; its validated bytes a
 _Avoid_: checksum file, index
 
 **Lost manifest**:
-The manifest of an archive's latest revision that is missing or cannot be used, and that nothing can put back: no backup of the repository, export of that revision or media copy holds it. The archive then takes its next revision from what its root holds now, in a registration over its lost manifest (`register --lost-manifest`), which compares nothing with the lost revision.
+The manifest of an archive's latest revision that is missing or cannot be used, and that nothing can put back: no backup of the repository, export of that revision or media copy holds it. The archive then takes its next revision from what its root holds now, in a registration over its lost manifest (`register --lost-manifest`), which compares nothing with the lost revision; where the device that held the archive is gone as well, the operator retires the archive (`archive retire --confirm`).
 _Avoid_: missing manifest (a missing one may still be put back), deleted manifest
 
 **Entry**:

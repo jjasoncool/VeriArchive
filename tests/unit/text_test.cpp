@@ -726,6 +726,68 @@ void translation_tests()
     CHECK(chinese.format("Revision {}, whose manifest was lost, was left out of the index; its verifications stay in "
                          "the history.",
               2) == "清單檔已無法取回的版次 2 已從索引移除；它的驗證紀錄仍保留在歷程中。");
+    // Retiring an archive whose latest manifest is lost (decision 0028, point
+    // 9): what it means before it is confirmed, its outcome and its refusals,
+    // and the archive listed as retired with its manifest lost, whose message
+    // ends with the import, as a retired archive takes no new revision.
+    CHECK(chinese.format("Retiring the archive declares that manifest lost for good: do this only where no backup of "
+                         "the repository, export of revision {} or media copy holds it, and the device that held the "
+                         "archive is gone as well (broken, lost or wiped); otherwise put the manifest back with "
+                         "`import`, or register the archive's next revision from its folder or volume with `register "
+                         "<root_path> --lost-manifest {}`. The archive keeps its verification history and its hash "
+                         "chain, but can no longer be verified or take a new revision. It no longer stops the "
+                         "registration of a new folder or volume or a relocation: a retired archive whose latest "
+                         "manifest is lost is no longer taken as a possible owner of one.",
+              2, uuid) ==
+          "停用此封存，就是宣告該清單檔再也無法取回：只有在儲存庫的備份、版次 2 的匯出檔和媒體副本中都沒有該清單檔，而且存放"
+          "此封存的裝置也已不在（損壞、遺失或已清除）時，才這麼做；否則請以 `import` 放回該清單檔，或以 `register "
+          "<root_path> --lost-manifest " + uuid +
+              "` 用封存的資料夾或磁碟區目前的內容註冊它的下一個版次。封存會保留它的驗證歷程及其雜湊鏈，但再也無法驗證，"
+              "也不再接受新的版次。它不再讓註冊新的資料夾或磁碟區、或搬移停下來：清單檔已無法取回的已停用封存，不再被視為"
+              "可能擁有它們的封存。");
+    CHECK(chinese("error: run the command again with --confirm to retire the archive") ==
+          "錯誤：若要停用此封存，請加上 --confirm 再執行一次");
+    CHECK(chinese.format("Retired {} ({}), whose manifest of revision {} is lost. It keeps its verification history and "
+                         "its hash chain; it can no longer be verified or take a new revision, and no longer stops the "
+                         "registration of a new folder or volume or a relocation.",
+              "ARCH-0002", uuid, 2) ==
+          "已停用 ARCH-0002（" + uuid + "），它版次 2 的清單檔已無法取回。此封存會保留它的驗證歷程及其雜湊鏈；它再也無法"
+                                        "驗證，也不再接受新的版次，並且不再讓註冊新的資料夾或磁碟區、或搬移停下來。");
+    CHECK(chinese("error: archive " + uuid + " now has revision 3, not revision 2; nothing was changed (run the command "
+                  "again)") ==
+          "錯誤：封存 " + uuid + " 現在的版次是 3，而不是版次 2；未做任何變更（請再執行一次此命令）");
+    CHECK(chinese("error: archive " + uuid + " is retired and takes no new revisions (decision 0003): abandon its "
+                  "unfinished registration with `archive abandon-registration " + uuid + "`") ==
+          "錯誤：封存 " + uuid + " 已停用，不再接受新的版次（決策紀錄 0003）：請以 `archive abandon-registration " + uuid +
+              "` 放棄它未完成的註冊");
+    CHECK(chinese("error: a retired archive takes no new revisions (decision 0003)") ==
+          "錯誤：已停用的封存不再接受新的版次（決策紀錄 0003）");
+    const std::string retired_put_back = "; put it back with `import <folder>/r0002.vam` from a backup of the "
+                                         "repository, an export of revision 2, or the media copy in the archive's "
+                                         ".veriarchive folder, where registration wrote one";
+    const std::string retired_put_back_chinese = "；請以 `import <folder>/r0002.vam` 從儲存庫的備份、版次 2 的匯出檔，"
+                                                 "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔";
+    CHECK(chinese("manifest lost: the manifest of revision 2 (" + manifest + ") is missing" + retired_put_back) ==
+          "清單檔無法取回：版次 2 的清單檔（" + manifest + "）已遺失" + retired_put_back_chinese);
+    CHECK(chinese("manifest lost: the manifest of revision 2 (" + manifest + ") cannot be read: CreateFileW failed "
+                  "(Win32 error 5)" + retired_put_back) ==
+          "清單檔無法取回：無法讀取版次 2 的清單檔（" + manifest + "）：CreateFileW 失敗（Win32 錯誤 5）" +
+              retired_put_back_chinese);
+    CHECK(chinese("warning: manifest: the manifest of revision 2 (" + manifest +
+                  ") has changed: its first line differs from what the repository recorded" + retired_put_back) ==
+          "警告：清單檔：版次 2 的清單檔（" + manifest + "）已被變更：其第一行與儲存庫所記錄的不同" +
+              retired_put_back_chinese);
+    CHECK(chinese("manifest lost: " + no_record + ", which is missing" + retired_put_back) ==
+          "清單檔無法取回：" + no_record_chinese + "，而該清單檔已遺失" + retired_put_back_chinese);
+    CHECK(chinese("manifest lost: " + no_record + ", which cannot be read: header does not match its file name" +
+                  retired_put_back) ==
+          "清單檔無法取回：" + no_record_chinese + "，而且無法讀取該清單檔：標頭與其檔名不符" + retired_put_back_chinese);
+    const auto lost = "the manifest of revision 2 (" + manifest + ") is missing" + retired_put_back;
+    CHECK(chinese.format("manifest lost: {}", chinese(lost)) ==
+          "清單檔無法取回：版次 2 的清單檔（" + manifest + "）已遺失" + retired_put_back_chinese);
+    CHECK(chinese.format("Manifest lost: {}", chinese(lost)) ==
+          "清單檔無法取回：版次 2 的清單檔（" + manifest + "）已遺失" + retired_put_back_chinese);
+    CHECK(english.format("Manifest lost: {}", english(lost)) == "Manifest lost: " + lost);
     // An archive listed with the problem of its manifest (decision 0028): the
     // CLI's line and the GUI's row, the message worded as everywhere else.
     const auto missing = "the manifest of revision 2 (" + manifest + ") is missing" + restore;

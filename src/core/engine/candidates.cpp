@@ -53,7 +53,19 @@ std::expected<CandidatePool, CandidatesFailure> load_candidate_pool(ArchiveStore
                                           manifest_not_indexed(repository_files, layout, archive.archive_uuid,
                                               archive.current_revision, false));
         if (!header) {
-            pool.unusable.push_back(CandidatesFailure{plain_message(header.error()), header.error(), archive.label});
+            auto unusable = header.error();
+            unusable.retired = archive.status == "RETIRED";
+            // Decision 0028, point 9: a retired archive whose latest manifest
+            // is lost, as the operator declares where its device is gone as
+            // well, is no possible owner of the root: matching could never
+            // recognise its media without that manifest, and it would stop
+            // every registration of a new folder or volume and every
+            // relocation for good. An index that a rebuild repairs still
+            // stops them, as for any archive: its manifest is not lost.
+            if (lost_by_a_retired_archive(unusable)) {
+                continue;
+            }
+            pool.unusable.push_back(CandidatesFailure{plain_message(unusable), unusable, archive.label});
             continue;
         }
         ArchiveCandidate candidate;

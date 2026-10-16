@@ -79,6 +79,7 @@ add_library(veriarchive_core
     src/core/engine/register_engine.cpp
     src/core/engine/registration_attempt.cpp
     src/core/engine/relocate_engine.cpp
+    src/core/engine/retire_archive.cpp
     src/core/engine/sha256sums.cpp
     src/core/engine/transfer.cpp
     src/core/engine/verify_engine.cpp
@@ -270,6 +271,7 @@ if(BUILD_TESTING)
         tests/unit/register_engine_test.cpp
         tests/unit/relocate_test.cpp
         tests/unit/repository_test.cpp
+        tests/unit/retire_archive_test.cpp
         tests/unit/scanner_test.cpp
         tests/unit/sha256sums_test.cpp
         tests/unit/subst_drive_test.cpp

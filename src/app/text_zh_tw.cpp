@@ -73,7 +73,8 @@ constexpr CatalogEntry entries[] = {
         "           [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
-        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"
+        "  archive list | show <uuid> | retire <uuid> [--confirm]\n"
+        "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  history <uuid>\n"
@@ -88,7 +89,8 @@ constexpr CatalogEntry entries[] = {
         "           [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
-        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"
+        "  archive list | show <uuid> | retire <uuid> [--confirm]\n"
+        "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  history <uuid>\n"
@@ -232,8 +234,11 @@ constexpr CatalogEntry entries[] = {
         "內容：{} 個檔案、{} 個空資料夾、{} 個連結、{} 位元組"},
     {"copy of: {}", "副本來源：{}"},
     {"revisions:", "版次："},
-    // An archive whose latest manifest cannot be used (decision 0028).
+    // An archive whose latest manifest cannot be used (decision 0028), and a
+    // retired archive whose latest manifest is lost (point 9), in the
+    // glossary's term (a lost manifest: 無法取回的清單檔).
     {"problem: {}", "問題：{}", Match::Cause},
+    {"manifest lost: {}", "清單檔無法取回：{}", Match::Cause},
     // The archive's unfinished registration and relocation in archive list and show (decision 0026), from
     // src/app/unfinished_operations.cpp; the progress and state are the Archive List's words.
     {"Unfinished registration of revision {} from \"{}\": {}; {}", "未完成的註冊（版次 {}，根目錄「{}」）：{}；{}",
@@ -243,6 +248,30 @@ constexpr CatalogEntry entries[] = {
     {"Retired {} ({}). It is no longer expected to be verified, "
         "is still recognised when attached, and keeps its history.",
         "已停用 {}（{}）。此封存不再需要定期驗證，接上時仍會被辨識，並保留其歷程。"},
+    // Retiring an archive whose latest manifest is lost (decision 0028, point
+    // 9): what it means, said before the operator confirms it, and its outcome.
+    {"Retiring the archive declares that manifest lost for good: do this only where no backup of the repository, "
+        "export of revision {} or media copy holds it, and the device that held the archive is gone as well (broken, "
+        "lost or wiped); otherwise put the manifest back with `import`, or register the archive's next revision from "
+        "its folder or volume with `register <root_path> --lost-manifest {}`. The archive keeps its verification "
+        "history and its hash chain, but can no longer be verified or take a new revision. It no longer stops the "
+        "registration of a new folder or volume or a relocation: a retired archive whose latest manifest is lost is "
+        "no longer taken as a possible owner of one.",
+        "停用此封存，就是宣告該清單檔再也無法取回：只有在儲存庫的備份、版次 {0} 的匯出檔和媒體副本中都沒有該清單檔，"
+        "而且存放此封存的裝置也已不在（損壞、遺失或已清除）時，才這麼做；否則請以 `import` 放回該清單檔，或以 "
+        "`register <root_path> --lost-manifest {1}` 用封存的資料夾或磁碟區目前的內容註冊它的下一個版次。封存會保留"
+        "它的驗證歷程及其雜湊鏈，但再也無法驗證，也不再接受新的版次。它不再讓註冊新的資料夾或磁碟區、或搬移停下來："
+        "清單檔已無法取回的已停用封存，不再被視為可能擁有它們的封存。",
+        Match::FormatOnly},
+    {"run the command again with --confirm to retire the archive", "若要停用此封存，請加上 --confirm 再執行一次"},
+    {"Retired {} ({}), whose manifest of revision {} is lost. It keeps its verification history and its hash chain; "
+        "it can no longer be verified or take a new revision, and no longer stops the registration of a new folder or "
+        "volume or a relocation.",
+        "已停用 {0}（{1}），它版次 {2} 的清單檔已無法取回。此封存會保留它的驗證歷程及其雜湊鏈；它再也無法驗證，也不再"
+        "接受新的版次，並且不再讓註冊新的資料夾或磁碟區、或搬移停下來。",
+        Match::FormatOnly},
+    {"archive {} now has revision {}, not revision {}; nothing was changed (run the command again)",
+        "封存 {0} 現在的版次是 {1}，而不是版次 {2}；未做任何變更（請再執行一次此命令）"},
     {"RELOCATION REFUSED: {}", "拒絕搬移：{}"},
     {"Relocated {} ({}) to {} as revision {}", "已將 {}（{}）搬移至 {}，成為版次 {}"},
     {"FULL VERIFY {} of the new carrier (run {})", "新載體的完整驗證：{}（執行 {}）"},
@@ -254,10 +283,10 @@ constexpr CatalogEntry entries[] = {
     {"relocation from r{}", "從 r{} 搬移", Match::FormatOnly},
     {"several archives start with {}", "有多個封存以 {} 開頭"},
     {"no archive {}", "找不到封存 {}"},
-    {"usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
+    {"usage: archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid> <root_path> "
         "[--io hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
         "abandon-relocation <uuid> [--confirm]",
-        "用法：archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
+        "用法：archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid> <root_path> "
         "[--io hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
         "abandon-relocation <uuid> [--confirm]"},
     // archive compare: A is the reference archive, B the copy compared with it.
@@ -353,6 +382,8 @@ constexpr CatalogEntry entries[] = {
     // src/gui/archive_list_view.cpp
     {"never", "從未"},
     {"Problem: {}", "問題：{}", Match::FormatOnly},  // an archive whose manifest cannot be used (decision 0028)
+    // A retired archive whose latest manifest is lost (decision 0028, point 9).
+    {"Manifest lost: {}", "清單檔無法取回：{}", Match::FormatOnly},
     {"No repository is open; see Settings.", "目前沒有開啟的儲存庫；請參閱「設定」。"},
     {"{} archive", "{} 個封存", Match::FormatOnly},
     {"{} archives", "{} 個封存", Match::FormatOnly},
@@ -673,6 +704,12 @@ constexpr CatalogEntry entries[] = {
     {"--lost-manifest takes none of --label, --new-revision, --force-new-archive and --resume",
         "--lost-manifest 不能與 --label、--new-revision、--force-new-archive 或 --resume 一起使用"},
     {"--confirm is used only with --lost-manifest", "--confirm 只能與 --lost-manifest 一起使用"},
+    // A retired archive takes no new revision, not even over its lost manifest
+    // (decision 0028, point 9): a registration of it that an older version
+    // began waits to be abandoned.
+    {"archive {} is retired and takes no new revisions (decision 0003): abandon its unfinished registration with "
+        "`archive abandon-registration {}`",
+        "封存 {} 已停用，不再接受新的版次（決策紀錄 0003）：請以 `archive abandon-registration {}` 放棄它未完成的註冊"},
     {"the manifest of revision {} of archive {} can be used: register its next revision with `register <root_path> "
         "--new-revision`",
         "封存 {1} 版次 {0} 的清單檔可以使用：請以 `register <root_path> --new-revision` 註冊它的下一個版次"},
@@ -989,6 +1026,36 @@ constexpr CatalogEntry entries[] = {
         "版次 {0} 的清單檔（{1}）已被變更：{2}；請以 `import <folder>/{3}` 從儲存庫的備份、版次 {4} 的匯出檔，"
         "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
         "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
+        Match::Cause},
+    // The same of the latest revision of a retired archive, which takes no new
+    // revision: the message ends with the import (point 9).
+    {"the manifest of revision {} ({}) is missing; put it back with `import <folder>/{}` from a backup of the "
+        "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one",
+        "版次 {0} 的清單檔（{1}）已遺失；請以 `import <folder>/{2}` 從儲存庫的備份、版次 {3} 的匯出檔，或封存 "
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔"},
+    {"the manifest of revision {} ({}) cannot be read: {}; put it back with `import <folder>/{}` from a backup of "
+        "the repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one",
+        "無法讀取版次 {0} 的清單檔（{1}）：{2}；請以 `import <folder>/{3}` 從儲存庫的備份、版次 {4} 的匯出檔，"
+        "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔",
+        Match::Cause},
+    {"the manifest of revision {} ({}) has changed: {}; put it back with `import <folder>/{}` from a backup of the "
+        "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one",
+        "版次 {0} 的清單檔（{1}）已被變更：{2}；請以 `import <folder>/{3}` 從儲存庫的備份、版次 {4} 的匯出檔，"
+        "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔",
+        Match::Cause},
+    {"the repository's index has no record of the manifest of revision {} ({}), which is missing; put it back with "
+        "`import <folder>/{}` from a backup of the repository, an export of revision {}, or the media copy in the "
+        "archive's .veriarchive folder, where registration wrote one",
+        "儲存庫的索引沒有版次 {0} 的清單檔（{1}）的紀錄，而該清單檔已遺失；請以 `import <folder>/{2}` 從儲存庫的"
+        "備份、版次 {3} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔"},
+    {"the repository's index has no record of the manifest of revision {} ({}), which cannot be read: {}; put it "
+        "back with `import <folder>/{}` from a backup of the repository, an export of revision {}, or the media copy "
+        "in the archive's .veriarchive folder, where registration wrote one",
+        "儲存庫的索引沒有版次 {0} 的清單檔（{1}）的紀錄，而且無法讀取該清單檔：{2}；請以 `import <folder>/{3}` "
+        "從儲存庫的備份、版次 {4} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔",
         Match::Cause},
     // The same of an earlier revision, which has a later revision already:
     // where nothing holds its manifest, `repo rebuild-index` leaves it out of

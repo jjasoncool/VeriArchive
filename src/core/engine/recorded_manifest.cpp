@@ -71,17 +71,21 @@ bool names_what_was_recorded(const RevisionRecord& record, const ManifestHeader&
 
 // The recorded manifest of `revision`, opened and checked against its record
 // up to its body's hash (R-14, R-62, R-15), and the record. `latest`: the
-// revision is the archive's latest, as the archive's record says it.
+// revision is the archive's latest, as the archive's record says it;
+// `retired`: the archive is retired.
 struct OpenedManifest {
     ManifestReader reader;
     RevisionRecord record;
     bool latest = true;
+    bool retired = false;
 };
 
-// `unusable` as a manifest of the archive's latest revision or of an earlier one.
-UnusableManifest of_revision(UnusableManifest unusable, bool latest)
+// `unusable` as a manifest of the archive's latest revision or of an earlier
+// one, of an archive that is retired or not.
+UnusableManifest of_revision(UnusableManifest unusable, bool latest, bool retired)
 {
     unusable.latest = latest;
+    unusable.retired = retired;
     return unusable;
 }
 
@@ -98,12 +102,16 @@ std::expected<OpenedManifest, ManifestLoadFailure> open_recorded(ArchiveStore& s
     // The archive's latest revision, whose lost manifest has a last resort
     // (decision 0028, point 8); an archive without a record has no earlier one.
     const bool latest = !*archive || revision >= (*archive)->current_revision;
+    // A retired archive takes no new revision, not even over its lost
+    // manifest (decision 0028, point 9).
+    const bool retired = *archive && (*archive)->status == "RETIRED";
     if (!*record) {
         // The archive's revision, as its record says it, of which the index
         // has no record (decision 0028): its manifest cannot be used, and
         // what the file at its place is says how to fix it.
         if (*archive && revision > 0 && (*archive)->current_revision == revision) {
-            return fail(manifest_not_indexed(repository_files, layout, archive_uuid, revision, true));
+            return fail(of_revision(
+                manifest_not_indexed(repository_files, layout, archive_uuid, revision, true), true, retired));
         }
         return fail("RepositoryError", "revision " + std::to_string(revision) + " is not recorded");
     }
@@ -113,16 +121,16 @@ std::expected<OpenedManifest, ManifestLoadFailure> open_recorded(ArchiveStore& s
     // a header changed into text that no longer parses has changed as well.
     auto reader = ManifestReader::open(repository_files, path, (*record)->header_blake3);
     if (!reader) {
-        return fail(of_revision(unusable_manifest(**record, reader.error(), false), latest));
+        return fail(of_revision(unusable_manifest(**record, reader.error(), false), latest, retired));
     }
     // Line 1 is the one recorded, and the body the one it names (R-62): the
     // manifest is intact, and what still differs is the index.
     if (!names_what_was_recorded(**record, reader->header())) {
-        return fail(of_revision(unusable_manifest(**record, UnusableManifest::Kind::IndexDiffers), latest));
+        return fail(of_revision(unusable_manifest(**record, UnusableManifest::Kind::IndexDiffers), latest, retired));
     }
     // The index's copy of the header is the manifest's own (CLAUDE.md rule 3).
     if (reader->header_line() != (*record)->header_json) {
-        return fail(of_revision(unusable_manifest(**record, UnusableManifest::Kind::IndexDiffers), latest));
+        return fail(of_revision(unusable_manifest(**record, UnusableManifest::Kind::IndexDiffers), latest, retired));
     }
     const auto highest = std::max_element(all->begin(), all->end(),
         [](const RevisionRecord& left, const RevisionRecord& right) { return left.revision < right.revision; });
@@ -131,7 +139,7 @@ std::expected<OpenedManifest, ManifestLoadFailure> open_recorded(ArchiveStore& s
             "revision " + std::to_string(revision) + " is older than the known revision " +
                 std::to_string(highest->revision));
     }
-    return OpenedManifest{std::move(*reader), **record, latest};
+    return OpenedManifest{std::move(*reader), **record, latest, retired};
 }
 
 } // namespace
@@ -187,13 +195,23 @@ std::string what_is_wrong_with(const UnusableManifest& unusable)
     return "the repository's index differs from the manifest of revision " + revision + " (" + unusable.manifest + ")";
 }
 
+bool only_the_index_is_wrong(const UnusableManifest& unusable)
+{
+    return unusable.kind == UnusableManifest::Kind::IndexDiffers ||
+           (unusable.kind == UnusableManifest::Kind::NotIndexed && unusable.file == UnusableManifest::File::Readable);
+}
+
+bool lost_by_a_retired_archive(const UnusableManifest& unusable)
+{
+    return unusable.retired && !only_the_index_is_wrong(unusable);
+}
+
 std::string how_to_fix(const UnusableManifest& unusable, std::string_view it)
 {
     // An index that differs from an intact manifest, or has no record of one
     // that reads as the manifest of its revision, is rebuilt from the
     // manifests (R-80): nothing of the manifest is lost.
-    if (unusable.kind == UnusableManifest::Kind::IndexDiffers ||
-        (unusable.kind == UnusableManifest::Kind::NotIndexed && unusable.file == UnusableManifest::File::Readable)) {
+    if (only_the_index_is_wrong(unusable)) {
         return "rebuild the index with `repo rebuild-index`";
     }
     // A manifest that is missing, cannot be read or has changed is put back
@@ -205,16 +223,18 @@ std::string how_to_fix(const UnusableManifest& unusable, std::string_view it)
                  std::format("r{:04}.vam", unusable.revision) + "` from a backup of the repository, an export of revision " +
                  revision + ", or the media copy in the archive's .veriarchive folder, where registration wrote one";
     // Of the latest revision, the last resort where none of these holds it
-    // (decision 0028, point 8). An earlier revision has another revision
-    // after it already, and its record serves matching alone, for the
-    // earlier carriers (decision 0004): where none of these holds its
+    // (decision 0028, point 8), unless the archive is retired: it takes no
+    // new revision, and where nothing holds its manifest, it stays retired
+    // with its manifest lost (point 9). An earlier revision has another
+    // revision after it already, and its record serves matching alone, for
+    // the earlier carriers (decision 0004): where none of these holds its
     // manifest, `repo rebuild-index` leaves that record out (point 6), and
     // matching no longer stops on it.
-    if (unusable.latest) {
+    if (unusable.latest && !unusable.retired) {
         steps += "; if none of these holds it, register revision " + std::to_string(unusable.revision + 1) +
                  " from what the archive's root holds now with `register <root_path> --lost-manifest " +
                  unusable.archive_uuid + "`";
-    } else {
+    } else if (!unusable.latest) {
         steps += "; if none of these holds it, leave revision " + revision +
                  " out of the index with `repo rebuild-index`";
     }
@@ -309,7 +329,8 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
         if (!next) {
             // The entries come from a second read of the manifest, checked at
             // the end of the body as the first was.
-            return fail(of_revision(unusable_manifest(opened->record, next.error(), true), opened->latest));
+            return fail(
+                of_revision(unusable_manifest(opened->record, next.error(), true), opened->latest, opened->retired));
         }
         if (!*next) {
             return manifest;

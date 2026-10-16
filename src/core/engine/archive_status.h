@@ -19,6 +19,11 @@ struct ArchiveStatus {
     // The latest revision's manifest cannot be used (decision 0028): the
     // archive is listed with this problem, and without a header.
     std::optional<UnusableManifest> unusable_manifest;
+    // The archive is retired and that manifest is lost (decision 0028, point
+    // 9; lost_by_a_retired_archive): it is listed as retired with its
+    // manifest lost, which needs nothing of the operator any more, and
+    // matching no longer takes it for a possible owner of a folder or volume.
+    bool manifest_lost = false;
     // Every other recorded revision whose manifest cannot be used, read as
     // matching reads them for the earlier carriers (decision 0004): line 1
     // alone. Only where `StatusSelection::earlier_revisions` asks for them.
@@ -54,9 +59,10 @@ struct StatusSelection {
 // is missing, cannot be read, has changed, or the index says otherwise of it
 // or has no record of it) is listed with that problem (unusable_manifest) and
 // without a header, like every other archive: one damaged archive never stops
-// the list (decision 0028). Only the database's failures fail it. Whether a
-// label is shared (R-88) is judged among every archive, whatever `selection`
-// reads.
+// the list (decision 0028); a retired archive whose latest manifest is lost
+// is listed so as well, with its manifest lost (manifest_lost). Only the
+// database's failures fail it. Whether a label is shared (R-88) is judged
+// among every archive, whatever `selection` reads.
 std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Policy& policy,
     std::chrono::sys_seconds now, const StatusSelection& selection = {});

@@ -73,6 +73,13 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
                 status.unusable_manifest = manifest_not_indexed(
                     repository_files, layout, archive.archive_uuid, archive.current_revision, whole);
             }
+            // A retired archive takes no new revision, not even over its
+            // lost manifest, and where that manifest is lost, the archive is
+            // retired with its manifest lost (decision 0028, point 9).
+            if (status.unusable_manifest) {
+                status.unusable_manifest->retired = archive.status == "RETIRED";
+                status.manifest_lost = lost_by_a_retired_archive(*status.unusable_manifest);
+            }
         }
         if (selection.earlier_revisions) {
             // The other revisions' manifests, which matching reads where the

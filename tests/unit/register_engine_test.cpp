@@ -2489,10 +2489,10 @@ void a_registration_over_a_lost_manifest_takes_its_own_volume_beside_a_registere
 // that records the next revision leaves the lost revision's record out of
 // the index as the first attempt would have. Where the manifest was put back
 // meanwhile, the record of its revision stays, and the next revision is
-// registered all the same, as the operator confirmed. A retired archive takes
-// its next revision this way and stays retired, and the new revision names the
-// original that the archive is a copy of, as its newest manifest that can be
-// used says (decision 0005). Sample data.
+// registered all the same, as the operator confirmed. The archive is
+// registered at it, as by any registration of a new revision, and the new
+// revision names the original that the archive is a copy of, as its newest
+// manifest that can be used says (decision 0005). Sample data.
 void a_registration_over_a_lost_manifest_resumes()
 {
     for (const bool put_back_meanwhile : {false, true}) {
@@ -2510,11 +2510,6 @@ void a_registration_over_a_lost_manifest_resumes()
             return;
         }
         const auto& archive_uuid = registered->archive_uuid;
-        auto archive = fixture.store.find_archive(archive_uuid);
-        if (archive && *archive) {
-            (*archive)->status = "RETIRED";
-            CHECK(fixture.store.update_archive(**archive));
-        }
         const auto recorded = va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2);
         const auto kept = read_bytes(recorded);
         std::filesystem::remove(recorded);
@@ -2543,11 +2538,101 @@ void a_registration_over_a_lost_manifest_resumes()
         }
         CHECK(revisions_of(fixture, archive_uuid) ==
               (put_back_meanwhile ? std::vector<std::uint32_t>{1, 2, 3} : std::vector<std::uint32_t>{1, 3}));
-        archive = fixture.store.find_archive(archive_uuid);
-        CHECK(archive && *archive && (*archive)->current_revision == 3 && (*archive)->status == "RETIRED");
+        const auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive && (*archive)->current_revision == 3 && (*archive)->status == "REGISTERED");
         auto reader = va::ManifestReader::open(*fixture.repository.files, resumed->manifest);
         CHECK(reader && reader->header().copy_of == std::optional<va::Uuid>(original) &&
               reader->header().supersedes == 2u);
+    }
+}
+
+// Decision 0028, point 9: a retired archive takes no new revision (decision
+// 0003), not even over its lost manifest. Archive A at /vol/a (sample data),
+// registered twice, whose manifest of revision 2 is gone: retired, as an
+// archive retired before its manifest was lost, the registration over its
+// lost manifest is refused and writes nothing. Retired while that
+// registration was named, before its plan is written (as the media copy is
+// looked for at its root), it writes no plan either. And a registration over
+// the lost manifest that a version before this point let begin (interrupted,
+// the archive retired since) is refused when it is resumed, naming the
+// abandon, which takes it away.
+void a_retired_archive_takes_no_registration_over_its_lost_manifest()
+{
+    const auto retire = [](Fixture& fixture, const va::Uuid& archive_uuid) {
+        auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive);
+        if (archive && *archive) {
+            (*archive)->status = "RETIRED";
+            CHECK(fixture.store.update_archive(**archive));
+        }
+    };
+    const std::string retired_refusal = "a retired archive takes no new revisions (decision 0003)";
+    {
+        Fixture fixture;
+        const auto archive_uuid = archive_a_registered_twice(fixture);
+        std::filesystem::remove(va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2));
+        retire(fixture, archive_uuid);
+        for (const bool confirmed : {false, true}) {
+            const auto refused = fixture.run(over_lost_manifest("/vol/a", archive_uuid, confirmed));
+            CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+                  refused.error().message == retired_refusal);
+        }
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+        CHECK(revisions_of(fixture, archive_uuid) == (std::vector<std::uint32_t>{1, 2}));
+    }
+    {
+        // Retired by another process while the registration was named: the
+        // transaction that writes its plan finds the archive retired.
+        Fixture fixture;
+        const auto archive_uuid = archive_a_registered_twice(fixture);
+        std::filesystem::remove(va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2));
+        const std::string sql = "UPDATE archives SET status = 'RETIRED' WHERE archive_uuid = '" + archive_uuid + "'";
+        test::HookedFiles hooked(fixture.archive, "r0002.vam", [&] { fixture.repository.execute(sql.c_str()); });
+        va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer,
+            fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+            fixture.processes};
+        const auto refused = va::register_archive(
+            services, over_lost_manifest("/vol/a", archive_uuid, true), fixture.cancel, fixture.progress);
+        CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+              refused.error().message == retired_refusal);
+        if (refused) {
+            std::cerr << "  retired meanwhile: registered revision " << refused->revision << '\n';
+        }
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+        CHECK(revisions_of(fixture, archive_uuid) == (std::vector<std::uint32_t>{1, 2}));
+    }
+    {
+        Fixture fixture;
+        const auto archive_uuid = archive_a_registered_twice(fixture);
+        std::filesystem::remove(va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2));
+        fixture.archive.node("a/SAMPLE-two.txt").open_error =
+            va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged (sample)"};
+        const auto interrupted = fixture.run(over_lost_manifest("/vol/a", archive_uuid, true));
+        CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+        fixture.archive.node("a/SAMPLE-two.txt").open_error.reset();
+        retire(fixture, archive_uuid);
+        auto resume = at("/vol/a");
+        resume.resume = true;
+        const auto refused = fixture.run(resume);
+        CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+              refused.error().message == "archive " + archive_uuid +
+                                             " is retired and takes no new revisions (decision 0003): abandon its "
+                                             "unfinished registration with `archive abandon-registration " +
+                                             archive_uuid + "`");
+        if (refused) {
+            std::cerr << "  resumed for a retired archive: registered revision " << refused->revision << '\n';
+        }
+        const auto plan = nlohmann::json::parse(fixture.store.setting("registration:" + archive_uuid).value_or(""),
+            nullptr, false);
+        CHECK(plan.is_object() && plan.value("lost_manifest", 0u) == 2u);
+        CHECK(revisions_of(fixture, archive_uuid) == (std::vector<std::uint32_t>{1, 2}));
+        va::AbandonServices abandon_services{fixture.store, fixture.processes, fixture.host.host};
+        const auto abandoned =
+            va::abandon_registration(abandon_services, va::AbandonRequest{archive_uuid, std::nullopt, std::nullopt});
+        CHECK(abandoned && abandoned->revision == 3 && !abandoned->first_registration);
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+        const auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive && (*archive)->current_revision == 2 && (*archive)->status == "RETIRED");
     }
 }
 
@@ -2693,5 +2778,6 @@ void register_engine_tests()
     a_registration_over_a_lost_manifest_needs_the_archives_own_root();
     a_registration_over_a_lost_manifest_takes_its_own_volume_beside_a_registered_clone();
     a_registration_over_a_lost_manifest_resumes();
+    a_retired_archive_takes_no_registration_over_its_lost_manifest();
     a_new_revision_of_another_archives_root_goes_ahead_beside_a_damaged_archive();
 }

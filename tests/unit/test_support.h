@@ -42,4 +42,5 @@ void subst_drive_tests();
 void progress_estimate_tests();
 void unfinished_operations_tests();
 void abandon_registration_tests();
+void retire_archive_tests();
 void typed_path_tests();

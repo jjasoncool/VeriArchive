@@ -104,7 +104,9 @@ void reads_operations_with_approximate_totals()
 // counts and root_hint), never the index's copy of that header (R-14). When
 // the manifest cannot be used (the index's copy differs, or the manifest is
 // gone; sample data), the totals stay unknown and the row says why, last in
-// its details, in either language.
+// its details, in either language: for a retired archive, without the
+// registration over its lost manifest, which it takes no more (decision 0028,
+// point 9).
 void an_older_verification_takes_its_totals_from_the_manifest()
 {
     test::EngineFixture fixture;
@@ -166,6 +168,13 @@ void an_older_verification_takes_its_totals_from_the_manifest()
     CHECK(gone && gone->files_total == 0 && gone->root.empty() &&
           gone->totals_failure ==
               "the manifest of revision 1 (manifests/" + uuid + "/r0001.vam) is missing" + test::put_back(uuid, 1));
+    fixture.repository.execute("UPDATE archives SET status = 'RETIRED'");
+    const auto retired = read_older();
+    CHECK(retired && retired->totals_failure ==
+                         "the manifest of revision 1 (manifests/" + uuid +
+                             "/r0001.vam) is missing; put it back with `import <folder>/r0001.vam` from a backup of "
+                             "the repository, an export of revision 1, or the media copy in the archive's "
+                             ".veriarchive folder, where registration wrote one");
 }
 
 // Watching reads a database, never creates one: a repository folder whose

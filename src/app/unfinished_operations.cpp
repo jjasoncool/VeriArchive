@@ -95,8 +95,14 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
     std::vector<UnfinishedVerification> verifications;
     std::vector<UnfinishedRelocation> relocations;
     // The revision records of the verifications of a version before decision
-    // 0022, by run: their manifests' headers hold their totals and roots.
-    std::map<std::string, std::optional<RevisionRecord>> older_runs;
+    // 0022, by run: their manifests' headers hold their totals and roots; and
+    // whether the run's archive is retired, which takes no new revision over
+    // a lost manifest (decision 0028, point 9).
+    struct OlderRun {
+        std::optional<RevisionRecord> record;
+        bool retired = false;
+    };
+    std::map<std::string, OlderRun> older_runs;
     const auto done = store->read_transaction([&]() -> std::expected<void, IoError> {
         auto mark = store->archive_list_mark();
         if (!mark) {
@@ -124,7 +130,11 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
             if (!record) {
                 return std::unexpected(record.error());
             }
-            older_runs[verification.run_id] = std::move(*record);
+            const auto archive = store->find_archive(verification.archive_uuid);
+            if (!archive) {
+                return std::unexpected(archive.error());
+            }
+            older_runs[verification.run_id] = {std::move(*record), *archive && (*archive)->status == "RETIRED"};
         }
         auto moving = store->unfinished_relocations();
         if (!moving) {
@@ -171,14 +181,15 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
             // where it was registered, as its manifest's line 1 holds them.
             std::expected<ManifestHeader, std::string> header = std::unexpected(
                 "revision " + std::to_string(verification.revision) + " is not recorded");
-            if (older->second) {
-                if (auto loaded = load_recorded_header(*repository_files, layout, *older->second)) {
+            if (older->second.record) {
+                if (auto loaded = load_recorded_header(*repository_files, layout, *older->second.record)) {
                     header = std::move(*loaded);
                 } else {
                     // The run's revision is the archive's latest exactly where
                     // the run can be resumed (R-104).
                     auto unusable = loaded.error();
                     unusable.latest = verification.resumable;
+                    unusable.retired = older->second.retired;
                     header = std::unexpected(plain_message(unusable));
                 }
             }
