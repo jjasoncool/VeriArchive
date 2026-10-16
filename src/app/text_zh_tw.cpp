@@ -676,7 +676,9 @@ constexpr CatalogEntry entries[] = {
     {"the manifest of revision {} of archive {} can be used: register its next revision with `register <root_path> "
         "--new-revision`",
         "封存 {1} 版次 {0} 的清單檔可以使用：請以 `register <root_path> --new-revision` 註冊它的下一個版次"},
-    {"the manifest of revision {} of archive {} is not lost: {}", "封存 {1} 版次 {0} 的清單檔並沒有遺失：{2}",
+    // "Not lost" in the glossary's term (a lost manifest: 無法取回的清單檔),
+    // never 遺失, which this catalog gives a manifest that is missing.
+    {"the manifest of revision {} of archive {} is not lost: {}", "封存 {1} 版次 {0} 的清單檔並非無法取回：{2}",
         Match::Cause},
     {"the identity file of this root (.veriarchive/identity.json) names archive {}, not archive {}",
         "此根目錄的身分檔案（.veriarchive/identity.json）指向封存 {}，而不是封存 {}"},

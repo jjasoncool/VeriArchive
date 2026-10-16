@@ -693,7 +693,7 @@ void translation_tests()
                   " can be used: register its next revision with `register <root_path> --new-revision`") ==
           "錯誤：封存 " + uuid + " 版次 2 的清單檔可以使用：請以 `register <root_path> --new-revision` 註冊它的下一個版次");
     CHECK(chinese("error: the manifest of revision 2 of archive " + uuid + " is not lost: " + index_differs) ==
-          "錯誤：封存 " + uuid + " 版次 2 的清單檔並沒有遺失：" + index_differs_chinese);
+          "錯誤：封存 " + uuid + " 版次 2 的清單檔並非無法取回：" + index_differs_chinese);
     CHECK(chinese("error: the identity file of this root (.veriarchive/identity.json) names archive " + uuid_b +
                   ", not archive " + uuid) ==
           "錯誤：此根目錄的身分檔案（.veriarchive/identity.json）指向封存 " + uuid_b + "，而不是封存 " + uuid);

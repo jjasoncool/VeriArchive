@@ -199,7 +199,7 @@ Rejected alternatives:
 | Registering revision M from this root takes what it holds now as the archive's new baseline, without comparing it with revision N, whose manifest is lost: damage since revision N was registered would not be found. ... | 從此根目錄註冊版次 M，會把它目前的內容當作封存新的基準，而不與清單檔已無法取回的版次 N 比對：自版次 N 註冊以來發生的損壞將不會被發現。…… |
 | run the command again with --confirm to register revision M | 若要註冊版次 M，請加上 --confirm 再執行一次 |
 | the manifest of revision N of archive U can be used: register its next revision with `register <root_path> --new-revision` | 封存 U 版次 N 的清單檔可以使用：請以 `register <root_path> --new-revision` 註冊它的下一個版次 |
-| the manifest of revision N of archive U is not lost: M | 封存 U 版次 N 的清單檔並沒有遺失：M |
+| the manifest of revision N of archive U is not lost: M | 封存 U 版次 N 的清單檔並非無法取回：M |
 | the identity file of this root (.veriarchive/identity.json) names archive X, not archive U | 此根目錄的身分檔案（.veriarchive/identity.json）指向封存 X，而不是封存 U |
 | the media copy at this root holds the manifest of revision N of archive U: put it back with `import P` | 此根目錄的媒體副本中有封存 U 版次 N 的清單檔：請以 `import P` 放回該清單檔 |
 | the root overlaps the root of archive X, whose latest manifest records this volume's filesystem id and device (decision 0001) | 根目錄與封存 X 的根目錄重疊，而該封存最新的清單檔所記錄的正是此磁碟區的檔案系統 UUID 與裝置（決策紀錄 0001） |
