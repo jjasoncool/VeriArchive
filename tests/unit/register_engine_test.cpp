@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -1673,6 +1674,184 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     }
 }
 
+// ---- A plan made for an older revision (decision 0030) ---------------------
+
+// How a registration made for an older revision is refused.
+std::string made_for_an_older_revision(
+    const va::Uuid& archive_uuid, std::uint32_t creates, std::uint32_t archive_revision)
+{
+    return "the unfinished registration of archive " + archive_uuid + " (root \"" +
+           va::path_to_utf8(std::filesystem::path("/vol")) + "\") would create revision " + std::to_string(creates) +
+           ", but the archive now has a later revision (" + std::to_string(archive_revision) +
+           "); the registration can no longer finish: abandon it with `archive abandon-registration " + archive_uuid +
+           "`";
+}
+
+// The sample at /vol registered as revision 1 (sample data); its uuid.
+va::Uuid registered_sample(Fixture& fixture)
+{
+    fill_sample(fixture.archive);
+    const auto first = fixture.run(at("/vol"));
+    CHECK(first && first->revision == 1);
+    return first ? first->archive_uuid : va::Uuid{};
+}
+
+// Decision 0030: a `register --new-revision` that creates revision 2 is
+// interrupted (its device went away), and then an import gives the archive
+// revision 3 (another repository's export, sample data). The registration can
+// no longer finish: revision 2 would set the archive back (R-15). Its resume
+// is refused before it reads anything, saying so and naming the abandon, and
+// so are a registration of its root without --resume and one of its volume
+// through another path (a second mount point), which would otherwise be told
+// to finish it. Nothing is recorded: its plan and saved progress stay, and the
+// archive stays at revision 3, which verifies. A plan whose revision is
+// recorded is done with instead (decision 0023), and keeps the words that
+// name its resume, which removes it. Abandoned, the registration leaves the
+// archive to its next one.
+void a_registration_made_for_an_older_revision_never_records()
+{
+    Fixture fixture;
+    const auto archive_uuid = registered_sample(fixture);
+    fixture.archive.node("videos/v130.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    auto again = at("/vol");
+    again.new_revision = true;
+    const auto interrupted = fixture.run(again);
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("videos/v130.bin").open_error.reset();
+    const auto key = "registration:" + archive_uuid;
+    const auto plan = fixture.store.setting(key).value_or("");
+    const auto saved = fixture.store.file_row_count(archive_uuid, 2).value_or(va::CheckpointCount{});
+    CHECK(!plan.empty() && saved.files > 0);
+
+    test::import_later_revision(fixture, fixture.store, archive_uuid, 3);
+    const auto refusal = made_for_an_older_revision(archive_uuid, 2, 3);
+    fixture.archive.bytes_read = 0;
+    auto resume = at("/vol");
+    resume.resume = true;
+    const auto resumed = fixture.run(resume);
+    CHECK(!resumed && resumed.error().kind == va::RegisterFailure::Kind::Refused &&
+          resumed.error().message == refusal);
+    const auto restarted = fixture.run(again);
+    CHECK(!restarted && restarted.error().kind == va::RegisterFailure::Kind::Refused &&
+          restarted.error().message == refusal);
+    auto alias = fixture.media.volume;
+    alias.mount_point = fixture.archive.root() / "alias";
+    fixture.media.extra_volumes.push_back(alias);
+    auto through_alias = at(fixture.archive.root() / "alias");
+    through_alias.new_revision = true;
+    const auto other_path = fixture.run(through_alias);
+    CHECK(!other_path && other_path.error().kind == va::RegisterFailure::Kind::Refused &&
+          other_path.error().message == refusal);
+    fixture.media.extra_volumes.clear();
+    CHECK(fixture.archive.bytes_read == 0);
+    CHECK(fixture.store.setting(key) == plan);
+    const auto kept = fixture.store.file_row_count(archive_uuid, 2);
+    CHECK(kept && kept->files == saved.files && kept->bytes == saved.bytes);
+    const auto revision = fixture.store.revision(archive_uuid, 2);
+    CHECK(revision && !*revision);
+    const auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 3);
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 3);
+
+    // The plan of a revision that another operation recorded and left behind
+    // (sample data): its root's registration says to resume it.
+    auto dead = nlohmann::json::parse(plan, nullptr, false);
+    dead["revision"] = 3;
+    CHECK(fixture.store.set_setting(key, dead.dump()));
+    const auto done_with = fixture.run(again);
+    CHECK(!done_with && done_with.error().message == "an interrupted registration of this root exists (archive " +
+                                                         archive_uuid +
+                                                         "); finish it with --resume, or abandon it with `archive "
+                                                         "abandon-registration " +
+                                                         archive_uuid + "`");
+    CHECK(fixture.store.set_setting(key, plan));
+
+    va::AbandonServices abandoning{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandoned = va::abandon_registration(abandoning, {archive_uuid, std::nullopt, std::nullopt});
+    CHECK(abandoned && abandoned->revision == 2 && abandoned->files == saved.files && !abandoned->first_registration);
+    const auto next = fixture.run(again);
+    CHECK(next && next->archive_uuid == archive_uuid && next->revision == 4);
+    const auto latest = fixture.verify(fixture.archive.root());
+    CHECK(latest && latest->result == "PASSED" && latest->revision == 4);
+}
+
+// Decision 0030: an import gives the archive revision 3 while a `register
+// --new-revision` creating revision 2 writes its manifest. Its record finds
+// the archive at a later revision and records nothing: no revision 2, no
+// manifest under its name, the archive at revision 3. Its plan says that the
+// attempt stopped, and keeps the files it saved.
+void a_registration_meets_a_later_revision_at_its_record()
+{
+    Fixture fixture;
+    const auto archive_uuid = registered_sample(fixture);
+    test::StagingHookWriter writer(*fixture.repository.writer, [&] {
+        auto store = fixture.repository.store(); // another process's connection
+        test::import_later_revision(fixture, store, archive_uuid, 3);
+    });
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, writer, fixture.media_writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host, fixture.processes};
+    auto request = at("/vol");
+    request.new_revision = true;
+    const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Refused &&
+          registered.error().message == made_for_an_older_revision(archive_uuid, 2, 3));
+    const auto revision = fixture.store.revision(archive_uuid, 2);
+    CHECK(revision && !*revision);
+    const auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 3);
+    CHECK(names_in(fixture.repository.context.repo.manifests() / archive_uuid) ==
+          (std::set<std::string>{"r0001.vam", "r0003.vam"}));
+    const auto plan = plan_of(fixture.store, archive_uuid);
+    CHECK(plan.is_object() && plan.value("revision", 0) == 2 && plan.contains("stopped"));
+    const auto saved = fixture.store.file_row_count(archive_uuid, 2);
+    CHECK(saved && saved->files == 40);
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 3);
+}
+
+// Decision 0030: a registration that can no longer finish stops reading at
+// its next checkpoint, after at most 1000 more files, rather than reading the
+// rest for nothing. While a `register --new-revision` of 2540 sample files
+// reads its 101st, an import gives the archive revision 3: the registration
+// stops with less than half of the rest read, and records nothing.
+void a_registration_made_for_an_older_revision_stops_reading()
+{
+    constexpr int many = 2500;
+    constexpr std::uint64_t many_file_bytes = 10;
+    constexpr std::uint64_t sample_bytes = 20780; // fill_sample's 40 files
+    Fixture fixture;
+    for (int index = 0; index < many; ++index) {
+        fixture.archive.add_file(std::format("many/m{:05}.txt", index), std::string(many_file_bytes, 'm'));
+    }
+    const auto archive_uuid = registered_sample(fixture);
+    std::uint64_t read_before = 0;
+    test::HookedFiles hooked(fixture.archive, "m00100.txt", [&] {
+        auto store = fixture.repository.store(); // another process's connection
+        test::import_later_revision(fixture, store, archive_uuid, 3);
+        read_before = fixture.archive.bytes_read;
+    });
+    va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
+    auto request = at("/vol");
+    request.new_revision = true;
+    const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Refused &&
+          registered.error().message == made_for_an_older_revision(archive_uuid, 2, 3));
+    // From the 101st file on, the volume holds 2400 more of them and the 40
+    // others; it stops after about 900.
+    const auto unread = (many - 100) * many_file_bytes + sample_bytes;
+    const auto read_after = fixture.archive.bytes_read - read_before;
+    CHECK(read_after < unread / 2);
+    if (read_after >= unread / 2) {
+        std::cerr << "  read " << read_after << " of " << unread
+                  << " bytes after the archive had a later revision\n";
+    }
+    const auto revision = fixture.store.revision(archive_uuid, 2);
+    CHECK(revision && !*revision);
+}
+
 } // namespace
 
 void register_engine_tests()
@@ -1714,4 +1893,7 @@ void register_engine_tests()
     an_attempt_abandoned_while_it_writes_its_manifest_records_nothing();
     an_abandoned_attempt_leaves_the_next_registration_alone();
     a_registration_never_replaces_another_unfinished_one_of_its_archive();
+    a_registration_made_for_an_older_revision_never_records();
+    a_registration_meets_a_later_revision_at_its_record();
+    a_registration_made_for_an_older_revision_stops_reading();
 }

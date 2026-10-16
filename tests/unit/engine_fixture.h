@@ -4,8 +4,13 @@
 #include "fakes.h"
 #include "test_repository.h"
 
+#include "core/engine/recorded_manifest.h"
 #include "core/engine/register_engine.h"
+#include "core/engine/transfer.h"
 #include "core/engine/verify_engine.h"
+#include "core/manifest/manifest_writer.h"
+
+#include <format>
 
 namespace test {
 
@@ -80,5 +85,47 @@ struct EngineFixture {
         return verify(request);
     }
 };
+
+// Imports revision `revision` of the archive `archive_uuid` through `store`,
+// as the operator imports an export of another repository that recorded the
+// revisions between (sample data): the header and entries of the archive's
+// current revision here, renumbered and written by "another-repository" into
+// a folder of exports beside the repository. The archive then has a later
+// revision than an unfinished registration or relocation of it here was made
+// for (decision 0030).
+inline void import_later_revision(
+    EngineFixture& fixture, va::ArchiveStore& store, const va::Uuid& archive_uuid, std::uint32_t revision)
+{
+    const auto archive = store.find_archive(archive_uuid);
+    if (!archive || !*archive) {
+        CHECK(false);
+        return;
+    }
+    const auto current = va::load_recorded_manifest(
+        store, *fixture.repository.files, fixture.repository.context.repo, archive_uuid, (*archive)->current_revision);
+    CHECK(current.has_value());
+    if (!current) {
+        return;
+    }
+    const auto directory = fixture.repository.context.repo.root.parent_path() / "exports" / std::to_string(revision);
+    std::filesystem::create_directories(directory);
+    const auto path = directory / std::format("r{:04}.vam", revision);
+    va::ManifestWriter writer(*fixture.repository.writer, *fixture.repository.files, path);
+    for (const auto& entry : current->entries) {
+        CHECK(writer.add(entry).has_value());
+    }
+    auto header = current->header;
+    header.revision = revision;
+    header.supersedes = revision - 1;
+    header.host = "another-repository";
+    const auto written = writer.finish(header);
+    CHECK(written && written->file->commit().has_value());
+    const auto imported = va::import_manifest(
+        store, *fixture.repository.files, *fixture.repository.writer, fixture.repository.context.repo, path, false);
+    CHECK(imported && imported->revision == revision && !imported->new_archive);
+    if (!imported) {
+        std::cerr << "  import of revision " << revision << ": " << imported.error().message << '\n';
+    }
+}
 
 } // namespace test

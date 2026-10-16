@@ -82,6 +82,24 @@ RelocateFailure differs_refusal(const Uuid& uuid, const std::string& root)
         {}};
 }
 
+// A relocation made for an older revision never records (decision 0030). A
+// relocation against revision N creates N+1; once another operation, such as
+// an import of N+2, gives the archive a later revision, recording N+1 would
+// set the archive back (R-15). Its record and saved progress stay until the
+// operator abandons it; every attempt that meets it, and a relocation that
+// is not a resume, stops with this.
+RelocateFailure made_for_an_older_revision(
+    const Uuid& uuid, const std::string& root, std::uint32_t verifies, std::uint32_t archive_revision)
+{
+    return RelocateFailure{RelocateFailure::Kind::Refused,
+        "the unfinished relocation of archive " + uuid + " (to \"" + root + "\") verifies revision " +
+            std::to_string(verifies) + ", but the archive now has a later revision (" +
+            std::to_string(archive_revision) +
+            "); the relocation can no longer finish: abandon it with `archive abandon-relocation " + uuid +
+            "`, then relocate again",
+        {}};
+}
+
 // Whether `volume` and the folder `root_subpath` on it are where the
 // relocation started (decision 0026): the volume its record saw then, as
 // identity matching tells it (§B10: MATCH, or MATCH_WEAK where a serial or
@@ -222,8 +240,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     // verifies, the process that ran the attempt before has ended, and its new
     // root is where it started. A record whose revision another operation has
     // recorded can never finish: it goes, with its checkpoints. One whose new
-    // carrier was found to differ can never finish either, but it stays for
-    // the operator to abandon: both are refused, saying so.
+    // carrier was found to differ can never finish either, nor can one made
+    // for an older revision than the archive has now (decision 0030), but
+    // they stay for the operator to abandon: each is refused, saying so.
     nlohmann::json record;
     std::string run_id;
     Timestamp started;          // when the relocation's first attempt started
@@ -240,6 +259,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         }
         auto unfinished = unfinished_from(*stored);
         bool dead = false;
+        std::optional<std::uint32_t> later; // the archive's, when it has a later one than the record's
         if (unfinished) {
             const auto taken = store.revision_recorded(uuid, unfinished->revision + 1);
             if (!taken) {
@@ -250,11 +270,22 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                 if (auto removed = store.remove_relocation(uuid, unfinished->run_id); !removed) {
                     return removed;
                 }
+            } else {
+                auto found = store.later_revision(uuid, unfinished->revision);
+                if (!found) {
+                    return std::unexpected(found.error());
+                }
+                later = *found;
             }
         }
         if (!request.resume) {
             if (unfinished && !dead && unfinished->differs) {
                 refused = differs_refusal(uuid, unfinished->root);
+                store.rollback();
+                return {};
+            }
+            if (unfinished && later) {
+                refused = made_for_an_older_revision(uuid, unfinished->root, unfinished->revision, *later);
                 store.rollback();
                 return {};
             }
@@ -300,6 +331,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         // there says nothing of a carrier copied again (decision 0026).
         if (unfinished->differs) {
             refused = differs_refusal(uuid, unfinished->root);
+            store.rollback();
+            return {};
+        }
+        // Made for an older revision (decision 0030): it can no longer
+        // finish, and stays for the operator to abandon.
+        if (later) {
+            refused = made_for_an_older_revision(uuid, unfinished->root, unfinished->revision, *later);
             store.rollback();
             return {};
         }
@@ -412,12 +450,14 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     input.content_verified = std::move(content_verified);
     // R-104: the matched entries are saved every 1000 entries or 60 seconds.
     // Each checkpoint looks first, in its own transaction, whether the
-    // revision this relocation creates is recorded (by another operation) or
-    // its record is gone (abandoned); then it stops, saving nothing. A
+    // revision this relocation creates is recorded (by another operation), its
+    // record is gone (abandoned), or the archive has a later revision than the
+    // one it verifies (decision 0030); then it stops, saving nothing. A
     // checkpoint that cannot be saved is rolled back, and its entries are
     // tried again with the next one.
     bool lost = false;      // another operation recorded the revision
     bool abandoned = false; // the operator abandoned the relocation meanwhile
+    std::optional<std::uint32_t> later_revision; // the archive's, once it has a later one than this verifies
     std::vector<std::string> unsaved;
     input.checkpoint = [&](const std::vector<std::string>& keys) {
         unsaved.insert(unsaved.end(), keys.begin(), keys.end());
@@ -438,12 +478,20 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                 abandoned = true;
                 return {};
             }
+            const auto later = store.later_revision(uuid, previous_revision);
+            if (!later) {
+                return std::unexpected(later.error());
+            }
+            if (*later) {
+                later_revision = *later;
+                return {};
+            }
             return store.add_progress(run_id, unsaved);
         });
-        if (saved && !lost && !abandoned) {
+        if (saved && !lost && !abandoned && !later_revision) {
             unsaved.clear();
         }
-        return !lost && !abandoned;
+        return !lost && !abandoned && !later_revision;
     };
     // The first entry that the new carrier does not hold as recorded ends the
     // relocation (below), however this attempt ends. Its record says so at
@@ -491,6 +539,14 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         return fail(Kind::Refused, "the unfinished relocation of archive " + uuid +
                                        " was abandoned while this attempt ran; nothing was changed");
     };
+    // The archive has a later revision than the one this relocation verifies
+    // (decision 0030): it stops, recording nothing. Its record keeps its
+    // saved progress, and says last that it stopped, for the operator to
+    // abandon.
+    const auto made_for_older = [&] {
+        return std::unexpected(
+            made_for_an_older_revision(uuid, path_to_utf8(request.root), previous_revision, *later_revision));
+    };
     // An interrupted attempt (cancelled, its device removed) is recorded in
     // the history as an interrupted verification is (R-104): an INCOMPLETE
     // FULL verification of the revision it compared the new carrier with,
@@ -536,6 +592,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     }
     if (abandoned) {
         return abandoned_meanwhile();
+    }
+    if (later_revision) {
+        return made_for_older();
     }
     // The new carrier must hold exactly the recorded content. Names that cannot
     // exist there would silently drop out of the baseline, so they block too.
@@ -680,6 +739,19 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             abandoned = true;
             return std::unexpected(IoError{IoErrorKind::Other, 0, "the relocation was abandoned"});
         }
+        // A relocation made for an older revision never records (decision
+        // 0030): another operation, such as an import, gave the archive a
+        // later revision while this one ran, and recording this one would set
+        // the archive back to it (R-15). Its record and saved progress stay
+        // for the operator to abandon.
+        const auto later = store.later_revision(uuid, previous_revision);
+        if (!later) {
+            return std::unexpected(later.error());
+        }
+        if (*later) {
+            later_revision = *later;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the archive has a later revision"});
+        }
         // An unfinished registration creating the same revision (`register
         // --new-revision`) checkpoints the files it has hashed under it
         // (R-104). Recorded over them, they would join this revision's index,
@@ -762,6 +834,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         }
         if (abandoned) {
             return abandoned_meanwhile();
+        }
+        if (later_revision) {
+            return made_for_older();
         }
         if (registering) {
             // The registration keeps the revision (decision 0023) until it is

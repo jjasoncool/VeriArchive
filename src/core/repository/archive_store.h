@@ -252,6 +252,16 @@ public:
     // transaction the answer holds until it ends: no other connection can
     // record a revision meanwhile (decision 0023).
     std::expected<bool, IoError> revision_recorded(const Uuid& archive_uuid, std::uint32_t revision);
+    // The revision the archive is at, when it is later than `made_for` while
+    // the revision after `made_for` is not recorded: an unfinished
+    // registration or relocation made for revision `made_for` creates that
+    // revision, and another operation, such as an import of a later revision,
+    // has given the archive a later one meanwhile. That operation can never
+    // finish: recording its revision would set the archive back (R-15,
+    // decision 0030). Nothing otherwise, also for an archive without a
+    // record. Inside a write transaction the answer holds until it ends.
+    std::expected<std::optional<std::uint32_t>, IoError> later_revision(
+        const Uuid& archive_uuid, std::uint32_t made_for);
     std::expected<std::vector<RevisionRecord>, IoError> revisions(const Uuid& archive_uuid);
     std::expected<std::optional<RevisionRecord>, IoError> revision(
         const Uuid& archive_uuid, std::uint32_t revision);

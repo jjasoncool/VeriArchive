@@ -671,4 +671,66 @@ run_cli("0;2" verify --full "${moving_uuid}")
 run_cli("0;2" verify --full "${MOVE_FROM}")
 file(RENAME "${EARLIER}.away" "${EARLIER}")
 
+# A registration or relocation made for an older revision never records
+# (decision 0030). The archive of a folder (sample data) is registered in the
+# first repository and imported into the second. In the second, a relocation
+# against revision 1 to a copy of the folder, and then a registration of
+# revision 2, each stop at their record while a folder stands where the
+# manifest of revision 2 belongs, keeping what they did. The first repository
+# records revisions 2 and 3, and the second imports revision 3. Then each
+# resume, the folder's registration and a relocation without --resume are
+# refused (exit 12), saying that the archive has a later revision and how to
+# abandon them. The archive stays at revision 3, which verifies; abandoned,
+# both are gone.
+set(GLOBAL --config "${WORK}/config.json")
+set(LATER "${WORK}/later")
+set(LATER_COPY "${WORK}/later-copy")
+file(WRITE "${LATER}/a.txt" "later sample a\n")
+file(WRITE "${LATER}/b.txt" "later sample b\n")
+file(COPY "${LATER}/" DESTINATION "${LATER_COPY}")
+run_cli("0" register "${LATER}" --json)
+string(JSON later_uuid GET "${last_output}" archive_uuid)
+string(SUBSTRING "${later_uuid}" 0 8 later_prefix)
+run_cli("0" export "${later_prefix}" --out "${WORK}/export-later1")
+set(GLOBAL --config "${WORK}/config2.json")
+run_cli("0" import "${WORK}/export-later1/r0001.vam")
+set(BLOCKER "${WORK}/repo2/manifests/${later_uuid}/r0002.vam")
+file(MAKE_DIRECTORY "${BLOCKER}")
+run_cli("11" archive relocate "${later_prefix}" "${LATER_COPY}")
+run_cli("11" register "${LATER}" --new-revision)
+file(REMOVE_RECURSE "${BLOCKER}")
+set(GLOBAL --config "${WORK}/config.json")
+run_cli("0;2" register "${LATER}" --new-revision)
+run_cli("0;2" register "${LATER}" --new-revision)
+run_cli("0" export "${later_prefix}" --out "${WORK}/export-later3")
+set(GLOBAL --config "${WORK}/config2.json")
+run_cli("0" import "${WORK}/export-later3/r0003.vam")
+set(later_registration "would create revision 2, but the archive now has a later revision (3); the registration can no longer finish: abandon it with `archive abandon-registration ${later_uuid}`")
+set(later_relocation "verifies revision 1, but the archive now has a later revision (3); the relocation can no longer finish: abandon it with `archive abandon-relocation ${later_uuid}`, then relocate again")
+foreach(refused IN ITEMS "register;${LATER};--resume" "register;${LATER};--new-revision"
+        "archive;relocate;${later_prefix};${LATER_COPY};--resume" "archive;relocate;${later_prefix};${LATER_COPY}")
+    run_cli("12" --lang en ${refused})
+    if(refused MATCHES "^register")
+        string(FIND "${last_errors}" "${later_registration}" said)
+    else()
+        string(FIND "${last_errors}" "${later_relocation}" said)
+    endif()
+    if(said EQUAL -1)
+        message(FATAL_ERROR "${refused} made for an older revision:\n${last_errors}")
+    endif()
+endforeach()
+run_cli("0" archive show "${later_prefix}" --json)
+string(JSON later_revision GET "${last_output}" revision)
+if(NOT later_revision EQUAL 3)
+    message(FATAL_ERROR "an archive whose operations were made for an older revision:\n${last_output}")
+endif()
+run_cli("0;2" verify --full "${later_uuid}")
+run_cli("0" archive abandon-registration "${later_prefix}" --confirm)
+run_cli("0" archive abandon-relocation "${later_prefix}" --confirm)
+run_cli("0" archive show "${later_prefix}" --json)
+if(last_output MATCHES "unfinished_")
+    message(FATAL_ERROR "an abandoned registration or relocation is still unfinished:\n${last_output}")
+endif()
+set(GLOBAL --config "${WORK}/config.json")
+
 message(STATUS "veriarchive-cli end-to-end test passed")

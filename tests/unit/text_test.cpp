@@ -391,6 +391,18 @@ void translation_tests()
           "完成該註冊，或以 `archive abandon-registration " + uuid + "` 放棄它後再匯入一次）");
     CHECK(chinese("ManifestHashMismatch: the manifest changed while it was imported; nothing was imported") ==
           "清單檔雜湊不符：清單檔在匯入期間被變更；未匯入任何內容");
+    // A registration or relocation made for an older revision never records
+    // (decision 0030); the revisions and the root keep their places.
+    CHECK(chinese("error: the unfinished registration of archive " + uuid + " (root \"Z:\\範例\") would create "
+                  "revision 2, but the archive now has a later revision (3); the registration can no longer finish: "
+                  "abandon it with `archive abandon-registration " + uuid + "`") ==
+          "錯誤：封存 " + uuid + " 未完成的註冊（根目錄「Z:\\範例」）原本要建立版次 2，但封存現在已有較新的版次（3）；"
+          "這個註冊再也無法完成：請以 `archive abandon-registration " + uuid + "` 放棄它");
+    CHECK(chinese("the unfinished relocation of archive " + uuid + " (to \"Y:\\範例\") verifies revision 1, but the "
+                  "archive now has a later revision (3); the relocation can no longer finish: abandon it with "
+                  "`archive abandon-relocation " + uuid + "`, then relocate again") ==
+          "封存 " + uuid + " 未完成的搬移（至「Y:\\範例」）驗證的是版次 1，但封存現在已有較新的版次（3）；"
+          "這次搬移再也無法完成：請以 `archive abandon-relocation " + uuid + "` 放棄它，再重新搬移");
     // A cause that a hint follows is translated too, and the uuid after it is
     // carried over.
     CHECK(chinese.format("RELOCATION REFUSED: {}",

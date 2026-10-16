@@ -672,6 +672,28 @@ std::expected<bool, IoError> ArchiveStore::revision_recorded(const Uuid& archive
     return statement->step();
 }
 
+std::expected<std::optional<std::uint32_t>, IoError> ArchiveStore::later_revision(
+    const Uuid& archive_uuid, std::uint32_t made_for)
+{
+    // A revision after `made_for` that is recorded means the operation's own
+    // revision was taken (decision 0023), which its callers tell apart first.
+    auto statement = database_.prepare(
+        "SELECT current_revision FROM archives WHERE archive_uuid = ?1 AND current_revision > ?2 "
+        "AND NOT EXISTS (SELECT 1 FROM archive_revisions WHERE archive_uuid = ?1 AND revision = ?2 + 1)");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(made_for));
+    const auto row = statement->step();
+    if (!row) {
+        return std::unexpected(row.error());
+    }
+    if (!*row) {
+        return std::optional<std::uint32_t>{};
+    }
+    return std::optional<std::uint32_t>(static_cast<std::uint32_t>(statement->integer(0)));
+}
+
 std::expected<std::vector<RevisionRecord>, IoError> ArchiveStore::revisions(const Uuid& archive_uuid)
 {
     auto statement = database_.prepare(

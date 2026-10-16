@@ -1485,25 +1485,42 @@ void a_relocation_that_loses_while_hashing_records_nothing()
     CHECK(runs && runs->empty());
 }
 
+// How a relocation to the new disk made for an older revision is refused
+// (decision 0030).
+std::string made_for_an_older_revision(
+    RelocationFixture& fixture, std::uint32_t verifies, std::uint32_t archive_revision)
+{
+    return "the unfinished relocation of archive " + fixture.archive_uuid + " (to \"" +
+           va::path_to_utf8(fixture.archive.root() / "new") + "\") verifies revision " + std::to_string(verifies) +
+           ", but the archive now has a later revision (" + std::to_string(archive_revision) +
+           "); the relocation can no longer finish: abandon it with `archive abandon-relocation " +
+           fixture.archive_uuid + "`, then relocate again";
+}
+
 // Decision 0026, point 2: a relocation that can no longer finish stops
 // reading at its next checkpoint, after at most 1000 more entries, rather than
 // reading the rest of the carrier for nothing. While the relocation of 2540
 // sample files reads its 101st, another process records the revision it
-// creates (`register --new-revision` of the old carrier), or abandons it.
+// creates (`register --new-revision` of the old carrier), abandons it, or
+// gives the archive a later revision than the one it verifies (an import,
+// decision 0030).
 void a_relocation_that_can_no_longer_finish_stops_reading()
 {
     constexpr int many = 2500;
-    for (const bool abandon : {false, true}) {
+    enum class Meanwhile { RevisionRecorded, Abandoned, LaterRevision };
+    for (const auto meanwhile : {Meanwhile::RevisionRecorded, Meanwhile::Abandoned, Meanwhile::LaterRevision}) {
         RelocationFixture fixture(true, many);
         fixture.copy_to_new_disk();
         std::uint64_t read_before = 0;
         test::HookedFiles hooked(fixture.archive, "m00100.txt", [&] {
             auto store = fixture.repository.store();
-            if (abandon) {
+            if (meanwhile == Meanwhile::Abandoned) {
                 const auto stored =
                     nlohmann::json::parse(store.setting(fixture.key()).value_or(""), nullptr, false);
                 const auto run_id = stored.is_object() ? stored.value("run_id", std::string{}) : std::string{};
                 CHECK(store.write_transaction([&] { return store.remove_relocation(fixture.archive_uuid, run_id); }));
+            } else if (meanwhile == Meanwhile::LaterRevision) {
+                test::import_later_revision(fixture, store, fixture.archive_uuid, 3);
             } else {
                 fixture.archive.add_file("old/added.txt", "added on the old carrier (sample data)");
                 va::RegisterRequest request;
@@ -1523,6 +1540,9 @@ void a_relocation_that_can_no_longer_finish_stops_reading()
         const auto relocated = va::relocate_archive(services,
             {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
         CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused);
+        if (meanwhile == Meanwhile::LaterRevision) {
+            CHECK(!relocated && relocated.error().message == made_for_an_older_revision(fixture, 1, 3));
+        }
         // From the 101st file on, the carrier holds 2400 more of them and the
         // 40 others; it stops after about 900.
         const auto unread = (many - 100) * many_file_bytes + sample_bytes;
@@ -1530,7 +1550,7 @@ void a_relocation_that_can_no_longer_finish_stops_reading()
         CHECK(read_after < unread / 2);
         if (read_after >= unread / 2) {
             std::cerr << "  read " << read_after << " of " << unread << " bytes after the relocation could no "
-                      << "longer finish (abandoned: " << abandon << ")\n";
+                      << "longer finish (case " << static_cast<int>(meanwhile) << ")\n";
         }
     }
 }
@@ -2045,6 +2065,84 @@ void an_attempt_stops_when_its_relocation_is_abandoned()
     CHECK(runs && runs->empty());
 }
 
+// ---- A relocation made for an older revision (decision 0030) ---------------
+
+// A relocation against revision 1, interrupted at about half, and then an
+// import gives the archive revision 3 (another repository's export, sample
+// data). The relocation can no longer finish: revision 2 would set the
+// archive back (R-15). Its resume is refused before it reads anything, saying
+// so and naming the abandon, and so is a relocation without --resume, which
+// would otherwise be told to resume it. Its record and saved progress stay,
+// and the archive stays at revision 3. Abandoned, the archive takes a
+// relocation against revision 3, which reads the whole carrier.
+void a_relocation_made_for_an_older_revision_never_records()
+{
+    RelocationFixture fixture(true);
+    const auto run_id = fixture.interrupted_relocation(fixture.processes.self, false);
+    const auto record = fixture.record();
+    const auto matched = fixture.saved(run_id);
+    CHECK(matched.files == 20);
+    test::import_later_revision(fixture, fixture.store, fixture.archive_uuid, 3);
+    const auto refusal = made_for_an_older_revision(fixture, 1, 3);
+
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!resumed && resumed.error().kind == va::RelocateFailure::Kind::Refused &&
+          resumed.error().message == refusal);
+    const auto restarted = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!restarted && restarted.error().kind == va::RelocateFailure::Kind::Refused &&
+          restarted.error().message == refusal);
+    CHECK(fixture.archive.bytes_read == 0);
+    CHECK(fixture.record() == record);
+    const auto kept = fixture.saved(run_id);
+    CHECK(kept.files == matched.files && kept.bytes == matched.bytes);
+    const auto revision = fixture.store.revision(fixture.archive_uuid, 2);
+    CHECK(revision && !*revision);
+    const auto archive = fixture.store.find_archive(fixture.archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 3);
+
+    va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandoned = va::abandon_relocation(services, {fixture.archive_uuid, std::nullopt});
+    CHECK(abandoned && abandoned->revision == 1 && abandoned->files == matched.files);
+    const auto relocated = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(relocated && relocated->revision == 4 && !relocated->resumed && fixture.archive.bytes_read == sample_bytes);
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 4);
+}
+
+// An import gives the archive revision 3 while a relocation against revision
+// 1 writes its manifest of revision 2. Its record finds the archive at a later
+// revision and records nothing: no revision 2, no manifest under its name, no
+// verification, the archive at revision 3. Its record says that the attempt
+// stopped, and keeps every entry it matched.
+void a_relocation_meets_a_later_revision_at_its_record()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    test::StagingHookWriter writer(*fixture.repository.writer, [&] {
+        auto store = fixture.repository.store(); // another process's connection
+        test::import_later_revision(fixture, store, fixture.archive_uuid, 3);
+    });
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, writer, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused &&
+          relocated.error().message == made_for_an_older_revision(fixture, 1, 3));
+    const auto revision = fixture.store.revision(fixture.archive_uuid, 2);
+    CHECK(revision && !*revision);
+    const auto archive = fixture.store.find_archive(fixture.archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 3);
+    CHECK(manifest_names(fixture) == (std::set<std::string>{"r0001.vam", "r0003.vam"}));
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->empty());
+    const auto record = fixture.record();
+    CHECK(record.is_object() && record.value("revision", 0) == 1 && record.contains("stopped"));
+    const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
+    CHECK(!run_id.empty() && fixture.saved(run_id).files == 40);
+}
+
 } // namespace
 
 void relocate_tests()
@@ -2086,4 +2184,6 @@ void relocate_tests()
     abandoning_a_relocation_removes_only_its_record_and_saved_progress();
     a_running_relocation_is_not_abandoned();
     an_attempt_stops_when_its_relocation_is_abandoned();
+    a_relocation_made_for_an_older_revision_never_records();
+    a_relocation_meets_a_later_revision_at_its_record();
 }

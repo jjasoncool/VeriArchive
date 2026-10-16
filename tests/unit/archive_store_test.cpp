@@ -666,6 +666,39 @@ void update_setting_never_creates()
     CHECK(store.setting("run:here") == std::string("2"));
 }
 
+// Decision 0030: an operation made for revision N of an archive (a
+// registration creating N+1, a relocation against N) can never finish once
+// the archive has a later revision than N while N+1 is not recorded, as after
+// an import of N+2. Not while the archive is at N, nor once N+1 is recorded
+// (the operation's revision was taken, decision 0023), nor for an archive
+// without a record. Sample data: revision records without manifests.
+void later_revision_of_an_archive()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const va::Uuid uuid = "c0ffee00-0000-4000-8000-000000000030";
+    const auto record_revision = [&](std::uint32_t revision) {
+        CHECK(store.insert_revision({uuid, revision, "manifests/" + uuid + "/r000" + std::to_string(revision) + ".vam",
+            "{}", "h", "b", "", "2026-10-16T01:00:00Z"}));
+        CHECK(store.update_archive({uuid, "ARCH-0030", "2026-10-16T00:00:00Z", revision, "REGISTERED", "", ""}));
+    };
+    const auto later = [&](const va::Uuid& archive_uuid, std::uint32_t made_for) {
+        const auto found = store.later_revision(archive_uuid, made_for);
+        CHECK(found.has_value());
+        return found ? *found : std::optional<std::uint32_t>(999);
+    };
+    CHECK(later(uuid, 0) == std::nullopt);
+    CHECK(store.insert_archive({uuid, "ARCH-0030", "2026-10-16T00:00:00Z", 0, "REGISTRATION_INCOMPLETE", "", ""}));
+    record_revision(1);
+    CHECK(later(uuid, 1) == std::nullopt);
+    CHECK(later(uuid, 0) == std::nullopt); // revision 1 is recorded
+    record_revision(3);
+    CHECK(later(uuid, 1) == 3u);
+    CHECK(later(uuid, 2) == std::nullopt); // revision 3 is recorded
+    CHECK(later(uuid, 3) == std::nullopt);
+    CHECK(later("c0ffee00-0000-4000-8000-0000000000ff", 0) == std::nullopt);
+}
+
 } // namespace
 
 void archive_store_tests()
@@ -683,4 +716,5 @@ void archive_store_tests()
     reads_without_write_ahead_log();
     failed_write_transaction_is_rolled_back();
     update_setting_never_creates();
+    later_revision_of_an_archive();
 }

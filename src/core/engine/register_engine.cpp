@@ -68,6 +68,7 @@ struct Plan {
     std::optional<Uuid> copy_of;
     Timestamp created;
     bool new_archive = true;
+    std::string root; // the root it registers (UTF-8), as its plan names it
 };
 
 // Two attempts of one registration can run at once (`register --resume` while
@@ -106,11 +107,38 @@ std::unexpected<RegisterFailure> abandoned_meanwhile(const Plan& plan)
             " was abandoned while this attempt ran; this attempt recorded nothing");
 }
 
+// A plan made for an older revision never records (decision 0030). A plan
+// creating revision N+1 is made while the archive is at N; once another
+// operation, such as an import of N+2, gives the archive a later revision,
+// recording N+1 would set the archive back (R-15). Every attempt and every
+// registration of the archive that meets such a plan stops with this,
+// recording nothing; the plan and its saved progress stay until the operator
+// abandons the registration.
+std::unexpected<RegisterFailure> made_for_an_older_revision(const Uuid& archive_uuid, const std::string& root,
+    std::uint32_t creates, std::uint32_t archive_revision)
+{
+    return fail(RegisterFailure::Kind::Refused,
+        "the unfinished registration of archive " + archive_uuid + " (root \"" + root + "\") would create revision " +
+            std::to_string(creates) + ", but the archive now has a later revision (" +
+            std::to_string(archive_revision) +
+            "); the registration can no longer finish: abandon it with `archive abandon-registration " +
+            archive_uuid + "`");
+}
+
+// The revision the archive is at, when it has a later one than the plan that
+// creates `revision` was made for (ArchiveStore::later_revision).
+std::expected<std::optional<std::uint32_t>, IoError> later_than_planned(
+    ArchiveStore& store, const Uuid& archive_uuid, std::uint32_t revision)
+{
+    return store.later_revision(archive_uuid, revision - 1);
+}
+
 // Another registration of the archive is unfinished: the plan its key holds
 // (decision 0025), and the root that registration reads.
 struct UnfinishedRegistration {
     std::string root;
     std::uint32_t revision = 0;
+    std::optional<std::uint32_t> later_revision; // the archive's, when it was made for an older one
 };
 
 // The archive's unfinished registration, if its key holds one: a plan whose
@@ -139,6 +167,11 @@ std::expected<std::optional<UnfinishedRegistration>, IoError> unfinished_registr
     }
     const auto root = plan.find("root");
     registration.root = root != plan.end() && root->is_string() ? root->get<std::string>() : std::string{};
+    const auto later = later_than_planned(store, archive_uuid, registration.revision);
+    if (!later) {
+        return std::unexpected(later.error());
+    }
+    registration.later_revision = *later;
     return std::optional<UnfinishedRegistration>(std::move(registration));
 }
 
@@ -244,6 +277,7 @@ std::expected<std::optional<Plan>, IoError> find_pending(ArchiveStore& store, co
         plan.label = json.value("label", std::string{});
         plan.created = json.value("created", std::string{});
         plan.new_archive = json.value("new_archive", true);
+        plan.root = json["root"].get<std::string>();
         if (json.contains("copy_of")) {
             plan.copy_of = json["copy_of"].get<std::string>();
         }
@@ -415,6 +449,17 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 store.rollback();
                 return {};
             }
+            // Made for an older revision (decision 0030): it can no longer
+            // finish, and stays for the operator to abandon.
+            const auto later = later_than_planned(store, plan.archive_uuid, plan.revision);
+            if (!later) {
+                return std::unexpected(later.error());
+            }
+            if (*later) {
+                refused = made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, **later).error();
+                store.rollback();
+                return {};
+            }
             if (const auto judged = judge_attempt(record, services.processes, services.host.host);
                 judged.state == AttemptState::Running) {
                 refused = still_running(*judged.attempt).error();
@@ -469,8 +514,17 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
     } else {
         // Its root takes no other registration until it is finished or
-        // given up (decision 0025).
+        // given up (decision 0025); one made for an older revision is only
+        // given up, as it can no longer finish (decision 0030).
         if (*pending) {
+            const auto later = later_than_planned(store, (*pending)->archive_uuid, (*pending)->revision);
+            if (!later) {
+                return fail(Kind::Repository, later.error().message);
+            }
+            if (*later) {
+                return made_for_an_older_revision(
+                    (*pending)->archive_uuid, (*pending)->root, (*pending)->revision, **later);
+            }
             return fail(Kind::Refused, "an interrupted registration of this root exists (archive " +
                                            (*pending)->archive_uuid +
                                            "); finish it with --resume, or abandon it with "
@@ -488,6 +542,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         const std::optional<ArchiveCandidate>& target = *checked;
         plan.created = current_timestamp();
         plan.copy_of = request.copy_of;
+        plan.root = path_to_utf8(request.root);
         if (target) {
             const auto found = store.find_archive(target->archive_uuid);
             if (!found || !*found) {
@@ -552,7 +607,13 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 return std::unexpected(other.error());
             }
             if (*other) {
-                refused = another_registration(plan.archive_uuid, **other).error();
+                // One made for an older revision can no longer finish
+                // (decision 0030): the way out is to abandon it.
+                refused = (*other)->later_revision
+                              ? made_for_an_older_revision(plan.archive_uuid, (*other)->root, (*other)->revision,
+                                    *(*other)->later_revision)
+                                    .error()
+                              : another_registration(plan.archive_uuid, **other).error();
                 store.rollback();
                 return {};
             }
@@ -682,12 +743,23 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // revision recorded (decision 0023). Likewise once the operator has
     // abandoned the registration (decision 0025): its plan is gone, or the
     // key holds a later registration's plan, whose checkpoints this attempt's
-    // rows must not join. flush_checkpoint() then returns false.
+    // rows must not join. And once another operation, such as an import, has
+    // given the archive a later revision than the one the plan was made for
+    // (decision 0030): the revision it creates can never be recorded, so
+    // reading on would be for nothing. flush_checkpoint() then returns false.
     std::vector<Entry> checkpoint;
     std::size_t hashed_since_checkpoint = 0;
     auto last_checkpoint = std::chrono::steady_clock::now();
     bool lost = false;      // the revision was recorded by another attempt or operation first
     bool abandoned = false; // the operator abandoned the registration meanwhile
+    std::optional<std::uint32_t> later_revision; // the archive's, once it has a later one than planned
+    // Why a checkpoint stopped this attempt.
+    const auto stopped_at_checkpoint = [&] {
+        return lost        ? lost_to_another()
+               : abandoned ? abandoned_meanwhile(plan)
+                           : made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision,
+                                 later_revision.value_or(0));
+    };
     const auto flush_checkpoint = [&] {
         if ((!checkpoint.empty() || !stale.empty()) &&
             store.write_transaction([&]() -> std::expected<void, IoError> {
@@ -707,6 +779,14 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     abandoned = true;
                     return {};
                 }
+                const auto later = later_than_planned(store, plan.archive_uuid, plan.revision);
+                if (!later) {
+                    return std::unexpected(later.error());
+                }
+                if (*later) {
+                    later_revision = *later;
+                    return {};
+                }
                 // Deleted first: a changed file hashed again has the same key.
                 if (auto deleted = store.delete_file_rows(plan.archive_uuid, plan.revision, stale); !deleted) {
                     return deleted;
@@ -718,12 +798,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         hashed_since_checkpoint = 0;
         last_checkpoint = std::chrono::steady_clock::now();
-        return !lost && !abandoned;
+        return !lost && !abandoned && !later_revision;
     };
     // The stale checkpoints go before the plan has the totals, so a reader
     // never sees more done than there is.
     if (!flush_checkpoint()) {
-        return lost ? lost_to_another() : abandoned_meanwhile(plan);
+        return stopped_at_checkpoint();
     }
     heartbeat.set("files_total", files_total);
     heartbeat.set("bytes_total", bytes_total);
@@ -748,18 +828,15 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             checkpoint.push_back(entry); // R-104: every 1000 files or 60 seconds
             if (++hashed_since_checkpoint >= 1000 ||
                 std::chrono::steady_clock::now() - last_checkpoint > std::chrono::seconds(60)) {
-                // False stops hashing: the revision is recorded, or the
-                // registration was abandoned.
+                // False stops hashing: the revision is recorded, the
+                // registration was abandoned, or the archive has a later
+                // revision than the one it was made for.
                 return flush_checkpoint();
             }
             return true;
         });
-    flush_checkpoint();
-    if (lost) {
-        return lost_to_another();
-    }
-    if (abandoned) {
-        return abandoned_meanwhile(plan);
+    if (!flush_checkpoint()) {
+        return stopped_at_checkpoint();
     }
     if (!hashed || device_removed) {
         return interrupted(device_removed ? "the device disappeared during registration"
@@ -865,6 +942,19 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             abandoned = true;
             return std::unexpected(IoError{IoErrorKind::Other, 0, "the registration was abandoned"});
         }
+        // A plan made for an older revision never records (decision 0030):
+        // another operation, such as an import, gave the archive a later
+        // revision while this attempt ran, and recording this one would set
+        // the archive back to it (R-15). The plan and its saved progress stay
+        // for the operator to abandon.
+        const auto later = later_than_planned(store, plan.archive_uuid, plan.revision);
+        if (!later) {
+            return std::unexpected(later.error());
+        }
+        if (*later) {
+            later_revision = *later;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the archive has a later revision"});
+        }
         ArchiveRecord archive;
         if (existing) {
             archive = *existing;
@@ -917,6 +1007,9 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         if (abandoned) {
             return abandoned_meanwhile(plan);
+        }
+        if (later_revision) {
+            return made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, *later_revision);
         }
         if (cancelled_waiting) {
             return interrupted("registration was cancelled");
