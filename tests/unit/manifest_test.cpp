@@ -322,6 +322,58 @@ void malformed_manifests_say_why()
     std::filesystem::remove_all(root, error);
 }
 
+// Passes everything to `inner`, except that each file it opens fails its
+// second read at the end of the file (sample data: a CRC error), as a disk
+// that fails while the rest of a manifest is read again; the first is the
+// read with which open() finds the end of the body it validates.
+class SecondEndFails final : public va::IFileSystemAccess {
+public:
+    explicit SecondEndFails(va::IFileSystemAccess& inner) : inner_(inner) {}
+
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        auto source = inner_.open(file, options);
+        if (!source) {
+            return source;
+        }
+        return std::make_unique<Source>(std::move(*source));
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    class Source final : public va::IByteSource {
+    public:
+        explicit Source(std::unique_ptr<va::IByteSource> inner) : inner_(std::move(inner)) {}
+        std::expected<std::size_t, va::IoError> read(std::uint64_t offset, std::span<std::byte> output) override
+        {
+            if (offset >= inner_->size() && ++ends_read_ == 2) {
+                return std::unexpected(va::IoError{va::IoErrorKind::MediaError, 23, "CRC error (sample)"});
+            }
+            return inner_->read(offset, output);
+        }
+        std::uint64_t size() const override { return inner_->size(); }
+        std::size_t alignment() const override { return inner_->alignment(); }
+
+    private:
+        std::unique_ptr<va::IByteSource> inner_;
+        int ends_read_ = 0;
+    };
+
+    va::IFileSystemAccess& inner_;
+};
+
 // R-62: the entries come from a second read of the file, after open()
 // validated the body. When that read gives other bytes (sample data: one hex
 // digit of the first entry's BLAKE3, as removable media read again might),
@@ -360,6 +412,80 @@ void entries_are_read_from_the_body_validated()
         CHECK(!again && again.error().kind == va::ManifestFailure::Kind::BodyMismatch);
     }
     CHECK(differing.differed());
+
+    // Other bytes that make a line that does not parse (a quote made an
+    // apostrophe), or entries out of canonical order (b.txt read as a.txt
+    // again): read on to the end of the body, they are not the body
+    // validated, so the reader fails with BodyMismatch, not as a malformed
+    // manifest, and so again when asked again (decision 0028).
+    const std::pair<std::string, std::string> read_otherwise[] = {
+        {"\"b3\":\"" + b3, "\"b3\":'" + b3},
+        {"\"p\":\"b.txt\"", "\"p\":\"a.txt\""},
+    };
+    for (const auto& [from, to] : read_otherwise) {
+        test::SecondReadDiffers other_line(*files, "r0001.vam", 1, bytes.find('\n') + 1, from, to);
+        auto opened = va::ManifestReader::open(other_line, path);
+        CHECK(opened.has_value());
+        if (!opened) {
+            continue;
+        }
+        std::optional<va::ManifestFailure> failure;
+        for (;;) {
+            const auto next = opened->next();
+            if (!next) {
+                failure = next.error();
+                break;
+            }
+            if (!*next) {
+                break;
+            }
+        }
+        CHECK(other_line.differed());
+        CHECK(failure && failure->kind == va::ManifestFailure::Kind::BodyMismatch &&
+              failure->message == "the manifest changed while it was read (ManifestHashMismatch)");
+        const auto again = opened->next();
+        CHECK(!again && again.error().kind == va::ManifestFailure::Kind::BodyMismatch);
+    }
+    // The rest of the body cannot be read after such a line: that says
+    // nothing either way, and the failure to read it is the failure.
+    {
+        test::SecondReadDiffers other_line(*files, "r0001.vam", 1, bytes.find('\n') + 1, "\"b3\":\"" + b3,
+            "\"b3\":'" + b3);
+        SecondEndFails failing(other_line);
+        auto opened = va::ManifestReader::open(failing, path);
+        CHECK(opened.has_value());
+        if (opened) {
+            const auto first = opened->next();
+            CHECK(other_line.differed());
+            CHECK(!first && first.error().kind == va::ManifestFailure::Kind::Io &&
+                  first.error().io_kind == va::IoErrorKind::MediaError &&
+                  first.error().message == "CRC error (sample)");
+        }
+    }
+
+    // A body that is the one validated and still has a line that does not
+    // parse (sample data: the apostrophe written into the file, and the
+    // header's body hash made to match it) is a malformed manifest, also
+    // when asked again.
+    {
+        const auto newline = bytes.find('\n');
+        auto header = bytes.substr(0, newline + 1);
+        const auto body = bytes.substr(newline + 1);
+        auto broken = body;
+        broken.replace(broken.find("\"b3\":\"" + b3), 6, "\"b3\":'");
+        header.replace(header.find(va::blake3_hex(body)), 64, va::blake3_hex(broken));
+        const auto malformed_path = root / "r0002.vam";
+        std::ofstream(malformed_path, std::ios::binary) << header << broken;
+        auto opened = va::ManifestReader::open(*files, malformed_path);
+        CHECK(opened.has_value());
+        if (opened) {
+            const auto first = opened->next();
+            CHECK(!first && first.error().kind == va::ManifestFailure::Kind::Malformed &&
+                  first.error().message.starts_with("invalid manifest entry: "));
+            const auto again = opened->next();
+            CHECK(!again && again.error().kind == va::ManifestFailure::Kind::Malformed);
+        }
+    }
 
     auto unchanged = va::ManifestReader::open(*files, path);
     CHECK(unchanged.has_value());

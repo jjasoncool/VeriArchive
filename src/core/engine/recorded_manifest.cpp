@@ -49,7 +49,8 @@ UnusableManifest unusable_manifest(const RevisionRecord& record, const ManifestF
         break;
     }
     // Bytes that are the ones recorded and still do not parse: no reading of
-    // them gives entries.
+    // them gives entries. (The reader tells a read of the entries that gave
+    // other bytes, also ones that do not parse, from them: BodyMismatch.)
     return unusable_manifest(record, Kind::Unreadable, failure.message);
 }
 

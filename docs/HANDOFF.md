@@ -284,7 +284,7 @@ lost+found/
 ### B4.1 Container
 
 > Amended by `docs/decisions/0023-manifest-named-in-the-record-transaction.md`: R-61's writer streams the body to a file of its own (`rNNNN.vam.body-<uuid>`) and writes header + body to a temporary file that it fsyncs without holding the database lock; the rename to `rNNNN.vam` happens inside the write transaction that records the revision, after it found the revision not recorded, so a recorded manifest is never replaced.
-> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: R-62's reader compares line 1 of a recorded revision's manifest with the BLAKE3 recorded for it before it parses it: a line 1 that differs, also one that no longer parses, ends without a newline or is empty, is a changed manifest (`ManifestHashMismatch`), never a malformed one.
+> Amended by `docs/decisions/0028-a-manifest-that-cannot-be-used.md`: R-62's reader compares line 1 of a recorded revision's manifest with the BLAKE3 recorded for it before it parses it: a line 1 that differs, also one that no longer parses, ends without a newline or is empty, is a changed manifest (`ManifestHashMismatch`), never a malformed one. In the read of the entries of any manifest, a line that does not parse, comes out of canonical order or ends the file without its newline is a malformed manifest only when what was read, read on to the end of the body, is the body validated; otherwise the manifest changed while it was read (`BodyMismatch`).
 
 One UTF-8 file, `\n` line endings, no BOM.
 

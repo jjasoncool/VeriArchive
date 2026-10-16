@@ -545,35 +545,40 @@ void an_import_copies_the_bytes_it_validated()
 // The index is made of the entries read from the source a second time, after
 // the reader validated its body (R-62). A source that gives other bytes only
 // in that read, as removable media can (sample data: one hex digit of the
-// first entry's BLAKE3), would index entries that the manifest does not hold,
-// while the manifest copied would be the one validated: it is not imported
-// (ManifestHashMismatch), and nothing is recorded or left behind. Read as it
-// is, it imports.
+// first entry's BLAKE3, or a quote made an apostrophe, so that a line no
+// longer parses, decision 0028), would index entries that the manifest does
+// not hold, while the manifest copied would be the one validated: it is not
+// imported (ManifestHashMismatch), and nothing is recorded or left behind.
+// Read as it is, it imports.
 void an_import_indexes_the_entries_it_validated()
 {
-    test::TestRepository repository;
-    const auto manifest = sample_manifest(repository, exports_of(repository, "r1"), 1, "host");
-    const auto bytes = read_bytes(manifest);
     const auto b3 = va::blake3_hex("a (sample data)"); // the first entry, a.txt
     auto other = b3;
     other[0] = other[0] == '0' ? '1' : '0';
-    test::SecondReadDiffers files(*repository.files, "r0001.vam", 1, bytes.find('\n') + 1, "\"b3\":\"" + b3,
-        "\"b3\":\"" + other);
-    auto store = repository.store();
-    const auto imported =
-        va::import_manifest(store, files, *repository.writer, repository.context.repo, manifest, false);
-    CHECK(files.differed());
-    CHECK(!imported && imported.error().failure_class == "ManifestHashMismatch" &&
-          imported.error().message == "the manifest changed while it was imported; nothing was imported");
-    const auto archives = store.archives();
-    CHECK(archives && archives->empty());
-    const auto rows = store.file_rows(sample_uuid, 1);
-    CHECK(rows && rows->empty());
-    CHECK(names_in(recorded_path(repository, 1).parent_path()).empty());
+    for (const auto& to : {"\"b3\":\"" + other, "\"b3\":'" + b3}) {
+        test::TestRepository repository;
+        const auto manifest = sample_manifest(repository, exports_of(repository, "r1"), 1, "host");
+        const auto bytes = read_bytes(manifest);
+        test::SecondReadDiffers files(*repository.files, "r0001.vam", 1, bytes.find('\n') + 1, "\"b3\":\"" + b3, to);
+        auto store = repository.store();
+        const auto imported =
+            va::import_manifest(store, files, *repository.writer, repository.context.repo, manifest, false);
+        CHECK(files.differed());
+        CHECK(!imported && imported.error().failure_class == "ManifestHashMismatch" &&
+              imported.error().message == "the manifest changed while it was imported; nothing was imported");
+        if (!imported && imported.error().failure_class != "ManifestHashMismatch") {
+            std::cerr << "  read as " << to << ": " << imported.error().message << '\n';
+        }
+        const auto archives = store.archives();
+        CHECK(archives && archives->empty());
+        const auto rows = store.file_rows(sample_uuid, 1);
+        CHECK(rows && rows->empty());
+        CHECK(names_in(recorded_path(repository, 1).parent_path()).empty());
 
-    const auto again = import(repository, store, manifest);
-    CHECK(again && again->revision == 1);
-    check_recorded_as(repository, store, 1, manifest);
+        const auto again = import(repository, store, manifest);
+        CHECK(again && again->revision == 1);
+        check_recorded_as(repository, store, 1, manifest);
+    }
 }
 
 } // namespace

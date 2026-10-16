@@ -10,6 +10,11 @@
 // body validated. At the end of the body, next() fails with BodyMismatch when
 // what it read differs from the header's body (its BLAKE3, length and lines).
 // So a caller uses no entry before next() has returned the end of the body.
+// A line that does not parse, comes out of canonical order or ends the file
+// without its newline is a malformed manifest only when what was read, read
+// on to the end of the body, is the body validated; otherwise the second read
+// gave other bytes, and next() fails with BodyMismatch (decision 0028). Once
+// next() has failed, it fails the same way again.
 #include "core/hash/hashers.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
@@ -48,6 +53,15 @@ public:
 private:
     ManifestReader() = default;
     std::expected<bool, ManifestFailure> read_line(std::string& line);
+    // Reads the next piece of the file into the buffer, hashed when the body
+    // is read again (body_read_); 0 at the end of the file.
+    std::expected<std::size_t, ManifestFailure> fill();
+    // Whether what next() read of the body, read on to its end, is the body
+    // that open() validated (R-62).
+    std::expected<bool, ManifestFailure> read_as_validated();
+    // next() fails with `failure`, and so again whenever it is asked. A
+    // malformed line is told from one that the second read gave otherwise.
+    std::unexpected<ManifestFailure> failed(ManifestFailure failure);
 
     // What next() reads, hashed as it is read: from the end of open(), which
     // validated the body, to the end of the body.
@@ -68,6 +82,7 @@ private:
     std::optional<Entry> previous_;
     std::unique_ptr<BodyRead> body_read_;
     bool body_read_differs_ = false;
+    std::optional<ManifestFailure> failure_;  // how next() failed
 };
 
 } // namespace va

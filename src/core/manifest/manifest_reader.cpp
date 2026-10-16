@@ -18,16 +18,40 @@ ManifestFailure malformed(std::string message)
     return {ManifestFailure::Kind::Malformed, std::move(message)};
 }
 
+// The entries were read from other bytes than the body validated (R-62).
+ManifestFailure changed_while_read()
+{
+    return {ManifestFailure::Kind::BodyMismatch, "the manifest changed while it was read (ManifestHashMismatch)"};
+}
+
 } // namespace
+
+std::expected<std::size_t, ManifestFailure> ManifestReader::fill()
+{
+    const auto count = source_->read(offset_, buffer_);
+    if (!count) {
+        return std::unexpected(io_failure(count.error()));
+    }
+    if (body_read_ && *count > 0) {
+        const auto piece = std::span<const std::byte>(buffer_.data(), *count);
+        body_read_->hash.update(piece);
+        body_read_->length += *count;
+        body_read_->lines += static_cast<std::uint64_t>(std::count(piece.begin(), piece.end(), std::byte{'\n'}));
+    }
+    offset_ += *count;
+    buffer_start_ = 0;
+    buffer_end_ = *count;
+    return *count;
+}
 
 std::expected<bool, ManifestFailure> ManifestReader::read_line(std::string& line)
 {
     line.clear();
     for (;;) {
         if (buffer_start_ == buffer_end_) {
-            const auto count = source_->read(offset_, buffer_);
+            const auto count = fill();
             if (!count) {
-                return std::unexpected(io_failure(count.error()));
+                return std::unexpected(count.error());
             }
             if (*count == 0) {
                 if (!line.empty()) {
@@ -35,16 +59,6 @@ std::expected<bool, ManifestFailure> ManifestReader::read_line(std::string& line
                 }
                 return false;
             }
-            if (body_read_) {
-                const auto piece = std::span<const std::byte>(buffer_.data(), *count);
-                body_read_->hash.update(piece);
-                body_read_->length += *count;
-                body_read_->lines +=
-                    static_cast<std::uint64_t>(std::count(piece.begin(), piece.end(), std::byte{'\n'}));
-            }
-            offset_ += *count;
-            buffer_start_ = 0;
-            buffer_end_ = *count;
         }
         const auto* begin = reinterpret_cast<const char*>(buffer_.data()) + buffer_start_;
         const auto* end = reinterpret_cast<const char*>(buffer_.data()) + buffer_end_;
@@ -146,26 +160,63 @@ std::expected<std::string, ManifestFailure> ManifestReader::read_header_line(
     return line;
 }
 
+std::expected<bool, ManifestFailure> ManifestReader::read_as_validated()
+{
+    while (body_read_) {
+        const auto count = fill();
+        if (!count) {
+            return std::unexpected(count.error());
+        }
+        if (*count == 0) {
+            body_read_differs_ = body_read_->length != header_.body_length ||
+                                 body_read_->lines != header_.body_lines ||
+                                 body_read_->hash.finish_hex() != header_.body_blake3;
+            body_read_.reset();
+        }
+    }
+    return !body_read_differs_;
+}
+
+std::unexpected<ManifestFailure> ManifestReader::failed(ManifestFailure failure)
+{
+    if (failure.kind == ManifestFailure::Kind::Malformed) {
+        // Decision 0028: a line that does not parse, comes out of canonical
+        // order or ends the file without its newline is a malformed manifest
+        // only in the body validated; in a read that gave other bytes, the
+        // manifest changed while it was read. Reading on to the end of the
+        // body tells which. A read that fails there is no answer either way,
+        // and is the failure.
+        const auto validated = read_as_validated();
+        if (!validated) {
+            failure = validated.error();
+        } else if (!*validated) {
+            failure = changed_while_read();
+        }
+    }
+    failure_ = failure;
+    return std::unexpected(std::move(failure));
+}
+
 std::expected<std::optional<Entry>, ManifestFailure> ManifestReader::next()
 {
+    if (failure_) {
+        return std::unexpected(*failure_);
+    }
     std::string line;
     for (;;) {
         auto has_line = read_line(line);
         if (!has_line) {
-            return std::unexpected(has_line.error());
+            return failed(has_line.error());
         }
         if (!*has_line) {
             // The end of the body: the entries count only when what they were
             // read from is the body that open() validated (R-62).
-            if (body_read_) {
-                body_read_differs_ = body_read_->length != header_.body_length ||
-                                     body_read_->lines != header_.body_lines ||
-                                     body_read_->hash.finish_hex() != header_.body_blake3;
-                body_read_.reset();
+            const auto validated = read_as_validated();
+            if (!validated) {
+                return failed(validated.error());
             }
-            if (body_read_differs_) {
-                return std::unexpected(ManifestFailure{ManifestFailure::Kind::BodyMismatch,
-                    "the manifest changed while it was read (ManifestHashMismatch)"});
+            if (!*validated) {
+                return failed(changed_while_read());
             }
             return std::optional<Entry>{};
         }
@@ -177,10 +228,10 @@ std::expected<std::optional<Entry>, ManifestFailure> ManifestReader::next()
             }
             entry = entry_from_json(json);
         } catch (const std::exception& error) {
-            return std::unexpected(malformed("invalid manifest entry: " + json_error_text(error)));
+            return failed(malformed("invalid manifest entry: " + json_error_text(error)));
         }
         if (previous_ && !canonical_less(*previous_, entry)) {
-            return std::unexpected(malformed("manifest entries out of canonical order"));
+            return failed(malformed("manifest entries out of canonical order"));
         }
         previous_ = entry;
         return std::optional<Entry>(std::move(entry));

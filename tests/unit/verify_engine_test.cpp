@@ -19,6 +19,7 @@
 #include <chrono>
 #include <fstream>
 #include <iterator>
+#include <utility>
 
 namespace {
 
@@ -994,39 +995,48 @@ void a_first_line_that_no_longer_parses_has_changed()
 
 // R-14: the archive is compared with the entries of the manifest validated.
 // They come from a second read of the recorded manifest; when that read gives
-// other bytes (sample data: one hex digit of the first entry's BLAKE3), the
-// verification fails with ManifestHashMismatch, recorded in the history,
-// rather than compare the archive with entries the manifest does not hold.
+// other bytes (sample data: one hex digit of the first file's BLAKE3; a quote
+// made an apostrophe, so that a line no longer parses; or a name that takes
+// an entry out of canonical order), the verification fails with
+// ManifestHashMismatch, the manifest having given other bytes when it was
+// read again (decision 0028), recorded in the history, rather than compare
+// the archive with entries the manifest does not hold.
 void entries_read_otherwise_than_validated_fail()
 {
-    Registered fixture;
-    const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
-    std::string bytes;
-    {
-        std::ifstream input(path, std::ios::binary);
-        bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-    }
-    const auto b3 = va::blake3_hex("report bytes"); // the first entry, docs/report.pdf
+    const auto b3 = va::blake3_hex("report bytes"); // the first file, docs/report.pdf
     auto other = b3;
     other[0] = other[0] == '0' ? '1' : '0';
-    // Its first opening reads line 1 alone (the candidates); the second loads it.
-    test::SecondReadDiffers repository_files(*fixture.repository.files, "r0001.vam", 2, bytes.find('\n') + 1,
-        "\"b3\":\"" + b3, "\"b3\":\"" + other);
-    va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store,
-        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
-    va::VerifyRequest request;
-    request.root = fixture.archive.root();
-    const auto outcome = va::verify_full(services, request, fixture.cancel, fixture.progress);
-    CHECK(repository_files.differed());
-    CHECK(outcome && outcome->result == "FAILED" &&
-          outcome->failure_classes == std::vector<std::string>{"ManifestHashMismatch"} && outcome->items.empty());
-    // By root, the media was looked at to find the archive (decision 0028).
-    CHECK(outcome && outcome->media_read &&
-          outcome->warnings == std::vector<std::string>{"manifest: " + restore_message(fixture.archive_uuid,
-                                                                       "has changed: it gave other bytes when it "
-                                                                       "was read again")});
-    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
-    CHECK(runs && runs->size() == 1 && runs->front().failure_classes == "ManifestHashMismatch");
+    const std::pair<std::string, std::string> read_otherwise[] = {
+        {"\"b3\":\"" + b3, "\"b3\":\"" + other},
+        {"\"b3\":\"" + b3, "\"b3\":'" + b3},
+        {"\"p\":\"notes.txt\"", "\"p\":\"aaaaa.txt\""}, // after "empty"
+    };
+    for (const auto& [from, to] : read_otherwise) {
+        Registered fixture;
+        const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
+        const auto bytes = file_bytes(path);
+        // Its first opening reads line 1 alone (the candidates); the second loads it.
+        test::SecondReadDiffers repository_files(*fixture.repository.files, "r0001.vam", 2, bytes.find('\n') + 1,
+            from, to);
+        va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store,
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        va::VerifyRequest request;
+        request.root = fixture.archive.root();
+        const auto outcome = va::verify_full(services, request, fixture.cancel, fixture.progress);
+        CHECK(repository_files.differed());
+        CHECK(outcome && outcome->result == "FAILED" &&
+              outcome->failure_classes == std::vector<std::string>{"ManifestHashMismatch"} &&
+              outcome->items.empty());
+        // By root, the media was looked at to find the archive (decision 0028).
+        const std::vector<std::string> warnings{"manifest: " +
+            restore_message(fixture.archive_uuid, "has changed: it gave other bytes when it was read again")};
+        CHECK(outcome && outcome->media_read && outcome->warnings == warnings);
+        if (outcome && outcome->warnings != warnings && !outcome->warnings.empty()) {
+            std::cerr << "  read as " << to << ": " << outcome->warnings.front() << '\n';
+        }
+        const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+        CHECK(runs && runs->size() == 1 && runs->front().failure_classes == "ManifestHashMismatch");
+    }
 }
 
 void item_rules()
