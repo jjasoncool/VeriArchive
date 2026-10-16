@@ -350,6 +350,146 @@ void a_retired_archive_whose_manifest_is_lost_owns_no_root()
           std::ranges::count(both.error().identity.archives, a->archive_uuid) == 1);
 }
 
+// Decision 0028, point 9: the lost manifest of a retired archive behind an
+// index that seems to be all that is wrong with it, as line 1 alone tells.
+// Archive A at /vol/a, registered twice, and B at /vol/b (sample data); A's
+// manifest of revision 2 damaged (sample damage): one byte of its body
+// changed, and the index's record of revision 2 gone, as an older version's
+// rebuild dropped it, or the index's copy of its header changed; or an entry
+// that does not parse in a manifest that the record names (its line 1 and
+// body) and whose header copy in the index differs. `repo rebuild-index`
+// skips such a manifest and keeps the index as it was, so no rebuild repairs
+// it. While A is not retired, a new folder and a relocation of B stop on it
+// with what line 1 alone tells (rebuild the index), and A is listed so.
+// Retired once confirmed (or, with the entry that does not parse, retired
+// before its manifest was lost: the state alone decides), A is no candidate
+// of matching: the new folder registers and B relocates, and A is listed
+// with its manifest lost and what the whole manifest says, which ends with
+// the import; so after a rebuild as well, after which another new folder
+// registers.
+void a_lost_manifest_behind_a_wrong_index_leaves_matching_once_retired()
+{
+    enum class Case { NotIndexed, IndexDiffers, EntryBehindIndexDiffers };
+    for (const auto what : {Case::NotIndexed, Case::IndexDiffers, Case::EntryBehindIndexDiffers}) {
+        test::EngineFixture fixture;
+        const auto archive_uuid = registered_twice(fixture);
+        fixture.archive.add_file("b/SAMPLE-three.txt", "three (sample data)");
+        fixture.archive.add_file("b-copy/SAMPLE-three.txt", "three (sample data)");
+        fixture.archive.add_file("c/SAMPLE-four.txt", "four (sample data)");
+        fixture.archive.add_file("d/SAMPLE-five.txt", "five (sample data)");
+        const auto b = fixture.register_root(fixture.archive.root() / "b");
+        CHECK(b.has_value());
+        if (!b) {
+            return;
+        }
+        const auto& layout = fixture.repository.context.repo;
+        const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+        const auto manifest = "the manifest of revision 2 (manifests/" + archive_uuid + "/r0002.vam)";
+        const auto of_a = " WHERE archive_uuid = " + test::sql_text(archive_uuid) + " AND revision = 2";
+        const auto header_copy_changed = "UPDATE archive_revisions SET header_json = replace(header_json, "
+                                         "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"')" +
+                                         of_a;
+        auto bytes = read_bytes(second);
+        std::string line_1_says;  // what line 1 alone tells, before the archive is retired
+        std::string whole_says;   // what the whole manifest tells
+        if (what == Case::EntryBehindIndexDiffers) {
+            bytes = test::with_an_entry_that_does_not_parse(bytes);
+            std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
+            test::record_as_written(fixture.repository, archive_uuid, 2, bytes);
+            fixture.repository.execute(header_copy_changed.c_str());
+            line_1_says =
+                "the repository's index differs from " + manifest + "; rebuild the index with `repo rebuild-index`";
+            whole_says = manifest + " cannot be read: invalid manifest entry: unknown entry type x";
+        } else {
+            bytes[bytes.size() - 5] ^= 0x01;
+            std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
+            if (what == Case::NotIndexed) {
+                fixture.repository.execute(
+                    ("DELETE FROM archive_revisions" + of_a + "; DELETE FROM files" + of_a).c_str());
+                line_1_says = "the repository's index has no record of " + manifest +
+                              "; rebuild the index with `repo rebuild-index`";
+                whole_says = "the repository's index has no record of " + manifest +
+                             ", which cannot be read: manifest body does not match its header (ManifestHashMismatch)";
+            } else {
+                fixture.repository.execute(header_copy_changed.c_str());
+                line_1_says =
+                    "the repository's index differs from " + manifest + "; rebuild the index with `repo rebuild-index`";
+                whole_says = manifest + " has changed: its body does not match its header";
+            }
+        }
+        const auto relocate_b = [&] {
+            va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+                fixture.media, fixture.store, layout, fixture.repository.context.repository_uuid, fixture.host,
+                fixture.processes};
+            return va::relocate_archive(services,
+                va::RelocateRequest{b->archive_uuid, fixture.archive.root() / "b-copy", std::nullopt, false},
+                fixture.cancel, fixture.progress);
+        };
+
+        // Not retired: line 1 alone tells, and every registration of a new
+        // folder and every relocation stops on it.
+        const auto stopped = fixture.register_root(fixture.archive.root() / "c");
+        CHECK(!stopped && stopped.error().kind == va::RegisterFailure::Kind::Repository &&
+              stopped.error().message == line_1_says);
+        if (!stopped && stopped.error().message != line_1_says) {
+            std::cerr << "  a new folder beside A: " << stopped.error().message << '\n';
+        }
+        const auto not_relocated = relocate_b();
+        CHECK(!not_relocated && not_relocated.error().kind == va::RelocateFailure::Kind::Repository);
+        const auto before = listed(fixture, archive_uuid);
+        CHECK(before && before->unusable_manifest && !before->manifest_lost &&
+              va::plain_message(*before->unusable_manifest) == line_1_says);
+
+        if (what == Case::EntryBehindIndexDiffers) {
+            // Retired before its manifest was lost: the state alone decides.
+            auto archive = fixture.store.find_archive(archive_uuid);
+            CHECK(archive && *archive);
+            if (archive && *archive) {
+                (*archive)->status = "RETIRED";
+                CHECK(fixture.store.update_archive(**archive));
+            }
+        } else {
+            // Retired once confirmed, as the whole manifest is lost.
+            const auto asked = retire(fixture, archive_uuid, false);
+            CHECK(!asked && asked.error().kind == va::RetireFailure::Kind::Unconfirmed && asked.error().retirement &&
+                  asked.error().retirement->lost_manifest &&
+                  va::what_is_wrong_with(*asked.error().retirement->lost_manifest) == whole_says);
+            const auto retired = retire(fixture, archive_uuid, true);
+            CHECK(retired && retired->lost_manifest &&
+                  va::what_is_wrong_with(*retired->lost_manifest) == whole_says);
+        }
+
+        // No candidate of matching any more.
+        const auto c = fixture.register_root(fixture.archive.root() / "c");
+        CHECK(c && c->revision == 1 && c->archive_uuid != archive_uuid);
+        if (!c) {
+            std::cerr << "  a new folder after the retirement: " << c.error().message << '\n';
+        }
+        const auto relocated = relocate_b();
+        CHECK(relocated && relocated->revision == 2);
+        if (!relocated) {
+            std::cerr << "  B relocated after the retirement: " << relocated.error().message << '\n';
+        }
+        const auto shown = listed(fixture, archive_uuid);
+        CHECK(shown && shown->manifest_lost && shown->unusable_manifest &&
+              va::plain_message(*shown->unusable_manifest) == whole_says + put_back_only(2));
+        if (shown && shown->unusable_manifest && !shown->manifest_lost) {
+            std::cerr << "  listed: " << va::plain_message(*shown->unusable_manifest) << '\n';
+        }
+
+        // A rebuild skips the manifest and leaves the index as it was.
+        const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+        CHECK(rebuilt && rebuilt->revisions_kept.size() + rebuilt->revisions_not_indexed.size() == 1);
+        const auto after = listed(fixture, archive_uuid);
+        CHECK(after && after->manifest_lost && after->archive.current_revision == 2);
+        const auto d = fixture.register_root(fixture.archive.root() / "d");
+        CHECK(d && d->revision == 1);
+        if (!d) {
+            std::cerr << "  a new folder after a rebuild: " << d.error().message << '\n';
+        }
+    }
+}
+
 // Decision 0028, point 9: retiring an archive whose latest manifest is lost
 // writes nothing while a registration of the archive is unfinished, which
 // would give it a new revision: a registration over the lost manifest that
@@ -442,5 +582,6 @@ void retire_archive_tests()
     an_archive_whose_manifest_can_be_used_is_retired_at_once();
     an_archive_whose_manifest_is_lost_is_retired_once_confirmed();
     a_retired_archive_whose_manifest_is_lost_owns_no_root();
+    a_lost_manifest_behind_a_wrong_index_leaves_matching_once_retired();
     retiring_writes_nothing_beside_a_registration_or_a_later_revision();
 }

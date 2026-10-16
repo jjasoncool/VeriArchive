@@ -56,6 +56,30 @@ UnusableManifest unusable_manifest(const RevisionRecord& record, const ManifestF
     return unusable_manifest(record, Kind::Unreadable, failure.message);
 }
 
+// What is wrong with the manifest of `record` itself, read whole as `repo
+// rebuild-index` reads a manifest, whatever the index says of it: its line 1
+// against the BLAKE3 recorded for it (decision 0028), its body against its
+// hash (R-62), and every entry to the end of the body. Nothing where it is
+// intact: a rebuild then reads it, and repairs what the index gets wrong.
+std::optional<UnusableManifest> damage_of(
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const RevisionRecord& record)
+{
+    auto reader = ManifestReader::open(
+        repository_files, layout.root / path_from_utf8(record.manifest_relpath), record.header_blake3);
+    if (!reader) {
+        return unusable_manifest(record, reader.error(), false);
+    }
+    for (;;) {
+        auto next = reader->next();
+        if (!next) {
+            return unusable_manifest(record, next.error(), true);
+        }
+        if (!*next) {
+            return std::nullopt;
+        }
+    }
+}
+
 // Whether the header parsed from a manifest's line 1 names the archive,
 // revision and body that `record` was recorded with (R-14). Asked once that
 // line has the BLAKE3 recorded for it: the line is then the one recorded, and
@@ -201,9 +225,39 @@ bool only_the_index_is_wrong(const UnusableManifest& unusable)
            (unusable.kind == UnusableManifest::Kind::NotIndexed && unusable.file == UnusableManifest::File::Readable);
 }
 
-bool lost_by_a_retired_archive(const UnusableManifest& unusable)
+std::expected<bool, IoError> lost_by_a_retired_archive(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, UnusableManifest& unusable)
 {
-    return unusable.retired && !only_the_index_is_wrong(unusable);
+    if (!unusable.retired) {
+        return false;
+    }
+    if (!only_the_index_is_wrong(unusable)) {
+        return true;
+    }
+    // Only the index is wrong as far as what was read tells. The manifest
+    // behind it is read whole, as `repo rebuild-index` reads one: a rebuild
+    // repairs the index only where it can read the manifest.
+    const auto record = store.revision(unusable.archive_uuid, unusable.revision);
+    if (!record) {
+        return std::unexpected(record.error());
+    }
+    std::optional<UnusableManifest> behind;
+    if (!*record) {
+        auto whole =
+            manifest_not_indexed(repository_files, layout, unusable.archive_uuid, unusable.revision, true);
+        if (!only_the_index_is_wrong(whole)) {
+            behind = std::move(whole);
+        }
+    } else {
+        behind = damage_of(repository_files, layout, **record);
+    }
+    if (!behind) {
+        return false;
+    }
+    behind->latest = unusable.latest;
+    behind->retired = unusable.retired;
+    unusable = std::move(*behind);
+    return true;
 }
 
 std::string how_to_fix(const UnusableManifest& unusable, std::string_view it)

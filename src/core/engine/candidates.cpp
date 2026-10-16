@@ -61,8 +61,16 @@ std::expected<CandidatePool, CandidatesFailure> load_candidate_pool(ArchiveStore
             // recognise its media without that manifest, and it would stop
             // every registration of a new folder or volume and every
             // relocation for good. An index that a rebuild repairs still
-            // stops them, as for any archive: its manifest is not lost.
-            if (lost_by_a_retired_archive(unusable)) {
+            // stops them, as for any archive: its manifest is not lost. One
+            // that stands before a manifest whose body has changed, or whose
+            // body or entries cannot be read, is no such index, as the
+            // rebuild skips that manifest: line 1 alone does not show it, so
+            // the whole manifest is read then (lost_by_a_retired_archive).
+            const auto lost = lost_by_a_retired_archive(store, repository_files, layout, unusable);
+            if (!lost) {
+                return std::unexpected(CandidatesFailure{lost.error().message, std::nullopt, {}});
+            }
+            if (*lost) {
                 continue;
             }
             pool.unusable.push_back(CandidatesFailure{plain_message(unusable), unusable, archive.label});

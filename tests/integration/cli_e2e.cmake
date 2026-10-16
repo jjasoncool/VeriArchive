@@ -1202,6 +1202,110 @@ if(NOT retire_asked MATCHES "^Lost manifest of ${gone_label} \\(${gone_uuid}\\),
         "${retired_listed_chinese}\n${retired_refused}")
 endif()
 
+# Decision 0028, point 9: the lost manifest of a retired archive behind an
+# index that seems to be all that is wrong with it, in a repository of its
+# own (sample data). A sample folder is registered, and a file under the name
+# of its manifest of revision 2 reads as that manifest by its first line,
+# while its body does not match its header (sample damage, as a file that
+# only bears a manifest's name). `repo rebuild-index` cannot read it, and
+# sets the archive at revision 2, of which the index has no record (exit 2).
+# Line 1 alone says only that the index has no record of it, so registering
+# another sample folder stops (exit 11), naming the rebuild. Retired with
+# --confirm, as the whole manifest cannot be read, the archive stops nothing:
+# the other folder registers, another archive relocates, and `archive list`
+# exits 0, with the line "manifest lost:" and what the whole manifest says.
+# Where the sqlite3 command is installed, the same for a recorded manifest
+# whose body changed and whose copy of the header in the index differs
+# (sample damage): line 1 alone says only that the index differs from it.
+file(WRITE "${WORK}/config4.json" "{\"language\": \"zh-TW\"}\n")
+set(GLOBAL --config "${WORK}/config4.json")
+run_cli("0" --repository "${WORK}/repo4" repo init)
+set(BEHIND "${WORK}/behind-index-sample")
+set(BEHIND_OTHER "${WORK}/behind-index-other-sample")
+set(BEHIND_MOVE "${WORK}/behind-index-move-sample")
+set(BEHIND_MOVED "${WORK}/behind-index-moved-sample")
+file(WRITE "${BEHIND}/a.txt" "behind the index sample a\n")
+file(WRITE "${BEHIND_OTHER}/b.txt" "behind the index sample b\n")
+file(WRITE "${BEHIND_MOVE}/c.txt" "behind the index sample c\n")
+file(COPY "${BEHIND_MOVE}/" DESTINATION "${BEHIND_MOVED}")
+run_cli("0" register "${BEHIND}" --json)
+string(JSON behind_uuid GET "${last_output}" archive_uuid)
+string(SUBSTRING "${behind_uuid}" 0 8 behind_prefix)
+run_cli("0" register "${BEHIND_MOVE}" --json)
+string(JSON behind_moving_uuid GET "${last_output}" archive_uuid)
+set(behind_folder "${WORK}/repo4/manifests/${behind_uuid}")
+file(READ "${behind_folder}/r0001.vam" behind_bytes)
+string(REPLACE "\"revision\":1," "\"revision\":2,\"supersedes\":1," behind_bytes "${behind_bytes}")
+string(REPLACE "\"p\":\"a.txt\"" "\"p\":\"q.txt\"" behind_bytes "${behind_bytes}")
+# Written byte for byte (file(WRITE) may write other line ends; the sample
+# manifests hold no "@").
+file(CONFIGURE OUTPUT "${behind_folder}/r0002.vam" CONTENT "${behind_bytes}" @ONLY NEWLINE_STYLE UNIX)
+run_cli("2" --lang en repo rebuild-index)
+set(behind_rebuilt "${last_output}")
+run_cli("11" --lang en register "${BEHIND_OTHER}")
+set(behind_stopped "${last_errors}")
+run_cli("12" --lang en archive retire "${behind_prefix}")
+set(behind_asked "${last_output}")
+run_cli("0" archive retire "${behind_prefix}" --confirm --json)
+string(JSON behind_retired_lost GET "${last_output}" manifest_lost)
+run_cli("0" --lang en archive list)
+set(behind_listed "${last_output}")
+run_cli("0" register "${BEHIND_OTHER}")
+run_cli("0;2" archive relocate "${behind_moving_uuid}" "${BEHIND_MOVED}" --json)
+string(JSON behind_relocated GET "${last_output}" revision)
+set(behind_manifest "the manifest of revision 2 (manifests/${behind_uuid}/r0002.vam)")
+string(FIND "${behind_rebuilt}" "not in the index: " behind_not_indexed)
+string(FIND "${behind_stopped}" "error: the repository's index has no record of ${behind_manifest}; rebuild the index with `repo rebuild-index`\n" behind_stop_line)
+string(FIND "${behind_asked}" "\n  the repository's index has no record of ${behind_manifest}, which cannot be read: manifest body does not match its header (ManifestHashMismatch)\n" behind_asked_line)
+string(FIND "${behind_listed}" "\n    manifest lost: the repository's index has no record of ${behind_manifest}, which cannot be read: manifest body does not match its header (ManifestHashMismatch); put it back with `import <folder>/r0002.vam` from a backup of the repository, an export of revision 2, or the media copy in the archive's .veriarchive folder, where registration wrote one\n" behind_lost_line)
+if(behind_not_indexed EQUAL -1 OR behind_stop_line EQUAL -1 OR behind_asked_line EQUAL -1 OR NOT behind_retired_lost
+        OR behind_lost_line EQUAL -1 OR NOT behind_relocated EQUAL 2)
+    message(FATAL_ERROR "a retired archive whose lost manifest the index has no record of: rebuilt ${behind_not_indexed}, "
+        "stopped ${behind_stop_line}, asked ${behind_asked_line}, retired lost ${behind_retired_lost}, listed "
+        "${behind_lost_line}, relocated r${behind_relocated}\n${behind_rebuilt}\n${behind_stopped}\n${behind_asked}\n"
+        "${behind_listed}")
+endif()
+find_program(SQLITE3_PROGRAM sqlite3)
+if(SQLITE3_PROGRAM)
+    set(DIFFERS "${WORK}/behind-differs-sample")
+    set(DIFFERS_OTHER "${WORK}/behind-differs-other-sample")
+    file(WRITE "${DIFFERS}/a.txt" "behind the index sample a, the index differs\n")
+    file(WRITE "${DIFFERS_OTHER}/b.txt" "behind the index sample b, the index differs\n")
+    run_cli("0" register "${DIFFERS}" --json)
+    string(JSON differs_uuid GET "${last_output}" archive_uuid)
+    string(SUBSTRING "${differs_uuid}" 0 8 differs_prefix)
+    set(differs_file "${WORK}/repo4/manifests/${differs_uuid}/r0001.vam")
+    file(READ "${differs_file}" differs_bytes)
+    string(REPLACE "\"p\":\"a.txt\"" "\"p\":\"q.txt\"" differs_bytes "${differs_bytes}")
+    file(CONFIGURE OUTPUT "${differs_file}" CONTENT "${differs_bytes}" @ONLY NEWLINE_STYLE UNIX)
+    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo4/veriarchive.db"
+        "UPDATE archive_revisions SET header_json = header_json || ' ' WHERE archive_uuid = '${differs_uuid}'"
+        RESULT_VARIABLE differs_damaged)
+    run_cli("11" --lang en register "${DIFFERS_OTHER}")
+    set(differs_stopped "${last_errors}")
+    run_cli("12" --lang en archive retire "${differs_prefix}")
+    set(differs_asked "${last_output}")
+    run_cli("0" archive retire "${differs_prefix}" --confirm)
+    run_cli("0" --lang en archive list)
+    set(differs_listed "${last_output}")
+    run_cli("0" register "${DIFFERS_OTHER}")
+    set(differs_manifest "the manifest of revision 1 (manifests/${differs_uuid}/r0001.vam)")
+    string(FIND "${differs_stopped}" "error: the repository's index differs from ${differs_manifest}; rebuild the index with `repo rebuild-index`\n" differs_stop_line)
+    string(FIND "${differs_asked}" "\n  ${differs_manifest} has changed: its body does not match its header\n" differs_asked_line)
+    string(FIND "${differs_listed}" "\n    manifest lost: ${differs_manifest} has changed: its body does not match its header; put it back with `import <folder>/r0001.vam`" differs_lost_line)
+    if(NOT differs_damaged EQUAL 0 OR differs_stop_line EQUAL -1 OR differs_asked_line EQUAL -1
+            OR differs_lost_line EQUAL -1)
+        message(FATAL_ERROR "a retired archive whose lost manifest the index differs from: damaged ${differs_damaged}, "
+            "stopped ${differs_stop_line}, asked ${differs_asked_line}, listed ${differs_lost_line}\n"
+            "${differs_stopped}\n${differs_asked}\n${differs_listed}")
+    endif()
+    message(STATUS "a retired archive whose lost manifest the index differs from: checked with ${SQLITE3_PROGRAM}")
+else()
+    message(STATUS "a retired archive whose lost manifest the index differs from: skipped, as the sqlite3 command that "
+        "changes the index (sample damage) is not installed")
+endif()
+set(GLOBAL --config "${WORK}/config.json")
+
 # Decision 0028, point 8 (operator, 2026-10-17): the same sample folder
 # registered on purpose as two archives (--force-new-archive), A and its twin
 # B. With A's manifest gone, the registration over it takes the folder, B's

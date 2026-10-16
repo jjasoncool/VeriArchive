@@ -971,25 +971,6 @@ void the_history_keeps_an_archive_from_an_earlier_revision()
     CHECK(archive && *archive && (*archive)->current_revision == 2);
 }
 
-// `manifest` with the type of its first file entry made "x", and the body's
-// BLAKE3 in its header made the one of the body so changed (sample bytes):
-// its body matches its header, and an entry does not parse.
-std::string with_an_entry_that_does_not_parse(const std::string& manifest)
-{
-    const auto newline = manifest.find('\n');
-    auto header = manifest.substr(0, newline + 1);
-    auto body = manifest.substr(newline + 1);
-    const auto body_hash = header.find(va::blake3_hex(body));
-    const auto entry_type = body.find("\"t\":\"f\"");
-    CHECK(body_hash != std::string::npos && entry_type != std::string::npos);
-    if (body_hash == std::string::npos || entry_type == std::string::npos) {
-        return manifest;
-    }
-    body[entry_type + 5] = 'x';
-    header.replace(body_hash, 64, va::blake3_hex(body));
-    return header + body;
-}
-
 // Decision 0028: a manifest that the index has no record of is read, where a
 // verification reads it whole, as `repo rebuild-index` reads a manifest:
 // every entry too. Sample damage: an archive registered twice whose index
@@ -1007,7 +988,7 @@ void a_manifest_without_a_record_is_read_to_its_last_entry()
     const auto& layout = fixture.repository.context.repo;
     const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
     const auto kept = read_file(second);
-    std::ofstream(second, std::ios::binary | std::ios::trunc) << with_an_entry_that_does_not_parse(kept);
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << test::with_an_entry_that_does_not_parse(kept);
     fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; DELETE FROM files WHERE revision = 2");
 
     const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
@@ -1047,19 +1028,6 @@ void a_manifest_without_a_record_is_read_to_its_last_entry()
     CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
 }
 
-// SQL text: `text` between single quotes, a quote in it doubled.
-std::string sql_text(const std::string& text)
-{
-    std::string quoted = "'";
-    for (const char character : text) {
-        quoted += character;
-        if (character == '\'') {
-            quoted += '\'';
-        }
-    }
-    return quoted + "'";
-}
-
 // Decision 0028: the lists read the manifest of an archive's revision that
 // the last rebuild skipped as the rebuild reads it, to its last entry. Sample
 // damage: the manifest of revision 2 has an entry that does not parse, and
@@ -1075,18 +1043,9 @@ void a_recorded_manifest_that_the_rebuild_skipped_is_listed_with_its_entry()
     const auto archive_uuid = registered_twice(fixture);
     const auto& layout = fixture.repository.context.repo;
     const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
-    const auto damaged = with_an_entry_that_does_not_parse(read_file(second));
+    const auto damaged = test::with_an_entry_that_does_not_parse(read_file(second));
     std::ofstream(second, std::ios::binary | std::ios::trunc) << damaged;
-    const auto line = damaged.substr(0, damaged.find('\n'));
-    const auto header = nlohmann::json::parse(line, nullptr, false);
-    CHECK(header.is_object() && header.contains("body"));
-    if (!header.is_object() || !header.contains("body")) {
-        return;
-    }
-    fixture.repository.execute(("UPDATE archive_revisions SET header_json = " + sql_text(line) +
-                                   ", header_blake3 = " + sql_text(va::blake3_hex(line)) + ", body_blake3 = " +
-                                   sql_text(header["body"]["blake3"].get<std::string>()) + " WHERE revision = 2")
-                                   .c_str());
+    test::record_as_written(fixture.repository, archive_uuid, 2, damaged);
     auto status = listed(fixture);
     CHECK(status && status->header && !status->unusable_manifest);
 

@@ -75,10 +75,18 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
             }
             // A retired archive takes no new revision, not even over its
             // lost manifest, and where that manifest is lost, the archive is
-            // retired with its manifest lost (decision 0028, point 9).
+            // retired with its manifest lost (decision 0028, point 9), judged
+            // as matching judges it: behind an index that seems to be all
+            // that is wrong, the whole manifest, and the list says what that
+            // read found.
             if (status.unusable_manifest) {
                 status.unusable_manifest->retired = archive.status == "RETIRED";
-                status.manifest_lost = lost_by_a_retired_archive(*status.unusable_manifest);
+                const auto lost =
+                    lost_by_a_retired_archive(store, repository_files, layout, *status.unusable_manifest);
+                if (!lost) {
+                    return std::unexpected(lost.error());
+                }
+                status.manifest_lost = *lost;
             }
         }
         if (selection.earlier_revisions) {

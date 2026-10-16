@@ -80,15 +80,34 @@ struct UnusableManifest {
 // only putting it back fixes it.
 bool only_the_index_is_wrong(const UnusableManifest& unusable);
 
-// Whether `unusable`, the manifest of an archive's latest revision, is the
-// lost manifest of a retired archive (decision 0028, point 9): the archive is
-// retired, and that manifest is missing, cannot be read or has changed, not
-// only an index that a rebuild repairs. Where the device that held the
-// archive is gone as well, the operator retires it so (`archive retire`).
-// Matching no longer takes such an archive for a possible owner of a folder
-// or volume, so it stops nothing, and the archive lists show it retired with
-// its manifest lost, which needs nothing of the operator any more.
-bool lost_by_a_retired_archive(const UnusableManifest& unusable);
+// Whether `unusable`, the manifest of an archive's latest revision as
+// matching or the archive lists read it (line 1 alone, or the whole manifest
+// where the last rebuild skipped it), is the lost manifest of a retired
+// archive (decision 0028, point 9): the archive is retired, and that manifest
+// is missing, cannot be read or has changed, not only an index that a
+// rebuild repairs. Where the device that held the archive is gone as well,
+// the operator retires it so (`archive retire`). Matching no longer takes
+// such an archive for a possible owner of a folder or volume, so it stops
+// nothing, and the archive lists show it retired with its manifest lost,
+// which needs nothing of the operator any more.
+//
+// Where what was read says that only the index is wrong (an index that
+// differs from a manifest whose line 1 is the one recorded, or has no record
+// of one that reads as the manifest of its revision), the manifest behind
+// the index may be lost all the same: its body may have changed, or its body
+// or an entry may not be readable, which line 1 alone does not show. `repo
+// rebuild-index` skips such a manifest and keeps the index as it was, so no
+// rebuild repairs that index. So a retired archive's manifest is read whole
+// then, as the rebuild reads one: line 1 against the BLAKE3 recorded for it,
+// the body against its hash (R-62), and every entry to the end of the body,
+// or, where the index has no record of the revision, as manifest_not_indexed
+// reads it whole. Where that read finds the manifest lost, `unusable` becomes
+// what that read found (`latest` and `retired` kept), and it is lost.
+// Matching, the lists and `archive retire` judge a retired archive's latest
+// manifest so; only a retired archive's is read again. Fails only where the
+// database cannot be read.
+std::expected<bool, IoError> lost_by_a_retired_archive(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, UnusableManifest& unusable);
 
 // The run-level failure class (§A6) of a verification whose manifest cannot
 // be used: ManifestHashMismatch for a manifest that has changed,

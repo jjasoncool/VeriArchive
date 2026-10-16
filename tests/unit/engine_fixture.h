@@ -8,7 +8,10 @@
 #include "core/engine/register_engine.h"
 #include "core/engine/transfer.h"
 #include "core/engine/verify_engine.h"
+#include "core/hash/hashers.h"
 #include "core/manifest/manifest_writer.h"
+
+#include <nlohmann/json.hpp>
 
 #include <format>
 
@@ -52,6 +55,58 @@ inline std::string put_back_steps(const va::Uuid& archive_uuid, std::uint32_t re
 inline std::string put_back(const va::Uuid& archive_uuid, std::uint32_t revision, bool latest = true)
 {
     return "; " + put_back_steps(archive_uuid, revision, latest);
+}
+
+// `manifest` with the type of its first file entry made "x", and the body's
+// BLAKE3 in its header made the one of the body so changed (sample bytes):
+// its body matches its header, and an entry does not parse.
+inline std::string with_an_entry_that_does_not_parse(const std::string& manifest)
+{
+    const auto newline = manifest.find('\n');
+    auto header = manifest.substr(0, newline + 1);
+    auto body = manifest.substr(newline + 1);
+    const auto body_hash = header.find(va::blake3_hex(body));
+    const auto entry_type = body.find("\"t\":\"f\"");
+    CHECK(body_hash != std::string::npos && entry_type != std::string::npos);
+    if (body_hash == std::string::npos || entry_type == std::string::npos) {
+        return manifest;
+    }
+    body[entry_type + 5] = 'x';
+    header.replace(body_hash, 64, va::blake3_hex(body));
+    return header + body;
+}
+
+// SQL text: `text` between single quotes, a quote in it doubled.
+inline std::string sql_text(const std::string& text)
+{
+    std::string quoted = "'";
+    for (const char character : text) {
+        quoted += character;
+        if (character == '\'') {
+            quoted += '\'';
+        }
+    }
+    return quoted + "'";
+}
+
+// The index's record of `revision` of the archive made to name the manifest
+// whose bytes are `manifest` (sample damage): its line 1 as the index's copy
+// of the header, the BLAKE3 of that line, and the body's BLAKE3 that the line
+// names, as if the revision had been recorded so.
+inline void record_as_written(
+    const TestRepository& repository, const va::Uuid& archive_uuid, std::uint32_t revision, const std::string& manifest)
+{
+    const auto line = manifest.substr(0, manifest.find('\n'));
+    const auto header = nlohmann::json::parse(line, nullptr, false);
+    CHECK(header.is_object() && header.contains("body"));
+    if (!header.is_object() || !header.contains("body")) {
+        return;
+    }
+    repository.execute(("UPDATE archive_revisions SET header_json = " + sql_text(line) + ", header_blake3 = " +
+                        sql_text(va::blake3_hex(line)) + ", body_blake3 = " +
+                        sql_text(header["body"]["blake3"].get<std::string>()) + " WHERE archive_uuid = " +
+                        sql_text(archive_uuid) + " AND revision = " + std::to_string(revision))
+                           .c_str());
 }
 
 inline va::VolumeInfo fake_volume(const std::filesystem::path& mount_point)
