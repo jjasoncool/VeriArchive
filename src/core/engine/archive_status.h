@@ -42,7 +42,7 @@ struct StatusSelection {
 // Retired archives are never overdue (decision 0003). Each header is read from
 // the latest revision's manifest (load_recorded_header), never taken from the
 // index's copy (R-14). An archive whose latest manifest cannot be used (it is
-// missing, cannot be read, has changed, or the index holds it otherwise) is
+// missing, cannot be read, has changed, or the index says otherwise of it) is
 // listed with that problem (unusable_manifest) and without a header, like
 // every other archive: one damaged archive never stops the list (decision
 // 0028). Only the database's failures fail it. Whether a label is shared

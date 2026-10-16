@@ -51,8 +51,8 @@ struct UnusableManifest {
 
 // The run-level failure class (§A6) of a verification whose manifest cannot
 // be used: ManifestHashMismatch for a manifest that has changed,
-// RepositoryError for one that is missing or cannot be read, or whose header
-// the index holds otherwise.
+// RepositoryError for one that is missing or cannot be read, or of which the
+// index says otherwise (IndexDiffers).
 std::string failure_class_of(const UnusableManifest& unusable);
 
 // The kind in English for --json (`manifest_problem.kind`): "missing",
@@ -65,9 +65,9 @@ std::string what_is_wrong_with(const UnusableManifest& unusable);
 
 // The plain message: what is wrong, then how to fix it, which is to restore
 // the manifest from a backup of the repository (R-86) or, where only the
-// index's copy of its header differs, to rebuild the index (R-80). Rebuilding
-// the index from a manifest that is missing or has changed would take what
-// the file holds now for the truth.
+// index differs from a manifest that is the one recorded (IndexDiffers), to
+// rebuild the index (R-80). Rebuilding the index from a manifest that is
+// missing or has changed would take what the file holds now for the truth.
 std::string plain_message(const UnusableManifest& unusable);
 
 struct ManifestLoadFailure {
@@ -87,10 +87,10 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
     std::uint32_t revision);
 
 // As load_recorded_manifest, without reading the entries: whether the
-// manifest can be used (its line 1, its body's hash, the index's copy of its
-// header, R-15), and its header when it can. For a verification that checks
-// the manifest of a known archive before it looks for the media (decision
-// 0028); the entries are read again once the media is found.
+// manifest can be used (its line 1, its body's hash, the index's record and
+// copy of its header, R-15), and its header when it can. For a verification
+// that checks the manifest of a known archive before it looks for the media
+// (decision 0028); the entries are read again once the media is found.
 std::expected<ManifestHeader, ManifestLoadFailure> check_recorded_manifest(
     ArchiveStore& store,
     IFileSystemAccess& repository_files,
