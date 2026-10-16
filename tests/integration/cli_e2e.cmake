@@ -194,6 +194,13 @@ run_cli("12" register "${BROKEN}/")
 if(NOT last_errors STREQUAL refusal)
     message(FATAL_ERROR "register of ${BROKEN}/ while its registration is unfinished:\n${last_errors}")
 endif()
+# Rebuilding the index keeps its saved progress (decision 0026): the abandon
+# below still finds the 2 files it saved.
+run_cli("0" repo rebuild-index --json)
+string(JSON kept GET "${last_output}" saved_progress_kept)
+if(NOT kept EQUAL 1)
+    message(FATAL_ERROR "rebuild-index and an unfinished registration:\n${last_output}")
+endif()
 run_cli("0" archive list --json)
 string(JSON archive_count LENGTH "${last_output}" archives)
 math(EXPR last_archive "${archive_count} - 1")

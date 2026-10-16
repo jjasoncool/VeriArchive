@@ -380,6 +380,8 @@ Entry line, keys in this order:
 
 ### B7.1 Layout
 
+> Amended by `docs/decisions/0026-relocation-resumes.md`: R-80's `repo rebuild-index` rebuilds only what the manifests define and keeps the saved progress of unfinished registrations: the rows of `files` under the revision a plan creates, while the plan exists and no manifest defines that revision; `verify_progress` (the saved progress of verifications and relocations) is not touched.
+
 ```text
 RepositoryRoot/
 ├── repository.json        {"format":"veriarchive-repo","version":1,"repository_uuid":"...","created":"..."}

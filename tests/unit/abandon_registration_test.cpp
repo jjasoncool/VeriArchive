@@ -297,9 +297,10 @@ void abandoning_keeps_an_archive_whose_index_lost_its_revision()
     const auto shown = va::abandonable_registration(services, {archive_uuid, std::nullopt, std::nullopt});
     CHECK(shown && shown->revision == 2 && !shown->first_registration);
     const auto abandoned = va::abandon_registration(services, {archive_uuid, std::nullopt, std::nullopt});
-    CHECK(abandoned && abandoned->revision == 2 && !abandoned->first_registration);
+    CHECK(abandoned && abandoned->revision == 2 && !abandoned->first_registration && abandoned->files == 3);
     auto expected = before;
-    expected.settings -= 1;  // its plan; its saved progress went with the rebuilt index
+    expected.settings -= 1;  // its plan
+    expected.files -= 3;     // its saved progress (a, b and c), which the rebuilt index kept (decision 0026)
     CHECK(rows_of(fixture.repository) == expected);
     const auto archive = fixture.store.find_archive(archive_uuid);
     CHECK(archive && *archive && (*archive)->status == "REGISTERED" && (*archive)->current_revision == 1 &&

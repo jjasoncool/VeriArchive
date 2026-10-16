@@ -78,13 +78,21 @@ int rebuild(const Arguments& arguments, const Session& session)
     }
     if (arguments.json) {
         print_json({{"archives", report->archives}, {"revisions", report->revisions},
-            {"entries", report->entries}, {"skipped", report->skipped}});
+            {"entries", report->entries}, {"skipped", report->skipped},
+            {"saved_progress_kept", report->saved_progress_kept}});
     } else {
         const auto& text = arguments.text;
         std::cout << text.format(
                          "Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
                          report->archives, report->revisions, report->entries)
                   << '\n';
+        // Decision 0026: the saved progress of unfinished registrations stays.
+        if (report->saved_progress_kept > 0) {
+            std::cout << "  "
+                      << text.format("unfinished registrations whose saved progress was kept: {}",
+                             report->saved_progress_kept)
+                      << '\n';
+        }
         for (const auto& skipped : report->skipped) {
             std::cout << "  " << text.format("skipped: {}", text(skipped)) << '\n';
         }

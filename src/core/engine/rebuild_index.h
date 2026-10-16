@@ -3,6 +3,11 @@
 // (archive_revisions, files) can be rebuilt from manifests/ alone. Archive rows
 // keep what only the database knows (label changes, RETIRED status, notes);
 // history tables are never touched — they are protected by the hash chain.
+// Only what the manifests define is rebuilt: the saved progress of an
+// unfinished registration, its rows of files under the revision it creates,
+// stays while its plan exists and no manifest defines that revision (decision
+// 0026); that of verifications and relocations is in verify_progress, which is
+// never touched either.
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
 
@@ -15,6 +20,8 @@ struct RebuildReport {
     std::size_t archives = 0;
     std::size_t revisions = 0;
     std::size_t entries = 0;
+    // Unfinished registrations whose saved progress stayed.
+    std::size_t saved_progress_kept = 0;
     // Manifests that failed validation, with the reason: "cannot read manifest
     // <uuid>/r0001.vam: <cause>" or "cannot list the manifests of archive <uuid>: <cause>".
     std::vector<std::string> skipped;

@@ -123,6 +123,7 @@ constexpr CatalogEntry entries[] = {
         "此筆紀錄已被修改（row_hash 與其內容不符）"},
     {"Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
         "已從清單檔重建索引：{} 個封存、{} 個版次、{} 個項目。"},
+    {"unfinished registrations whose saved progress was kept: {}", "保留了已儲存進度的未完成註冊：{} 個"},
     {"skipped: {}", "已略過：{}"},
     {"usage: repo init | info | rebuild-index | verify-history",
         "用法：repo init | info | rebuild-index | verify-history"},

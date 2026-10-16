@@ -4,9 +4,14 @@
 #include "common/uuid.h"
 #include "core/manifest/manifest_reader.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <map>
 #include <optional>
+#include <set>
+#include <string_view>
+#include <utility>
 
 namespace va {
 namespace {
@@ -104,7 +109,36 @@ std::expected<RebuildReport, IoError> rebuild_index(
         return std::unexpected(begun.error());
     }
     const auto rebuilt = [&]() -> std::expected<void, IoError> {
-        if (auto cleared = store.clear_index(); !cleared) {
+        // The saved progress of the unfinished registrations stays (decision
+        // 0026): the rows under the revision each plan creates, which are no
+        // index and which no manifest holds. Unless a manifest read here
+        // defines that revision: then the plan is done with (decision 0023),
+        // and its rows are that manifest's index, rebuilt below. Read in this
+        // transaction, so no plan is made or removed in between.
+        const auto plans = store.settings_with_prefix("registration:");
+        if (!plans) {
+            return std::unexpected(plans.error());
+        }
+        std::set<std::pair<Uuid, std::uint32_t>> saved_progress;
+        for (const auto& [key, value] : *plans) {
+            const auto plan = nlohmann::json::parse(value, nullptr, false);
+            const auto revision = plan.is_object() ? plan.find("revision") : plan.end();
+            if (!plan.is_object() || revision == plan.end() || !revision->is_number_unsigned()) {
+                continue; // no plan this version wrote
+            }
+            const auto archive_uuid = key.substr(std::string_view("registration:").size());
+            const auto created = revision->get<std::uint32_t>();
+            const auto manifests = found.find(archive_uuid);
+            const bool defined = manifests != found.end() &&
+                                 std::ranges::any_of(manifests->second, [&](const FoundRevision& manifest) {
+                                     return manifest.record.revision == created;
+                                 });
+            if (!defined) {
+                saved_progress.emplace(archive_uuid, created);
+                ++report.saved_progress_kept;
+            }
+        }
+        if (auto cleared = store.clear_index(saved_progress); !cleared) {
             return cleared;
         }
         for (auto& [archive_uuid, revisions] : found) {

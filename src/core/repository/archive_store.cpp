@@ -856,9 +856,42 @@ std::expected<void, IoError> ArchiveStore::delete_file_rows(
     return {};
 }
 
-std::expected<void, IoError> ArchiveStore::clear_index()
+std::expected<void, IoError> ArchiveStore::clear_index(const std::set<std::pair<Uuid, std::uint32_t>>& keep)
 {
-    return database_.execute("DELETE FROM files; DELETE FROM archive_revisions;");
+    if (keep.empty()) {
+        return database_.execute("DELETE FROM files; DELETE FROM archive_revisions;");
+    }
+    if (auto cleared = database_.execute("DELETE FROM archive_revisions;"); !cleared) {
+        return cleared;
+    }
+    // Every revision the files table holds rows of, read through its primary
+    // key, then the rows of each that is not kept. Read to the end before the
+    // first delete.
+    auto held = database_.prepare("SELECT DISTINCT archive_uuid, revision FROM files");
+    if (!held) {
+        return std::unexpected(held.error());
+    }
+    std::vector<std::pair<Uuid, std::uint32_t>> revisions;
+    for (;;) {
+        const auto row = held->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            break;
+        }
+        revisions.emplace_back(held->text(0), static_cast<std::uint32_t>(held->integer(1)));
+    }
+    held->reset();
+    for (const auto& revision : revisions) {
+        if (keep.contains(revision)) {
+            continue;
+        }
+        if (auto deleted = delete_file_rows(revision.first, revision.second); !deleted) {
+            return deleted;
+        }
+    }
+    return {};
 }
 
 std::expected<VerifyRunRecord, IoError> ArchiveStore::append_verify_run(

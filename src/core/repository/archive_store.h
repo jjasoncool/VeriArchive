@@ -267,8 +267,10 @@ public:
     // revision is recorded, the files a registration creating it has hashed
     // and saved (its checkpoints).
     std::expected<CheckpointCount, IoError> file_row_count(const Uuid& archive_uuid, std::uint32_t revision);
-    // Empties the rebuildable index tables (archive_revisions, files) for rebuild-index.
-    std::expected<void, IoError> clear_index();
+    // Empties the rebuildable index tables (archive_revisions, files) for
+    // rebuild-index, except the rows of `keep` (archive, revision) in files:
+    // the saved progress of unfinished registrations (decision 0026).
+    std::expected<void, IoError> clear_index(const std::set<std::pair<Uuid, std::uint32_t>>& keep = {});
 
     std::expected<VerifyRunRecord, IoError> append_verify_run(
         VerifyRunRecord run, const std::string& repository_uuid);

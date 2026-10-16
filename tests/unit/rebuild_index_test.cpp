@@ -3,11 +3,15 @@
 #include "engine_fixture.h"
 
 #include "core/engine/rebuild_index.h"
+#include "core/engine/relocate_engine.h"
 #include "core/hash/hashers.h"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <fstream>
 #include <iterator>
+#include <set>
 
 namespace {
 
@@ -135,10 +139,111 @@ void skipped_manifests_say_why()
         "cannot read manifest " + own + "/r0001.vam: invalid manifest entry: unknown entry type x"));
 }
 
+// Decision 0026: rebuild-index rebuilds only what the manifests define, and
+// keeps the saved progress of the unfinished operations whose record exists:
+// an interrupted registration's rows under the revision it creates, and a
+// relocation's checkpoints, which are not in the index at all. Both then
+// resume reading only the rest. Rows that no manifest and no plan names go,
+// and those of a revision a manifest defines are its index, also where a plan
+// of that revision was left behind (sample data on a fake volume).
+void rebuild_keeps_saved_progress()
+{
+    test::EngineFixture fixture;
+    auto second = test::fake_volume(fixture.archive.root() / "new");
+    second.filesystem_uuid = "5555666677778888";
+    second.filesystem_uuid_short = "77778888";
+    second.devices.front().serial = "NEW-DISK";
+    fixture.media.extra_volumes.push_back(second);
+
+    // An archive at /vol/old, relocated to a new disk that went away after
+    // one of its two files had matched.
+    fixture.archive.add_file("old/a.txt", std::string(100, 'a'));
+    fixture.archive.add_file("old/b.txt", std::string(200, 'b'));
+    const auto moved = fixture.register_root(fixture.archive.root() / "old");
+    CHECK(moved.has_value());
+    if (!moved) {
+        return;
+    }
+    const auto& moved_uuid = moved->archive_uuid;
+    fixture.archive.add_file("new/a.txt", std::string(100, 'a'));
+    fixture.archive.add_file("new/b.txt", std::string(200, 'b')).open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto stopped = va::relocate_archive(services, {moved_uuid, fixture.archive.root() / "new", std::nullopt},
+        fixture.cancel, fixture.progress);
+    CHECK(!stopped && stopped.error().kind == va::RelocateFailure::Kind::Incomplete);
+    fixture.archive.node("new/b.txt").open_error.reset();
+    const auto record =
+        nlohmann::json::parse(fixture.store.setting(va::relocation_key(moved_uuid)).value_or(""), nullptr, false);
+    const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
+    CHECK(fixture.store.progress(run_id).value_or(std::set<std::string>{}).size() == 1);
+
+    // A first registration at /vol/broken, interrupted after it saved two of
+    // its three files.
+    fixture.archive.add_file("broken/f0.bin", std::string(100, 'x'));
+    fixture.archive.add_file("broken/f1.bin", std::string(100, 'y'));
+    fixture.archive.add_file("broken/z.bin", std::string(100, 'z')).open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.register_root(fixture.archive.root() / "broken");
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("broken/z.bin").open_error.reset();
+    va::Uuid broken_uuid;
+    if (const auto archives = fixture.store.archives()) {
+        for (const auto& archive : *archives) {
+            if (archive.status == "REGISTRATION_INCOMPLETE") {
+                broken_uuid = archive.archive_uuid;
+            }
+        }
+    }
+    const auto saved = fixture.store.file_row_count(broken_uuid, 1);
+    CHECK(saved && saved->files == 2 && saved->bytes == 200);
+
+    // Rows that no manifest and no plan names, a row too many under revision
+    // 1 of the relocated archive, and a plan of that revision that an older
+    // version left behind although it is recorded (decision 0023).
+    const std::string stray = "aaaaaaaa-0000-4000-8000-00000000dead";
+    fixture.repository.execute(("INSERT INTO files(archive_uuid, revision, path, raw_hex, stream, type, size) "
+                                "VALUES('" + stray + "', 7, 'stray.bin', '', '', 'f', 5)")
+                                   .c_str());
+    fixture.repository.execute(("INSERT INTO files(archive_uuid, revision, path, raw_hex, stream, type, size) "
+                                "VALUES('" + moved_uuid + "', 1, 'ghost.bin', '', '', 'f', 5)")
+                                   .c_str());
+    const nlohmann::json left_plan{{"archive_uuid", moved_uuid}, {"revision", 1}, {"label", "ARCH-0001"},
+        {"created", "2026-10-16T01:00:00Z"}, {"new_archive", true}, {"root", "Z:\\left behind"}};
+    CHECK(fixture.store.set_setting("registration:" + moved_uuid, left_plan.dump()));
+
+    const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
+    CHECK(report && report->revisions == 1 && report->skipped.empty() && report->saved_progress_kept == 1);
+    const auto kept = fixture.store.file_row_count(broken_uuid, 1);
+    CHECK(kept && kept->files == 2 && kept->bytes == 200);
+    CHECK(!fixture.store.has_file_rows(stray, 7).value_or(true));
+    const auto index = fixture.store.file_rows(moved_uuid, 1);
+    CHECK(index && index->size() == 2 && std::ranges::none_of(*index, [](const va::Entry& row) {
+        return row.path.p == "ghost.bin";
+    }));
+    CHECK(fixture.store.progress(run_id).value_or(std::set<std::string>{}).size() == 1);
+    CHECK(fixture.store.remove_setting("registration:" + moved_uuid));
+
+    // Both resume reading only the rest.
+    fixture.archive.bytes_read = 0;
+    va::RegisterRequest resume;
+    resume.root = fixture.archive.root() / "broken";
+    resume.resume = true;
+    const auto registered = fixture.register_root(resume);
+    CHECK(registered && registered->revision == 1 && fixture.archive.bytes_read == 100);
+    fixture.archive.bytes_read = 0;
+    const auto relocated = va::relocate_archive(services,
+        {moved_uuid, fixture.archive.root() / "new", std::nullopt, true}, fixture.cancel, fixture.progress);
+    CHECK(relocated && relocated->revision == 2 && fixture.archive.bytes_read == 200);
+}
+
 } // namespace
 
 void rebuild_index_tests()
 {
     rebuild_keeps_database_facts();
     skipped_manifests_say_why();
+    rebuild_keeps_saved_progress();
 }

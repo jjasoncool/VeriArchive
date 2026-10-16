@@ -289,6 +289,8 @@ void translation_tests()
           "無法列出封存 " + uuid + " 的清單檔：FindFirstFileExW 失敗（Win32 錯誤 5）");
     CHECK(chinese.format("skipped: {}", chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest")) ==
           "已略過：無法讀取清單檔 " + uuid + "/r0001.vam：清單檔是空的");
+    CHECK(chinese.format("unfinished registrations whose saved progress was kept: {}", 2) ==
+          "保留了已儲存進度的未完成註冊：2 個"); // decision 0026
 
     // Which process runs a registration (decision 0024) and abandoning one
     // (decision 0025): the process id, the program and the uuid are values.
