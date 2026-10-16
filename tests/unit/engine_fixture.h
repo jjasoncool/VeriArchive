@@ -50,6 +50,16 @@ inline std::string put_back_steps(const va::Uuid& archive_uuid, std::uint32_t re
     return text;
 }
 
+// How the manifest of `revision` of a retired archive is put back (decision
+// 0028, point 7), without the last resort, as a retired archive takes no new
+// revision (point 9): what comes after what is wrong in its plain message.
+inline std::string put_back_only(std::uint32_t revision)
+{
+    return "; put it back with `import <folder>/" + std::format("r{:04}.vam", revision) +
+           "` from a backup of the repository, an export of revision " + std::to_string(revision) +
+           ", or the media copy in the archive's .veriarchive folder, where registration wrote one";
+}
+
 // How the plain message of such a manifest says to fix it: what comes after
 // what is wrong.
 inline std::string put_back(const va::Uuid& archive_uuid, std::uint32_t revision, bool latest = true)

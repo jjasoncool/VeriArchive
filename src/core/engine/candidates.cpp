@@ -66,12 +66,19 @@ std::expected<CandidatePool, CandidatesFailure> load_candidate_pool(ArchiveStore
             // body or entries cannot be read, is no such index, as the
             // rebuild skips that manifest: line 1 alone does not show it, so
             // the whole manifest is read then (lost_by_a_retired_archive).
-            const auto lost = lost_by_a_retired_archive(store, repository_files, layout, unusable);
-            if (!lost) {
-                return std::unexpected(CandidatesFailure{lost.error().message, std::nullopt, {}});
-            }
-            if (*lost) {
-                continue;
+            // Only where matching looks for the owner of a root: an archive
+            // named by its uuid (`only`) is the one candidate, as its
+            // verification checked its manifest itself (point 3), and one
+            // that cannot be used after that check stops it with the plain
+            // message alone, never as no registered archive.
+            if (!only) {
+                const auto lost = lost_by_a_retired_archive(store, repository_files, layout, unusable);
+                if (!lost) {
+                    return std::unexpected(CandidatesFailure{lost.error().message, std::nullopt, {}});
+                }
+                if (*lost) {
+                    continue;
+                }
             }
             pool.unusable.push_back(CandidatesFailure{plain_message(unusable), unusable, archive.label});
             continue;

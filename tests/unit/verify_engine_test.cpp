@@ -1369,6 +1369,37 @@ void a_named_archive_is_never_the_one_that_may_be_at_a_root()
     CHECK(!stopped && stopped.error().kind == va::VerifyStop::Kind::Repository &&
           stopped.error().message ==
               restore_message(fixture.archive_uuid, "cannot be read: access denied (sample)"));
+
+    // Retired as well (decision 0028, point 9): matching by root leaves out a
+    // retired archive whose latest manifest is lost, but named by its uuid
+    // the archive is the one candidate, and a manifest that goes missing
+    // after its check (removed as its first line is opened for matching, the
+    // second opening, sample damage) stops the verification with the plain
+    // message alone, never as no registered archive; for a retired archive
+    // it ends with the import. Nothing is recorded.
+    auto archive = fixture.store.find_archive(fixture.archive_uuid);
+    CHECK(archive && *archive);
+    if (!archive || !*archive) {
+        return;
+    }
+    (*archive)->status = "RETIRED";
+    CHECK(fixture.store.update_archive(**archive));
+    const auto manifest = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
+    test::HookedFiles removed(
+        *fixture.repository.files, "r0001.vam", [&] { std::filesystem::remove(manifest); }, 2);
+    va::VerifyServices race{fixture.archive, removed, fixture.media, fixture.store, fixture.repository.context.repo,
+        fixture.repository.context.repository_uuid, fixture.host};
+    const auto missing = va::verify_full(race, by_uuid, fixture.cancel, fixture.progress);
+    CHECK(!missing && missing.error().kind == va::VerifyStop::Kind::Repository &&
+          missing.error().message == "the manifest of revision 1 (manifests/" + fixture.archive_uuid +
+                                         "/r0001.vam) is missing" + test::put_back_only(1));
+    if (missing) {
+        std::cerr << "  a retired archive verified by its uuid: " << missing->result << '\n';
+    } else if (missing.error().kind != va::VerifyStop::Kind::Repository) {
+        std::cerr << "  a retired archive verified by its uuid: " << missing.error().message << '\n';
+    }
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->empty());
 }
 
 // Two archives on one volume (sample data): A at /vol/a and B at /vol/b. A's

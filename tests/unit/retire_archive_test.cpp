@@ -59,14 +59,7 @@ std::optional<va::ArchiveStatus> listed(test::EngineFixture& fixture, const va::
     return statuses->front();
 }
 
-// How the manifest of revision 2 of the archive is put back (decision 0028,
-// point 7), without the last resort: a retired archive takes no new revision.
-std::string put_back_only(std::uint32_t revision)
-{
-    return "; put it back with `import <folder>/" + std::format("r{:04}.vam", revision) +
-           "` from a backup of the repository, an export of revision " + std::to_string(revision) +
-           ", or the media copy in the archive's .veriarchive folder, where registration wrote one";
-}
+using test::put_back_only;
 
 constexpr const char* confirm_message = "run the command again with --confirm to retire the archive";
 

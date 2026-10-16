@@ -38,7 +38,8 @@ struct CandidatesFailure {
 // whose carrier and root only that manifest records. A retired archive whose
 // latest manifest is lost (lost_by_a_retired_archive) is left out instead,
 // neither a candidate nor a manifest that cannot be used: it is no possible
-// owner of a folder or volume (decision 0028, point 9).
+// owner of a folder or volume (decision 0028, point 9). Not where `only`
+// names it: then it fails with that manifest as any archive's.
 std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout,
     const std::optional<Uuid>& only = std::nullopt);
