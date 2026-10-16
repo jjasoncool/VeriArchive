@@ -1,5 +1,6 @@
 #include "core/manifest/manifest_writer.h"
 
+#include "common/hex.h"
 #include "common/uuid.h"
 
 #include <format>
@@ -93,6 +94,9 @@ std::expected<void, IoError> ManifestWriter::add(const Entry& entry)
         return std::unexpected(writer_error(
             std::format("chunk hashes of {}: {} given, {} expected", entry.path.p, entry.chunks.size(),
                 expected_chunks)));
+    }
+    if (chunk_size_ > 0 && !entry.sha256.empty() && !is_hash_hex(entry.sha256)) {
+        return std::unexpected(writer_error("sha256 is not 64 lowercase hex digits"));
     }
     if (chunk_size_ > 0 && !add_merkle_leaves(merkle_, entry, chunk_size_)) {
         return std::unexpected(writer_error("b3 is not 64 lowercase hex digits"));

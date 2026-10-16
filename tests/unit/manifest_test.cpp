@@ -1120,6 +1120,10 @@ void chunked_manifests_are_read_strictly()
     CHECK(reading.malformed(reading.entry_changed(1, [](va::Entry& entry) { entry.b3 = uppercase(entry.b3); }),
         entry_b3));
     CHECK(reading.malformed(reading.entry_changed(3, [](va::Entry& entry) { entry.b3 = "zz"; }), entry_b3));
+    // And its sha256, which a FULL verify compares as it is.
+    CHECK(reading.malformed(
+        reading.entry_changed(0, [](va::Entry& entry) { entry.sha256 = uppercase(entry.sha256); }),
+        "invalid manifest entry: sha256 is not 64 lowercase hex digits"));
 
     // Content hashes that do not give the Merkle root.
     CHECK(reading.merkle_mismatch(
@@ -1190,8 +1194,8 @@ void chunked_manifests_without_chunk_lines()
 }
 
 // A manifest without a chunk size, as every V1 manifest, is read as before:
-// chunk lines are skipped wherever they are, and merkle_root is ignored,
-// whatever JSON it holds, since V1 never read it.
+// chunk lines are skipped wherever they are, merkle_root is ignored, whatever
+// JSON it holds, since V1 never read it, and a sha256 is taken as it is.
 void manifests_without_a_chunk_size_are_read_as_before()
 {
     const auto root = temporary_directory("va-manifest-v1-");
@@ -1203,9 +1207,15 @@ void manifests_without_a_chunk_size_are_read_as_before()
     CHECK(!read_file(path).contains("merkle_root"));
 
     auto parts = test::split_manifest(read_file(path));
+    auto entries = golden_entries();
+    const auto hashed = std::ranges::find_if(entries, [](const va::Entry& entry) { return !entry.sha256.empty(); });
+    CHECK(hashed != entries.end());
+    if (hashed != entries.end()) {
+        hashed->sha256 = uppercase(hashed->sha256);
+        parts.lines[static_cast<std::size_t>(hashed - entries.begin())] = va::entry_to_json(*hashed);
+    }
     parts.lines.insert(parts.lines.begin() + 1, va::chunk_line_to_json({"a.txt", 0, 0, 5, va::blake3_hex("hello")}));
     parts.lines.push_back("{\"t\":\"c\"}");
-    const auto entries = golden_entries();
     const std::string merkle_roots[] = {'"' + va::blake3_hex("anything") + '"', "\"anything\"", "null", "5", "{}", "[]"};
     for (const auto& merkle_root : merkle_roots) {
         parts.merkle_root_json = merkle_root;
@@ -1260,6 +1270,10 @@ void writer_takes_chunk_hashes_only_where_they_belong()
     upper_file.b3 = uppercase(upper_file.b3);
     CHECK(refused(test_chunk_size, upper_file) == "b3 is not 64 lowercase hex digits");
     CHECK(refused(0, upper_file).empty()); // without a chunk size, as before
+    auto upper_sha256 = test::sample_file("a.txt", "hello", test_chunk_size);
+    upper_sha256.sha256 = uppercase(upper_sha256.sha256);
+    CHECK(refused(test_chunk_size, upper_sha256) == "sha256 is not 64 lowercase hex digits");
+    CHECK(refused(0, upper_sha256).empty());
     // Also a b3 that is no Merkle leaf: a file's with chunk lines, a directory's.
     auto upper_big = big;
     upper_big.b3 = uppercase(upper_big.b3);

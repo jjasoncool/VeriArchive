@@ -367,6 +367,10 @@ std::expected<std::optional<Entry>, ManifestFailure> ManifestReader::next_entry(
         }
         previous_ = entry;
         if (chunk_size > 0) {
+            // A FULL verify compares the sha256 as it is (decision 0031).
+            if (!entry.sha256.empty() && !is_hash_hex(entry.sha256)) {
+                return std::unexpected(malformed("invalid manifest entry: sha256 is not 64 lowercase hex digits"));
+            }
             if (has_chunk_lines(entry, chunk_size)) {
                 if (auto attached = attach_chunks(entry); !attached) {
                     return std::unexpected(attached.error());

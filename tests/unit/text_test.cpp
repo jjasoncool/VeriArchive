@@ -371,6 +371,8 @@ void translation_tests()
     CHECK(chinese("invalid chunk line: key 'idx' not found") == "區塊行無效：找不到欄位「idx」");
     CHECK(chinese("invalid chunk line: b3 is not 64 lowercase hex digits") ==
           "區塊行無效：b3 不是 64 個小寫十六進位數字");
+    CHECK(chinese("invalid manifest entry: sha256 is not 64 lowercase hex digits") ==
+          "清單檔項目無效：sha256 不是 64 個小寫十六進位數字");
     CHECK(chinese("cannot write the manifest: chunk hashes of big.bin: 2 given, 3 expected") ==
           "無法寫入清單檔：big.bin 的區塊雜湊：提供 2 個，應為 3 個");
     // Rebuild-index skipped lines.

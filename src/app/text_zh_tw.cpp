@@ -1445,6 +1445,7 @@ constexpr CatalogEntry entries[] = {
     // Chunk lines and the Merkle root (decision 0031): a technical message
     // says Merkle 根雜湊, where the interface says 總碼.
     {"merkle_root is missing or not 64 lowercase hex digits", "merkle_root 缺少或不是 64 個小寫十六進位數字"},
+    {"sha256 is not 64 lowercase hex digits", "sha256 不是 64 個小寫十六進位數字"},
     {"counts.chunks is larger than body.lines", "counts.chunks 大於 body.lines"},
     {"chunk line among the manifest entries", "清單檔項目之間出現區塊行"},
     {"manifest entry among the chunk lines", "區塊行之間出現清單檔項目"},
