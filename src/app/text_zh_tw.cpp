@@ -539,6 +539,15 @@ constexpr CatalogEntry entries[] = {
         "請選擇要驗證的資料夾或磁碟區，或挑選已註冊的封存。"},
     {"Verifying (reading every registered byte) ...", "正在驗證（讀取每個已註冊的位元組）……"},
     {"Not verified: {}", "未能驗證：{}"},
+    // A chosen archive that more than one attached volume holds (decision 0022, point 7).
+    {"Not verified: archive {} is on more than one attached volume, as a device and a sector-by-sector clone of it "
+        "would be:{}\nVeriArchive cannot tell which one to verify. Type the folder of the one to verify above, or "
+        "choose it with \"Choose...\", choose \"The folder or volume above\" under \"Verify:\" and press \"Verify "
+        "(FULL)\"; or detach the other volumes and verify the archive again.",
+        "未能驗證：封存 {} 位於多個已連接的磁碟區上，例如一個裝置和它逐磁區複製出來的複本：{}\n程式無法判斷要驗證哪一個。"
+        "請在上方輸入要驗證的那一個的資料夾，或按「選擇…」挑選它，在「驗證：」選擇「上方的資料夾或磁碟區」，"
+        "再按「完整驗證」；或讓其他磁碟區中斷連線後，再驗證一次這個封存。",
+        Match::FormatOnly},
     {"The folder or volume above", "上方的資料夾或磁碟區"},
     {"FULL verification re-reads every registered file from the medium and compares it with "
         "the baseline. Only FULL VERIFY PASSED means 100% of the registered content was read and "
@@ -706,6 +715,12 @@ constexpr CatalogEntry entries[] = {
         "again",
         "無法確定：封存 {0} 位於多個已連接的磁碟區上（複製的媒體）：{1}；請以 `verify --full <root_path> --resume {3}` "
         "從執行 {2} 讀取的那個磁碟區上的根目錄繼續，或讓其他磁碟區中斷連線後再繼續一次"},
+    // An archive named by its uuid, not to resume a run, that more than one
+    // attached volume holds (decision 0022, point 7).
+    {"AMBIGUOUS: archive {} is on more than one attached volume (cloned media): {}; verify it at the root on one of "
+        "them with `verify --full <root_path>`, or detach the other volumes and verify it again",
+        "無法確定：封存 {} 位於多個已連接的磁碟區上（複製的媒體）：{}；請以 `verify --full <root_path>` 驗證其中一個"
+        "磁碟區上的根目錄，或讓其他磁碟區中斷連線後再驗證一次"},
     {"run {} is not an interrupted run", "執行 {} 不是中斷的執行"},
     // An interrupted attempt of a relocation, which `verify --resume` does not continue (decision 0026).
     {"run {} is an interrupted attempt of the unfinished relocation of archive {}; continue it with `archive "

@@ -372,6 +372,9 @@ va::VolumeInfo serial_less_volume(const std::filesystem::path& mount_point)
     return volume;
 }
 
+// The rows of `table` in the fixture's database (defined below).
+std::int64_t count_rows(EngineFixture& fixture, const std::string& table);
+
 // Decision 0022, point 7: a resume by the archive's uuid, as `verify --full
 // <archive_uuid> --resume <run_id>` and Resume in the Archive List make it,
 // looks at every attached volume. A device and a sector clone of it attached at
@@ -381,9 +384,12 @@ va::VolumeInfo serial_less_volume(const std::filesystem::path& mount_point)
 // nothing and leaves the run to resume. Continued on the other volume, it
 // would join the two into one result: a FULL pass for entries never read
 // there. Resumed at the root it read, it reads only the rest there and finds
-// the files the clone lost. A verification by uuid that is not a resume reads
-// the first volume that holds the archive, as before. (Sample volumes, sample
-// files.)
+// the files the clone lost. A verification by uuid that is not a resume, as
+// `verify --full <archive_uuid>` and Verify Archive make it, stops the same
+// way, never reading the volume listed first by itself: it names both roots
+// in its words, and gives them apart for the GUI's, reading and recording
+// nothing. With the clone detached, it reads the one volume left. (Sample
+// volumes, sample files.)
 void a_resume_by_uuid_stops_where_several_volumes_hold_the_archive()
 {
     EngineFixture fixture;
@@ -426,6 +432,7 @@ void a_resume_by_uuid_stops_where_several_volumes_hold_the_archive()
                               quoted(clone) + "; run " + run + " read " + quoted(clone) +
                               ": resume it at the root on the volume it read with `verify --full <root_path> "
                               "--resume " + run + "`, or detach the other volumes and resume it again");
+    CHECK(!stopped && stopped.error().roots_found == (std::vector<std::filesystem::path>{original, clone}));
     if (stopped) {
         std::cerr << "  resumed by uuid on two volumes: FULL VERIFY " << stopped->result << " at "
                   << va::path_to_utf8(stopped->root) << '\n';
@@ -464,10 +471,29 @@ void a_resume_by_uuid_stops_where_several_volumes_hold_the_archive()
           status_of(*resumed, "f8") == "Modified" && status_of(*resumed, "f5") == "Verified");
     CHECK(fixture.archive.bytes_read == 4000);
 
-    // Not a resume: the first volume that holds the archive, read in full.
+    // Not a resume: it stops too, naming both roots, reading and recording
+    // nothing. With the clone detached, the one volume left is read in full.
     va::VerifyRequest fresh;
     fresh.archive_uuid = registered->archive_uuid;
     fixture.archive.bytes_read = 0;
+    const auto runs_before = count_rows(fixture, "verify_runs");
+    const auto evidence_before = count_rows(fixture, "media_evidence");
+    const auto chosen = fixture.verify(fresh);
+    CHECK(!chosen && chosen.error().kind == va::VerifyStop::Kind::Decision &&
+          chosen.error().identity.result == va::MatchResult::Ambiguous);
+    CHECK(!chosen && chosen.error().message ==
+                         "AMBIGUOUS: archive " + registered->archive_uuid +
+                             " is on more than one attached volume (cloned media): " + quoted(original) + ", " +
+                             quoted(clone) + "; verify it at the root on one of them with `verify --full "
+                             "<root_path>`, or detach the other volumes and verify it again");
+    CHECK(!chosen && chosen.error().roots_found == (std::vector<std::filesystem::path>{original, clone}));
+    if (chosen) {
+        std::cerr << "  verified by uuid on two volumes: FULL VERIFY " << chosen->result << " at "
+                  << va::path_to_utf8(chosen->root) << '\n';
+    }
+    CHECK(fixture.archive.bytes_read == 0 && count_rows(fixture, "verify_runs") == runs_before &&
+          count_rows(fixture, "media_evidence") == evidence_before);
+    fixture.media.extra_volumes.clear();
     const auto verified = fixture.verify(fresh);
     CHECK(verified && verified->result == "PASSED_WITH_WARNINGS" && verified->root == original);
     CHECK(verified && verified->identity.result == va::MatchResult::MatchWeak && fixture.archive.bytes_read == 8000);

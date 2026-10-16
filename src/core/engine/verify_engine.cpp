@@ -44,39 +44,49 @@ std::optional<std::filesystem::path> native_subpath(const std::string& root_subp
     return native ? std::optional(*native) : std::nullopt;
 }
 
-// Decision 0022, point 7: a run resumed by its archive's uuid, whose archive
-// more than one attached volume holds, as a device and a sector clone of it do.
-// Matching cannot tell them apart, and the run's checkpoints say what matched
-// on the volume it read: continued on another, the verification would join
-// two volumes into one result. So it stops, as AMBIGUOUS does, naming the
-// roots and the root the run read, for the operator to resume it by its root.
+// Decision 0022, point 7: an archive named by its uuid that more than one
+// attached volume holds, as a device and a sector clone of it do. Matching
+// cannot tell them apart. A run resumed by the archive's uuid would join two
+// volumes into one result where it continued on another volume than the one
+// it read (its checkpoints say what matched there); a verification that is
+// not a resume would read the volume listed first, not one the operator
+// chose, and record its result as the archive's. So both stop, as AMBIGUOUS
+// does, naming the roots (and the root a resumed run read), for the operator
+// to name the root, or to detach the other volumes.
 VerifyStop on_several_volumes(const Uuid& archive_uuid, const std::vector<Located>& holding,
-    const std::string& run_id, const ResumePoint& resume)
+    const std::optional<std::string>& run_id, const std::optional<ResumePoint>& resume)
 {
     std::string roots;
+    std::vector<std::filesystem::path> found;
     for (const auto& place : holding) {
         roots += (roots.empty() ? "\"" : ", \"") + path_to_utf8(place.root) + "\"";
+        found.push_back(place.root);
     }
     MatchOutcome identity;
     identity.result = MatchResult::Ambiguous;
     identity.archives = {archive_uuid};
     const auto head = "AMBIGUOUS: archive " + archive_uuid + " is on more than one attached volume (cloned media): " +
                       roots + "; ";
-    const auto how = "with `verify --full <root_path> --resume " + run_id +
+    if (!resume || !run_id) {
+        return VerifyStop{VerifyStop::Kind::Decision,
+            head + "verify it at the root on one of them with `verify --full <root_path>`, or detach the other volumes "
+                   "and verify it again",
+            std::move(identity), std::move(found)};
+    }
+    const auto how = "with `verify --full <root_path> --resume " + *run_id +
                      "`, or detach the other volumes and resume it again";
     return VerifyStop{VerifyStop::Kind::Decision,
-        resume.root.empty()
-            ? head + "resume run " + run_id + " at the root on the volume it read " + how
-            : head + "run " + run_id + " read \"" + resume.root + "\": resume it at the root on the volume it read " +
+        resume->root.empty()
+            ? head + "resume run " + *run_id + " at the root on the volume it read " + how
+            : head + "run " + *run_id + " read \"" + resume->root + "\": resume it at the root on the volume it read " +
                   how,
-        std::move(identity)};
+        std::move(identity), std::move(found)};
 }
 
-// Where the verification reads. By root, there. By archive uuid, on an
+// Where the verification reads. By root, there. By archive uuid, on the
 // attached volume that holds the archive: its identity matches, and its root
-// folder is there. A verification that is not a resume reads the first one
-// found; a resume (`resume`) looks at every attached volume, and stops where
-// more than one holds the archive (on_several_volumes).
+// folder is there. Every attached volume is looked at, and where more than
+// one holds the archive, the verification stops (on_several_volumes).
 std::expected<Located, VerifyStop> locate(VerifyServices& services, const VerifyRequest& request,
     const std::vector<ArchiveCandidate>& pool, const std::optional<ResumePoint>& resume)
 {
@@ -118,9 +128,6 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
             relative->empty() ? volume.mount_point : volume.mount_point / *relative);
         if (services.archive_files.list(root)) {
             holding.push_back(Located{root, volume, candidate.root_subpath});
-            if (!resume) {
-                break;
-            }
         }
     }
     if (holding.empty()) {
@@ -128,8 +135,7 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
             "archive " + candidate.archive_uuid + " is not on any attached volume");
     }
     if (holding.size() > 1) {
-        return std::unexpected(
-            on_several_volumes(candidate.archive_uuid, holding, request.resume_run.value_or(""), *resume));
+        return std::unexpected(on_several_volumes(candidate.archive_uuid, holding, request.resume_run, resume));
     }
     return holding.front();
 }

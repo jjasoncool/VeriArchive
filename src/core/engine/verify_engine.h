@@ -67,6 +67,10 @@ struct VerifyStop {
     Kind kind;
     std::string message;
     MatchOutcome identity;
+    // An archive named by its uuid that more than one attached volume holds
+    // (decision 0022, point 7): the archive's root on each, for the user
+    // interfaces to word what to do. Empty for every other stop.
+    std::vector<std::filesystem::path> roots_found = {};
 };
 
 std::expected<VerifyOutcome, VerifyStop> verify_full(

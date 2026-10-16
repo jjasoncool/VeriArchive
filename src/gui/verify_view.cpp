@@ -175,6 +175,30 @@ void run_verification(GuiState& state, VerifyRequest request)
                 session.context.repository_uuid, state.host};
             auto outcome = verify_full(services, request, cancel, progress);
             if (!outcome) {
+                // Decision 0022, point 7: a chosen archive that more than one
+                // attached volume holds. The verification names their roots;
+                // this view says what to do in it.
+                if (!request.resume_run && request.archive_uuid && !outcome.error().roots_found.empty()) {
+                    const auto short_uuid = request.archive_uuid->substr(0, 8);
+                    std::string label;
+                    if (const auto archive = store->find_archive(*request.archive_uuid); archive && *archive) {
+                        label = (*archive)->label;
+                    }
+                    std::string roots;
+                    for (const auto& root : outcome.error().roots_found) {
+                        roots += "\n  " + path_to_utf8(root);
+                    }
+                    return [label, short_uuid, roots](const app::Text& text) {
+                        const auto archive_name = label.empty() ? short_uuid : label + text.parenthesized(short_uuid);
+                        return text.format(
+                            "Not verified: archive {} is on more than one attached volume, as a device and a "
+                            "sector-by-sector clone of it would be:{}\nVeriArchive cannot tell which one to verify. "
+                            "Type the folder of the one to verify above, or choose it with \"Choose...\", choose "
+                            "\"The folder or volume above\" under \"Verify:\" and press \"Verify (FULL)\"; or detach "
+                            "the other volumes and verify the archive again.",
+                            archive_name, roots);
+                    };
+                }
                 return [message = outcome.error().message](const app::Text& text) {
                     return text.format("Not verified: {}", text(message));
                 };

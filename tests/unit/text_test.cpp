@@ -403,6 +403,24 @@ void translation_tests()
           "無法確定：封存 " + uuid + " 位於多個已連接的磁碟區上（複製的媒體）：" + clones + "；請以 `verify --full "
           "<root_path> --resume " + run + "` 從執行 " + run + " 讀取的那個磁碟區上的根目錄繼續，或讓其他磁碟區中斷連線後再"
           "繼續一次");
+    // A verification by the archive's uuid that is not a resume stops the same
+    // way, and Verify Archive says what to do in it (decision 0022, point 7).
+    CHECK(chinese("error: AMBIGUOUS: archive " + uuid + " is on more than one attached volume (cloned media): " +
+                  clones + "; verify it at the root on one of them with `verify --full <root_path>`, or detach the "
+                  "other volumes and verify it again") ==
+          "錯誤：無法確定：封存 " + uuid + " 位於多個已連接的磁碟區上（複製的媒體）：" + clones +
+              "；請以 `verify --full <root_path>` 驗證其中一個磁碟區上的根目錄，或讓其他磁碟區中斷連線後再驗證一次");
+    const std::string roots_found = "\n  K:\\SAMPLE\n  X:\\SAMPLE";
+    CHECK(chinese.format("Not verified: archive {} is on more than one attached volume, as a device and a "
+                         "sector-by-sector clone of it would be:{}\nVeriArchive cannot tell which one to verify. Type "
+                         "the folder of the one to verify above, or choose it with \"Choose...\", choose \"The folder "
+                         "or volume above\" under \"Verify:\" and press \"Verify (FULL)\"; or detach the other volumes "
+                         "and verify the archive again.",
+              "ARCH-0002" + chinese.parenthesized(uuid.substr(0, 8)), roots_found) ==
+          "未能驗證：封存 ARCH-0002（" + uuid.substr(0, 8) +
+              "） 位於多個已連接的磁碟區上，例如一個裝置和它逐磁區複製出來的複本：" + roots_found +
+              "\n程式無法判斷要驗證哪一個。請在上方輸入要驗證的那一個的資料夾，或按「選擇…」挑選它，在「驗證：」選擇"
+              "「上方的資料夾或磁碟區」，再按「完整驗證」；或讓其他磁碟區中斷連線後，再驗證一次這個封存。");
     // An import that loses its revision, or leaves it to a registration with
     // saved files (decision 0030).
     CHECK(chinese("error: revision 2 of archive " + uuid + " was recorded by another operation while this import ran; "

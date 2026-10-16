@@ -110,7 +110,7 @@ veriarchive-cli verify --full E:\
 veriarchive-cli verify --full 46d4c696-4999-4c7d-80eb-b626da614e77
 ```
 
-With a uuid, VeriArchive finds the archive on the attached disks.
+With a uuid, VeriArchive finds the archive on the attached disks. If more than one attached volume holds it, as a device and a sector-by-sector clone of it do, it does not choose one: it stops (exit code 12) and names their folders. Verify one of them by its folder, or detach the other volumes and verify it again. In the Verify Archive view, type or choose the folder of the one to verify, choose "The folder or volume above" in "Verify:", and press "Verify (FULL)".
 
 ### Reading the result
 
@@ -162,7 +162,8 @@ If more than one attached volume holds the archive, as a device and a sector-by-
 | UNKNOWN | not a registered archive | check that the right disk is attached, or register it |
 | MIGRATED | the filesystem matches but the device changed (e.g. cloned onto a new disk) | if you moved it: `archive relocate <uuid> <new root>` |
 | AMBIGUOUS | several archives match (cloned disks) | choose one with `verify --full <archive_uuid>` |
-| AMBIGUOUS: archive ... is on more than one attached volume | a resume by the archive's uuid finds it on several attached volumes (a device and a clone of it) | resume at the root on the volume the run read: `verify --full <root> --resume <RUN_ID>`, or detach the other volumes and resume again |
+| AMBIGUOUS: archive ... is on more than one attached volume | a verification by the archive's uuid finds it on several attached volumes (a device and a clone of it) | verify one of them by its folder: `verify --full <root>`, or detach the other volumes and verify again |
+| AMBIGUOUS: archive ... is on more than one attached volume ...; run ... | a resume by the archive's uuid finds it on several attached volumes | resume at the root on the volume the run read: `verify --full <root> --resume <RUN_ID>`, or detach the other volumes and resume again |
 | PREVIOUS_CARRIER | this is the old disk of a relocated archive | the old disk is no longer verified; verify the new carrier |
 
 ## Comparing an archive with its copy
