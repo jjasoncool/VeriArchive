@@ -1852,6 +1852,95 @@ void a_registration_made_for_an_older_revision_stops_reading()
     CHECK(revision && !*revision);
 }
 
+// Decision 0030: an interrupted attempt says to go on with --resume, but not
+// once its plan was made for an older revision, which a resume refuses. Here
+// an import gives the archive revision 3 as a `register --new-revision`
+// creating revision 2 opens its first file, where the device goes away: no
+// checkpoint had files to save, so none looked. The attempt ends as one made
+// for an older revision, not as interrupted, in the words of its resume,
+// which reads nothing; its plan stays, saying that it stopped, and nothing is
+// recorded.
+void an_interrupted_registration_made_for_an_older_revision_says_to_abandon_it()
+{
+    Fixture fixture;
+    const auto archive_uuid = registered_sample(fixture);
+    test::HookedFiles hooked(fixture.archive, "p100.bin", [&] {
+        auto store = fixture.repository.store(); // another process's connection
+        test::import_later_revision(fixture, store, archive_uuid, 3);
+        fixture.archive.node("photos/p100.bin").open_error =
+            va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    });
+    va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
+    auto request = at("/vol");
+    request.new_revision = true;
+    const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+    const auto refusal = made_for_an_older_revision(archive_uuid, 2, 3);
+    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Refused &&
+          registered.error().message == refusal);
+    if (!registered && registered.error().message != refusal) {
+        std::cerr << "  interrupted after an import: " << registered.error().message << '\n';
+    }
+    const auto plan = plan_of(fixture.store, archive_uuid);
+    CHECK(plan.is_object() && plan.value("revision", 0) == 2 && plan.contains("stopped"));
+    const auto revision = fixture.store.revision(archive_uuid, 2);
+    CHECK(revision && !*revision);
+    const auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 3);
+
+    fixture.archive.node("photos/p100.bin").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    auto resume = at("/vol");
+    resume.resume = true;
+    const auto resumed = fixture.run(resume);
+    CHECK(!resumed && resumed.error().message == refusal && fixture.archive.bytes_read == 0);
+}
+
+// A resume cancelled while its takeover waits for the write lock (decision
+// 0024, point 3) says to go on with --resume, but not for a plan made for an
+// older revision, which a resume refuses (decision 0030). A `register
+// --new-revision` creating revision 2 was interrupted; then another
+// connection holds the write lock while a resume, already cancelled, waits
+// for it (scaled down: its statements wait 100 ms). It names the resume, and
+// once an import has given the archive revision 3, the abandon.
+void a_cancelled_resume_of_a_plan_made_for_an_older_revision_says_to_abandon_it()
+{
+    Fixture fixture;
+    const auto archive_uuid = registered_sample(fixture);
+    fixture.archive.node("videos/v130.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    auto again = at("/vol");
+    again.new_revision = true;
+    const auto interrupted = fixture.run(again);
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("videos/v130.bin").open_error.reset();
+    const auto cancelled_resume = [&] {
+        auto holder = fixture.repository.store(); // another process's write lock
+        CHECK(holder.begin());
+        auto store = fixture.repository.store(std::chrono::milliseconds(100));
+        va::CancelToken cancel;
+        cancel.cancel();
+        va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+            fixture.media_writer, fixture.media, store, fixture.repository.context.repo, fixture.host,
+            fixture.processes};
+        auto resume = at("/vol");
+        resume.resume = true;
+        auto resumed = va::register_archive(services, resume, cancel, fixture.progress);
+        holder.rollback();
+        return resumed;
+    };
+    const auto before = cancelled_resume();
+    CHECK(!before && before.error().kind == va::RegisterFailure::Kind::Incomplete &&
+          before.error().message == "registration was cancelled; continue with `register <root_path> --resume`");
+
+    test::import_later_revision(fixture, fixture.store, archive_uuid, 3);
+    const auto after = cancelled_resume();
+    CHECK(!after && after.error().kind == va::RegisterFailure::Kind::Refused &&
+          after.error().message == made_for_an_older_revision(archive_uuid, 2, 3));
+    const auto plan = plan_of(fixture.store, archive_uuid);
+    CHECK(plan.is_object() && plan.value("revision", 0) == 2);
+}
+
 } // namespace
 
 void register_engine_tests()
@@ -1896,4 +1985,6 @@ void register_engine_tests()
     a_registration_made_for_an_older_revision_never_records();
     a_registration_meets_a_later_revision_at_its_record();
     a_registration_made_for_an_older_revision_stops_reading();
+    an_interrupted_registration_made_for_an_older_revision_says_to_abandon_it();
+    a_cancelled_resume_of_a_plan_made_for_an_older_revision_says_to_abandon_it();
 }

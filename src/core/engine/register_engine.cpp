@@ -133,6 +133,22 @@ std::expected<std::optional<std::uint32_t>, IoError> later_than_planned(
     return store.later_revision(archive_uuid, revision - 1);
 }
 
+// An attempt that stops without finishing (cancelled, its device removed)
+// says to go on with `register --resume`, unless its plan was made for an
+// older revision by now (decision 0030): another operation, such as an
+// import, gave the archive a later revision while it ran, which only a
+// checkpoint with files to save looks for, and the resume would be refused.
+// Then it ends as one made for an older revision, as at such a checkpoint.
+// Read once, best effort as its stop mark: when the database cannot tell, the
+// resume is named, and says so itself.
+std::unexpected<RegisterFailure> interrupted(ArchiveStore& store, const Plan& plan, const std::string& why)
+{
+    if (const auto later = later_than_planned(store, plan.archive_uuid, plan.revision); later && *later) {
+        return made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, **later);
+    }
+    return fail(RegisterFailure::Kind::Incomplete, why + "; continue with `register <root_path> --resume`");
+}
+
 // Another registration of the archive is unfinished: the plan its key holds
 // (decision 0025), and the root that registration reads.
 struct UnfinishedRegistration {
@@ -487,8 +503,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (!claimed) {
             store.rollback();
             if (cancel.cancelled()) {
-                return fail(Kind::Incomplete,
-                    "registration was cancelled; continue with `register <root_path> --resume`");
+                return interrupted(store, plan, "registration was cancelled");
             }
             return fail(Kind::Repository, claimed.error().message);
         }
@@ -683,15 +698,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     }
 
     // Scan, then hash every readable file not already hashed before an interruption.
-    const auto interrupted = [&](const std::string& why) {
-        return fail(Kind::Incomplete, why + "; continue with `register <root_path> --resume`");
-    };
     ScanOptions scan_options;
     auto scanned = scan_tree(services.archive_files, request.root, scan_options, cancel, heartbeat);
     if (!scanned) {
         const auto kind = scanned.error().kind;
         if (kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved) {
-            return interrupted("registration was interrupted while scanning");
+            return interrupted(store, plan, "registration was interrupted while scanning");
         }
         return fail(Kind::Media, "cannot scan the root: " + scanned.error().message);
     }
@@ -839,8 +851,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         return stopped_at_checkpoint();
     }
     if (!hashed || device_removed) {
-        return interrupted(device_removed ? "the device disappeared during registration"
-                                          : "registration was cancelled");
+        return interrupted(store, plan,
+            device_removed ? "the device disappeared during registration" : "registration was cancelled");
     }
     // Writing the manifest and the index of a large archive takes a while
     // without progress reports: it starts from a fresh "updated".
@@ -1012,7 +1024,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             return made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, *later_revision);
         }
         if (cancelled_waiting) {
-            return interrupted("registration was cancelled");
+            return interrupted(store, plan, "registration was cancelled");
         }
         return fail(Kind::Repository, "cannot record the archive: " + record.error().message);
     }

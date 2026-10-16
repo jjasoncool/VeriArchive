@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <functional>
 #include <map>
 #include <semaphore>
 #include <set>
@@ -1729,14 +1730,23 @@ void a_relocation_replaces_rows_that_no_plan_names()
 
 // Writes the repository through `inner`, except the files of a manifest,
 // which cannot be created (a sample failure, as a full disk would be).
+// `meanwhile` runs once, as the first of them is about to fail.
 class ManifestFailingWriter final : public va::IFileWriter {
 public:
-    explicit ManifestFailingWriter(va::IFileWriter& inner) : inner_(inner) {}
+    explicit ManifestFailingWriter(va::IFileWriter& inner, std::function<void()> meanwhile = {})
+        : inner_(inner), meanwhile_(std::move(meanwhile))
+    {
+    }
 
     std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
         const std::filesystem::path& destination) override
     {
         if (va::path_to_utf8(destination.filename()).contains(".vam")) {
+            if (meanwhile_) {
+                const auto hook = std::move(meanwhile_);
+                meanwhile_ = nullptr;
+                hook();
+            }
             return std::unexpected(va::IoError{va::IoErrorKind::Other, 0, "disk full (sample)"});
         }
         return inner_.create(destination);
@@ -1752,6 +1762,7 @@ public:
 
 private:
     va::IFileWriter& inner_;
+    std::function<void()> meanwhile_;
 };
 
 // Decision 0026: a failure that stops a relocation (its scan, its manifest,
@@ -2190,6 +2201,83 @@ void a_relocation_meets_a_later_revision_at_its_record()
     CHECK(!run_id.empty() && fixture.saved(run_id).files == 40);
 }
 
+// An interrupted attempt says to go on with --resume (decision 0026), but not
+// once the archive has a later revision than the one its relocation verifies,
+// which a resume refuses (decision 0030). Here an import gives the archive
+// revision 3 as the relocation opens its first file on the new carrier, where
+// the new disk goes away: no checkpoint had entries to save, so none looked.
+// The attempt ends as one made for an older revision, in the words of its
+// resume, which reads nothing, and records no run; its record stays, saying
+// that it stopped.
+void an_interrupted_relocation_made_for_an_older_revision_says_to_abandon_it()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    test::HookedFiles hooked(fixture.archive, "p100.bin", [&] {
+        auto store = fixture.repository.store(); // another process's connection
+        test::import_later_revision(fixture, store, fixture.archive_uuid, 3);
+        fixture.archive.node("new/photos/p100.bin").open_error =
+            va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    });
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    const auto refusal = made_for_an_older_revision(fixture, 1, 3);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused &&
+          relocated.error().message == refusal);
+    if (!relocated && relocated.error().message != refusal) {
+        std::cerr << "  interrupted after an import: " << relocated.error().message << '\n';
+    }
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->empty());
+    const auto record = fixture.record();
+    CHECK(record.is_object() && record.value("revision", 0) == 1 && record.contains("stopped"));
+
+    fixture.archive.node("new/photos/p100.bin").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!resumed && resumed.error().message == refusal && fixture.archive.bytes_read == 0);
+}
+
+// A failure that stops a relocation says to go on with --resume (decision
+// 0026), but not once the archive has a later revision than the one the
+// relocation verifies (decision 0030). Here an import gives the archive
+// revision 3 after every entry of the new carrier matched and was saved, as
+// the manifest of revision 2 is about to be written, which fails (a sample
+// failure): the relocation ends as one made for an older revision, not with
+// that failure, and records nothing; its record stays, saying that it
+// stopped, with what it matched.
+void a_relocation_stopped_by_a_failure_after_an_import_says_to_abandon_it()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    ManifestFailingWriter failing(*fixture.repository.writer, [&] {
+        auto store = fixture.repository.store(); // another process's connection
+        test::import_later_revision(fixture, store, fixture.archive_uuid, 3);
+    });
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, failing, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    const auto refusal = made_for_an_older_revision(fixture, 1, 3);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused &&
+          relocated.error().message == refusal);
+    if (!relocated && relocated.error().message != refusal) {
+        std::cerr << "  stopped by a failure after an import: " << relocated.error().message << '\n';
+    }
+    const auto revision = fixture.store.revision(fixture.archive_uuid, 2);
+    CHECK(revision && !*revision);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->empty());
+    const auto record = fixture.record();
+    CHECK(record.is_object() && record.value("revision", 0) == 1 && record.contains("stopped"));
+    const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
+    CHECK(!run_id.empty() && fixture.saved(run_id).files == 40);
+}
+
 } // namespace
 
 void relocate_tests()
@@ -2234,4 +2322,6 @@ void relocate_tests()
     an_attempt_stops_when_its_relocation_is_abandoned();
     a_relocation_made_for_an_older_revision_never_records();
     a_relocation_meets_a_later_revision_at_its_record();
+    an_interrupted_relocation_made_for_an_older_revision_says_to_abandon_it();
+    a_relocation_stopped_by_a_failure_after_an_import_says_to_abandon_it();
 }

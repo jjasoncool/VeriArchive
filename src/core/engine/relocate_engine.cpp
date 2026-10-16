@@ -224,13 +224,6 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         this_attempt = AttemptProcess{*self, services.host.host};
     }
     const auto resume_hint = "continue it with `archive relocate " + uuid + " <root_path> --resume`";
-    // An attempt that a failure stops (its scan, its manifest, its record)
-    // keeps the relocation's record and checkpoints as an interrupted one
-    // does, and its failure says how to go on once the cause is dealt with
-    // (decision 0026); it keeps its kind (exit 11), as registration's does.
-    const auto stopped_by = [&](Kind kind, const std::string& failure) {
-        return fail(kind, failure + "; the relocation keeps its saved progress: " + resume_hint);
-    };
 
     // The relocation begins, or takes over the archive's unfinished one, in
     // one write transaction before anything of the media is read (decision
@@ -547,6 +540,21 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         return std::unexpected(
             made_for_an_older_revision(uuid, path_to_utf8(request.root), previous_revision, *later_revision));
     };
+    // An attempt that ends without finishing, interrupted or stopped by a
+    // failure, says to go on with `--resume` (decision 0026), unless the
+    // archive has a later revision by now than the one this relocation
+    // verifies (decision 0030): another operation, such as an import, gave it
+    // one while the attempt ran, which only a checkpoint with entries to save
+    // looks for, and the resume would be refused. Then it ends as one made
+    // for an older revision, as at such a checkpoint, and records no run.
+    // Read once, best effort as the stop mark: when the database cannot tell,
+    // the resume is named, and says so itself.
+    const auto made_for_older_by_now = [&] {
+        if (const auto later = store.later_revision(uuid, previous_revision); later && *later) {
+            later_revision = *later;
+        }
+        return later_revision.has_value();
+    };
     // An interrupted attempt (cancelled, its device removed) is recorded in
     // the history as an interrupted verification is (R-104): an INCOMPLETE
     // FULL verification of the revision it compared the new carrier with,
@@ -586,6 +594,24 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             }
             return store.insert_verify_items(items);
         });
+    };
+    // An interrupted attempt, recorded as such, and continued with `--resume`.
+    const auto interrupted = [&] {
+        if (made_for_older_by_now()) {
+            return made_for_older();
+        }
+        record_interruption(comparison);
+        return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
+    };
+    // An attempt that a failure stops (its scan, its manifest, its record)
+    // keeps the relocation's record and checkpoints as an interrupted one
+    // does, and its failure says how to go on once the cause is dealt with
+    // (decision 0026); it keeps its kind (exit 11), as registration's does.
+    const auto stopped_by = [&](Kind kind, const std::string& failure) {
+        if (made_for_older_by_now()) {
+            return made_for_older();
+        }
+        return fail(kind, failure + "; the relocation keeps its saved progress: " + resume_hint);
     };
     if (lost) {
         return lost_to_another();
@@ -649,8 +675,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             comparison.items);
     }
     if (comparison.incomplete) {
-        record_interruption(comparison);
-        return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
+        return interrupted();
     }
     if (!comparison.scan_error.empty()) {
         return stopped_by(Kind::Media, "cannot scan the new root: " + comparison.scan_error);
@@ -866,8 +891,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                                            " <root_path> --resume`)");
         }
         if (cancelled_waiting) {
-            record_interruption(comparison);
-            return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
+            return interrupted();
         }
         return stopped_by(Kind::Repository, "cannot record the relocation: " + recorded.error().message);
     }
