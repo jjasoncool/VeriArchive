@@ -54,8 +54,8 @@ std::optional<std::string> kernel_filesystem_id_for(std::string_view filesystem_
     std::uint64_t fsid);
 
 // Windows' storage driver reports an NVMe namespace's EUI-64/NGUID in the serial
-// field, formatted like "E823_8FA6_BF53_0001_001B_448B_47F1_5232.". Linux shows the
-// same identifier as the WWN "eui.e8238fa6bf530001001b448b47f15232". Returns that
+// field, formatted like "1234_5678_9ABC_DEF0_0011_2233_4455_6677.". Linux shows the
+// same identifier as the WWN "eui.123456789abcdef00011223344556677". Returns that
 // WWN form, or nullopt when `serial` is not in this format.
 std::optional<std::string> nvme_wwn_from_windows_serial(std::string_view serial);
 
