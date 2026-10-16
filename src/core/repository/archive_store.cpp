@@ -1222,7 +1222,7 @@ std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_r
     }
     // The archive row is written together with the plan (register_engine.cpp);
     // for a new revision it is the existing archive, with the same root.
-    auto archive = database_.prepare("SELECT root_subpath FROM archives WHERE archive_uuid = ?");
+    auto archive = database_.prepare("SELECT root_subpath, status FROM archives WHERE archive_uuid = ?");
     // Checkpoints hold only hashed files, so every row counts.
     auto hashed = database_.prepare(
         "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE archive_uuid = ? AND revision = ?");
@@ -1258,6 +1258,9 @@ std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_r
             return std::unexpected(found.error());
         }
         registration.volume_root = *found && archive->text(0).empty();
+        // A registration over a lost manifest of an archive retired since
+        // (decision 0028, point 9): its resume is refused.
+        registration.archive_retired = *found && archive->text(1) == "RETIRED" && json_unsigned(plan, "lost_manifest");
         archive->reset();
         // Made for an older revision (decision 0030): the plan creating
         // revision N+1 was made for N.

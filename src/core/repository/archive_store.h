@@ -118,6 +118,11 @@ struct PendingRegistration {
     bool later_revision = false;                // made for an older revision: the archive has a later one
                                                 // than the plan was made for, so it can never finish and
                                                 // waits to be abandoned (decision 0030)
+    bool archive_retired = false;               // a registration over a lost manifest (its plan names
+                                                // "lost_manifest") of an archive retired since, as a
+                                                // version before decision 0028, point 9 let one begin: a
+                                                // retired archive takes no new revision, so it can never
+                                                // finish and waits to be abandoned
 };
 
 // A verification that has not finished: running now (it has no history row

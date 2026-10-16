@@ -69,6 +69,9 @@ struct UnfinishedOperation {
                                        // the recorded content (decision 0026): it can never finish
     bool later_revision = false;       // a registration or relocation made for an older revision: the archive
                                        // has a later one now, so it can never finish (decision 0030)
+    bool archive_retired = false;      // a registration over a lost manifest of an archive retired since: a
+                                       // retired archive takes no new revision, so it can never finish
+                                       // (decision 0028, point 9)
     std::optional<std::chrono::sys_seconds> updated;  // when the operation last said it was working, if it does
     bool done_counted = true;          // false: files_done and bytes_done are not known, as the checkpoints
                                        // are not counted where that would hold up the operation (a database
@@ -155,10 +158,13 @@ enum class OperationState {
                // hold the recorded content (decision 0026): it is never resumed, and waits to be abandoned
     LaterRevision,  // a registration or relocation stopped as Stopped says, made for an older revision
                     // than the archive has now (decision 0030): it never records, and waits to be abandoned
+    ArchiveRetired, // a registration over a lost manifest stopped as Stopped says, whose archive is retired
+                    // by now (decision 0028, point 9): it never records, and waits to be abandoned
     Unknown,   // its progress is not counted and its record says nothing of its state (an older version)
 };
 
-// Whether an operation in `state` has stopped: Stopped, Differs or LaterRevision.
+// Whether an operation in `state` has stopped: Stopped, Differs, LaterRevision or
+// ArchiveRetired.
 bool has_stopped(OperationState state);
 
 // After this long without progress an operation is no longer called running,
@@ -166,7 +172,8 @@ bool has_stopped(OperationState state);
 inline constexpr std::chrono::minutes quiet_after{3};
 
 // The state in --json, in English: "waiting", "running", "quiet", "held_up"
-// (Silent), "stopped", "differs", "later_revision", "unknown".
+// (Silent), "stopped", "differs", "later_revision", "archive_retired",
+// "unknown".
 std::string_view state_code(OperationState state);
 
 // Follows one operation from poll to poll: when its numbers last moved, and

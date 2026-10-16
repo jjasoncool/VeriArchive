@@ -432,6 +432,9 @@ constexpr CatalogEntry entries[] = {
     {"new carrier differs; abandon it", "新載體上的內容不符；請放棄它"},
     // A registration or relocation made for an older revision (decision 0030).
     {"archive has a later revision; abandon it", "封存已有較新的版次；請放棄它"},
+    // A registration over the lost manifest of an archive retired since
+    // (decision 0028, point 9).
+    {"archive is retired; abandon it", "封存已停用；請放棄它"},
     {"not counted", "未計算"},
     {"not known", "不明"},
     {"no progress reported for {} minutes; its process is still running", "已 {} 分鐘未回報進度；其處理程序仍在執行",

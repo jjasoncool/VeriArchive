@@ -241,8 +241,11 @@ UnfinishedOperation registration_operation(const PendingRegistration& registrati
     operation.recorded_stopped = !registration.stopped.empty();
     operation.done_counted = registration.done_counted;
     operation.revision = registration.revision;
-    // Made for an older revision, it never records (decision 0030).
+    // Made for an older revision, it never records (decision 0030), nor
+    // does one over the lost manifest of an archive retired since (decision
+    // 0028, point 9).
     operation.later_revision = registration.later_revision;
+    operation.archive_retired = registration.archive_retired;
     // Otherwise the process its plan names tells whether it still runs
     // (decision 0024): one that has ended has stopped at once, not when its
     // plan has said nothing for minutes.
@@ -291,7 +294,7 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
 bool has_stopped(OperationState state)
 {
     return state == OperationState::Stopped || state == OperationState::Differs ||
-           state == OperationState::LaterRevision;
+           state == OperationState::LaterRevision || state == OperationState::ArchiveRetired;
 }
 
 std::string_view state_code(OperationState state)
@@ -311,6 +314,8 @@ std::string_view state_code(OperationState state)
         return "differs";
     case OperationState::LaterRevision:
         return "later_revision";
+    case OperationState::ArchiveRetired:
+        return "archive_retired";
     case OperationState::Unknown:
         return "unknown";
     }
@@ -469,11 +474,17 @@ OperationState OperationWatch::state(Clock::time_point now, std::chrono::sys_sec
     // relocation itself), it is shown as any attempt that runs. Likewise a
     // registration or relocation made for an older revision than the archive
     // has now, which never records (decision 0030): while its attempt runs,
-    // it stops at its next checkpoint.
+    // it stops at its next checkpoint. And a registration over the lost
+    // manifest of an archive retired since, as a version before decision
+    // 0028, point 9 let one begin, whose resume is refused: a retired
+    // archive takes no new revision.
     if (operation_.differs) {
         return OperationState::Differs;
     }
-    return operation_.later_revision ? OperationState::LaterRevision : judged;
+    if (operation_.later_revision) {
+        return OperationState::LaterRevision;
+    }
+    return operation_.archive_retired ? OperationState::ArchiveRetired : judged;
 }
 
 OperationState OperationWatch::judged_state(Clock::time_point now, std::chrono::sys_seconds wall_now) const
@@ -586,8 +597,9 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     // resumed (R-104), and a registration that has stopped, may be resumed
     // from the list, as their command-line resumes continue them. Not one
     // that runs, or may, nor one that can no longer finish (a later revision,
-    // decision 0030). Nor a relocation: the GUI does not relocate, and its
-    // resume stays `archive relocate --resume`.
+    // decision 0030; an archive retired since, decision 0028, point 9). Nor a
+    // relocation: the GUI does not relocate, and its resume stays `archive
+    // relocate --resume`.
     row.offers_resume = operation.kind != OperationKind::Relocation && row.state_kind == OperationState::Stopped &&
                         operation.resumable;
 
@@ -680,6 +692,9 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         break;
     case OperationState::LaterRevision:
         row.state = text("archive has a later revision; abandon it");
+        break;
+    case OperationState::ArchiveRetired:
+        row.state = text("archive is retired; abandon it");
         break;
     }
     return row;

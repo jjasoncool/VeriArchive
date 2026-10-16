@@ -1332,6 +1332,43 @@ if(NOT body_retired MATCHES "^Retired [^\n]+ \\(${body_uuid}\\)[.] It is no long
     message(FATAL_ERROR "retiring an archive whose manifest changed only in its body: verified ${body_verified} "
         "(${body_result})\n${body_retired}\n${body_registered}")
 endif()
+# A registration over the lost manifest of an archive retired since, as a
+# version before decision 0028, point 9 let one begin, can never finish.
+# Where the sqlite3 command is installed: a sample folder registered, its
+# manifest gone, and a registration over it stopped as its manifest cannot be
+# written (a folder stands at its place, sample data); the archive then
+# retired as an older version retired it, without looking at its
+# registrations (sample damage of its record). `archive show` gives the
+# registration the state archive_retired in --json and its line in text, its
+# resume is refused (exit 12), and it is abandoned.
+if(SQLITE3_PROGRAM)
+    set(OLDER "${WORK}/older-registration-sample")
+    file(WRITE "${OLDER}/a.txt" "older registration sample a\n")
+    run_cli("0" register "${OLDER}" --json)
+    string(JSON older_uuid GET "${last_output}" archive_uuid)
+    string(SUBSTRING "${older_uuid}" 0 8 older_prefix)
+    file(REMOVE "${WORK}/repo4/manifests/${older_uuid}/r0001.vam")
+    set(OLDER_BLOCKER "${WORK}/repo4/manifests/${older_uuid}/r0002.vam")
+    file(MAKE_DIRECTORY "${OLDER_BLOCKER}")
+    run_cli("11" register "${OLDER}" --lost-manifest "${older_prefix}" --confirm)
+    file(REMOVE_RECURSE "${OLDER_BLOCKER}")
+    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo4/veriarchive.db"
+        "UPDATE archives SET status = 'RETIRED' WHERE archive_uuid = '${older_uuid}'"
+        RESULT_VARIABLE older_retired)
+    run_cli("0" archive show "${older_prefix}" --json)
+    string(JSON older_state GET "${last_output}" unfinished_registration state)
+    run_cli("0" --lang en archive show "${older_prefix}")
+    set(older_shown "${last_output}")
+    run_cli("12" --lang en register "${OLDER}" --resume)
+    set(older_resumed "${last_errors}")
+    run_cli("0" archive abandon-registration "${older_prefix}" --confirm)
+    if(NOT older_retired EQUAL 0 OR NOT older_state STREQUAL "archive_retired"
+            OR NOT older_shown MATCHES "\n  Unfinished registration of revision 2 from [^\n]*; archive is retired; abandon it\n"
+            OR NOT older_resumed MATCHES "is retired and takes no new revisions [(]decision 0003[)]: abandon its unfinished registration")
+        message(FATAL_ERROR "an older version's registration over the lost manifest of a retired archive: retired "
+            "${older_retired}, state ${older_state}\n${older_shown}\n${older_resumed}")
+    endif()
+endif()
 set(GLOBAL --config "${WORK}/config.json")
 
 # Decision 0028, point 8 (operator, 2026-10-17): the same sample folder

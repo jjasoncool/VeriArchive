@@ -1486,6 +1486,146 @@ void an_operation_made_for_an_older_revision_waits_to_be_abandoned()
           "未完成的註冊（版次 2，根目錄「Z:\\」）：3.00 GiB / 8.00 GiB（37%）・1200 / 3000 個檔案；封存已有較新的版次；請放棄它");
 }
 
+// Decision 0028, point 9: a registration over the lost manifest of an
+// archive retired since, as a version before that point let one begin,
+// never records: stopped (by its mark, its process ended, or silent for
+// minutes), it is shown in a state of its own, to be abandoned, without
+// Resume, in both languages, as --json says it and on the command line's
+// line, ordered with the stopped operations. While its attempt runs, it is
+// shown as any that runs. One made for an older revision as well keeps the
+// state of a later revision.
+void a_registration_of_an_archive_retired_since_waits_to_be_abandoned()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const Clock::time_point start{};
+    auto operation = registration(20, 10 * mib);
+    operation.revision = 3;
+    operation.files_total = 40;
+    operation.bytes_total = 20 * mib;
+    operation.archive_retired = true;
+    operation.updated = wall_now - 20s;
+    operation.attempt = va::AttemptState::Running;
+    OperationWatch working;
+    working.update(operation, start, wall_now);
+    CHECK(working.state(start, wall_now) == OperationState::Running);
+    CHECK(!describe_operation(english, working, start, wall_now).abandonable);
+
+    for (const auto& [stopped, attempt, updated] :
+        {std::tuple{true, va::AttemptState::Running, wall_now - 20s},
+            std::tuple{false, va::AttemptState::Ended, wall_now - 20s},
+            std::tuple{false, va::AttemptState::Unknown, wall_now - 10min}}) {
+        auto ended = operation;
+        ended.recorded_stopped = stopped;
+        ended.attempt = attempt;
+        ended.updated = updated;
+        OperationWatch watch;
+        watch.update(ended, start, wall_now);
+        CHECK(watch.state(start, wall_now) == OperationState::ArchiveRetired);
+        const auto row = describe_operation(english, watch, start, wall_now);
+        CHECK(row.state_kind == OperationState::ArchiveRetired && row.abandonable && !row.offers_resume &&
+              row.state == "archive is retired; abandon it");
+        CHECK(describe_operation(chinese, watch, start, wall_now).state == "封存已停用；請放棄它");
+        CHECK(va::app::state_code(va::app::state_of_one_read(ended, wall_now)) == "archive_retired");
+    }
+
+    // After a registration that runs, though it started later.
+    auto ended = operation;
+    ended.key = "registration:c0ffee00-0000-4000-8000-000000000028";
+    ended.recorded_stopped = true;
+    auto running = registration(1, mib);
+    running.started = "2026-10-15T02:00:00Z";
+    running.updated = wall_now;
+    std::vector<OperationWatch> watches;
+    va::app::follow(watches, {ended, running}, start, wall_now);
+    const auto rows = va::app::describe_operations(english, watches, start, wall_now);
+    CHECK(rows.size() == 2 && rows[0].state == "running" && rows[1].state_kind == OperationState::ArchiveRetired);
+
+    // Made for an older revision as well: that state, as its resume says.
+    auto both = ended;
+    both.later_revision = true;
+    OperationWatch later;
+    later.update(both, start, wall_now);
+    CHECK(later.state(start, wall_now) == OperationState::LaterRevision);
+
+    // The command line's line under the archive.
+    CHECK(va::app::describe_for_archive(english, ended, wall_now) ==
+          "Unfinished registration of revision 3 from \"Z:\\\": 10.0 MiB of 20.0 MiB (50%) · 20 of 40 files; "
+          "archive is retired; abandon it");
+    CHECK(va::app::describe_for_archive(chinese, ended, wall_now) ==
+          "未完成的註冊（版次 3，根目錄「Z:\\」）：10.0 MiB / 20.0 MiB（50%）・20 / 40 個檔案；封存已停用；請放棄它");
+}
+
+// Decision 0028, point 9: the repository tells which unfinished registration
+// is one over the lost manifest of an archive retired since. Archive A
+// registered twice (sample data), its manifest of revision 2 gone, and a
+// registration over that lost manifest interrupted (its device removed);
+// then A is retired, as a version before that point retired it without
+// looking at its registrations (sample damage of the archive's record). The
+// registration reads as stopped and resumable until A is retired, then as
+// one to abandon, without Resume; an interrupted registration of a new
+// revision of another archive retired since, which is no registration over
+// a lost manifest, is not told so.
+void reads_a_registration_of_an_archive_retired_since()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("a/SAMPLE-one.txt", "one (sample data)");
+    fixture.archive.add_file("b/SAMPLE-three.txt", "three (sample data)");
+    const auto first = fixture.register_root(fixture.archive.root() / "a");
+    fixture.archive.add_file("a/SAMPLE-two.txt", "two (sample data)");
+    va::RegisterRequest again;
+    again.root = fixture.archive.root() / "a";
+    again.new_revision = true;
+    const auto second = fixture.register_root(again);
+    const auto b = fixture.register_root(fixture.archive.root() / "b");
+    CHECK(first && second && b);
+    if (!first || !second || !b) {
+        return;
+    }
+    const auto& archive_uuid = first->archive_uuid;
+    std::filesystem::remove(va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2));
+    fixture.archive.node("a/SAMPLE-two.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RegisterRequest over;
+    over.root = fixture.archive.root() / "a";
+    over.lost_manifest_of = archive_uuid;
+    over.confirmed = true;
+    const auto interrupted = fixture.register_root(over);
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.add_file("b/SAMPLE-four.txt", "four (sample data)");
+    fixture.archive.node("b/SAMPLE-four.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RegisterRequest next;
+    next.root = fixture.archive.root() / "b";
+    next.new_revision = true;
+    const auto other = fixture.register_root(next);
+    CHECK(!other && other.error().kind == va::RegisterFailure::Kind::Incomplete);
+
+    const va::app::Text english;
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    // Each registration's state and whether it offers Resume, as one read gives them.
+    const auto states = [&] {
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; });
+        CHECK(read && read->operations.size() == 2);
+        std::map<va::Uuid, std::pair<std::string, bool>> found;
+        for (const auto& operation : read ? read->operations : std::vector<UnfinishedOperation>{}) {
+            OperationWatch watch;
+            watch.update(operation, Clock::time_point{}, now);
+            const auto row = describe_operation(english, watch, Clock::time_point{}, now);
+            found[operation.archive_uuid] = {row.state, row.offers_resume};
+        }
+        return found;
+    };
+    auto before = states();
+    CHECK((before[archive_uuid] == std::pair<std::string, bool>{"stopped; it can be resumed", true}));
+    CHECK((before[b->archive_uuid] == std::pair<std::string, bool>{"stopped; it can be resumed", true}));
+
+    fixture.repository.execute("UPDATE archives SET status = 'RETIRED'");
+    auto after = states();
+    CHECK((after[archive_uuid] == std::pair<std::string, bool>{"archive is retired; abandon it", false}));
+    // Not a registration over a lost manifest: not told so.
+    CHECK(after[b->archive_uuid].first != "archive is retired; abandon it");
+}
+
 // The repository tells which unfinished registration and relocation were
 // made for an older revision (decision 0030). An archive at revision 1 has a
 // relocation against revision 1 and a `register --new-revision` creating
@@ -1850,6 +1990,8 @@ void unfinished_operations_tests()
     lists_an_unfinished_relocation();
     a_relocation_whose_new_carrier_differs_waits_to_be_abandoned();
     an_operation_made_for_an_older_revision_waits_to_be_abandoned();
+    a_registration_of_an_archive_retired_since_waits_to_be_abandoned();
+    reads_a_registration_of_an_archive_retired_since();
     reads_operations_made_for_an_older_revision();
     words_a_line_for_the_command_line();
 }
