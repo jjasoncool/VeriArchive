@@ -659,6 +659,18 @@ constexpr CatalogEntry entries[] = {
     // src/core/engine/verify_engine.cpp
     {"cannot list volumes: {}", "無法列出磁碟區：{}", Match::Cause},
     {"archive {} is not on any attached volume", "封存 {} 不在任何已連接的磁碟區上"},
+    // A run resumed by its archive's uuid, whose archive more than one attached
+    // volume holds (decision 0022, point 7): the roots are one value, quoted.
+    {"AMBIGUOUS: archive {} is on more than one attached volume (cloned media): {}; run {} read \"{}\": resume it "
+        "at the root on the volume it read with `verify --full <root_path> --resume {}`, or detach the other volumes "
+        "and resume it again",
+        "無法確定：封存 {} 位於多個已連接的磁碟區上（複製的媒體）：{}；執行 {} 讀取的是「{}」：請以 `verify --full "
+        "<root_path> --resume {}` 從它讀取的那個磁碟區上的根目錄繼續，或讓其他磁碟區中斷連線後再繼續一次"},
+    {"AMBIGUOUS: archive {} is on more than one attached volume (cloned media): {}; resume run {} at the root on "
+        "the volume it read with `verify --full <root_path> --resume {}`, or detach the other volumes and resume it "
+        "again",
+        "無法確定：封存 {0} 位於多個已連接的磁碟區上（複製的媒體）：{1}；請以 `verify --full <root_path> --resume {3}` "
+        "從執行 {2} 讀取的那個磁碟區上的根目錄繼續，或讓其他磁碟區中斷連線後再繼續一次"},
     {"run {} is not an interrupted run", "執行 {} 不是中斷的執行"},
     // An interrupted attempt of a relocation, which `verify --resume` does not continue (decision 0026).
     {"run {} is an interrupted attempt of the unfinished relocation of archive {}; continue it with `archive "

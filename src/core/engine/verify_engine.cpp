@@ -28,6 +28,13 @@ struct Located {
     std::string root_subpath;
 };
 
+// The run that a verification resumes (R-104), as its record says.
+struct ResumePoint {
+    Uuid archive_uuid;
+    std::uint32_t revision = 0;
+    std::string root;  // where the run read (decision 0022); empty in a record of an older version
+};
+
 std::optional<std::filesystem::path> native_subpath(const std::string& root_subpath)
 {
     if (root_subpath.empty()) {
@@ -37,8 +44,41 @@ std::optional<std::filesystem::path> native_subpath(const std::string& root_subp
     return native ? std::optional(*native) : std::nullopt;
 }
 
+// Decision 0022, point 7: a run resumed by its archive's uuid, whose archive
+// more than one attached volume holds, as a device and a sector clone of it do.
+// Matching cannot tell them apart, and the run's checkpoints say what matched
+// on the volume it read: continued on another, the verification would join
+// two volumes into one result. So it stops, as AMBIGUOUS does, naming the
+// roots and the root the run read, for the operator to resume it by its root.
+VerifyStop on_several_volumes(const Uuid& archive_uuid, const std::vector<Located>& holding,
+    const std::string& run_id, const ResumePoint& resume)
+{
+    std::string roots;
+    for (const auto& place : holding) {
+        roots += (roots.empty() ? "\"" : ", \"") + path_to_utf8(place.root) + "\"";
+    }
+    MatchOutcome identity;
+    identity.result = MatchResult::Ambiguous;
+    identity.archives = {archive_uuid};
+    const auto head = "AMBIGUOUS: archive " + archive_uuid + " is on more than one attached volume (cloned media): " +
+                      roots + "; ";
+    const auto how = "with `verify --full <root_path> --resume " + run_id +
+                     "`, or detach the other volumes and resume it again";
+    return VerifyStop{VerifyStop::Kind::Decision,
+        resume.root.empty()
+            ? head + "resume run " + run_id + " at the root on the volume it read " + how
+            : head + "run " + run_id + " read \"" + resume.root + "\": resume it at the root on the volume it read " +
+                  how,
+        std::move(identity)};
+}
+
+// Where the verification reads. By root, there. By archive uuid, on an
+// attached volume that holds the archive: its identity matches, and its root
+// folder is there. A verification that is not a resume reads the first one
+// found; a resume (`resume`) looks at every attached volume, and stops where
+// more than one holds the archive (on_several_volumes).
 std::expected<Located, VerifyStop> locate(VerifyServices& services, const VerifyRequest& request,
-    const std::vector<ArchiveCandidate>& pool)
+    const std::vector<ArchiveCandidate>& pool, const std::optional<ResumePoint>& resume)
 {
     if (request.root) {
         const auto volume = services.media.volume_for_path(*request.root);
@@ -59,6 +99,7 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
         return stop(VerifyStop::Kind::NotFound, "cannot list volumes: " + volumes.error().message);
     }
     const auto& candidate = pool.front();
+    std::vector<Located> holding;
     for (const auto& volume : *volumes) {
         const MediaEvidence evidence{current_timestamp(), volume, std::nullopt};
         const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
@@ -76,11 +117,21 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
         const auto root = without_trailing_separators(
             relative->empty() ? volume.mount_point : volume.mount_point / *relative);
         if (services.archive_files.list(root)) {
-            return Located{root, volume, candidate.root_subpath};
+            holding.push_back(Located{root, volume, candidate.root_subpath});
+            if (!resume) {
+                break;
+            }
         }
     }
-    return stop(VerifyStop::Kind::NotFound,
-        "archive " + candidate.archive_uuid + " is not on any attached volume");
+    if (holding.empty()) {
+        return stop(VerifyStop::Kind::NotFound,
+            "archive " + candidate.archive_uuid + " is not on any attached volume");
+    }
+    if (holding.size() > 1) {
+        return std::unexpected(
+            on_several_volumes(candidate.archive_uuid, holding, request.resume_run.value_or(""), *resume));
+    }
+    return holding.front();
 }
 
 std::optional<Uuid> read_identity_claim(IFileSystemAccess& files, const std::filesystem::path& root)
@@ -108,11 +159,6 @@ std::string run_setting(const std::string& run_id)
 {
     return "run:" + run_id;
 }
-
-struct ResumePoint {
-    Uuid archive_uuid;
-    std::uint32_t revision = 0;
-};
 
 // An unfinished relocation made for an older revision (decision 0030): the
 // revision it verifies, and the later one its archive has now.
@@ -199,7 +245,9 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
     if (!json.is_object() || !json.contains("archive_uuid") || !json.contains("revision")) {
         return stop(VerifyStop::Kind::Repository, "run " + run_id + " has an invalid resume record");
     }
-    return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>()};
+    const auto root = json.find("root");
+    return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>(),
+        root != json.end() && root->is_string() ? root->get<std::string>() : std::string{}};
 }
 
 // Decision 0028: the archive is known, and the manifest of its current
@@ -371,7 +419,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         return stop(VerifyStop::Kind::NotFound, "no registered archive " + *selected);
     }
 
-    const auto located = locate(services, request, candidates);
+    const auto located = locate(services, request, candidates, resume);
     if (!located) {
         return std::unexpected(located.error());
     }

@@ -362,6 +362,117 @@ void resume_refused_after_new_revision()
     CHECK(!resumed && resumed.error().kind == va::VerifyStop::Kind::Decision);
 }
 
+// A sample volume behind a USB bridge that gives no serial: an archive on it
+// is recognised MATCH_WEAK (§B10).
+va::VolumeInfo serial_less_volume(const std::filesystem::path& mount_point)
+{
+    auto volume = test::fake_volume(mount_point);
+    volume.devices.front().serial.clear();
+    volume.devices.front().wwn.clear();
+    return volume;
+}
+
+// Decision 0022, point 7: a resume by the archive's uuid, as `verify --full
+// <archive_uuid> --resume <run_id>` and Resume in the Archive List make it,
+// looks at every attached volume. A device and a sector clone of it attached at
+// once, both behind bridges that give no serial, both hold the archive
+// (MATCH_WEAK) and cannot be told apart: the resume stops (AMBIGUOUS, an
+// operator decision), naming both roots and the root the run read, reads
+// nothing and leaves the run to resume. Continued on the other volume, it
+// would join the two into one result: a FULL pass for entries never read
+// there. Resumed at the root it read, it reads only the rest there and finds
+// the files the clone lost. A verification by uuid that is not a resume reads
+// the first volume that holds the archive, as before. (Sample volumes, sample
+// files.)
+void a_resume_by_uuid_stops_where_several_volumes_hold_the_archive()
+{
+    EngineFixture fixture;
+    const auto original = fixture.archive.root() / "SAMPLE-source";
+    const auto clone = fixture.archive.root() / "SAMPLE-cloned";
+    fixture.media.volume = serial_less_volume(original);
+    fixture.media.extra_volumes = {serial_less_volume(clone)};
+    for (int index = 1; index <= 8; ++index) {
+        const auto name = "f" + std::to_string(index);
+        const std::string content(1000, static_cast<char>('a' + index));
+        fixture.archive.add_file("SAMPLE-source/" + name, content);
+        // The clone's last three files are damaged (same size and time).
+        fixture.archive.add_file("SAMPLE-cloned/" + name, index >= 6 ? std::string(1000, 'Z') : content);
+    }
+    const auto registered = fixture.register_root(original);
+    CHECK(registered.has_value());
+    // The clone verified by its root, its device gone at f5.
+    fixture.archive.node("SAMPLE-cloned/f5").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.verify(clone);
+    CHECK(interrupted && interrupted->result == "INCOMPLETE" && interrupted->root == clone);
+    if (!registered || !interrupted) {
+        return;
+    }
+    fixture.archive.node("SAMPLE-cloned/f5").open_error.reset();
+    const auto& run = interrupted->run_id;
+    const auto checkpoints = fixture.store.progress(run);
+    CHECK(checkpoints && checkpoints->size() == 4 && interrupted->coverage_bytes == 4000);
+
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = registered->archive_uuid;
+    by_uuid.resume_run = run;
+    fixture.archive.bytes_read = 0;
+    const auto stopped = fixture.verify(by_uuid);
+    CHECK(!stopped && stopped.error().kind == va::VerifyStop::Kind::Decision);
+    CHECK(!stopped && stopped.error().identity.result == va::MatchResult::Ambiguous);
+    const auto quoted = [](const std::filesystem::path& root) { return "\"" + va::path_to_utf8(root) + "\""; };
+    CHECK(!stopped && stopped.error().message ==
+                          "AMBIGUOUS: archive " + registered->archive_uuid +
+                              " is on more than one attached volume (cloned media): " + quoted(original) + ", " +
+                              quoted(clone) + "; run " + run + " read " + quoted(clone) +
+                              ": resume it at the root on the volume it read with `verify --full <root_path> "
+                              "--resume " + run + "`, or detach the other volumes and resume it again");
+    if (stopped) {
+        std::cerr << "  resumed by uuid on two volumes: FULL VERIFY " << stopped->result << " at "
+                  << va::path_to_utf8(stopped->root) << '\n';
+    }
+    CHECK(fixture.archive.bytes_read == 0);
+    // The run is left as it was, to resume.
+    const auto kept = fixture.store.progress(run);
+    CHECK(kept && checkpoints && *kept == *checkpoints);
+    const auto record = fixture.store.setting("run:" + run).value_or("");
+    CHECK(!record.empty());
+    const auto runs = fixture.store.verify_runs(registered->archive_uuid);
+    CHECK(runs && runs->size() == 1);
+    // The record of an older version's run does not say where it read.
+    auto older = nlohmann::json::parse(record, nullptr, false);
+    if (older.is_object()) {
+        older.erase("root");
+        CHECK(fixture.store.set_setting("run:" + run, older.dump()).has_value());
+        const auto unsaid = fixture.verify(by_uuid);
+        CHECK(!unsaid && unsaid.error().kind == va::VerifyStop::Kind::Decision &&
+              unsaid.error().message ==
+                  "AMBIGUOUS: archive " + registered->archive_uuid +
+                      " is on more than one attached volume (cloned media): " + quoted(original) + ", " +
+                      quoted(clone) + "; resume run " + run +
+                      " at the root on the volume it read with `verify --full <root_path> --resume " + run +
+                      "`, or detach the other volumes and resume it again");
+        CHECK(fixture.store.set_setting("run:" + run, record).has_value() && fixture.archive.bytes_read == 0);
+    }
+
+    // At the root it read: only the rest, on the clone, which lost three files.
+    va::VerifyRequest by_root;
+    by_root.root = clone;
+    by_root.resume_run = run;
+    const auto resumed = fixture.verify(by_root);
+    CHECK(resumed && resumed->result == "FAILED" && resumed->root == clone && resumed->resumed_from == run);
+    CHECK(resumed && status_of(*resumed, "f6") == "Modified" && status_of(*resumed, "f7") == "Modified" &&
+          status_of(*resumed, "f8") == "Modified" && status_of(*resumed, "f5") == "Verified");
+    CHECK(fixture.archive.bytes_read == 4000);
+
+    // Not a resume: the first volume that holds the archive, read in full.
+    va::VerifyRequest fresh;
+    fresh.archive_uuid = registered->archive_uuid;
+    fixture.archive.bytes_read = 0;
+    const auto verified = fixture.verify(fresh);
+    CHECK(verified && verified->result == "PASSED_WITH_WARNINGS" && verified->root == original);
+    CHECK(verified && verified->identity.result == va::MatchResult::MatchWeak && fixture.archive.bytes_read == 8000);
+}
+
 // Reads the run's record whenever hashing reports progress, as the GUI's
 // Archive List would read it from another process.
 class RunWatcher final : public va::IProgressSink {
@@ -1507,6 +1618,7 @@ void verify_engine_tests()
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
     resume_refused_after_new_revision();
+    a_resume_by_uuid_stops_where_several_volumes_hold_the_archive();
     run_record_says_where_and_how_much();
     archive_found_by_uuid_is_read_at_its_folder();
     an_archive_on_a_volume_known_by_its_guid_path_verifies_by_uuid();

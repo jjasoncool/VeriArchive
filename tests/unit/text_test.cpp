@@ -386,6 +386,23 @@ void translation_tests()
     CHECK(chinese("error: run " + run + " is an interrupted attempt of a relocation of archive " + uuid +
                   " that has ended; nothing is left to resume") ==
           "錯誤：執行 " + run + " 是封存 " + uuid + " 某次搬移中斷時留下的紀錄，該搬移已結束；沒有可繼續的作業");
+    // A run resumed by its archive's uuid, whose archive more than one
+    // attached volume holds (decision 0022, point 7): the roots, quoted, are
+    // one value; the root the run read, when its record says it, another.
+    const std::string clones = "\"K:\\SAMPLE\", \"X:\\SAMPLE\"";
+    CHECK(chinese("error: AMBIGUOUS: archive " + uuid + " is on more than one attached volume (cloned media): " +
+                  clones + "; run " + run + " read \"X:\\SAMPLE\": resume it at the root on the volume it read with "
+                  "`verify --full <root_path> --resume " + run + "`, or detach the other volumes and resume it "
+                  "again") ==
+          "錯誤：無法確定：封存 " + uuid + " 位於多個已連接的磁碟區上（複製的媒體）：" + clones + "；執行 " + run +
+              " 讀取的是「X:\\SAMPLE」：請以 `verify --full <root_path> --resume " + run +
+              "` 從它讀取的那個磁碟區上的根目錄繼續，或讓其他磁碟區中斷連線後再繼續一次");
+    CHECK(chinese("AMBIGUOUS: archive " + uuid + " is on more than one attached volume (cloned media): " + clones +
+                  "; resume run " + run + " at the root on the volume it read with `verify --full <root_path> "
+                  "--resume " + run + "`, or detach the other volumes and resume it again") ==
+          "無法確定：封存 " + uuid + " 位於多個已連接的磁碟區上（複製的媒體）：" + clones + "；請以 `verify --full "
+          "<root_path> --resume " + run + "` 從執行 " + run + " 讀取的那個磁碟區上的根目錄繼續，或讓其他磁碟區中斷連線後再"
+          "繼續一次");
     // An import that loses its revision, or leaves it to a registration with
     // saved files (decision 0030).
     CHECK(chinese("error: revision 2 of archive " + uuid + " was recorded by another operation while this import ran; "

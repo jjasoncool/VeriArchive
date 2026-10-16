@@ -152,6 +152,8 @@ An interrupted verification ends INCOMPLETE and can be continued; files already 
 - GUI: in the Archive List view, press "Resume" on the verification's row among the unfinished operations. This works for any interrupted verification, also one started on the command line or interrupted before the program was closed. It continues the verification exactly as the command below does: the archive is looked for on the attached disks by its uuid, so a disk that got another drive letter is found too, and the Verify Archive view shows the progress and the result. In the window where the verification was interrupted, "Resume interrupted run" in the Verify Archive view continues it as well.
 - CLI: `veriarchive-cli verify --full <archive_uuid> --resume <RUN_ID>`, for any interrupted verification, also one started in the GUI. Among the unfinished operations of the Archive List, pointing at the label of its row shows the archive's uuid, and pointing at its state shows the run's id.
 
+If more than one attached volume holds the archive, as a device and a sector-by-sector clone of it do, a resume by the archive's uuid cannot tell which one the run read: it stops (exit code 12) and names them, with the root the run read. Resume it at the root on the volume it read with `veriarchive-cli verify --full <root> --resume <RUN_ID>`, or detach the other volumes and resume it again.
+
 ### When VeriArchive needs your decision (exit code 12)
 
 | Message | Situation | What to do |
@@ -159,6 +161,7 @@ An interrupted verification ends INCOMPLETE and can be continued; files already 
 | UNKNOWN | not a registered archive | check that the right disk is attached, or register it |
 | MIGRATED | the filesystem matches but the device changed (e.g. cloned onto a new disk) | if you moved it: `archive relocate <uuid> <new root>` |
 | AMBIGUOUS | several archives match (cloned disks) | choose one with `verify --full <archive_uuid>` |
+| AMBIGUOUS: archive ... is on more than one attached volume | a resume by the archive's uuid finds it on several attached volumes (a device and a clone of it) | resume at the root on the volume the run read: `verify --full <root> --resume <RUN_ID>`, or detach the other volumes and resume again |
 | PREVIOUS_CARRIER | this is the old disk of a relocated archive | the old disk is no longer verified; verify the new carrier |
 
 ## Comparing an archive with its copy
