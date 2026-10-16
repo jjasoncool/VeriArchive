@@ -286,7 +286,10 @@ void run_verification(GuiState& state, VerifyRequest request)
                             archive_name, roots);
                     };
                 }
-                return [message = outcome.error().message](const app::Text& text) {
+                // Refused while the archive's verification that adds chunk
+                // hashes is unfinished, it names the window's own ways on
+                // (decision 0033).
+                return [message = app::stop_message_in_window(outcome.error())](const app::Text& text) {
                     return text.format("Not verified: {}", text(message));
                 };
             }

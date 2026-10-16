@@ -116,11 +116,11 @@ std::string adding_verification_refusal(const AddingVerification& verification)
            "` first, or abandon it with `archive abandon-verification " + uuid + "`)";
 }
 
-std::expected<std::optional<std::string>, IoError> another_operation_creates_the_revision(
+std::expected<std::optional<NextRevisionRefusal>, IoError> another_operation_creates_the_revision(
     ArchiveStore& store, const ArchiveRecord& archive)
 {
     const auto& uuid = archive.archive_uuid;
-    using Refusal = std::optional<std::string>;
+    using Refusal = std::optional<NextRevisionRefusal>;
     // A registration of the archive (decision 0025), whose revision is not
     // recorded: in the words of a registration through another root path.
     const auto plan_value = store.setting("registration:" + uuid);
@@ -134,11 +134,12 @@ std::expected<std::optional<std::string>, IoError> another_operation_creates_the
             return std::unexpected(recorded.error());
         }
         if (!*recorded) {
-            return Refusal("an unfinished registration of archive " + uuid + " (root \"" +
+            return Refusal({"an unfinished registration of archive " + uuid + " (root \"" +
                            text_member(plan, "root") + "\") is creating revision " + std::to_string(*creates) +
                            "; nothing was changed (finish it with `register --resume` first, or abandon it with "
                            "`archive abandon-registration " +
-                           uuid + "`)");
+                               uuid + "`)",
+                std::nullopt});
         }
     }
     // A relocation of the archive (decision 0026) whose revision is not
@@ -155,22 +156,24 @@ std::expected<std::optional<std::string>, IoError> another_operation_creates_the
         }
         const auto to = text_member(relocation, "root");
         if (!*recorded && !text_member(relocation, "differs").empty()) {
-            return Refusal("the unfinished relocation of archive " + uuid + " (to \"" + to +
+            return Refusal({"the unfinished relocation of archive " + uuid + " (to \"" + to +
                            "\") found that the new carrier does not hold the recorded content and cannot be resumed; "
                            "abandon it with `archive abandon-relocation " +
-                           uuid + "`, then relocate again");
+                               uuid + "`, then relocate again",
+                std::nullopt});
         }
         if (!*recorded) {
-            return Refusal("an unfinished relocation of archive " + uuid + " (to \"" + to +
+            return Refusal({"an unfinished relocation of archive " + uuid + " (to \"" + to +
                            "\") exists; resume it with `archive relocate " + uuid + " " + shell_argument(to) +
-                           " --resume`, or abandon it with `archive abandon-relocation " + uuid + "`");
+                               " --resume`, or abandon it with `archive abandon-relocation " + uuid + "`",
+                std::nullopt});
         }
     }
     const auto adding = unfinished_adding_verification(store, uuid);
     if (!adding) {
         return std::unexpected(adding.error());
     }
-    return *adding ? Refusal(adding_verification_refusal(**adding)) : Refusal{};
+    return *adding ? Refusal({adding_verification_refusal(**adding), **adding}) : Refusal{};
 }
 
 std::expected<void, IoError> remove_adding_verifications_of_earlier_revisions(

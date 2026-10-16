@@ -1009,6 +1009,13 @@ constexpr CatalogEntry entries[] = {
         "abandon-verification {}`)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先以 "
         "`verify --full {3} --resume {4}` 完成它，或以 `archive abandon-verification {5}` 放棄它）"},
+    // The same refusal in Verify Archive, which names the window's own ways
+    // on in place of the command lines.
+    {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
+        "was changed (finish it first with Resume interrupted run once the archive is chosen above, or abandon it "
+        "with Abandon... in the Archive List)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在上方選擇該封存，"
+        "再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
     {"this verification is still running in process {} ({}) on this computer; resume it once that process has "
         "ended",
         "此驗證仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再繼續"},

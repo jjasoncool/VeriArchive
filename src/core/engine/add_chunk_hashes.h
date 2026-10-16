@@ -67,6 +67,16 @@ std::expected<std::optional<AddingVerification>, IoError> unfinished_adding_veri
 // time), naming how to finish or abandon it.
 std::string adding_verification_refusal(const AddingVerification& verification);
 
+// Why an operation that would create an archive's next revision does not
+// begin while another one that creates it is unfinished: the refusal, which
+// names the commands that finish or abandon the other one, and the other one
+// when it is a verification that adds chunk hashes, whose ways on the GUI
+// names in its own words (decision 0033).
+struct NextRevisionRefusal {
+    std::string message;
+    std::optional<AddingVerification> adding;
+};
+
 // Why a FULL verify that adds chunk hashes to `archive` does not begin:
 // another operation that creates its next revision is unfinished, a
 // registration (decision 0025), a relocation (decision 0026) or another
@@ -74,7 +84,7 @@ std::string adding_verification_refusal(const AddingVerification& verification);
 // refusals, which name how to finish or abandon it. Nothing when none is. A
 // registration or relocation whose revision is recorded can never finish, and
 // is none. Called in the transaction that begins the verification.
-std::expected<std::optional<std::string>, IoError> another_operation_creates_the_revision(
+std::expected<std::optional<NextRevisionRefusal>, IoError> another_operation_creates_the_revision(
     ArchiveStore& store, const ArchiveRecord& archive);
 
 // Removes the records and saved progress of the verifications that add chunk

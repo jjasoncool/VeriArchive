@@ -455,6 +455,22 @@ void translation_tests()
     // Adding chunk hashes (decision 0033): the refusal, the revision that
     // records them, why none does, and a run that keeps its saved progress.
     const std::string sample = "c0ffee00-0000-4000-8000-000000000001";
+    // Verify Archive's refusal while such a verification is unfinished names
+    // the window's own ways on; the command line's names its commands.
+    const std::string adding_run = "c0ffee00-0000-4000-8000-0000000000aa";
+    CHECK(chinese.format("Not verified: {}",
+              chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
+                      ") is creating revision 2; nothing was changed (finish it first with Resume interrupted run "
+                      "once the archive is chosen above, or abandon it with Abandon... in the Archive List)")) ==
+          "未能驗證：封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
+              "）正在建立版次 2；未做任何變更（請先在上方選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」按"
+              "「放棄…」放棄它）");
+    CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
+                  ") is creating revision 2; nothing was changed (finish it with `verify --full " + sample +
+                  " --resume " + adding_run + "` first, or abandon it with `archive abandon-verification " + sample +
+                  "`)") == "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
+                               "）正在建立版次 2；未做任何變更（請先以 `verify --full " + sample + " --resume " + adding_run +
+                               "` 完成它，或以 `archive abandon-verification " + sample + "` 放棄它）");
     CHECK(chinese("revision 1 of archive " + sample +
                   " has chunk hashes already; a FULL verify compares them, and there are none to add") ==
           "封存 " + sample + " 的版次 1 已有區塊雜湊；完整驗證會比對它們，沒有可加入的區塊雜湊");

@@ -94,6 +94,18 @@ nlohmann::json abandonable_verification_member(const AbandonableVerification& ve
     return {{"verification", abandonable_verification_json(verification)}};
 }
 
+std::string stop_message_in_window(const VerifyStop& stop)
+{
+    if (!stop.adding) {
+        return stop.message;
+    }
+    const auto& adding = *stop.adding;
+    return "an unfinished verification of archive " + adding.archive_uuid + " that adds chunk hashes (run " +
+           adding.run_id + ") is creating revision " + std::to_string(adding.revision + 1) +
+           "; nothing was changed (finish it first with Resume interrupted run once the archive is chosen above, or "
+           "abandon it with Abandon... in the Archive List)";
+}
+
 std::expected<std::optional<RunToResume>, IoError> resumable_adding_verification(
     ArchiveStore& store, const Uuid& archive_uuid, const AttemptCheck& attempts, std::chrono::sys_seconds wall_now)
 {

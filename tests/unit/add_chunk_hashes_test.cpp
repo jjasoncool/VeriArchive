@@ -949,6 +949,30 @@ std::string waits_for(const va::Uuid& uuid, const std::string& run, std::uint32_
            "` first, or abandon it with `archive abandon-verification " + uuid + "`)";
 }
 
+// The same refusal of a verification in Verify Archive, which names the
+// window's own ways on rather than command lines (decision 0033).
+std::string waits_for_in_window(const va::Uuid& uuid, const std::string& run)
+{
+    return "an unfinished verification of archive " + uuid + " that adds chunk hashes (run " + run +
+           ") is creating revision 2; nothing was changed (finish it first with Resume interrupted run once the "
+           "archive is chosen above, or abandon it with Abandon... in the Archive List)";
+}
+
+// A verification refused while the verification that adds chunk hashes `run`
+// is unfinished: the command line's words, that verification, and the
+// window's words.
+bool refused_by(const va::VerifyStop& stop, const va::Uuid& uuid, const std::string& run)
+{
+    const bool said = stop.kind == va::VerifyStop::Kind::Refused && stop.message == waits_for(uuid, run) &&
+                      stop.adding && stop.adding->run_id == run && stop.adding->archive_uuid == uuid &&
+                      va::app::stop_message_in_window(stop) == waits_for_in_window(uuid, run);
+    if (!said) {
+        std::cerr << "  refused with: " << stop.message << "\n  in the window: " << va::app::stop_message_in_window(stop)
+                  << '\n';
+    }
+    return said;
+}
+
 // Another process: its own connection to the repository, its own view of the
 // media (through which a test may step in while it reads), and the process
 // table it sees, in which the engines' own process (EngineFixture::processes)
@@ -1078,6 +1102,9 @@ void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
         const auto refused = fixture.add();
         CHECK(!refused && refused.error().kind == va::VerifyStop::Kind::Refused &&
               refused.error().message == registration_refusal(fixture));
+        // A registration's refusal is no verification's: the window keeps its words.
+        CHECK(!refused && !refused.error().adding &&
+              va::app::stop_message_in_window(refused.error()) == registration_refusal(fixture));
         CHECK(fixture.archive.bytes_read == 0);
         const auto records = fixture.store.settings_with_prefix("run:");
         CHECK(records && records->empty());
@@ -1176,8 +1203,7 @@ void two_at_once()
             second = fixture.add();
         });
         const auto first = other.add(fixture, hooked);
-        CHECK(second && !*second && (*second).error().kind == va::VerifyStop::Kind::Refused &&
-              (*second).error().message == waits_for(fixture.archive_uuid, running));
+        CHECK(second && !*second && refused_by((*second).error(), fixture.archive_uuid, running));
         CHECK(first && first->added_revision == 2 && first->run_id == running);
     }
     {
@@ -1195,8 +1221,7 @@ void two_at_once()
         });
         const auto first = other.add(fixture, hooked, interrupted->run_id);
         CHECK(!taken_over.empty() && taken_over != interrupted->run_id);
-        CHECK(second && !*second && (*second).error().kind == va::VerifyStop::Kind::Refused &&
-              (*second).error().message == waits_for(fixture.archive_uuid, taken_over));
+        CHECK(second && !*second && refused_by((*second).error(), fixture.archive_uuid, taken_over));
         CHECK(first && first->run_id == taken_over && first->added_revision == 2);
     }
     {
@@ -1821,8 +1846,7 @@ void two_resumes_that_found_the_run_at_once()
             CHECK(!second && second.error().kind == va::VerifyStop::Kind::Decision &&
                   second.error().message.starts_with("run " + interrupted->run_id + " cannot be resumed"));
         } else {
-            CHECK(!second && second.error().kind == va::VerifyStop::Kind::Refused &&
-                  second.error().message == waits_for(fixture.archive_uuid, (**first).run_id));
+            CHECK(!second && refused_by(second.error(), fixture.archive_uuid, (**first).run_id));
         }
     }
 }

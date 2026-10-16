@@ -26,7 +26,15 @@ namespace {
 
 std::unexpected<VerifyStop> stop(VerifyStop::Kind kind, std::string message, MatchOutcome identity = {})
 {
-    return std::unexpected(VerifyStop{kind, std::move(message), std::move(identity)});
+    return std::unexpected(VerifyStop{kind, std::move(message), std::move(identity), {}, std::nullopt});
+}
+
+// Refused while `adding`, the archive's verification that adds chunk hashes,
+// is unfinished (decision 0033), in the command line's words, with that
+// verification for the GUI's.
+std::unexpected<VerifyStop> refused_by(const AddingVerification& adding)
+{
+    return std::unexpected(VerifyStop{VerifyStop::Kind::Refused, adding_verification_refusal(adding), {}, {}, adding});
 }
 
 struct Located {
@@ -309,7 +317,7 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
                 return stop(VerifyStop::Kind::Repository, adding.error().message);
             }
             if (*adding) {
-                return stop(VerifyStop::Kind::Refused, adding_verification_refusal(**adding));
+                return refused_by(**adding);
             }
         }
         return stop(VerifyStop::Kind::NotFound, "run " + run_id + " is not an interrupted run");
@@ -665,6 +673,9 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         // that looks first, before anything of the media is read. So two
         // started at once cannot both go on.
         std::optional<std::string> refused;
+        // The archive's verification that adds chunk hashes, where it is what
+        // refuses this run.
+        std::optional<AddingVerification> refused_by_adding;
         const auto claimed = [&]() -> std::expected<void, IoError> {
             if (auto begun = store.begin(); !begun) {
                 return begun;
@@ -683,6 +694,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                     }
                     refused = *other ? adding_verification_refusal(**other)
                                      : "run " + before + " is not an interrupted run";
+                    refused_by_adding = *other;
                     store.rollback();
                     return {};
                 }
@@ -738,7 +750,8 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                         return std::unexpected(another.error());
                     }
                     if (*another) {
-                        refused = std::move(*another);
+                        refused = std::move((*another)->message);
+                        refused_by_adding = std::move((*another)->adding);
                         store.rollback();
                         return {};
                     }
@@ -757,7 +770,8 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             return stop(VerifyStop::Kind::Repository, "cannot start the verification: " + claimed.error().message);
         }
         if (refused) {
-            return stop(VerifyStop::Kind::Refused, *refused);
+            return std::unexpected(
+                VerifyStop{VerifyStop::Kind::Refused, std::move(*refused), {}, {}, std::move(refused_by_adding)});
         }
     } else {
         (void)store.set_setting(run_setting(outcome.run_id), run_record.dump());

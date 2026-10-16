@@ -61,6 +61,14 @@ nlohmann::json abandonable_verification_json(const AbandonableVerification& veri
 // that asks for --confirm and its exit code.
 nlohmann::json abandonable_verification_member(const AbandonableVerification& verification);
 
+// What Verify Archive says of a verification that does not begin (`stop`),
+// an English sentence translated where it is shown: its message, except where
+// the archive's verification that adds chunk hashes is unfinished (decision
+// 0033). There the window names its own ways on, Resume interrupted run once
+// the archive is chosen above and Abandon... in the Archive List, where the
+// command line names its commands.
+std::string stop_message_in_window(const VerifyStop& stop);
+
 // A run that Verify Archive's Resume continues (R-104): its id, the root it
 // was given, or none for an archive found by its uuid on the attached
 // volumes, and its archive.
