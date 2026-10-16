@@ -416,6 +416,31 @@ void translation_tests()
                   "4 more of 40 do not match" + whole) ==
           "big.bin 的區塊雜湊不可靠：共 40 個區塊，其中區塊 1-3, 5, 8-9, 12, 14, 16, 18, 20, 22, 24 及另外 4 個區塊不符" +
               whole_chinese);
+    // Adding chunk hashes (decision 0033): the refusal, the revision that
+    // records them, why none does, and a run that keeps its saved progress.
+    const std::string sample = "c0ffee00-0000-4000-8000-000000000001";
+    CHECK(chinese("revision 1 of archive " + sample +
+                  " has chunk hashes already; a FULL verify compares them, and there are none to add") ==
+          "封存 " + sample + " 的版次 1 已有區塊雜湊；完整驗證會比對它們，沒有可加入的區塊雜湊");
+    CHECK(chinese.format("chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})", 2,
+              "64 MiB", 160, "4f3f") == "已加入區塊雜湊：由版次 2 記錄（區塊大小 64 MiB，160 個區塊，總碼 4f3f）");
+    CHECK(chinese.format("chunk hashes not added: {}",
+              chinese("the verification did not pass; revision 1 stays without chunk hashes")) ==
+          "未加入區塊雜湊：驗證未通過；版次 1 仍不含區塊雜湊");
+    CHECK(chinese("not every entry matches revision 1 as recorded; revision 1 stays without chunk hashes (`register "
+                  "--new-revision` records the archive as it is now, with chunk hashes)") ==
+          "並非每個項目都與版次 1 的紀錄相符；版次 1 仍不含區塊雜湊（`register --new-revision` "
+          "會依封存目前的內容記錄新版次，並含區塊雜湊）");
+    CHECK(chinese("archive " + sample + " is at revision 2 now, recorded by another operation while this verification "
+                                        "ran") == "封存 " + sample + " 現在是版次 2，由其他作業在這次驗證期間記錄");
+    CHECK(chinese("verification finished as PASSED but could not be recorded: cannot execute SQL: database is locked; "
+                  "resume the run with `verify --full " + sample + " --resume R` to record it") ==
+          "驗證結果為通過，但無法記錄：無法執行 SQL：資料庫已被鎖定；請以 `verify --full " + sample +
+              " --resume R` 繼續該執行，以記錄該版次");
+    CHECK(chinese("verification finished as PASSED but could not be recorded: cannot execute SQL: database is locked") ==
+          "驗證結果為通過，但無法記錄：無法執行 SQL：資料庫已被鎖定");
+    CHECK(chinese("run R adds no chunk hashes; resume it without --add-chunk-hashes, or start a new verification with "
+                  "it") == "執行 R 不會加入區塊雜湊；請不加 --add-chunk-hashes 繼續它，或加上 --add-chunk-hashes 開始新的驗證");
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==

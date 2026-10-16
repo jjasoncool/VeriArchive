@@ -24,6 +24,11 @@ struct WrittenManifest {
     ManifestHeader header;      // with chunk size, counts, Merkle root and body fields filled in
     std::string header_line;    // line 1 without '\n' (what V1.1 signs, R-60)
     std::string header_blake3;  // BLAKE3 of header_line
+    // The BLAKE3 and length of the entry lines alone, the body without its
+    // chunk lines: a revision that adds chunk hashes to one without them holds
+    // its entry lines to that one's body with them (decision 0033).
+    std::string entry_lines_blake3;
+    std::uint64_t entry_lines_length = 0;
     // The manifest, durable but not at the destination yet: commit() renames
     // it there. Destroyed without a commit, its temporary file is deleted.
     std::unique_ptr<IOutputFile> file;

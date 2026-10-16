@@ -45,6 +45,7 @@ void progress_estimate_tests();
 void unfinished_operations_tests();
 void abandon_registration_tests();
 void retire_archive_tests();
+void add_chunk_hashes_tests();
 void typed_path_tests();
 void interrupt_tests();
 void plain_words_tests();

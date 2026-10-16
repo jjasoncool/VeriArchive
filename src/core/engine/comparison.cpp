@@ -434,8 +434,10 @@ ComparisonResult compare_with_manifest(
     hash_options.readers = default_reader_count(input.rotational);
     // Compared by chunk, a file's chunk hashes come from the read that hashes
     // it whole (R-101), at the revision's chunk size: there is no other read.
-    // A revision without a chunk size gives no chunk hashes (decision 0032).
-    const auto chunk_size = input.compare_chunks ? input.header->chunk_size : 0;
+    // A revision without a chunk size gives no chunk hashes (decision 0032),
+    // unless they are added, at the chunk size to add (decision 0033).
+    const auto adding = input.header->chunk_size == 0 ? input.adding_chunk_size : 0;
+    const auto chunk_size = adding > 0 ? adding : input.compare_chunks ? input.header->chunk_size : 0;
     hash_options.chunk_size = chunk_size;
 
     // The files whose chunk hashes cannot be relied on, with their warning.
@@ -528,6 +530,11 @@ ComparisonResult compare_with_manifest(
             unreliable.emplace_back(&was, unreliable_chunk_hashes(was, differing));
             // Not checkpointed: a resume reads it again, and warns again (R-104).
             return true;
+        }
+        // The chunk hashes to add, of content that matched (decision 0033),
+        // before the file joins a checkpoint.
+        if (adding > 0 && !hash.chunks.empty() && input.chunks_read) {
+            input.chunks_read(was, std::move(hash.chunks));
         }
         // R-104: checkpoint every 1000 items or 60 seconds.
         pending_checkpoint.push_back(entry_key(was));

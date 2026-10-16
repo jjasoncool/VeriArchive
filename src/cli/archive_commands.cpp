@@ -6,6 +6,7 @@
 // unfinished registration and relocation, one line each (decision 0026).
 #include "cli/commands.h"
 
+#include "app/chunk_size.h"
 #include "app/history.h"
 #include "app/local_time.h"
 #include "app/plain_words.h"
@@ -26,7 +27,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <format>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -265,11 +265,8 @@ std::string chunks_line(const app::Text& text, const ManifestHeader& header)
     if (header.chunk_size == 0) {
         return text("chunk size 0: whole-file hashes only");
     }
-    // A multiple of 64 KiB (decision 0031), in the largest unit that keeps it whole.
-    constexpr std::uint64_t mebibyte = 1024 * 1024;
-    const auto size = header.chunk_size % mebibyte == 0 ? std::format("{} MiB", header.chunk_size / mebibyte)
-                                                         : std::format("{} KiB", header.chunk_size / 1024);
-    return text.format("chunk size {}, {} chunks, Merkle root {}", size, header.counts.chunks, header.merkle_root);
+    return text.format("chunk size {}, {} chunks, Merkle root {}", app::chunk_size_text(header.chunk_size),
+        header.counts.chunks, header.merkle_root);
 }
 
 // Accepts a full uuid or a unique prefix of at least 8 characters (names_archive).

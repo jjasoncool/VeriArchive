@@ -1,8 +1,11 @@
 // `verify --full <root_path|archive_uuid>`: re-read the whole archive and
 // compare it with its manifest (M3). The result line always carries its mode
-// (R-21) and the report states which guarantee applies (R-02).
+// (R-21) and the report states which guarantee applies (R-02). With
+// --add-chunk-hashes it also adds chunk hashes to an archive registered
+// without them (decision 0033).
 #include "cli/commands.h"
 
+#include "app/chunk_size.h"
 #include "app/plain_words.h"
 #include "app/verify_report.h"
 
@@ -77,6 +80,18 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
                   << (item.detail.empty() ? "" : "  " + text.parenthesized(text(app::item_detail_words(item.detail))))
                   << '\n';
     }
+    // Decision 0033: the revision that records the chunk hashes added, or why
+    // there is none.
+    if (outcome.added_revision > 0) {
+        std::cout << "  "
+                  << text.format("chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root "
+                                 "{})",
+                         outcome.added_revision, app::chunk_size_text(outcome.adding_chunk_size),
+                         outcome.added_chunks, outcome.added_merkle_root)
+                  << '\n';
+    } else if (!outcome.not_added.empty()) {
+        std::cout << "  " << text.format("chunk hashes not added: {}", text(outcome.not_added)) << '\n';
+    }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::CommandLine)) {
         std::cout << "  " << *advice << '\n';
     }
@@ -111,7 +126,7 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
     const auto identity = outcome.media_read ? nlohmann::json{{"result", to_string(outcome.identity.result)},
                                                    {"details", outcome.identity.details}}
                                              : nlohmann::json(nullptr);
-    return {
+    nlohmann::json document{
         {"run_id", outcome.run_id},
         {"resumed_from", outcome.resumed_from},
         {"archive_uuid", outcome.archive_uuid},
@@ -131,6 +146,22 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
         {"registered_bytes", outcome.registered_bytes},
         {"guarantee", guarantee},
     };
+    // Decision 0033: a run that adds chunk hashes says at which chunk size,
+    // and once it has finished, which revision records them, or why none does.
+    if (outcome.adding_chunk_size > 0) {
+        const auto optional_text = [](const std::string& value) {
+            return value.empty() ? nlohmann::json(nullptr) : nlohmann::json(value);
+        };
+        const bool added = outcome.added_revision > 0;
+        document["chunk_hashes"] = {
+            {"chunk_size", outcome.adding_chunk_size},
+            {"added_revision", added ? nlohmann::json(outcome.added_revision) : nlohmann::json(nullptr)},
+            {"chunks", added ? nlohmann::json(outcome.added_chunks) : nlohmann::json(nullptr)},
+            {"merkle_root", optional_text(outcome.added_merkle_root)},
+            {"not_added", optional_text(outcome.not_added)},
+        };
+    }
+    return document;
 }
 
 } // namespace
@@ -141,13 +172,14 @@ int verify_command(const Arguments& arguments)
         return report_failure(arguments, {exit_code::usage,
             "QUICK and DEEP verification are not available in this version; use --full"});
     }
-    if (const auto problem = check_options(arguments, {"--full", "--strict-metadata"}, {"--io", "--resume"})) {
+    if (const auto problem = check_options(
+            arguments, {"--full", "--strict-metadata", "--add-chunk-hashes"}, {"--io", "--resume"})) {
         return report_failure(arguments, *problem);
     }
     if (arguments.words.size() != 2 || !arguments.has("--full")) {
         return report_failure(arguments, {exit_code::usage,
             "usage: verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd] "
-            "[--resume RUN_ID]"});
+            "[--resume RUN_ID] [--add-chunk-hashes]"});
     }
 
     // Decision 0029, point 7: an archive's uuid; a folder or volume that is
@@ -183,6 +215,7 @@ int verify_command(const Arguments& arguments)
     }
     request.strict_metadata = arguments.has("--strict-metadata");
     request.resume_run = arguments.value("--resume");
+    request.add_chunk_hashes = arguments.has("--add-chunk-hashes");
     if (const auto io = arguments.value("--io")) {
         if (*io != "hdd" && *io != "ssd") {
             return report_failure(arguments, {exit_code::usage, "--io takes hdd or ssd"});
@@ -227,7 +260,7 @@ int verify_command(const Arguments& arguments)
     const auto repository_files = platform::make_file_system_access();
     const auto media = platform::make_media_enumerator();
     VerifyServices services{*archive_files, *repository_files, *media, *store, session->context.repo,
-        session->context.repository_uuid, host_info()};
+        session->context.repository_uuid, host_info(), *session->writer};
 
     CancelToken cancel;
     const platform::CancelOnInterrupt interrupt(cancel);
@@ -238,10 +271,13 @@ int verify_command(const Arguments& arguments)
         // What the operator named is not there (decision 0029, point 7): an
         // archive uuid that names no registered archive, an archive whose
         // volume or folder is not attached, a run that is no interrupted
-        // run. A usage error (exit 10), as a folder that is not there.
-        const auto code = outcome.error().kind == VerifyStop::Kind::Decision ? exit_code::identity_decision
-                          : outcome.error().kind == VerifyStop::Kind::NotFound ? exit_code::usage
-                                                                               : exit_code::repository;
+        // run. A usage error (exit 10), as a folder that is not there. A run
+        // that cannot add chunk hashes is refused as a decision (exit 12).
+        const auto kind = outcome.error().kind;
+        const auto code = kind == VerifyStop::Kind::Decision || kind == VerifyStop::Kind::Refused
+                              ? exit_code::identity_decision
+                          : kind == VerifyStop::Kind::NotFound ? exit_code::usage
+                                                               : exit_code::repository;
         return report_failure(arguments, {code, outcome.error().message});
     }
     if (arguments.json) {

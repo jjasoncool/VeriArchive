@@ -73,6 +73,7 @@ target_link_libraries(veriarchive_common
 add_library(veriarchive_core
     src/core/engine/abandon_registration.cpp
     src/core/engine/abandon_relocation.cpp
+    src/core/engine/add_chunk_hashes.cpp
     src/core/engine/archive_status.cpp
     src/core/engine/compare_archives.cpp
     src/core/engine/candidates.cpp
@@ -275,6 +276,7 @@ if(BUILD_TESTING)
     add_executable(veriarchive_tests
         tests/unit/test_main.cpp
         tests/unit/abandon_registration_test.cpp
+        tests/unit/add_chunk_hashes_test.cpp
         tests/unit/archive_path_test.cpp
         tests/unit/archive_status_test.cpp
         tests/unit/compare_archives_test.cpp

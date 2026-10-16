@@ -1298,6 +1298,27 @@ if(NOT last_output MATCHES "\n    r1  [^\n]*r0001\\.vam\n      區塊大小 64 M
     message(FATAL_ERROR "archive show of a revision with chunk lines:\n${last_output}")
 endif()
 run_cli("0;2" verify --full "${large_uuid}")
+# A FULL verify that adds chunk hashes (decision 0033) is refused for an
+# archive whose revision has them, before it reads anything (exit 12), in
+# either language and in --json; no run is recorded.
+run_cli("0" history "${large_uuid}" --json)
+string(JSON runs_before LENGTH "${last_output}" runs)
+run_cli("12" --lang en verify --full "${large_uuid}" --add-chunk-hashes)
+set(has_them "revision 1 of archive ${large_uuid} has chunk hashes already; a FULL verify compares them, and there are none to add")
+if(NOT last_errors MATCHES "${has_them}")
+    message(FATAL_ERROR "verify --add-chunk-hashes of an archive with chunk hashes:\n${last_errors}")
+endif()
+run_cli("12" verify --full "${LARGE}" --add-chunk-hashes)
+if(NOT last_errors MATCHES "封存 ${large_uuid} 的版次 1 已有區塊雜湊；完整驗證會比對它們，沒有可加入的區塊雜湊")
+    message(FATAL_ERROR "verify --add-chunk-hashes of an archive with chunk hashes, in Chinese:\n${last_errors}")
+endif()
+run_cli("12" verify --full "${large_uuid}" --add-chunk-hashes --json)
+string(JSON refused_error GET "${last_output}" error)
+run_cli("0" history "${large_uuid}" --json)
+string(JSON runs_after LENGTH "${last_output}" runs)
+if(NOT refused_error STREQUAL has_them OR NOT runs_after EQUAL runs_before)
+    message(FATAL_ERROR "verify --add-chunk-hashes --json of an archive with chunk hashes:\n${refused_error}\n${last_output}")
+endif()
 
 # One byte changed in chunk 1, 16000 bytes into it (sample data): a FULL
 # verify fails (exit 3) and names that chunk of the three and the byte where

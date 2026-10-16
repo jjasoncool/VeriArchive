@@ -1292,7 +1292,8 @@ void an_interrupted_attempt_is_recorded_incomplete()
         va::CancelToken cancel;
         test::HookedFiles hooked(fixture.archive, "p110.bin", [&] { cancel.cancel(); });
         va::VerifyServices services{hooked, *fixture.repository.files, fixture.media, fixture.store,
-            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+            *fixture.repository.writer};
         va::VerifyRequest request;
         request.root = fixture.archive.root() / "old";
         const auto verified = va::verify_full(services, request, cancel, fixture.progress);

@@ -4,6 +4,7 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
+#include "core/engine/add_chunk_hashes.h"
 #include "core/engine/comparison.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <format>
+#include <map>
 
 namespace va {
 namespace {
@@ -37,6 +39,7 @@ struct ResumePoint {
     Uuid archive_uuid;
     std::uint32_t revision = 0;
     std::string root;  // where the run read (decision 0022); empty in a record of an older version
+    std::uint64_t adding = 0;  // the chunk size at which the run adds chunk hashes (decision 0033)
 };
 
 std::optional<std::filesystem::path> native_subpath(const std::string& root_subpath)
@@ -303,7 +306,30 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
     }
     const auto root = json.find("root");
     return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>(),
-        root != json.end() && root->is_string() ? root->get<std::string>() : std::string{}};
+        root != json.end() && root->is_string() ? root->get<std::string>() : std::string{}, adding_chunk_size(json)};
+}
+
+// Why a run that adds chunk hashes records no revision with them, though it
+// read everything (decision 0033): one is recorded only when the run did not
+// fail and every entry of revision `revision` matched as recorded: Verified,
+// or recorded unreadable at registration and carried as it is, whether it
+// can be read now or not (decision 0010: Unreadable since registration, or
+// Unbaselined); nothing new found but in a folder unreadable at registration.
+std::optional<std::string> why_no_revision(const VerifyOutcome& outcome, std::uint32_t revision)
+{
+    const auto stays = "; revision " + std::to_string(revision) + " stays without chunk hashes";
+    if (outcome.result == "FAILED") {
+        return "the verification did not pass" + stays;
+    }
+    for (const auto& item : outcome.items) {
+        const bool known_unreadable =
+            item.status.starts_with("Unreadable(") && item.detail == "known-since-registration";
+        if (!known_unreadable && item.status != "Unbaselined") {
+            return "not every entry matches revision " + std::to_string(revision) + " as recorded" + stays +
+                   " (`register --new-revision` records the archive as it is now, with chunk hashes)";
+        }
+    }
+    return std::nullopt;
 }
 
 // Decision 0028: the archive is known, and the manifest of its current
@@ -426,6 +452,26 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             return std::unexpected(point.error());
         }
         resume = *point;
+    }
+    // Decision 0033: the chunk size at which this run adds chunk hashes; 0
+    // when it adds none. A resumed run adds them as the run it continues did.
+    std::uint64_t adding = 0;
+    if (resume) {
+        adding = resume->adding;
+        if (request.add_chunk_hashes && adding == 0) {
+            return stop(VerifyStop::Kind::Refused,
+                "run " + *request.resume_run +
+                    " adds no chunk hashes; resume it without --add-chunk-hashes, or start a new verification with "
+                    "it");
+        }
+    } else if (request.add_chunk_hashes) {
+        if (request.chunk_size == 0) {
+            return stop(VerifyStop::Kind::Refused, "chunk hashes cannot be added at chunk size 0");
+        }
+        if (!valid_chunk_size(request.chunk_size)) {
+            return stop(VerifyStop::Kind::Refused, invalid_chunk_size(request.chunk_size));
+        }
+        adding = request.chunk_size;
     }
 
     // Naming an archive (or resuming its run) is the operator's selection (§B10
@@ -550,6 +596,28 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             "run " + *request.resume_run + " cannot be resumed: the media identity or the archive "
             "revision changed since it started; run a new verification");
     }
+    // Decision 0033: chunk hashes are added to an archive whose current
+    // revision has none, as its manifest says (R-14), and that takes new
+    // revisions. Refused before anything is read or written. A manifest that
+    // cannot be used fails the run below, as in any FULL verify, which then
+    // records no revision.
+    if (adding > 0 && !resume) {
+        if ((*archive)->status == "RETIRED") {
+            return stop(VerifyStop::Kind::Refused, "a retired archive takes no new revisions");
+        }
+        const auto current = store.revision((*archive)->archive_uuid, (*archive)->current_revision);
+        if (!current) {
+            return stop(VerifyStop::Kind::Repository, current.error().message);
+        }
+        if (*current) {
+            const auto header = load_recorded_header(services.repository_files, services.layout, **current);
+            if (header && header->chunk_size > 0) {
+                return stop(VerifyStop::Kind::Refused,
+                    "revision " + std::to_string(header->revision) + " of archive " + (*archive)->archive_uuid +
+                        " has chunk hashes already; a FULL verify compares them, and there are none to add");
+            }
+        }
+    }
 
     VerifyOutcome outcome;
     outcome.run_id = generate_uuid();
@@ -565,14 +633,19 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     if (!located->volume.driver.empty()) {
         outcome.notes.push_back("driver: " + located->volume.driver);
     }
+    outcome.adding_chunk_size = adding;
     const auto started = current_timestamp();
 
     // Make this run resumable from now on, carrying over a resumed run's
     // checkpoints. The record also says where the run reads and, while it
-    // works, that it does ("updated"; decision 0022).
+    // works, that it does ("updated"; decision 0022), and whether it adds
+    // chunk hashes, at which chunk size (decision 0033).
     std::set<std::string> content_verified;
     nlohmann::json run_record{{"archive_uuid", outcome.archive_uuid}, {"revision", outcome.revision},
         {"started", started}, {"root", path_to_utf8(located->root)}, {"updated", started}};
+    if (adding > 0) {
+        run_record[adding_member] = adding;
+    }
     (void)store.set_setting(run_setting(outcome.run_id), run_record.dump());
     Heartbeat heartbeat(store, run_setting(outcome.run_id), std::move(run_record), progress);
     if (resume) {
@@ -640,8 +713,20 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         }
     }
 
+    // The chunk hashes read, by entry key, of every file larger than the
+    // chunk size whose content matched (decision 0033).
+    std::map<std::string, std::vector<std::string>> chunks_read;
     ComparisonResult comparison;
     if (manifest) {
+        // A checkpoint keeps no chunk hashes: a resumed run that adds them
+        // reads again each checkpointed file that has chunk lines.
+        if (adding > 0) {
+            for (const auto& entry : manifest->entries) {
+                if (has_chunk_lines(entry, adding)) {
+                    content_verified.erase(entry_key(entry));
+                }
+            }
+        }
         ComparisonInput input;
         input.root = located->root;
         input.filesystem_type = located->volume.filesystem_type;
@@ -654,6 +739,12 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         // By chunk as well, in the same read (decision 0032): a file whose
         // content differs names the chunks that differ.
         input.compare_chunks = true;
+        // Or, for a revision without chunk lines, the chunk hashes to add,
+        // from the same read (decision 0033).
+        input.adding_chunk_size = adding;
+        input.chunks_read = [&](const Entry& recorded, std::vector<std::string> chunks) {
+            chunks_read[entry_key(recorded)] = std::move(chunks);
+        };
         input.content_verified = std::move(content_verified);
         // A checkpoint that cannot be saved is rolled back, so its open
         // transaction cannot swallow the next checkpoints and the run's
@@ -712,7 +803,76 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         outcome.result = "PASSED";
     }
 
+    // Decision 0033: the revision with chunk hashes added, when the run read
+    // every entry and each matched as revision N records it. Its entry lines
+    // are N's as they are, which the writer holds to N's body; the manifest
+    // is written and flushed without a lock, and gets its name in the record
+    // below (decision 0023). A failure to write it keeps the run resumable,
+    // as a record that cannot be written does: its resume reads only what it
+    // did not match, and records again.
+    const auto previous_revision = outcome.revision;
+    const auto creates = previous_revision + 1;
+    const auto resume_hint = "; resume the run with `verify --full " + outcome.archive_uuid + " --resume " +
+                             outcome.run_id + "` to record it";
+    std::optional<WrittenManifest> added;
+    std::vector<Entry> added_entries;
+    if (adding > 0 && outcome.result != "INCOMPLETE") {
+        if (auto why = why_no_revision(outcome, previous_revision)) {
+            outcome.not_added = std::move(*why);
+        } else if (manifest) {
+            // Writing the manifest of a large archive takes a while without
+            // progress reports: it starts from a fresh "updated".
+            heartbeat.beat();
+            auto entries = entries_with_chunk_hashes(manifest->entries, chunks_read, adding);
+            if (!entries) {
+                return stop(VerifyStop::Kind::Repository,
+                    "verification finished as " + outcome.result +
+                        " but its revision with chunk hashes could not be written: " + entries.error().message +
+                        resume_hint);
+            }
+            const auto header = header_with_chunk_hashes(manifest->header, current_timestamp(), services.host,
+                located->volume, located->root_subpath, path_to_utf8(located->root));
+            const auto path = manifest_path(services.layout.manifests(), outcome.archive_uuid, creates);
+            std::error_code directory_error;
+            std::filesystem::create_directories(path.parent_path(), directory_error);
+            ManifestWriter writer(services.writer, services.repository_files, path, adding);
+            std::expected<void, IoError> written_entries;
+            for (const auto& entry : *entries) {
+                if (written_entries = writer.add(entry); !written_entries) {
+                    break;
+                }
+            }
+            auto written = written_entries ? writer.finish(header)
+                                           : std::expected<WrittenManifest, IoError>(
+                                                 std::unexpected(written_entries.error()));
+            if (!written) {
+                return stop(VerifyStop::Kind::Repository,
+                    "verification finished as " + outcome.result +
+                        " but its revision with chunk hashes could not be written: " + written.error().message +
+                        resume_hint);
+            }
+            if (written->entry_lines_blake3 != manifest->header.body_blake3 ||
+                written->entry_lines_length != manifest->header.body_length) {
+                outcome.not_added = "the entry lines of revision " + std::to_string(previous_revision) +
+                                    " cannot be written again as they are; revision " +
+                                    std::to_string(previous_revision) +
+                                    " stays without chunk hashes (`register --new-revision` records them)";
+            } else {
+                added = std::move(*written);
+                added_entries = std::move(*entries);
+            }
+        }
+    }
+
     // Record evidence, the chained run row and its items in one transaction.
+    // With a revision with chunk hashes added, the transaction records it too
+    // (decision 0033), as a relocation records its revision (decisions 0023,
+    // 0026): it waits for the write lock as such a record does; the archive
+    // must still be at revision N, the one compared, or another operation has
+    // recorded a revision meanwhile; a registration that has saved files of
+    // N+1 keeps the revision (decision 0023). Either way the run records the
+    // verification alone, as a FULL verify does. The manifest is renamed to
+    // its name last, so a recorded manifest is never replaced.
     nlohmann::json counts{{"items", outcome.counts}};
     if (!outcome.resumed_from.empty()) {
         counts["resumed_from"] = outcome.resumed_from;
@@ -720,31 +880,98 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     VerifyRunRecord run;
     run.run_id = outcome.run_id;
     run.archive_uuid = outcome.archive_uuid;
-    run.revision = outcome.revision;
     run.mode = "FULL";
     run.started = started;
-    run.finished = current_timestamp();
     run.result = outcome.result;
     run.coverage_bytes = outcome.coverage_bytes;
-    run.counts_json = counts.dump();
     for (const auto& failure : outcome.failure_classes) {
         run.failure_classes += (run.failure_classes.empty() ? "" : ",") + failure;
     }
     run.host = services.host.host;
     run.app_version = services.host.app_version;
 
+    std::string not_recorded; // why the revision with chunk hashes was not recorded after all
+    std::optional<ArchiveRecord> current; // the archive's record as the transaction reads it
     const auto recorded_run = [&]() -> std::expected<void, IoError> {
-        if (auto begun = store.begin(); !begun) {
+        not_recorded.clear();
+        if (added) {
+            if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
+                return begun;
+            }
+            auto now = store.find_archive(outcome.archive_uuid);
+            if (!now) {
+                return std::unexpected(now.error());
+            }
+            current = std::move(*now);
+            const auto registering = store.has_file_rows(outcome.archive_uuid, creates);
+            if (!registering) {
+                return std::unexpected(registering.error());
+            }
+            if (!current || current->current_revision != previous_revision) {
+                not_recorded = "archive " + outcome.archive_uuid + " is at revision " +
+                               std::to_string(current ? current->current_revision : 0) +
+                               " now, recorded by another operation while this verification ran";
+            } else if (current->status == "RETIRED") {
+                not_recorded = "archive " + outcome.archive_uuid +
+                               " was retired while this verification ran; a retired archive takes no new revisions";
+            } else if (*registering) {
+                const auto plan = store.registration_plan(outcome.archive_uuid, creates);
+                not_recorded = "an unfinished registration of archive " + outcome.archive_uuid + " (root \"" +
+                               (plan && *plan ? **plan : std::string{}) + "\") is creating revision " +
+                               std::to_string(creates) + "; finish it with `register --resume`, or abandon it with "
+                                                         "`archive abandon-registration " +
+                               outcome.archive_uuid + "`";
+            }
+        } else if (auto begun = store.begin(); !begun) {
             return begun;
         }
+        const bool records_revision = added && not_recorded.empty();
+        auto row = run;
+        auto row_counts = counts;
+        row.revision = records_revision ? creates : previous_revision;
+        if (records_revision) {
+            row_counts["chunk_hashes_added_from_revision"] = previous_revision;
+        }
+        row.counts_json = row_counts.dump();
+        row.finished = current_timestamp();
         if (auto inserted = record_evidence(outcome.archive_uuid, outcome.run_id); !inserted) {
             return inserted;
         }
-        if (auto appended = store.append_verify_run(run, services.repository_uuid); !appended) {
+        if (auto appended = store.append_verify_run(row, services.repository_uuid); !appended) {
             return std::unexpected(appended.error());
         }
         if (auto items = store.insert_verify_items(outcome.items); !items) {
             return items;
+        }
+        if (records_revision) {
+            // A registration or a relocation that creates the same revision
+            // and has saved nothing for it can never finish once it is
+            // recorded: its plan or record goes (decisions 0023, 0026).
+            if (auto removed = store.remove_registration_plan(outcome.archive_uuid, creates); !removed) {
+                return removed;
+            }
+            if (auto removed = store.remove_relocation_creating(outcome.archive_uuid, creates); !removed) {
+                return removed;
+            }
+            auto record = *current;
+            record.current_revision = creates;
+            record.root_subpath = located->root_subpath;
+            if (auto updated = store.update_archive(record); !updated) {
+                return updated;
+            }
+            const auto path = manifest_path(services.layout.manifests(), outcome.archive_uuid, creates);
+            auto relative = path_to_utf8(path.lexically_relative(services.layout.root));
+            std::replace(relative.begin(), relative.end(), '\\', '/');
+            RevisionRecord revision{outcome.archive_uuid, creates, relative, added->header_line,
+                added->header_blake3, added->header.body_blake3, "", added->header.created,
+                merkle_root_of(added->header)};
+            if (auto inserted = store.insert_revision(revision); !inserted) {
+                return inserted;
+            }
+            if (auto indexed = store.insert_file_rows(outcome.archive_uuid, creates, added_entries, adding);
+                !indexed) {
+                return indexed;
+            }
         }
         // A finished run needs no checkpoints; an INCOMPLETE one keeps them for --resume.
         if (outcome.result != "INCOMPLETE") {
@@ -755,13 +982,26 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                 return removed;
             }
         }
+        if (records_revision) {
+            if (auto named = added->file->commit(); !named) {
+                return named;
+            }
+        }
         return store.commit();
     }();
     if (!recorded_run) {
         store.rollback();
         return stop(VerifyStop::Kind::Repository,
             "verification finished as " + outcome.result + " but could not be recorded: " +
-                recorded_run.error().message);
+                recorded_run.error().message + (added ? resume_hint : std::string{}));
+    }
+    if (added && not_recorded.empty()) {
+        outcome.revision = creates;
+        outcome.added_revision = creates;
+        outcome.added_chunks = added->header.counts.chunks;
+        outcome.added_merkle_root = added->header.merkle_root;
+    } else if (added) {
+        outcome.not_added = not_recorded;
     }
     return outcome;
 }

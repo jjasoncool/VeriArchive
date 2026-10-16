@@ -88,7 +88,8 @@ void progress_counts_bytes()
     Registered fixture;
     RecordingProgress progress;
     va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
-        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        *fixture.repository.writer};
     va::VerifyRequest request;
     request.root = fixture.archive.root();
     const auto outcome = va::verify_full(services, request, fixture.cancel, progress);
@@ -1311,7 +1312,8 @@ void run_record_says_where_and_how_much()
 
     RunWatcher watcher(fixture.store);
     va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
-        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        *fixture.repository.writer};
     va::VerifyRequest request;
     request.root = fixture.archive.root();
     const auto outcome = va::verify_full(services, request, fixture.cancel, watcher);
@@ -1338,7 +1340,8 @@ void archive_found_by_uuid_is_read_at_its_folder()
     fixture.media.volume.mount_point = fixture.archive.root() / ""; // "/vol/"
     RunWatcher watcher(fixture.store);
     va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
-        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        *fixture.repository.writer};
     va::VerifyRequest request;
     request.archive_uuid = fixture.archive_uuid;
     const auto outcome = va::verify_full(services, request, fixture.cancel, watcher);
@@ -1418,7 +1421,7 @@ void an_archive_on_a_volume_known_by_its_guid_path_verifies_by_uuid()
         }
         RunWatcher watcher(fixture.store);
         va::VerifyServices services{fixture.archive, *fixture.repository.files, fixture.media, fixture.store,
-            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host, *fixture.repository.writer};
         va::VerifyRequest request;
         request.archive_uuid = registered->archive_uuid;
         const auto verified = va::verify_full(services, request, fixture.cancel, watcher);
@@ -1782,7 +1785,8 @@ void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
                                                   : what == Case::ReadFails ? static_cast<va::IFileSystemAccess&>(bad_sector)
                                                                             : *fixture.repository.files;
         va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store,
-            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+            *fixture.repository.writer};
         va::VerifyRequest by_uuid;
         by_uuid.archive_uuid = fixture.archive_uuid;
         const auto outcome = va::verify_full(services, by_uuid, fixture.cancel, fixture.progress);
@@ -1888,7 +1892,7 @@ void an_archive_at_a_revision_the_index_has_no_record_of()
 
         // By root: the root may be this archive's.
         va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store, layout,
-            fixture.repository.context.repository_uuid, fixture.host};
+            fixture.repository.context.repository_uuid, fixture.host, *fixture.repository.writer};
         va::VerifyRequest by_root;
         by_root.root = fixture.archive.root();
         const auto stopped = va::verify_full(services, by_root, fixture.cancel, fixture.progress);
@@ -2121,7 +2125,8 @@ void a_named_archive_is_never_the_one_that_may_be_at_a_root()
     Registered fixture;
     DeniedOpen second(*fixture.repository.files, "r0001.vam", 2);
     va::VerifyServices services{fixture.archive, second, fixture.media, fixture.store,
-        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        *fixture.repository.writer};
     va::VerifyRequest by_uuid;
     by_uuid.archive_uuid = fixture.archive_uuid;
     const auto stopped = va::verify_full(services, by_uuid, fixture.cancel, fixture.progress);
@@ -2147,7 +2152,7 @@ void a_named_archive_is_never_the_one_that_may_be_at_a_root()
     test::HookedFiles removed(
         *fixture.repository.files, "r0001.vam", [&] { std::filesystem::remove(manifest); }, 2);
     va::VerifyServices race{fixture.archive, removed, fixture.media, fixture.store, fixture.repository.context.repo,
-        fixture.repository.context.repository_uuid, fixture.host};
+        fixture.repository.context.repository_uuid, fixture.host, *fixture.repository.writer};
     const auto missing = va::verify_full(race, by_uuid, fixture.cancel, fixture.progress);
     CHECK(!missing && missing.error().kind == va::VerifyStop::Kind::Repository &&
           missing.error().message == "the manifest of revision 1 (manifests/" + fixture.archive_uuid +
@@ -2415,7 +2420,8 @@ void entries_read_otherwise_than_validated_fail()
         test::SecondReadDiffers repository_files(*fixture.repository.files, "r0001.vam", 2, bytes.find('\n') + 1,
             from, to);
         va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store,
-            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+            fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+            *fixture.repository.writer};
         va::VerifyRequest request;
         request.root = fixture.archive.root();
         const auto outcome = va::verify_full(services, request, fixture.cancel, fixture.progress);

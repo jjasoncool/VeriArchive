@@ -23,7 +23,7 @@ void print_usage(const app::Text& text)
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy]\n"
         "           [--resume [--confirm]] [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
-        "         [--resume RUN_ID]\n"
+        "         [--resume RUN_ID] [--add-chunk-hashes]\n"
         "  archive list | show <uuid> | retire <uuid> [--confirm]\n"
         "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"

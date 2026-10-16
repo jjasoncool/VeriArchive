@@ -195,6 +195,7 @@ std::expected<WrittenManifest, IoError> ManifestWriter::finish(ManifestHeader he
 
     // The body hash covers the entry lines, hashed as they came, and then the
     // chunk lines.
+    const auto entry_lines_blake3 = body_hash_.current_hex();
     if (chunked) {
         const auto hashed = read_side_file(reader_, chunks_path_, [&](std::span<const std::byte> bytes) {
             body_hash_.update(bytes);
@@ -219,6 +220,8 @@ std::expected<WrittenManifest, IoError> ManifestWriter::finish(ManifestHeader he
     written.header_line = header_to_json(header);
     written.header_blake3 = blake3_hex(written.header_line);
     written.header = std::move(header);
+    written.entry_lines_blake3 = entry_lines_blake3;
+    written.entry_lines_length = entries_length_;
 
     auto output = writer_.create(destination_);
     if (!output) {

@@ -33,6 +33,14 @@ struct ComparisonInput {
     // compares by chunk; a relocation compares whole files, and carries the
     // chunk hashes of the revision it verifies (decision 0032, point 5).
     bool compare_chunks = false;
+    // Adding chunk hashes (decision 0033): the chunk size at which a FULL
+    // verify hashes the chunks of a revision that has none (chunk size 0, as
+    // V1 registered it), in the read that hashes each file whole (R-101); 0
+    // adds none. Nothing is compared by them, as none are recorded:
+    // `chunks_read` is given the chunk hashes of each file larger than it
+    // whose content matched, before its key joins a checkpoint.
+    std::uint64_t adding_chunk_size = 0;
+    std::function<void(const Entry& recorded, std::vector<std::string> chunks)> chunks_read;
     // R-104 resume: entry keys whose content already matched in the run being resumed.
     std::set<std::string> content_verified;
     // Called with keys of entries whose content matched, in batches

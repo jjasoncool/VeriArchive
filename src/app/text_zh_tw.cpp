@@ -77,7 +77,7 @@ constexpr CatalogEntry entries[] = {
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy]\n"
         "           [--resume [--confirm]] [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
-        "         [--resume RUN_ID]\n"
+        "         [--resume RUN_ID] [--add-chunk-hashes]\n"
         "  archive list | show <uuid> | retire <uuid> [--confirm]\n"
         "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
@@ -94,7 +94,7 @@ constexpr CatalogEntry entries[] = {
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy]\n"
         "           [--resume [--confirm]] [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
-        "         [--resume RUN_ID]\n"
+        "         [--resume RUN_ID] [--add-chunk-hashes]\n"
         "  archive list | show <uuid> | retire <uuid> [--confirm]\n"
         "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
@@ -275,9 +275,14 @@ constexpr CatalogEntry entries[] = {
     {"QUICK and DEEP verification are not available in this version; use --full",
         "這個版本尚未提供快速驗證與深度驗證；請使用 --full"},
     {"usage: verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd] "
-        "[--resume RUN_ID]",
+        "[--resume RUN_ID] [--add-chunk-hashes]",
         "用法：verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd] "
-        "[--resume RUN_ID]"},
+        "[--resume RUN_ID] [--add-chunk-hashes]"},
+    // Adding chunk hashes (decision 0033): the revision that records them, or
+    // why there is none (an engine sentence). The Merkle root is 總碼 here.
+    {"chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
+        "已加入區塊雜湊：由版次 {} 記錄（區塊大小 {}，{} 個區塊，總碼 {}）"},
+    {"chunk hashes not added: {}", "未加入區塊雜湊：{}", Match::Cause},
     // src/cli/archive_commands.cpp
     {"Last verify: never", "上次驗證：從未執行"},
     {"Last FULL verify: never", "上次完整驗證：從未執行"},
@@ -940,6 +945,49 @@ constexpr CatalogEntry entries[] = {
         "執行 {} 是封存 {} 未完成的搬移中斷時留下的紀錄，該搬移驗證的是版次 {}，但封存現在已有較新的版次（{}）；"
         "該搬移再也無法完成：請以 `archive abandon-relocation {}` 放棄它，再重新搬移"},
     {"run {} has an invalid resume record", "執行 {} 的繼續紀錄無效"},
+    // Adding chunk hashes (decision 0033): refused before anything is read.
+    {"run {} adds no chunk hashes; resume it without --add-chunk-hashes, or start a new verification with it",
+        "執行 {} 不會加入區塊雜湊；請不加 --add-chunk-hashes 繼續它，或加上 --add-chunk-hashes 開始新的驗證"},
+    {"chunk hashes cannot be added at chunk size 0", "無法以區塊大小 0 加入區塊雜湊"},
+    {"revision {} of archive {} has chunk hashes already; a FULL verify compares them, and there are none to add",
+        "封存 {1} 的版次 {0} 已有區塊雜湊；完整驗證會比對它們，沒有可加入的區塊雜湊"},
+    // Why a run that adds chunk hashes records no revision with them.
+    {"the verification did not pass; revision {} stays without chunk hashes", "驗證未通過；版次 {} 仍不含區塊雜湊"},
+    {"not every entry matches revision {} as recorded; revision {} stays without chunk hashes (`register "
+        "--new-revision` records the archive as it is now, with chunk hashes)",
+        "並非每個項目都與版次 {0} 的紀錄相符；版次 {1} 仍不含區塊雜湊（`register --new-revision` "
+        "會依封存目前的內容記錄新版次，並含區塊雜湊）"},
+    {"archive {} is at revision {} now, recorded by another operation while this verification ran",
+        "封存 {} 現在是版次 {}，由其他作業在這次驗證期間記錄"},
+    {"archive {} was retired while this verification ran; a retired archive takes no new revisions",
+        "封存 {} 在這次驗證期間被停用；已停用的封存不再接受新的版次"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; finish it with `register "
+        "--resume`, or abandon it with `archive abandon-registration {}`",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；請以 `register --resume` 完成該註冊，"
+        "或以 `archive abandon-registration {}` 放棄它"},
+    {"the entry lines of revision {} cannot be written again as they are; revision {} stays without chunk hashes "
+        "(`register --new-revision` records them)",
+        "版次 {0} 的項目行無法原樣寫出；版次 {1} 仍不含區塊雜湊（`register --new-revision` 會記錄它們）"},
+    {"chunk hashes of {}: {} read, {} expected", "{} 的區塊雜湊：讀到 {} 個，應為 {} 個"},
+    // A run that read everything keeps its saved progress when the revision
+    // with chunk hashes cannot be written or recorded: its resume records it.
+    {"verification finished as PASSED but its revision with chunk hashes could not be written: {}; resume the run "
+        "with `verify --full {} --resume {}` to record it",
+        "驗證結果為通過，但無法寫入含區塊雜湊的版次：{}；請以 `verify --full {} --resume {}` 繼續該執行，以記錄該版次",
+        Match::Cause},
+    {"verification finished as PASSED_WITH_WARNINGS but its revision with chunk hashes could not be written: {}; "
+        "resume the run with `verify --full {} --resume {}` to record it",
+        "驗證結果為通過（有警告），但無法寫入含區塊雜湊的版次：{}；請以 `verify --full {} --resume {}` "
+        "繼續該執行，以記錄該版次",
+        Match::Cause},
+    {"verification finished as PASSED but could not be recorded: {}; resume the run with `verify --full {} "
+        "--resume {}` to record it",
+        "驗證結果為通過，但無法記錄：{}；請以 `verify --full {} --resume {}` 繼續該執行，以記錄該版次",
+        Match::Cause},
+    {"verification finished as PASSED_WITH_WARNINGS but could not be recorded: {}; resume the run with `verify "
+        "--full {} --resume {}` to record it",
+        "驗證結果為通過（有警告），但無法記錄：{}；請以 `verify --full {} --resume {}` 繼續該執行，以記錄該版次",
+        Match::Cause},
     {"media copy {} differs from the repository copy", "媒體副本 {} 與儲存庫中的副本不同"},
     {"the media holds revision {}, newer than the repository's {}: "
         "the repository may have been rolled back",
