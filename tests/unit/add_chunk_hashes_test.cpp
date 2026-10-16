@@ -9,6 +9,7 @@
 #include "engine_fixture.h"
 #include "manifest_samples.h"
 
+#include "app/adding_chunk_hashes.h"
 #include "app/unfinished_operations.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_verification.h"
@@ -1495,6 +1496,124 @@ void a_run_that_cannot_record_itself_says_that_it_stopped()
     }
 }
 
+// The verification that adds chunk hashes which Verify Archive's Resume
+// continues once its archive is chosen (decision 0033), also after the window
+// that ran it was closed: the archive's unfinished one when the Archive List
+// would show it stopped, as when it was recorded INCOMPLETE, though the
+// process that cancelled it goes on (the GUI's window), its record says that
+// it stopped, the process it names has ended, or, on another computer, its
+// record has said nothing for minutes. Not one that runs, here in the command
+// line or in this window while the window runs it, or is held up, its process
+// running; nor one that adds no chunk hashes, or adds them to an earlier
+// revision. The window is a process of its own, in whose eyes this fixture's
+// process (the command line's) runs. Records written by hand are sample data,
+// as the engine writes them.
+void what_resume_continues()
+{
+    using namespace std::chrono_literals;
+    {
+        Halves fixture;
+        const auto interrupted = fixture.interrupted();
+        if (!interrupted) {
+            return;
+        }
+        test::FakeProcessTable window;
+        window.self = {5151, "boot-1:2000", "veriarchive-gui.exe"};
+        window.others = {fixture.processes.self};
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        const auto found = va::app::resumable_adding_verification(
+            fixture.store, fixture.archive_uuid, {&window, fixture.host.host, {}}, now);
+        CHECK(found && *found && (*found)->run_id == interrupted->run_id && !(*found)->root &&
+              (*found)->archive_uuid == fixture.archive_uuid);
+    }
+
+    RegisteredWithout fixture;
+    const auto& uuid = fixture.archive_uuid;
+    const std::string run = "c0ffee00-0000-4000-8000-0000000000e1";
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const va::ProcessIdentity command_line{1000, "boot-1:1000", "veriarchive-cli.exe"};
+    test::FakeProcessTable window;
+    window.self = {5151, "boot-1:2000", "veriarchive-gui.exe"};
+    window.others = {command_line};
+    bool window_runs = false;
+    const va::app::AttemptCheck attempts{&window, "test-host", [&] { return window_runs; }};
+    const auto timestamp = [](std::chrono::sys_seconds time) { return std::format("{:%Y-%m-%dT%H:%M:%SZ}", time); };
+    // The record of a run of revision `revision` that adds chunk hashes (or
+    // none), last working `silent` ago in `process` on `host`.
+    const auto record = [&](std::chrono::seconds silent, const va::ProcessIdentity& process, std::string host,
+                            bool stopped = false, std::uint32_t revision = 1, bool adds = true) {
+        nlohmann::json value{{"archive_uuid", uuid}, {"revision", revision},
+            {"root", va::path_to_utf8(fixture.archive.root())}, {"started", timestamp(now - 1h)},
+            {"updated", timestamp(now - silent)}, {"files_total", 3}, {"bytes_total", 1000}};
+        if (adds) {
+            value["add_chunk_hashes"] = test_chunk_size;
+            va::record_attempt(value, {process, std::move(host)});
+        }
+        if (stopped) {
+            value["stopped"] = timestamp(now - silent);
+        }
+        CHECK(fixture.store.set_setting("run:" + run, value.dump()));
+    };
+    const auto resumes = [&]() -> std::string {
+        const auto found = va::app::resumable_adding_verification(fixture.store, uuid, attempts, now);
+        CHECK(found.has_value());
+        if (!found || !*found) {
+            return "none";
+        }
+        CHECK(!(*found)->root && (*found)->archive_uuid == uuid);
+        return (*found)->run_id;
+    };
+
+    CHECK(resumes() == "none");
+    record(10s, command_line, "test-host");
+    CHECK(resumes() == "none");  // it runs
+    record(10min, command_line, "test-host");
+    CHECK(resumes() == "none");  // held up: its process runs
+    record(10s, command_line, "test-host", true);
+    CHECK(resumes() == run);  // it says that it stopped
+    record(10s, command_line, "another-computer");
+    CHECK(resumes() == "none");  // it may run there
+    record(10min, command_line, "another-computer");
+    CHECK(resumes() == run);  // silent for minutes there
+    record(10s, window.self, "test-host");
+    window_runs = true;
+    CHECK(resumes() == "none");  // this window runs it
+    window_runs = false;
+    CHECK(resumes() == run);  // the window runs nothing: it stopped
+    window.others.clear();
+    record(10s, command_line, "test-host");
+    CHECK(resumes() == run);  // its process has ended
+    record(10min, command_line, "test-host", true, 0);
+    CHECK(resumes() == "none");  // of an earlier revision: it can never finish
+    record(10min, command_line, "test-host", true, 1, false);
+    CHECK(resumes() == "none");  // it adds none
+}
+
+// Which run Verify Archive's Resume continues (decision 0033): the run
+// interrupted last in the window while its archive is chosen, also one that
+// adds no chunk hashes; the chosen archive's stopped verification that adds
+// them while another archive's run, or none, was interrupted in the window;
+// and the window's run when the chosen archive has none (sample ids).
+void which_run_resume_continues()
+{
+    using va::app::RunToResume;
+    const RunToResume here{"c0ffee00-0000-4000-8000-0000000000f1", std::filesystem::path("K:/SAMPLE"),
+        "c0ffee00-0000-4000-8000-00000000000a"};
+    const RunToResume same_archive{"c0ffee00-0000-4000-8000-0000000000f2", std::nullopt,
+        "c0ffee00-0000-4000-8000-00000000000a"};
+    const RunToResume other_archive{"c0ffee00-0000-4000-8000-0000000000f3", std::nullopt,
+        "c0ffee00-0000-4000-8000-00000000000b"};
+    CHECK(!va::app::run_to_resume(std::nullopt, std::nullopt));
+    const auto own = va::app::run_to_resume(here, std::nullopt);
+    CHECK(own && own->run_id == here.run_id && own->root == here.root);
+    const auto chosen = va::app::run_to_resume(std::nullopt, other_archive);
+    CHECK(chosen && chosen->run_id == other_archive.run_id && !chosen->root);
+    const auto own_archive = va::app::run_to_resume(here, same_archive);
+    CHECK(own_archive && own_archive->run_id == here.run_id && own_archive->root == here.root);
+    const auto another = va::app::run_to_resume(here, other_archive);
+    CHECK(another && another->run_id == other_archive.run_id && another->archive_uuid == other_archive.archive_uuid);
+}
+
 // A registration plan whose revision is recorded, and the record of a
 // relocation whose next revision is recorded, can never finish (decisions
 // 0023, 0026): they refuse nothing (sample records written by hand, as an
@@ -1647,6 +1766,8 @@ void add_chunk_hashes_tests()
     a_verification_of_an_earlier_revision_is_not_unfinished();
     a_run_abandoned_while_it_reads_saves_no_checkpoint();
     a_run_that_cannot_record_itself_says_that_it_stopped();
+    what_resume_continues();
+    which_run_resume_continues();
     what_can_no_longer_finish_refuses_nothing();
     two_resumes_that_found_the_run_at_once();
 }

@@ -2,6 +2,7 @@
 // The GUI's state and its six views: the five of HANDOFF §B17 (Archive List,
 // Register Archive, Verify Archive, Verification History, Settings) and
 // Compare Archives (decision 0020).
+#include "app/adding_chunk_hashes.h"
 #include "app/unfinished_operations.h"
 #include "app/session.h"
 #include "gui/displayed_identity.h"
@@ -110,6 +111,11 @@ struct GuiState {
         std::string incomplete_run;        // last INCOMPLETE run, for Resume
         std::optional<std::filesystem::path> incomplete_root;
         std::optional<Uuid> incomplete_archive;
+        // The stopped verification that adds chunk hashes of the archive
+        // chosen in the drop-down (decision 0033), for Resume as
+        // app::run_to_resume says; read again whenever the choice changes and
+        // after each run.
+        std::optional<app::RunToResume> chosen_adding;
     } verify_view;
 
     struct {

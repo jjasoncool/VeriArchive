@@ -97,12 +97,25 @@ void show_report(GuiState& state, Report report)
     state.verify_view.shown_report = std::move(report);
 }
 
+// The run that Resume continues (app::run_to_resume): the run interrupted
+// last in this window, or the stopped verification that adds chunk hashes of
+// the archive chosen in the drop-down (decision 0033).
+std::optional<app::RunToResume> resume_target(const GuiState& state)
+{
+    const auto& view = state.verify_view;
+    std::optional<app::RunToResume> interrupted_here;
+    if (!view.incomplete_run.empty() && view.incomplete_archive) {
+        interrupted_here = app::RunToResume{view.incomplete_run, view.incomplete_root, *view.incomplete_archive};
+    }
+    return app::run_to_resume(interrupted_here, view.chosen_adding);
+}
+
 void set_running(GuiState& state, bool running)
 {
     auto& view = state.verify_view;
     gtk_widget_set_sensitive(view.start, !running);
     gtk_widget_set_sensitive(view.cancel, running);
-    gtk_widget_set_sensitive(view.resume, !running && !view.incomplete_run.empty());
+    gtk_widget_set_sensitive(view.resume, !running && resume_target(state));
     lock_language(state, running);
 }
 
@@ -129,18 +142,24 @@ bool strict_metadata(const GuiState& state)
 // this view. A run left INCOMPLETE is offered for Resume here.
 void run_verification(GuiState& state, VerifyRequest request);
 
-// "Full verify, and add chunk hashes" (decision 0033) is offered only for a
-// registered archive chosen in the drop-down to which a verification would
-// add them, by its rule (why_chunk_hashes_cannot_be_added): one whose current
-// revision has no chunk size, as its manifest says (R-14), and that is not
-// retired. For any other choice it is cleared and cannot be chosen.
-void offer_chunk_hashes(GuiState& state)
+// What the view offers for the archive chosen in the drop-down (decision
+// 0033). "Full verify, and add chunk hashes" is offered only for a registered
+// archive to which a verification would add them, by its rule
+// (why_chunk_hashes_cannot_be_added): one whose current revision has no chunk
+// size, as its manifest says (R-14), and that is not retired. For any other
+// choice it is cleared and cannot be chosen. And Resume continues the
+// archive's verification that adds chunk hashes once it has stopped
+// (app::resumable_adding_verification), also when another window or the
+// command line ran it, as app::run_to_resume says. A verification that this
+// window runs is never taken for one that has stopped.
+void offer_for_chosen_archive(GuiState& state)
 {
     auto& view = state.verify_view;
     if (!view.add_chunk_hashes) {
         return;
     }
     bool offered = false;
+    view.chosen_adding.reset();
     const auto selected = chosen_archive(view.archive, view.archive_uuids, 1);
     if (state.session && selected) {
         if (auto store = ArchiveStore::open_read_only(state.session->context.repo)) {
@@ -149,6 +168,13 @@ void offer_chunk_hashes(GuiState& state)
                 const auto refused = why_chunk_hashes_cannot_be_added(
                     *store, *repository_files, state.session->context.repo, **archive);
                 offered = refused && !*refused;
+                const auto processes = platform::make_process_table();
+                const app::AttemptCheck attempts{
+                    processes.get(), state.host.host, [&state] { return state.job.running(); }};
+                const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+                if (auto stopped = app::resumable_adding_verification(*store, *selected, attempts, now)) {
+                    view.chosen_adding = std::move(*stopped);
+                }
             }
         }
     }
@@ -156,6 +182,9 @@ void offer_chunk_hashes(GuiState& state)
         gtk_check_button_set_active(GTK_CHECK_BUTTON(view.add_chunk_hashes), FALSE);
     }
     gtk_widget_set_sensitive(view.add_chunk_hashes, offered);
+    if (view.resume) {
+        gtk_widget_set_sensitive(view.resume, !state.job.running() && resume_target(state));
+    }
 }
 
 void start_verification(GuiState& state, bool resume)
@@ -174,10 +203,15 @@ void start_verification(GuiState& state, bool resume)
     request.add_chunk_hashes = !resume && gtk_widget_get_sensitive(view.add_chunk_hashes) &&
                                gtk_check_button_get_active(GTK_CHECK_BUTTON(view.add_chunk_hashes));
     if (resume) {
-        request.resume_run = view.incomplete_run;
-        request.root = view.incomplete_root;
+        // Resume is offered only with a run to continue (set_running).
+        const auto target = resume_target(state);
+        if (!target) {
+            return;
+        }
+        request.resume_run = target->run_id;
+        request.root = target->root;
         if (!request.root) {
-            request.archive_uuid = view.incomplete_archive;
+            request.archive_uuid = target->archive_uuid;
         }
     } else {
         const auto selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(view.archive));
@@ -288,8 +322,9 @@ void run_verification(GuiState& state, VerifyRequest request)
                     gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.progress), state.text("Done").c_str());
                     show_report(state, result);
                     refresh_archive_list(state);
-                    // A revision with chunk hashes may have been recorded.
-                    offer_chunk_hashes(state);
+                    // A revision with chunk hashes may have been recorded, or
+                    // a verification that adds them may have stopped.
+                    offer_for_chosen_archive(state);
                 },
                 [&](Report error) { show_error(state, std::move(error)); });
         });
@@ -343,7 +378,7 @@ void refresh_archive_choices(GuiState& state)
     verify_items.insert(verify_items.end(), labels.begin(), labels.end());
     set_choices(state.verify_view.archive, verify_items);
     state.verify_view.archive_uuids = uuids;
-    offer_chunk_hashes(state);
+    offer_for_chosen_archive(state);
 
     set_choices(state.history_view.archive, labels);
     state.history_view.archive_uuids = uuids;
@@ -417,7 +452,7 @@ GtkWidget* build_verify_view(GuiState& state)
     gtk_box_append(GTK_BOX(box), view.add_chunk_hashes);
     g_signal_connect(view.archive, "notify::selected", G_CALLBACK(+[](GObject*, GParamSpec*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
-        guarded([&] { offer_chunk_hashes(state); }, [&](Report error) { show_error(state, std::move(error)); });
+        guarded([&] { offer_for_chosen_archive(state); }, [&](Report error) { show_error(state, std::move(error)); });
     }), &state);
 
     GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -426,7 +461,7 @@ GtkWidget* build_verify_view(GuiState& state)
     view.resume = gtk_button_new_with_label(state.text("Resume interrupted run").c_str());
     gtk_widget_set_sensitive(view.cancel, FALSE);
     // A rebuilt window (language change) can still resume an interrupted run.
-    gtk_widget_set_sensitive(view.resume, !view.incomplete_run.empty());
+    gtk_widget_set_sensitive(view.resume, resume_target(state).has_value());
     g_signal_connect(view.start, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) {
             auto& state = *static_cast<GuiState*>(data);

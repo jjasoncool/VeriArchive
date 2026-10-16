@@ -152,6 +152,7 @@ endif()
 
 # Composition-root helpers shared by the CLI and the GUI (R-05).
 add_library(veriarchive_app
+    src/app/adding_chunk_hashes.cpp
     src/app/history.cpp
     src/app/local_time.cpp
     src/app/plain_words.cpp
