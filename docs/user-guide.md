@@ -149,8 +149,8 @@ Item statuses:
 
 An interrupted verification ends INCOMPLETE and tells you how to continue:
 
-- GUI: press "Resume interrupted run".
-- CLI: `veriarchive-cli verify --full <archive_uuid> --resume <RUN_ID>`
+- GUI: press "Resume interrupted run" in the window where the verification was interrupted, before another verification runs there or the program is closed.
+- CLI: `veriarchive-cli verify --full <archive_uuid> --resume <RUN_ID>`, for any interrupted verification, also one started in the GUI. Among the unfinished operations of the Archive List, pointing at the label of its row shows the archive's uuid, and pointing at its state shows the run's id.
 
 Files already verified are not read again.
 

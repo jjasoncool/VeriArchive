@@ -149,8 +149,8 @@ veriarchive-cli verify --full 46d4c696-4999-4c7d-80eb-b626da614e77
 
 驗證被中斷時，結果是「未完成」，畫面會告訴你繼續的方法：
 
-- 圖形介面：按「繼續中斷的執行」。
-- 命令列：`veriarchive-cli verify --full <archive_uuid> --resume <RUN_ID>`
+- 圖形介面：在中斷驗證的那個視窗按「繼續中斷的執行」；在那之後又執行過其他驗證，或程式關閉過，就不能用這個按鈕。
+- 命令列：`veriarchive-cli verify --full <archive_uuid> --resume <RUN_ID>`，任何中斷的驗證都可以，包括在圖形介面啟動的。在「封存列表」的未完成的作業中，把滑鼠移到該列的標籤上會顯示封存的 UUID，移到狀態上會顯示執行編號。
 
 已驗證過的檔案不必重讀。
 
