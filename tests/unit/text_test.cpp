@@ -319,6 +319,44 @@ void translation_tests()
     CHECK(english("archive " + uuid + " has no unfinished registration") ==
           "archive " + uuid + " has no unfinished registration");
 
+    // A relocation resumes, and may be abandoned (decision 0026). Revision
+    // numbers keep their place in the Chinese word order.
+    CHECK(chinese("error: relocation was interrupted; continue it with `archive relocate " + uuid +
+                  " <root_path> --resume`") ==
+          "錯誤：搬移已中斷；請以 `archive relocate " + uuid + " <root_path> --resume` 繼續");
+    CHECK(chinese("an unfinished relocation of archive " + uuid + " (to \"Z:\\範例\") exists; resume it with `archive "
+                  "relocate " + uuid + " <root_path> --resume`, or abandon it with `archive abandon-relocation " +
+                  uuid + "`") ==
+          "封存 " + uuid + " 有一個未完成的搬移（至「Z:\\範例」）；請以 `archive relocate " + uuid +
+              " <root_path> --resume` 繼續，或以 `archive abandon-relocation " + uuid + "` 放棄它");
+    CHECK(chinese("this relocation is still running in process 4242 (veriarchive-cli.exe) on this computer; "
+                  "resume it once that process has ended") ==
+          "此搬移仍在這台電腦的處理程序 4242（veriarchive-cli.exe）中執行；請等該處理程序結束後再繼續");
+    CHECK(chinese("archive " + uuid + " is at revision 3, not at revision 2 that its unfinished relocation "
+                  "verifies; it cannot be resumed (abandon it with `archive abandon-relocation " + uuid + "`)") ==
+          "封存 " + uuid + " 目前是版次 3，不是其未完成的搬移所驗證的版次 2；無法繼續（請以 `archive "
+          "abandon-relocation " + uuid + "` 放棄它）");
+    CHECK(chinese("revision 3 of archive " + uuid + " was recorded by another operation; the unfinished relocation "
+                  "can no longer finish, and its saved progress was removed") ==
+          "封存 " + uuid + " 的版次 3 已由其他作業記錄；未完成的搬移再也無法完成，其已儲存的進度已刪除");
+    CHECK(chinese("revision 3 of archive " + uuid + " was recorded by another operation while this relocation ran; "
+                  "nothing was changed") ==
+          "封存 " + uuid + " 的版次 3 已在這次搬移期間由其他作業記錄；未做任何變更");
+    CHECK(chinese("archive " + uuid + " has no unfinished relocation to resume") ==
+          "封存 " + uuid + " 沒有可繼續的未完成搬移");
+    CHECK(chinese.format("Not abandoned: {}", chinese("archive " + uuid + " has no unfinished relocation")) ==
+          "未能放棄：封存 " + uuid + " 沒有未完成的搬移");
+    CHECK(chinese("cannot abandon the relocation: cannot run SQL: database is locked") ==
+          "無法放棄搬移：無法執行 SQL 陳述式：資料庫已被鎖定");
+    CHECK(chinese("an unfinished registration of archive " + uuid + " (root \"Z:\\範例\") is creating revision 2; "
+                  "this relocation recorded nothing (finish that registration with `register --resume`, then "
+                  "relocate again; or abandon it with `archive abandon-registration " + uuid + "`, then continue "
+                  "this relocation with `archive relocate " + uuid + " <root_path> --resume`)") ==
+          "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；這次搬移未記錄任何內容（請以 "
+          "`register --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration " + uuid +
+              "` 放棄該註冊後，以 `archive relocate " + uuid + " <root_path> --resume` 繼續這次搬移）");
+    CHECK(chinese.format("Abandon the unfinished relocation of {}?", "ARCH-0007") == "要放棄 ARCH-0007 未完成的搬移嗎？");
+
     // Comparing archives (CLI `archive compare`, GUI Compare Archives). The
     // result line keeps its mode word in every language, as verification's does.
     const std::string uuid_b = "94bbff52-39fa-458a-8831-9b30fb0cadf1";

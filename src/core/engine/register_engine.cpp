@@ -877,6 +877,13 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (auto removed = store.remove_setting(pending_key(plan.archive_uuid)); !removed) {
             return removed;
         }
+        // An unfinished relocation of the archive that creates this revision
+        // can never finish once it is recorded: its record and its saved
+        // progress go with this record (decision 0026), as a plan goes with
+        // the relocation that records its revision (decision 0023).
+        if (auto removed = store.remove_relocation_creating(plan.archive_uuid, plan.revision); !removed) {
+            return removed;
+        }
         if (auto named = written->file->commit(); !named) {
             return named;
         }

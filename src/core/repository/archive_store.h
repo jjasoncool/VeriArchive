@@ -134,6 +134,37 @@ struct UnfinishedVerification {
     Timestamp updated;                          // the setting's "updated": when it last said it was working
 };
 
+// The setting that holds the record of an unfinished relocation of an archive
+// (decision 0026): one per archive, never a verification's "run:<run_id>".
+inline std::string relocation_key(const Uuid& archive_uuid)
+{
+    return "relocation:" + archive_uuid;
+}
+
+// A relocation that has not finished (decision 0026): running now, in this or
+// another process, or interrupted and waiting for `archive relocate --resume`.
+// Its record is the setting relocation_key(archive_uuid); the entries of the
+// new carrier whose content matched so far are checkpointed into
+// verify_progress under its run_id (R-104), as a verification's are.
+struct UnfinishedRelocation {
+    Uuid archive_uuid;
+    std::string label;
+    std::string root;                           // UTF-8: the new root, where its latest attempt reads
+    std::uint32_t revision = 0;                 // the revision it verifies against; it creates the next one
+    std::string run_id;                         // its checkpoints, and its FULL verification's id once recorded
+    Timestamp started;                          // when its first attempt started
+    std::uint64_t files_done = 0;               // files (and streams) read and matched so far
+    std::uint64_t bytes_done = 0;               // their recorded bytes
+    bool done_counted = true;                   // false: the two above were not counted (not in WAL mode)
+    std::uint64_t files_total = 0;              // the files (and streams) of the revision with content hashes
+    std::uint64_t bytes_total = 0;              // their bytes
+    Timestamp updated;                          // the record's "updated": when it last said it was working
+    Timestamp stopped;                          // the record's "stopped": when an attempt ended without finishing
+    bool resumable = true;                      // false when the archive has another revision now
+    std::string record;                         // the record as stored (JSON), for judging which process runs
+                                                // its attempt (decision 0024)
+};
+
 // Files (and streams) and their bytes, counted from a run's checkpoints.
 struct CheckpointCount {
     std::uint64_t files = 0;
@@ -251,6 +282,11 @@ public:
     std::expected<void, IoError> add_progress(
         const std::string& run_id, const std::vector<std::string>& entry_keys);
     std::expected<std::set<std::string>, IoError> progress(const std::string& run_id);
+    // The entries checkpointed under `run_id` and their bytes, each entry's
+    // size from the index of `revision` of the archive (the revision the run
+    // verifies against).
+    std::expected<CheckpointCount, IoError> progress_count(
+        const std::string& run_id, const Uuid& archive_uuid, std::uint32_t revision);
     std::expected<void, IoError> clear_progress(const std::string& run_id);
 
     // Unfinished operations, for showing their progress while another process
@@ -276,6 +312,10 @@ public:
     // never changes, so it is not counted again.
     std::expected<std::vector<UnfinishedVerification>, IoError> unfinished_verifications(
         std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted = {});
+    // Every relocation whose record exists (decision 0026), its checkpoints
+    // counted as a verification's are (each entry's size from the index of
+    // the revision it verifies against), and only in WAL mode.
+    std::expected<std::vector<UnfinishedRelocation>, IoError> unfinished_relocations();
     // A mark of what the Archive List shows of the archives (archive_statuses):
     // it changes whenever an archive is added or changes its label, revision,
     // root or status, a revision is recorded, or a verification is recorded.
@@ -314,6 +354,27 @@ public:
     // recorded the plan can never be finished (decision 0023). Inside a write
     // transaction, so that the plan read is the plan removed.
     std::expected<void, IoError> remove_registration_plan(const Uuid& archive_uuid, std::uint32_t revision);
+    // Writes the record of a relocation (the setting relocation_key), in one
+    // statement, only while the key holds this relocation's record (the one
+    // with `run_id`) and the revision it creates, `creates`, is not recorded:
+    // once it is, or the relocation was abandoned, the key holds no record or
+    // another relocation's (decision 0026).
+    std::expected<void, IoError> update_relocation(const Uuid& archive_uuid, const std::string& run_id,
+        std::uint32_t creates, const std::string& value);
+    // True while the key relocation_key(archive_uuid) holds the record of the
+    // relocation with `run_id`. Inside a write transaction the answer holds
+    // until it ends.
+    std::expected<bool, IoError> relocation_recorded(const Uuid& archive_uuid, const std::string& run_id);
+    // Removes the record of the relocation with `run_id` and its checkpoints
+    // (decision 0026); leaves alone a record of another relocation under the
+    // key. Inside a write transaction, so that the record read is the record
+    // removed.
+    std::expected<void, IoError> remove_relocation(const Uuid& archive_uuid, const std::string& run_id);
+    // Removes the record and the checkpoints of an unfinished relocation of
+    // the archive that creates `revision` (it verifies against the revision
+    // before), if the key holds one: once that revision is recorded, by
+    // whatever records it, the relocation can never finish (decision 0026).
+    std::expected<void, IoError> remove_relocation_creating(const Uuid& archive_uuid, std::uint32_t revision);
     std::expected<std::vector<std::pair<std::string, std::string>>, IoError> settings_with_prefix(
         const std::string& prefix);
 

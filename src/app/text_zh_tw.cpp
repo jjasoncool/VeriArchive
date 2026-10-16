@@ -71,9 +71,9 @@ constexpr CatalogEntry entries[] = {
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
-        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
+        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
-        "  archive abandon-registration <uuid> [--confirm]\n"
+        "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n",
@@ -85,9 +85,9 @@ constexpr CatalogEntry entries[] = {
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
-        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
+        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
-        "  archive abandon-registration <uuid> [--confirm]\n"
+        "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n"},
@@ -205,9 +205,11 @@ constexpr CatalogEntry entries[] = {
     {"several archives start with {}", "有多個封存以 {} 開頭"},
     {"no archive {}", "找不到封存 {}"},
     {"usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
-        "[--io hdd|ssd] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm]",
+        "[--io hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
+        "abandon-relocation <uuid> [--confirm]",
         "用法：archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> "
-        "[--io hdd|ssd] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm]"},
+        "[--io hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
+        "abandon-relocation <uuid> [--confirm]"},
     // archive compare: A is the reference archive, B the copy compared with it.
     {"COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", "比較結果：{}  {}（{}）r{}  與  {}（{}）r{}"},
     {"A: {}, registered {}, {} entries", "A：{}，註冊於 {}，共 {} 個項目"},
@@ -235,6 +237,15 @@ constexpr CatalogEntry entries[] = {
         "registering the folder or volume again, unless you register it with --write-media-copy.",
         "注意：媒體上可能仍有指向此封存的 .veriarchive/identity.json；再次註冊此資料夾或磁碟區前請先刪除它，"
         "除非註冊時加上 --write-media-copy。"},
+    // archive abandon-relocation (decision 0026); "started: {}", "saved
+    // progress: ..." and the --confirm line are abandon-registration's.
+    {"Unfinished relocation of {} ({}), revision {}", "{}（{}）未完成的搬移，版次 {}"},
+    {"new root: {}", "新根目錄：{}"},
+    {"Abandoning it removes its saved progress, and it can never be resumed afterwards. The archive, its "
+        "revisions, manifests and the verification history stay as they are.",
+        "放棄後，已儲存的進度會被刪除，而且之後再也無法繼續。封存本身、已記錄的版次、清單檔與驗證歷程都維持不變。"},
+    {"Abandoned the unfinished relocation of {} ({}): its saved progress ({} files, {} bytes) was removed.",
+        "已放棄 {}（{}）未完成的搬移：已刪除其已儲存的進度（{} 個檔案，{} 位元組）。"},
     {"usage: history <uuid>", "用法：history <uuid>"},
     // src/cli/export_commands.cpp
     {"usage: export-sha256sums <uuid> --out FILE", "用法：export-sha256sums <uuid> --out FILE"},
@@ -310,16 +321,17 @@ constexpr CatalogEntry entries[] = {
     // src/gui/archive_list_view.cpp, src/app/unfinished_operations.cpp: unfinished
     // operations (decision 0022)
     {"Unfinished operations", "未完成的作業"},
-    {"Registrations and verifications that have not finished, also those started from the command line. "
-        "The numbers move each time an operation saves its progress: after every 1000 files, or once a "
-        "minute when a file finishes; not while it scans.",
-        "尚未完成的註冊與驗證，包括從命令列啟動的。每當作業儲存進度，數字就會更新：每 1000 個檔案一次，"
+    {"Registrations, verifications and relocations that have not finished, also those started from the "
+        "command line. The numbers move each time an operation saves its progress: after every 1000 files, "
+        "or once a minute when a file finishes; not while it scans.",
+        "尚未完成的註冊、驗證與搬移，包括從命令列啟動的。每當作業儲存進度，數字就會更新：每 1000 個檔案一次，"
         "或在檔案完成時每分鐘一次；掃描期間不會更新。"},
     {"Root", "根目錄"},
     {"Operation", "作業"},
     {"Progress", "進度"},
     {"Registration", "註冊"},
     {"Verification", "驗證"},
+    {"Relocation", "搬移"},
     {"{} of about {} ({}%)", "{} / 約 {}（{}%）", Match::FormatOnly},
     {"{} done", "已完成 {}", Match::FormatOnly},
     {"{} of {} files", "{} / {} 個檔案", Match::FormatOnly},
@@ -353,6 +365,19 @@ constexpr CatalogEntry entries[] = {
         "除非註冊時同時寫入媒體副本。"},
     {"Not abandoned: {}", "未能放棄：{}"},
     {"This registration is no longer listed as unfinished.", "此註冊已不在未完成的作業中。"},
+    // Abandoning a relocation (decision 0026); "Abandon", "Cancel" and "Not
+    // abandoned: {}" are the registration's.
+    {"Abandon the unfinished relocation of {}?", "要放棄 {} 未完成的搬移嗎？"},
+    {"New root: {}", "新根目錄：{}"},
+    {"Its saved progress will be lost: {} files ({}) matched so far.",
+        "已儲存的進度會遺失：目前已比對相符的 {} 個檔案（{}）。"},
+    {"It cannot be resumed afterwards. The archive, its revisions, manifests and the verification history are "
+        "not changed.",
+        "之後再也無法繼續。封存本身、已記錄的版次、清單檔與驗證歷程都不會變更。"},
+    {"Reading the relocation of {} ...", "正在讀取 {} 的搬移……"},
+    {"Abandoning the relocation of {} ...", "正在放棄 {} 的搬移……"},
+    {"Abandoned the unfinished relocation of {} ({}).", "已放棄 {}（{}）未完成的搬移。"},
+    {"This relocation is no longer listed as unfinished.", "此搬移已不在未完成的作業中。"},
     {"Cannot read the unfinished operations: {}", "無法讀取未完成的作業：{}", Match::FormatOnly},
     // src/gui/history_view.cpp
     {"Finished", "完成時間"},
@@ -684,6 +709,51 @@ constexpr CatalogEntry entries[] = {
     {"ManifestRevisionRollback: {}", "清單檔版次倒退：{}", Match::Cause},
     {"RepositoryError: {}", "儲存庫錯誤：{}", Match::Cause},
     {"relocation was interrupted; nothing was changed", "搬移已中斷；未做任何變更"},
+    // A relocation resumes (decision 0026).
+    {"relocation was interrupted; continue it with `archive relocate {} <root_path> --resume`",
+        "搬移已中斷；請以 `archive relocate {} <root_path> --resume` 繼續"},
+    {"an unfinished relocation of archive {} (to \"{}\") exists; resume it with `archive relocate {} "
+        "<root_path> --resume`, or abandon it with `archive abandon-relocation {}`",
+        "封存 {} 有一個未完成的搬移（至「{}」）；請以 `archive relocate {} <root_path> --resume` 繼續，"
+        "或以 `archive abandon-relocation {}` 放棄它"},
+    {"archive {} has no unfinished relocation to resume", "封存 {} 沒有可繼續的未完成搬移"},
+    {"revision {} of archive {} was recorded by another operation; the unfinished relocation can no longer "
+        "finish, and its saved progress was removed",
+        "封存 {1} 的版次 {0} 已由其他作業記錄；未完成的搬移再也無法完成，其已儲存的進度已刪除"},
+    {"archive {} is at revision {}, not at revision {} that its unfinished relocation verifies; it cannot be "
+        "resumed (abandon it with `archive abandon-relocation {}`)",
+        "封存 {0} 目前是版次 {1}，不是其未完成的搬移所驗證的版次 {2}；無法繼續（請以 "
+        "`archive abandon-relocation {3}` 放棄它）"},
+    {"this relocation is still running in process {} ({}) on this computer; resume it once that process has "
+        "ended",
+        "此搬移仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再繼續"},
+    {"the volume or folder of this root is not the one the unfinished relocation of archive {} started on "
+        "(\"{}\"); resume it there, or abandon it with `archive abandon-relocation {}` and start again",
+        "此根目錄所在的磁碟區或資料夾，不是封存 {} 未完成的搬移開始時的那一個（「{}」）；請在那裡繼續，"
+        "或以 `archive abandon-relocation {}` 放棄後重新開始"},
+    {"cannot start the relocation: {}", "無法開始搬移：{}", Match::Cause},
+    {"the unfinished relocation of archive {} was abandoned while this attempt ran; nothing was changed",
+        "封存 {} 未完成的搬移已在這次執行期間被放棄；未做任何變更"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; this relocation recorded "
+        "nothing (finish that registration with `register --resume`, then relocate again; or abandon it with "
+        "`archive abandon-registration {}`, then continue this relocation with `archive relocate {} <root_path> "
+        "--resume`)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；這次搬移未記錄任何內容（請以 "
+        "`register --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration {}` 放棄該註冊後，"
+        "以 `archive relocate {} <root_path> --resume` 繼續這次搬移）"},
+    // src/core/engine/abandon_relocation.cpp
+    {"archive {} has no unfinished relocation", "封存 {} 沒有未完成的搬移"},
+    {"the unfinished relocation of archive {} is no longer the one shown (it was resumed, finished or "
+        "abandoned meanwhile); nothing was changed",
+        "封存 {} 未完成的搬移已不是畫面上顯示的那一個（期間已被繼續、完成或放棄）；未做任何變更"},
+    {"the relocation of archive {} is still running in process {} ({}) on this computer; abandon it once that "
+        "process has ended",
+        "封存 {} 的搬移仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再放棄"},
+    {"an attempt of the relocation of archive {} said it was working less than 3 minutes ago; abandon it once "
+        "it has stopped",
+        "封存 {} 的搬移在不到 3 分鐘前仍回報正在執行；請等它停止後再放棄"},
+    {"cannot read the unfinished relocation: {}", "無法讀取未完成的搬移：{}", Match::Cause},
+    {"cannot abandon the relocation: {}", "無法放棄搬移：{}", Match::Cause},
     {"cannot scan the new root: {}", "無法掃描新根目錄：{}", Match::Cause},
     {"the new carrier does not hold the recorded content; "
         "nothing was changed (use `register --new-revision` to re-baseline changed content)",

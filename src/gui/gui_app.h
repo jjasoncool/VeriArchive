@@ -16,8 +16,8 @@
 
 namespace va::gui {
 
-// Unfinished registrations and verifications, wherever they run (the command
-// line, this window), read from the repository every few seconds while the
+// Unfinished registrations, verifications and relocations, wherever they run
+// (the command line, this window), read from the repository every few seconds while the
 // Archive List is shown (archive_list_view.cpp). Each read runs on a thread of
 // its own, so a slow one never holds up the window. Kept across windows, so a
 // language change keeps the speed and time left.
@@ -76,7 +76,8 @@ struct GuiState {
         GtkWidget* operations = nullptr;       // "Unfinished operations", hidden when there are none
         GtkWidget* operations_note = nullptr;  // what the section shows, or why it cannot
         GtkWidget* operations_grid = nullptr;
-        GtkWidget* abandoning = nullptr;       // progress while a registration is abandoned (decision 0025)
+        GtkWidget* abandoning = nullptr;       // progress while a registration (decision 0025) or a
+                                               // relocation (decision 0026) is abandoned
     } archive_list;
 
     struct {

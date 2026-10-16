@@ -256,6 +256,8 @@ veriarchive-cli archive relocate <uuid> <根目錄> # 封存搬到新磁碟後�
 veriarchive-cli archive compare <uuid> <uuid>    # 兩個封存的內容是否相同（見上文）
 ```
 
+中斷的 `archive relocate` 會保留已比對相符的進度，並列在未完成的作業中：以 `archive relocate <uuid> <根目錄> --resume` 繼續，或以 `archive abandon-relocation <uuid> --confirm` 放棄。
+
 `archive show`、`retire`、`relocate`、`compare`、`history`、`export` 與 `export-sha256sums` 的 uuid 可以只打前 8 個以上的字元，只要不會和其他封存混淆。
 
 ## 驗證歷程

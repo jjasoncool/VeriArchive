@@ -25,8 +25,12 @@ struct ComparisonInput {
     bool strict_metadata = false;
     // R-104 resume: entry keys whose content already matched in the run being resumed.
     std::set<std::string> content_verified;
-    // Called with keys of entries whose content matched, in batches (checkpoints).
-    std::function<void(const std::vector<std::string>&)> checkpoint;
+    // Called with keys of entries whose content matched, in batches
+    // (checkpoints). Returning false stops the comparison, as a cancel does
+    // (the result is incomplete): the operation found that it can no longer
+    // finish, such as a relocation whose revision another operation recorded
+    // (decision 0026).
+    std::function<bool(const std::vector<std::string>&)> checkpoint;
 };
 
 struct ComparisonResult {

@@ -1,7 +1,7 @@
 #pragma once
-// Unfinished registrations and verifications, for showing their progress while
-// they run, whoever runs them: this window, another one, or the command line.
-// The GUI's Archive List polls the repository every few seconds
+// Unfinished registrations, verifications and relocations, for showing their
+// progress while they run, whoever runs them: this window, another one, or the
+// command line. The GUI's Archive List polls the repository every few seconds
 // (read_unfinished_operations), follows each operation from poll to poll
 // (OperationWatch) and shows one row per operation (describe_operations).
 //
@@ -12,15 +12,17 @@
 // operation also writes the time into its record ("updated", decision 0022),
 // which tells a working operation from a stopped one. For an operation that
 // does not (one started by an older version), a few quiet minutes only say
-// that it *may* have stopped. A registration's plan also names the process
-// that runs its attempt (decision 0024): on this computer, whether that
-// process still runs tells at once whether the attempt does.
+// that it *may* have stopped. A registration's plan, and a relocation's record
+// (decision 0026), also name the process that runs its attempt (decision
+// 0024): on this computer, whether that process still runs tells at once
+// whether the attempt does.
 #include "app/progress_estimate.h"
 #include "app/text.h"
 #include "common/error.h"
 #include "common/repository_layout.h"
 #include "common/types.h"
 #include "core/engine/registration_attempt.h"
+#include "core/repository/archive_store.h"
 
 #include <chrono>
 #include <cstdint>
@@ -34,17 +36,19 @@
 
 namespace va::app {
 
-enum class OperationKind { Registration, Verification };
+enum class OperationKind { Registration, Verification, Relocation };
 
 // One unfinished operation as one poll of the repository saw it.
 struct UnfinishedOperation {
     OperationKind kind = OperationKind::Registration;
-    std::string key;                   // its setting ("registration:<uuid>", "run:<id>"): the same in every poll
+    std::string key;                   // its setting ("registration:<uuid>", "run:<id>", "relocation:<uuid>"):
+                                       // the same in every poll
     Uuid archive_uuid;
     std::string label;
-    std::string root;                  // UTF-8; may be empty for a verification
-    std::string run_id;                // verifications only
-    std::uint32_t revision = 0;        // the revision a registration creates, or a verification verifies
+    std::string root;                  // UTF-8; may be empty for a verification; a relocation's new root
+    std::string run_id;                // verifications and relocations (its checkpoints, decision 0026)
+    std::uint32_t revision = 0;        // the revision a registration creates, or a verification verifies, or a
+                                       // relocation verifies against (it creates the next one)
     Timestamp started;                 // for a registration, when its plan was made (its "created")
     std::uint64_t files_done = 0;
     std::uint64_t bytes_done = 0;
@@ -52,18 +56,19 @@ struct UnfinishedOperation {
     std::uint64_t bytes_total = 0;     // 0: not known
     bool total_is_estimate = false;    // bytes_total is the volume's used space, not the bytes to hash
     bool recorded_stopped = false;     // its record says it stopped: a verification recorded INCOMPLETE,
-                                       // a registration whose plan says "stopped"
-    bool resumable = true;             // false: a verification whose archive has a newer revision (R-104)
+                                       // a registration whose plan says "stopped", a relocation likewise
+    bool resumable = true;             // false: a verification or relocation whose archive has a newer
+                                       // revision (R-104)
     std::optional<std::chrono::sys_seconds> updated;  // when the operation last said it was working, if it does
     bool done_counted = true;          // false: files_done and bytes_done are not known, as the checkpoints
                                        // are not counted where that would hold up the operation (a database
                                        // not in WAL mode, decision 0022); only the record's state is shown
-    // A registration whose plan does not say it stopped: whether the process
-    // that runs its attempt runs (decision 0024). Unknown for a plan that names
-    // no process, or one on another computer, and when no process table was
-    // read; and for verifications.
+    // A registration or relocation whose record does not say it stopped:
+    // whether the process that runs its attempt runs (decision 0024). Unknown
+    // for a record that names no process, or one on another computer, and when
+    // no process table was read; and for verifications.
     AttemptState attempt = AttemptState::Unknown;
-    std::optional<AttemptProcess> process;  // the process the plan names, if it names one
+    std::optional<AttemptProcess> process;  // the process the record names, if it names one
 };
 
 // How a read judges each registration's attempt (decision 0024): through this
@@ -111,6 +116,11 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         volume_used_bytes,
     const AttemptCheck& attempts = {});
 
+// An unfinished relocation (decision 0026) as an operation of the list, its
+// attempt judged as `attempts` says. read_unfinished_operations uses it, and
+// so does the command line for `archive list|show --json`.
+UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation, const AttemptCheck& attempts);
+
 enum class OperationState {
     Waiting,   // first seen, and not yet seen to move
     Running,   // moved in the last few minutes, or its record says it works
@@ -125,6 +135,10 @@ enum class OperationState {
 // After this long without progress an operation is no longer called running,
 // and one whose record has said nothing for this long has stopped.
 inline constexpr std::chrono::minutes quiet_after{3};
+
+// The state in --json, in English: "waiting", "running", "quiet", "held_up"
+// (Silent), "stopped", "unknown".
+std::string_view state_code(OperationState state);
 
 // Follows one operation from poll to poll: when its numbers last moved, and
 // its speed and time left (ProgressEstimate).
@@ -199,6 +213,10 @@ private:
 void follow(std::vector<OperationWatch>& watches, std::vector<UnfinishedOperation> operations,
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
 
+// The state of an operation from one read alone, as the command line shows it
+// (--json), with nothing seen before: as the Archive List judges its first read.
+OperationState state_of_one_read(const UnfinishedOperation& operation, std::chrono::sys_seconds wall_now);
+
 // The share done, from 0 to 1: by bytes when their total is known, else by
 // files; nothing when neither is known, when the done bytes already passed an
 // approximate total, or when what is done was not counted. It stays below 1
@@ -210,7 +228,7 @@ std::optional<double> share_done(const UnfinishedOperation& operation);
 struct OperationRow {
     std::string label;
     std::string root;
-    std::string kind;                // "Registration", "Verification"
+    std::string kind;                // "Registration", "Verification", "Relocation"
     std::string progress;            // "3.45 TiB of about 8.55 TiB (40%)", "not counted"
     std::string details;             // "78895 files · 120 MiB/s · about 11-13 hours left"
     std::string state;               // "running", "no progress seen for 5 minutes; it may have stopped"
@@ -218,9 +236,11 @@ struct OperationRow {
     std::optional<double> fraction;  // for a progress bar
     Uuid archive_uuid;               // for a tooltip
     std::string run_id;              // verifications only, for a tooltip
-    std::string process;             // a registration's: "Process: 4242 (veriarchive-cli.exe)", for a tooltip
+    std::string process;             // a registration's or relocation's: "Process: 4242 (veriarchive-cli.exe)",
+                                     // for a tooltip
     std::string key;                 // the operation's key (UnfinishedOperation::key)
-    bool abandonable = false;        // a registration shown stopped: the operator may abandon it (decision 0025)
+    bool abandonable = false;        // a registration (decision 0025) or relocation (decision 0026) shown
+                                     // stopped: the operator may abandon it
 };
 
 OperationRow describe_operation(const Text& text, const OperationWatch& watch, OperationWatch::Clock::time_point now,

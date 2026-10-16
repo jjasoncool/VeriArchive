@@ -411,6 +411,66 @@ std::expected<void, IoError> ArchiveStore::remove_registration_plan(const Uuid& 
     return remove_setting("registration:" + archive_uuid);
 }
 
+std::expected<void, IoError> ArchiveStore::update_relocation(const Uuid& archive_uuid, const std::string& run_id,
+    std::uint32_t creates, const std::string& value)
+{
+    // As update_registration_plan: a damaged record (not JSON) is never this
+    // relocation's, and CASE keeps json_extract from reading it.
+    auto statement = database_.prepare(
+        "UPDATE settings SET value = ?1 WHERE key = ?2 "
+        "AND (CASE WHEN json_valid(value) THEN json_extract(value, '$.run_id') END) = ?3 "
+        "AND NOT EXISTS (SELECT 1 FROM archive_revisions WHERE archive_uuid = ?4 AND revision = ?5)");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    return statement->bind(1, value)
+        .bind(2, relocation_key(archive_uuid))
+        .bind(3, run_id)
+        .bind(4, archive_uuid)
+        .bind(5, static_cast<std::int64_t>(creates))
+        .run();
+}
+
+std::expected<bool, IoError> ArchiveStore::relocation_recorded(const Uuid& archive_uuid, const std::string& run_id)
+{
+    const auto value = setting(relocation_key(archive_uuid));
+    if (!value) {
+        return std::unexpected(value.error());
+    }
+    const auto record = nlohmann::json::parse(*value, nullptr, false);
+    return record.is_object() && !run_id.empty() && json_text(record, "run_id") == run_id;
+}
+
+std::expected<void, IoError> ArchiveStore::remove_relocation(const Uuid& archive_uuid, const std::string& run_id)
+{
+    const auto recorded = relocation_recorded(archive_uuid, run_id);
+    if (!recorded) {
+        return std::unexpected(recorded.error());
+    }
+    if (*recorded) {
+        if (auto removed = remove_setting(relocation_key(archive_uuid)); !removed) {
+            return removed;
+        }
+    }
+    // Its checkpoints are its own, whoever removed the record.
+    return clear_progress(run_id);
+}
+
+std::expected<void, IoError> ArchiveStore::remove_relocation_creating(const Uuid& archive_uuid, std::uint32_t revision)
+{
+    const auto value = setting(relocation_key(archive_uuid));
+    if (!value) {
+        return std::unexpected(value.error());
+    }
+    const auto record = nlohmann::json::parse(*value, nullptr, false);
+    const auto verifies = record.is_object() ? json_unsigned(record, "revision") : std::nullopt;
+    const auto run_id = record.is_object() ? json_text(record, "run_id") : std::string{};
+    if (!verifies || *verifies + 1 != revision || run_id.empty()) {
+        return {};
+    }
+    return remove_relocation(archive_uuid, run_id);
+}
+
 std::expected<std::vector<std::pair<std::string, std::string>>, IoError> ArchiveStore::settings_with_prefix(
     const std::string& prefix)
 {
@@ -1006,6 +1066,24 @@ std::expected<std::set<std::string>, IoError> ArchiveStore::progress(const std::
     }
 }
 
+std::expected<CheckpointCount, IoError> ArchiveStore::progress_count(
+    const std::string& run_id, const Uuid& archive_uuid, std::uint32_t revision)
+{
+    auto statement = database_.prepare(
+        "SELECT COUNT(*), COALESCE(SUM(f.size), 0) FROM verify_progress AS p "
+        "LEFT JOIN files AS f ON f.archive_uuid = ? AND f.revision = ? AND f.path = p.path "
+        "AND f.raw_hex = p.raw_hex AND f.stream = p.stream WHERE p.run_id = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision)).bind(3, run_id);
+    const auto counted = count_and_bytes(*statement);
+    if (!counted) {
+        return std::unexpected(counted.error());
+    }
+    return CheckpointCount{counted->first, counted->second};
+}
+
 std::expected<void, IoError> ArchiveStore::clear_progress(const std::string& run_id)
 {
     auto statement = database_.prepare("DELETE FROM verify_progress WHERE run_id = ?");
@@ -1330,6 +1408,80 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
     }
     std::ranges::sort(result, {}, [](const UnfinishedVerification& run) {
         return std::tie(run.started, run.label, run.run_id);
+    });
+    return result;
+}
+
+std::expected<std::vector<UnfinishedRelocation>, IoError> ArchiveStore::unfinished_relocations()
+{
+    const ReadSnapshot snapshot(database_);
+    // Counting is the one long statement of a read (write_ahead_log).
+    const bool count = write_ahead_log(database_);
+    const auto records = settings_with_prefix("relocation:");
+    if (!records) {
+        return std::unexpected(records.error());
+    }
+    auto archive = database_.prepare("SELECT label, current_revision FROM archives WHERE archive_uuid = ?");
+    // As a verification's checkpoints: each entry's size from the index of
+    // the revision it verifies against, looked up by its primary key.
+    auto matched = database_.prepare(
+        "SELECT COUNT(*), COALESCE(SUM(f.size), 0) FROM verify_progress AS p "
+        "LEFT JOIN files AS f ON f.archive_uuid = ? AND f.revision = ? AND f.path = p.path "
+        "AND f.raw_hex = p.raw_hex AND f.stream = p.stream WHERE p.run_id = ?");
+    if (!archive || !matched) {
+        return std::unexpected(!archive ? archive.error() : matched.error());
+    }
+
+    std::vector<UnfinishedRelocation> result;
+    for (const auto& [key, value] : *records) {
+        const auto record = nlohmann::json::parse(value, nullptr, false);
+        if (!record.is_object()) {
+            continue;
+        }
+        UnfinishedRelocation relocation;
+        relocation.archive_uuid = json_text(record, "archive_uuid");
+        relocation.run_id = json_text(record, "run_id");
+        const auto revision = json_unsigned(record, "revision");
+        if (relocation.archive_uuid.empty() || relocation.run_id.empty() || !revision) {
+            continue; // not a record this version wrote
+        }
+        relocation.revision = static_cast<std::uint32_t>(*revision);
+        relocation.label = json_text(record, "label");
+        relocation.root = json_text(record, "root");
+        relocation.started = json_text(record, "started");
+        relocation.files_total = json_unsigned(record, "files_total").value_or(0);
+        relocation.bytes_total = json_unsigned(record, "bytes_total").value_or(0);
+        relocation.updated = json_text(record, "updated");
+        relocation.stopped = json_text(record, "stopped");
+        relocation.record = value;
+
+        archive->bind(1, relocation.archive_uuid);
+        const auto found = archive->step();
+        if (!found) {
+            return std::unexpected(found.error());
+        }
+        if (*found && relocation.label.empty()) {
+            relocation.label = archive->text(0);
+        }
+        // It resumes only while its archive is at the revision it verifies.
+        relocation.resumable = *found && static_cast<std::uint32_t>(archive->integer(1)) == relocation.revision;
+        archive->reset();
+
+        relocation.done_counted = count;
+        if (count) {
+            matched->bind(1, relocation.archive_uuid)
+                .bind(2, static_cast<std::int64_t>(relocation.revision))
+                .bind(3, relocation.run_id);
+            const auto done = count_and_bytes(*matched);
+            if (!done) {
+                return std::unexpected(done.error());
+            }
+            std::tie(relocation.files_done, relocation.bytes_done) = *done;
+        }
+        result.push_back(std::move(relocation));
+    }
+    std::ranges::sort(result, {}, [](const UnfinishedRelocation& relocation) {
+        return std::tie(relocation.started, relocation.label, relocation.archive_uuid);
     });
     return result;
 }

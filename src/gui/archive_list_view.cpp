@@ -1,14 +1,16 @@
 // Archive List (§B17): never a bare "integrity status", but the last FULL
 // verify and the last verify of any mode with dates, plus OVERDUE (R-21).
-// Above the archives, the registrations and verifications that have not
-// finished, with their progress, wherever they were started: a registration
-// of a whole volume from the command line takes many hours, and this is where
-// the operator sees how far it is. A registration there that has stopped can
-// be abandoned (decision 0025), as when its media failed.
+// Above the archives, the registrations, verifications and relocations that
+// have not finished, with their progress, wherever they were started: a
+// registration of a whole volume from the command line takes many hours, and
+// this is where the operator sees how far it is. A registration there that
+// has stopped can be abandoned (decision 0025), as when its media failed, and
+// so can a stopped relocation (decision 0026).
 #include "gui/gui_app.h"
 
 #include "app/local_time.h"
 #include "core/engine/abandon_registration.h"
+#include "core/engine/abandon_relocation.h"
 #include "core/engine/archive_status.h"
 #include "platform/process_table.h"
 
@@ -113,9 +115,10 @@ void show_operations(GuiState& state)
     gtk_widget_set_visible(view.operations, TRUE);
     gtk_label_set_text(GTK_LABEL(view.operations_note),
         poll.error ? poll.error(text).c_str()
-                   : text("Registrations and verifications that have not finished, also those started from "
-                          "the command line. The numbers move each time an operation saves its progress: "
-                          "after every 1000 files, or once a minute when a file finishes; not while it scans.")
+                   : text("Registrations, verifications and relocations that have not finished, also those "
+                          "started from the command line. The numbers move each time an operation saves its "
+                          "progress: after every 1000 files, or once a minute when a file finishes; not while it "
+                          "scans.")
                          .c_str());
 
     const char* headers[] = {"Label", "Root", "Operation", "Progress", "Status"};
@@ -176,7 +179,8 @@ void show_operations(GuiState& state)
         }
         gtk_grid_attach(GTK_GRID(view.operations_grid), state_cell, 4, row, 1, 1);
 
-        // A stopped registration can be given up on purpose (decision 0025).
+        // A stopped registration (decision 0025) or relocation (decision
+        // 0026) can be given up on purpose.
         if (shown.abandonable) {
             GtkWidget* abandon = gtk_button_new_with_label(text("Abandon...").c_str());
             gtk_widget_set_valign(abandon, GTK_ALIGN_START);
@@ -541,12 +545,132 @@ void confirm_abandon(GuiState& state, const AbandonableRegistration& registratio
         choice);
 }
 
-// The operator chose to abandon the registration `key` of the latest read.
-// What abandoning it removes is read first, by the check that abandons it
-// (abandonable_registration, as the CLI shows it), not taken from the read
-// the row came from: whether the archive goes, and the saved progress, which
-// is nothing once its revision is recorded. A refusal shows at once (an
-// attempt that runs, another registration by now); otherwise the question.
+// ---- Abandoning a relocation (decision 0026) --------------------------------
+
+struct RelocationAbandonChoice {
+    GuiState* state;
+    RelocationAbandonRequest request;
+    std::string label;
+};
+
+Report relocation_abandon_report(const AbandonableRelocation& abandoned)
+{
+    return [abandoned](const app::Text& text) {
+        return text.format("Abandoned the unfinished relocation of {} ({}).", abandoned.label, abandoned.archive_uuid);
+    };
+}
+
+// Abandons the relocation the operator confirmed, after the same checks
+// again, in its own transaction (abandon_relocation); reports what it did.
+void start_relocation_abandon(GuiState& state, const RelocationAbandonRequest& request, const std::string& label)
+{
+    if (!can_abandon(state)) {
+        return;
+    }
+    run_abandon_step(state, state.text.format("Abandoning the relocation of {} ...", label),
+        [layout = state.session->context.repo, host = state.host.host, request](
+            CancelToken&, IProgressSink&) -> Report {
+            auto store = ArchiveStore::open(layout);
+            if (!store) {
+                return cannot_open(store.error());
+            }
+            const auto processes = platform::make_process_table();
+            AbandonServices services{*store, *processes, host};
+            const auto abandoned = abandon_relocation(services, request);
+            return abandoned ? relocation_abandon_report(*abandoned) : not_abandoned(abandoned.error());
+        },
+        [&state](const Report& result) {
+            refresh_archive_list(state);
+            start_poll(state);
+            show_abandon_result(state, result);
+        });
+}
+
+// Asks the operator, with Cancel as the default, saying what abandoning the
+// relocation removes, as abandonable_relocation read it.
+void confirm_relocation_abandon(GuiState& state, const AbandonableRelocation& relocation)
+{
+    const auto& text = state.text;
+    const auto label = relocation.label.empty() ? relocation.archive_uuid.substr(0, 8) : relocation.label;
+    const std::string detail = text.format("New root: {}", relocation.root) + "\n\n" +
+                               text.format("Its saved progress will be lost: {} files ({}) matched so far.",
+                                   relocation.files, format_bytes(relocation.bytes)) +
+                               " " +
+                               text("It cannot be resumed afterwards. The archive, its revisions, manifests and the "
+                                    "verification history are not changed.");
+    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s",
+        text.format("Abandon the unfinished relocation of {}?", label).c_str());
+    gtk_alert_dialog_set_detail(dialog, detail.c_str());
+    const auto cancel = text("Cancel");
+    const auto abandon = text("Abandon");
+    const char* buttons[] = {cancel.c_str(), abandon.c_str(), nullptr};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    // The request names the relocation shown: one that changed meanwhile
+    // (resumed and finished, say) is not abandoned in its place.
+    auto* choice = new RelocationAbandonChoice{&state, {relocation.archive_uuid, relocation.run_id}, label};
+    gtk_alert_dialog_choose(dialog, state.window, nullptr,
+        +[](GObject* source, GAsyncResult* result, gpointer data) {
+            std::unique_ptr<RelocationAbandonChoice> choice(static_cast<RelocationAbandonChoice*>(data));
+            GError* error = nullptr;
+            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
+            if (error) {
+                g_error_free(error); // dismissed, as when the window closed
+            }
+            g_object_unref(source);
+            auto& state = *choice->state;
+            if (button != 1 || !state.window) {
+                return;
+            }
+            guarded([&] { start_relocation_abandon(state, choice->request, choice->label); },
+                [&](const Report& report) { show_abandon_result(state, report); });
+        },
+        choice);
+}
+
+// The operator chose to abandon the relocation of a row: what abandoning it
+// removes is read first, by the check that abandons it, as for a
+// registration.
+void ask_to_abandon_relocation(GuiState& state, const app::UnfinishedOperation& operation)
+{
+    const auto label = operation.label.empty() ? operation.archive_uuid.substr(0, 8) : operation.label;
+    // The relocation shown: one that changed since is refused, not read in its place.
+    const RelocationAbandonRequest request{operation.archive_uuid, operation.run_id};
+    auto examined = std::make_shared<std::optional<AbandonableRelocation>>();
+    run_abandon_step(state, state.text.format("Reading the relocation of {} ...", label),
+        [layout = state.session->context.repo, host = state.host.host, request, examined](
+            CancelToken&, IProgressSink&) -> Report {
+            // Reads only, as the Archive List does (decision 0022).
+            auto store = ArchiveStore::open_read_only(layout);
+            if (!store) {
+                return cannot_open(store.error());
+            }
+            const auto processes = platform::make_process_table();
+            AbandonServices services{*store, *processes, host};
+            auto relocation = abandonable_relocation(services, request);
+            if (!relocation) {
+                return not_abandoned(relocation.error());
+            }
+            *examined = std::move(*relocation);
+            return {};
+        },
+        [&state, examined](const Report& refused) {
+            if (refused) {
+                show_abandon_result(state, refused);
+            } else if (*examined) {
+                confirm_relocation_abandon(state, **examined);
+            }
+        });
+}
+
+// The operator chose to abandon the registration or relocation `key` of the
+// latest read. What abandoning it removes is read first, by the check that
+// abandons it (abandonable_registration, abandonable_relocation, as the CLI
+// shows it), not taken from the read the row came from: whether the archive
+// goes, and the saved progress, which is nothing once its revision is
+// recorded. A refusal shows at once (an attempt that runs, another
+// registration by now); otherwise the question.
 void ask_to_abandon(GuiState& state, const std::string& key)
 {
     if (!can_abandon(state)) {
@@ -555,8 +679,14 @@ void ask_to_abandon(GuiState& state, const std::string& key)
     const auto& watches = state.operations.watches;
     const auto found = std::ranges::find(watches, key,
         [](const app::OperationWatch& watch) -> const std::string& { return watch.operation().key; });
+    if (!key.empty() && found != watches.end() && found->operation().kind == app::OperationKind::Relocation) {
+        ask_to_abandon_relocation(state, found->operation());
+        return;
+    }
     if (key.empty() || found == watches.end() || found->operation().kind != app::OperationKind::Registration) {
-        show_abandon_result(state, fixed_message("This registration is no longer listed as unfinished."));
+        show_abandon_result(state, fixed_message(key.starts_with("relocation:")
+                                                     ? "This relocation is no longer listed as unfinished."
+                                                     : "This registration is no longer listed as unfinished."));
         return;
     }
     const auto& operation = found->operation();

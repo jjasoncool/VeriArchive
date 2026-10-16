@@ -90,6 +90,7 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
     OperationsRead read;
     std::vector<PendingRegistration> registrations;
     std::vector<UnfinishedVerification> verifications;
+    std::vector<UnfinishedRelocation> relocations;
     const auto done = store->read_transaction([&]() -> std::expected<void, IoError> {
         auto mark = store->archive_list_mark();
         if (!mark) {
@@ -109,6 +110,11 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
             return std::unexpected(unfinished.error());
         }
         verifications = std::move(*unfinished);
+        auto moving = store->unfinished_relocations();
+        if (!moving) {
+            return std::unexpected(moving.error());
+        }
+        relocations = std::move(*moving);
         return {};
     });
     if (!done) {
@@ -170,10 +176,73 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         operation.done_counted = verification.done_counted;
         operations.push_back(std::move(operation));
     }
+    for (const auto& relocation : relocations) {
+        operations.push_back(relocation_operation(relocation, attempts));
+    }
     // Newest first. Timestamps sort as text; a stable sort keeps registrations
-    // before verifications that started in the same second.
+    // before verifications, and those before relocations, that started in the
+    // same second.
     std::ranges::stable_sort(operations, std::ranges::greater{}, &UnfinishedOperation::started);
     return read;
+}
+
+UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation, const AttemptCheck& attempts)
+{
+    UnfinishedOperation operation;
+    operation.kind = OperationKind::Relocation;
+    operation.key = relocation_key(relocation.archive_uuid);
+    operation.archive_uuid = relocation.archive_uuid;
+    operation.label = relocation.label;
+    operation.root = relocation.root;
+    operation.run_id = relocation.run_id;
+    operation.revision = relocation.revision;
+    operation.started = relocation.started;
+    operation.files_done = relocation.files_done;
+    operation.bytes_done = relocation.bytes_done;
+    operation.files_total = relocation.files_total;
+    operation.bytes_total = relocation.bytes_total;
+    operation.updated = parse_timestamp(relocation.updated);
+    // An attempt that ended without finishing says so in the record, as a
+    // registration's does in its plan.
+    operation.recorded_stopped = !relocation.stopped.empty();
+    operation.resumable = relocation.resumable;
+    operation.done_counted = relocation.done_counted;
+    // Otherwise the process the record names tells whether it still runs
+    // (decision 0024).
+    const auto record = nlohmann::json::parse(relocation.record, nullptr, false);
+    operation.process = recorded_attempt(record);
+    if (attempts.processes && !operation.recorded_stopped) {
+        operation.attempt =
+            judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+    }
+    return operation;
+}
+
+std::string_view state_code(OperationState state)
+{
+    switch (state) {
+    case OperationState::Waiting:
+        return "waiting";
+    case OperationState::Running:
+        return "running";
+    case OperationState::Quiet:
+        return "quiet";
+    case OperationState::Silent:
+        return "held_up";
+    case OperationState::Stopped:
+        return "stopped";
+    case OperationState::Unknown:
+        return "unknown";
+    }
+    return "unknown";
+}
+
+OperationState state_of_one_read(const UnfinishedOperation& operation, std::chrono::sys_seconds wall_now)
+{
+    OperationWatch watch;
+    const auto now = OperationWatch::Clock::now();
+    watch.update(operation, now, wall_now);
+    return watch.state(now, wall_now);
 }
 
 void OperationWatch::update(UnfinishedOperation operation, Clock::time_point now, std::chrono::sys_seconds wall_now)
@@ -387,20 +456,32 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     OperationRow row;
     row.label = operation.label.empty() ? operation.archive_uuid.substr(0, 8) : operation.label;
     row.root = operation.root;
-    row.kind = operation.kind == OperationKind::Registration ? text("Registration") : text("Verification");
+    switch (operation.kind) {
+    case OperationKind::Registration:
+        row.kind = text("Registration");
+        break;
+    case OperationKind::Verification:
+        row.kind = text("Verification");
+        break;
+    case OperationKind::Relocation:
+        row.kind = text("Relocation");
+        break;
+    }
     row.state_kind = watch.state(now, wall_now);
     row.fraction = share_done(operation);
     row.archive_uuid = operation.archive_uuid;
-    row.run_id = operation.run_id;
+    if (operation.kind == OperationKind::Verification) {
+        row.run_id = operation.run_id;
+    }
     row.key = operation.key;
-    if (operation.kind == OperationKind::Registration && operation.process) {
+    if (operation.kind != OperationKind::Verification && operation.process) {
         const auto& program = operation.process->process.program;
         row.process = text.format(
             "Process: {} ({})", operation.process->process.id, program.empty() ? std::string("?") : program);
     }
-    // A stopped registration may be given up on purpose (decision 0025); one
-    // that runs, or may, may not.
-    row.abandonable = operation.kind == OperationKind::Registration && row.state_kind == OperationState::Stopped;
+    // A stopped registration (decision 0025) or relocation (decision 0026)
+    // may be given up on purpose; one that runs, or may, may not.
+    row.abandonable = operation.kind != OperationKind::Verification && row.state_kind == OperationState::Stopped;
 
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;

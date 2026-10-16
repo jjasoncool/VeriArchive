@@ -1,13 +1,16 @@
 // `archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>
-// | compare <uuid> <uuid> | abandon-registration <uuid>` and `history <uuid>`.
-// Archives are always shown with their last FULL verify and last verify of any
-// mode, with dates and OVERDUE flags, never a bare "integrity status" (R-21).
+// [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> |
+// abandon-relocation <uuid>` and `history <uuid>`. Archives are always shown
+// with their last FULL verify and last verify of any mode, with dates and
+// OVERDUE flags, never a bare "integrity status" (R-21).
 #include "cli/commands.h"
 
 #include "app/local_time.h"
+#include "app/unfinished_operations.h"
 
 #include "common/utf8.h"
 #include "core/engine/abandon_registration.h"
+#include "core/engine/abandon_relocation.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
 #include "core/engine/relocate_engine.h"
@@ -16,7 +19,9 @@
 #include "platform/media_enumerator.h"
 #include "platform/process_table.h"
 
+#include <chrono>
 #include <iostream>
+#include <map>
 
 namespace va::cli {
 namespace {
@@ -66,7 +71,51 @@ nlohmann::json run_json(const std::optional<VerifyRunRecord>& run)
         {"finished", run->finished}};
 }
 
-nlohmann::json status_json(const ArchiveStatus& status)
+// The archives' unfinished relocations (decision 0026) as --json shows them,
+// by archive: where each reads, its progress from its checkpoints, and its
+// state from this one read, its attempt judged through this computer's
+// process table (decision 0024). Read only.
+using RelocationsJson = std::map<Uuid, nlohmann::json>;
+
+std::expected<RelocationsJson, Failure> unfinished_relocations_json(ArchiveStore& store)
+{
+    const auto relocations = store.unfinished_relocations();
+    if (!relocations) {
+        return std::unexpected(Failure{exit_code::repository, relocations.error().message});
+    }
+    const auto processes = platform::make_process_table();
+    const app::AttemptCheck attempts{processes.get(), host_info().host, {}};
+    const auto wall_now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto optional_text = [](const std::string& text) {
+        return text.empty() ? nlohmann::json(nullptr) : nlohmann::json(text);
+    };
+    RelocationsJson result;
+    for (const auto& relocation : *relocations) {
+        const auto operation = app::relocation_operation(relocation, attempts);
+        nlohmann::json json{
+            {"root", relocation.root},
+            {"revision", relocation.revision},
+            {"run_id", relocation.run_id},
+            {"started", relocation.started},
+            {"updated", optional_text(relocation.updated)},
+            {"stopped", optional_text(relocation.stopped)},
+            {"state", app::state_code(app::state_of_one_read(operation, wall_now))},
+            {"resumable", relocation.resumable},
+            {"files_done", relocation.done_counted ? nlohmann::json(relocation.files_done) : nullptr},
+            {"bytes_done", relocation.done_counted ? nlohmann::json(relocation.bytes_done) : nullptr},
+            {"files_total", relocation.files_total},
+            {"bytes_total", relocation.bytes_total},
+        };
+        if (operation.process) {
+            json["process"] = {{"id", operation.process->process.id},
+                {"program", operation.process->process.program}, {"host", operation.process->host}};
+        }
+        result[relocation.archive_uuid] = std::move(json);
+    }
+    return result;
+}
+
+nlohmann::json status_json(const ArchiveStatus& status, const RelocationsJson& relocations)
 {
     nlohmann::json json{
         {"archive_uuid", status.archive.archive_uuid},
@@ -89,6 +138,9 @@ nlohmann::json status_json(const ArchiveStatus& status)
         if (status.header->copy_of) {
             json["copy_of"] = *status.header->copy_of;
         }
+    }
+    if (const auto relocation = relocations.find(status.archive.archive_uuid); relocation != relocations.end()) {
+        json["unfinished_relocation"] = relocation->second;
     }
     return json;
 }
@@ -137,12 +189,16 @@ std::expected<Opened, Failure> open_statuses(const Arguments& arguments)
     return Opened{std::move(*session), std::move(*store), std::move(*statuses)};
 }
 
-int list(const Arguments& arguments, const Opened& opened)
+int list(const Arguments& arguments, Opened& opened)
 {
     if (arguments.json) {
+        const auto relocations = unfinished_relocations_json(opened.store);
+        if (!relocations) {
+            return report_failure(arguments, relocations.error());
+        }
         auto list = nlohmann::json::array();
         for (const auto& status : opened.statuses) {
-            list.push_back(status_json(status));
+            list.push_back(status_json(status, *relocations));
         }
         print_json({{"archives", std::move(list)}});
         return exit_code::passed;
@@ -177,7 +233,11 @@ int show(const Arguments& arguments, Opened& opened)
         return report_failure(arguments, {exit_code::repository, revisions.error().message});
     }
     if (arguments.json) {
-        auto json = status_json(*status);
+        const auto relocations = unfinished_relocations_json(opened.store);
+        if (!relocations) {
+            return report_failure(arguments, relocations.error());
+        }
+        auto json = status_json(*status, *relocations);
         auto list = nlohmann::json::array();
         for (const auto& revision : *revisions) {
             list.push_back({{"revision", revision.revision}, {"created", revision.created},
@@ -476,28 +536,121 @@ int abandon(const Arguments& arguments)
     return exit_code::passed;
 }
 
+// An unfinished relocation as --json shows it, abandoned or to be.
+nlohmann::json abandonable_relocation_json(const AbandonableRelocation& relocation)
+{
+    return {
+        {"archive_uuid", relocation.archive_uuid},
+        {"label", relocation.label},
+        {"revision", relocation.revision},
+        {"root", relocation.root},
+        {"run_id", relocation.run_id},
+        {"started", relocation.started},
+        {"saved_progress", {{"files", relocation.files}, {"bytes", relocation.bytes}}},
+    };
+}
+
+// `archive abandon-relocation <uuid> [--confirm]` (decision 0026): gives up an
+// unfinished relocation on purpose, such as one whose new carrier failed. Its
+// record and saved progress go; the archive, its revisions, manifests and the
+// history stay. Without --confirm it only says what would be lost (exit 12).
+int abandon_relocation_command(const Arguments& arguments)
+{
+    auto session = open_session(arguments, false);
+    if (!session) {
+        return report_failure(arguments, session.error());
+    }
+    auto store = ArchiveStore::open(session->context.repo);
+    if (!store) {
+        return report_failure(arguments, {exit_code::repository, store.error().message});
+    }
+    const auto archive_uuid = find_archive_uuid(*store, arguments.words[2]);
+    if (!archive_uuid) {
+        return report_failure(arguments, archive_uuid.error());
+    }
+    const auto processes = platform::make_process_table();
+    AbandonServices services{*store, *processes, host_info().host};
+    const RelocationAbandonRequest request{*archive_uuid, std::nullopt};
+    const auto failed = [&](const AbandonFailure& failure) {
+        return report_failure(arguments, {failure.kind == AbandonFailure::Kind::Refused ? exit_code::identity_decision
+                                                                                       : exit_code::repository,
+                                             failure.message});
+    };
+    const auto& text = arguments.text;
+
+    // The confirmation: what would be lost, and how to go ahead.
+    if (!arguments.has("--confirm")) {
+        const auto relocation = abandonable_relocation(services, request);
+        if (!relocation) {
+            return failed(relocation.error());
+        }
+        const std::string confirm = "run the command again with --confirm to abandon it";
+        if (arguments.json) {
+            print_json({{"error", confirm}, {"exit_code", exit_code::identity_decision},
+                {"relocation", abandonable_relocation_json(*relocation)}});
+            return exit_code::identity_decision;
+        }
+        std::cout << text.format("Unfinished relocation of {} ({}), revision {}", relocation->label,
+                         relocation->archive_uuid, relocation->revision)
+                  << "\n  " << text.format("new root: {}", relocation->root)
+                  << "\n  " << text.format("started: {}", app::local_time(relocation->started, text))
+                  << "\n  "
+                  << text.format("saved progress: {} files, {} bytes", relocation->files, relocation->bytes)
+                  << '\n'
+                  << text("Abandoning it removes its saved progress, and it can never be resumed afterwards. The "
+                          "archive, its revisions, manifests and the verification history stay as they are.")
+                  << '\n';
+        return report_failure(arguments, {exit_code::identity_decision, confirm});
+    }
+
+    const auto abandoned = abandon_relocation(services, request);
+    if (!abandoned) {
+        return failed(abandoned.error());
+    }
+    if (arguments.json) {
+        print_json(abandonable_relocation_json(*abandoned));
+        return exit_code::passed;
+    }
+    std::cout << text.format("Abandoned the unfinished relocation of {} ({}): its saved progress ({} files, {} "
+                             "bytes) was removed.",
+                     abandoned->label, abandoned->archive_uuid, abandoned->files, abandoned->bytes)
+              << '\n';
+    return exit_code::passed;
+}
+
 } // namespace
 
 // Decision 0004: accept a copy (or a new enclosure) as the archive's carrier
-// after a FULL verify of every entry; VeriArchive itself copies nothing.
+// after a FULL verify of every entry; VeriArchive itself copies nothing. With
+// --resume it continues the archive's unfinished relocation without reading
+// again what matched before (decision 0026).
 int relocate(const Arguments& arguments, Opened& opened)
 {
     const auto status = find_status(opened.statuses, arguments.words[2]);
     if (!status) {
         return report_failure(arguments, status.error());
     }
-    RelocateRequest request{status->archive.archive_uuid, root_path(arguments.words[3]), std::nullopt};
+    // `archive relocate <uuid> --resume <root_path>` reads the root as the option's value.
+    const auto typed_root = arguments.words.size() == 4 ? arguments.words[3] : arguments.value("--resume").value_or("");
+    RelocateRequest request{status->archive.archive_uuid, root_path(typed_root), std::nullopt};
+    request.resume = arguments.has("--resume") || arguments.value("--resume").has_value();
     if (const auto io = arguments.value("--io")) {
         if (*io != "hdd" && *io != "ssd") {
             return report_failure(arguments, {exit_code::usage, "--io takes hdd or ssd"});
         }
         request.rotational = *io == "hdd";
     }
+    // The error_code overload: a root that cannot be checked is reported, not thrown.
+    std::error_code root_error;
+    if (!std::filesystem::is_directory(request.root, root_error)) {
+        return report_failure(arguments, {exit_code::usage, "not a directory: " + typed_root});
+    }
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();
     const auto media = platform::make_media_enumerator();
-    RelocateServices services{*archive_files, *repository_files, *opened.session.writer, *media,
-        opened.store, opened.session.context.repo, opened.session.context.repository_uuid, host_info()};
+    const auto processes = platform::make_process_table();
+    RelocateServices services{*archive_files, *repository_files, *opened.session.writer, *media, opened.store,
+        opened.session.context.repo, opened.session.context.repository_uuid, host_info(), *processes};
     CancelToken cancel;
     platform::cancel_on_interrupt(cancel);
     CliProgress progress(arguments);
@@ -523,7 +676,8 @@ int relocate(const Arguments& arguments, Opened& opened)
     if (arguments.json) {
         print_json({{"archive_uuid", outcome->archive_uuid}, {"revision", outcome->revision},
             {"result", outcome->result}, {"run_id", outcome->run_id},
-            {"manifest", path_to_utf8(outcome->manifest)}, {"counts", outcome->counts}});
+            {"manifest", path_to_utf8(outcome->manifest)}, {"counts", outcome->counts},
+            {"resumed", outcome->resumed}});
     } else {
         std::cout << text.format("Relocated {} ({}) to {} as revision {}", outcome->label, outcome->archive_uuid,
                          path_to_utf8(request.root), outcome->revision)
@@ -542,12 +696,19 @@ int relocate(const Arguments& arguments, Opened& opened)
 
 int archive_command(const Arguments& arguments)
 {
-    const bool relocate_command = arguments.words.size() == 4 && arguments.words[1] == "relocate";
+    // `relocate <uuid> <root_path> [--resume]`, or `relocate <uuid> --resume <root_path>`.
+    const bool resume_root = arguments.value("--resume").has_value();
+    const bool relocate_command = arguments.words.size() >= 2 && arguments.words[1] == "relocate" &&
+                                  ((arguments.words.size() == 4 && !resume_root) ||
+                                      (arguments.words.size() == 3 && resume_root));
     const bool abandon_command = arguments.words.size() == 3 && arguments.words[1] == "abandon-registration";
+    const bool relocation_abandon_command =
+        arguments.words.size() == 3 && arguments.words[1] == "abandon-relocation";
     if (const auto problem = check_options(arguments,
-            abandon_command ? std::initializer_list<std::string_view>{"--confirm"}
-                            : std::initializer_list<std::string_view>{},
-            relocate_command ? std::initializer_list<std::string_view>{"--io"}
+            abandon_command || relocation_abandon_command ? std::initializer_list<std::string_view>{"--confirm"}
+            : relocate_command                            ? std::initializer_list<std::string_view>{"--resume"}
+                                                          : std::initializer_list<std::string_view>{},
+            relocate_command ? std::initializer_list<std::string_view>{"--io", "--resume"}
                              : std::initializer_list<std::string_view>{})) {
         return report_failure(arguments, *problem);
     }
@@ -555,18 +716,24 @@ int archive_command(const Arguments& arguments)
     const bool uuid_command = arguments.words.size() == 3 &&
                               (arguments.words[1] == "show" || arguments.words[1] == "retire");
     const bool compare_command = arguments.words.size() == 4 && arguments.words[1] == "compare";
-    if (!list_command && !uuid_command && !relocate_command && !compare_command && !abandon_command) {
+    if (!list_command && !uuid_command && !relocate_command && !compare_command && !abandon_command &&
+        !relocation_abandon_command) {
         return report_failure(arguments, {exit_code::usage,
             "usage: archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--io hdd|ssd] "
-            "| compare <uuid> <uuid> | abandon-registration <uuid> [--confirm]"});
+            "[--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | abandon-relocation "
+            "<uuid> [--confirm]"});
     }
     // Compare needs no verification status of every archive, only the two
-    // manifests; abandoning only the archive's unfinished registration.
+    // manifests; abandoning only the archive's unfinished registration or
+    // relocation.
     if (compare_command) {
         return compare(arguments);
     }
     if (abandon_command) {
         return abandon(arguments);
+    }
+    if (relocation_abandon_command) {
+        return abandon_relocation_command(arguments);
     }
     auto opened = open_statuses(arguments);
     if (!opened) {

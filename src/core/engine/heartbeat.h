@@ -24,7 +24,9 @@
 // it first, and then the key may hold the plan of the archive's next
 // registration (decision 0023); or the operator may abandon the registration,
 // and then the plan is gone, or the key holds a later registration's plan
-// (decision 0025).
+// (decision 0025). A relocation's record likewise, only while the key holds
+// that relocation's record and the revision it creates is not recorded
+// (only_while_relocating, decision 0026).
 #include "common/time.h"
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
@@ -78,6 +80,17 @@ public:
         planned_ = PlannedRegistration{std::move(archive_uuid), revision, std::move(created)};
     }
 
+    // For a relocation's record (decision 0026): from now on every write
+    // changes the record only while the key holds this relocation's record
+    // (the one with `run_id`) and the revision it creates, `creates`, is not
+    // recorded. Once it is, the relocation is done with (its record is
+    // removed), and once the relocation is abandoned the key holds no record,
+    // or a later relocation's, which this record must not replace.
+    void only_while_relocating(Uuid archive_uuid, std::string run_id, std::uint32_t creates)
+    {
+        relocating_ = Relocating{std::move(archive_uuid), std::move(run_id), creates};
+    }
+
     // Writes the record now, with the current time.
     void beat() noexcept
     {
@@ -90,6 +103,9 @@ public:
             if (planned_) {
                 (void)store_.update_registration_plan(
                     planned_->archive_uuid, planned_->revision, planned_->created, record_.dump());
+            } else if (relocating_) {
+                (void)store_.update_relocation(
+                    relocating_->archive_uuid, relocating_->run_id, relocating_->creates, record_.dump());
             } else {
                 (void)store_.update_setting(key_, record_.dump());
             }
@@ -107,7 +123,8 @@ public:
     // replace (update_setting only changes a record that exists, so with the
     // key empty it writes nothing; only_while_planned keeps a plan's record
     // from it once the revision is recorded, by any attempt, or the
-    // registration is abandoned).
+    // registration is abandoned; only_while_relocating a relocation's record
+    // likewise).
     void stop() noexcept
     {
         try {
@@ -124,6 +141,11 @@ private:
         std::uint32_t revision = 0;
         Timestamp created;
     };
+    struct Relocating {
+        Uuid archive_uuid;
+        std::string run_id;
+        std::uint32_t creates = 0;
+    };
 
     ArchiveStore& store_;
     std::string key_;
@@ -132,6 +154,7 @@ private:
     Clock::duration interval_;
     Clock::time_point last_;
     std::optional<PlannedRegistration> planned_;
+    std::optional<Relocating> relocating_;
 };
 
 } // namespace va

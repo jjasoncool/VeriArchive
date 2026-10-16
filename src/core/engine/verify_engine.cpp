@@ -361,6 +361,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             if (store.write_transaction([&] { return store.add_progress(outcome.run_id, unsaved); })) {
                 unsaved.clear();
             }
+            return true;
         };
         comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
         if (!comparison.scan_error.empty()) {

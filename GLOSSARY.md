@@ -89,6 +89,10 @@ _Avoid_: backup, import
 An unfinished registration that the operator gave up on purpose, as when its media failed: its plan and saved progress are removed, so it can never be resumed, while recorded revisions, manifests and history stay. An archive that never had a revision goes with its abandoned first registration.
 _Avoid_: cancelled registration (a cancelled one can be resumed), deleted registration
 
+**Abandoned relocation**:
+An unfinished relocation that the operator gave up on purpose, as when the new carrier failed: its record and saved progress are removed, so it can never be resumed, while the archive, its revisions and history stay.
+_Avoid_: cancelled relocation (a cancelled one can be resumed)
+
 **Verification**:
 Re-reading an archive and comparing it against a revision's manifest; its outcome is a run result qualified by its mode.
 _Avoid_: check, integrity status

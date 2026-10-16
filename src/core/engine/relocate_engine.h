@@ -5,6 +5,15 @@
 // revision and, if every entry matches, writes the next revision with the same
 // content hashes and the new carrier's identity, so the archive keeps its uuid
 // and history and stays verifiable.
+//
+// A relocation resumes like a FULL verification (R-104, decision 0026). While
+// it has not finished it keeps a record of its own in the repository settings
+// (relocation_key, one per archive: never a verification's "run:<run_id>"),
+// and checkpoints the entries whose content matched into verify_progress
+// under its run_id. `archive relocate --resume` continues it without reading
+// those entries again, while the archive is still at the revision it verifies
+// and the new root is on the volume and in the folder it started on, and never
+// while the process that runs its attempt still runs (decision 0024).
 #include "core/engine/candidates.h"
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
@@ -20,6 +29,7 @@ struct RelocateRequest {
     Uuid archive_uuid;
     std::filesystem::path root;             // the archive root on the new carrier
     std::optional<bool> rotational;
+    bool resume = false;                    // continue the archive's unfinished relocation (decision 0026)
 };
 
 struct RelocateServices {
@@ -31,6 +41,7 @@ struct RelocateServices {
     RepositoryLayout layout;
     std::string repository_uuid;
     HostInfo host;
+    IProcessTable& processes;               // which process runs an attempt, and whether it still runs
 };
 
 struct RelocateOutcome {
@@ -42,6 +53,7 @@ struct RelocateOutcome {
     std::map<std::string, std::uint64_t> counts;
     std::vector<VerifyItemRecord> items;
     std::filesystem::path manifest;
+    bool resumed = false;                   // it continued an unfinished relocation (decision 0026)
 };
 
 struct RelocateFailure {

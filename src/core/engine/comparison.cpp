@@ -263,12 +263,15 @@ ComparisonResult compare_with_manifest(
 
     std::vector<std::string> pending_checkpoint;
     auto last_checkpoint = std::chrono::steady_clock::now();
+    // False when the caller stops the comparison.
     const auto flush_checkpoint = [&] {
+        bool go_on = true;
         if (input.checkpoint && !pending_checkpoint.empty()) {
-            input.checkpoint(pending_checkpoint);
+            go_on = input.checkpoint(pending_checkpoint);
         }
         pending_checkpoint.clear();
         last_checkpoint = std::chrono::steady_clock::now();
+        return go_on;
     };
 
     const auto hashed = hash_files(files, jobs, hash_options, cancel, progress, [&](HashResult&& hash) {
@@ -305,12 +308,12 @@ ComparisonResult compare_with_manifest(
         pending_checkpoint.push_back(entry_key(was));
         if (pending_checkpoint.size() >= 1000 ||
             std::chrono::steady_clock::now() - last_checkpoint > std::chrono::seconds(60)) {
-            flush_checkpoint();
+            return flush_checkpoint(); // false stops hashing
         }
         return true;
     });
-    flush_checkpoint();
-    if (!hashed) {
+    // The last matches, also of a run that stops: a resume skips them.
+    if (!flush_checkpoint() || !hashed) {
         result.incomplete = true;
     }
     std::sort(result.current_entries.begin(), result.current_entries.end(), canonical_less);

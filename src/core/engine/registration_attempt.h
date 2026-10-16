@@ -8,7 +8,9 @@
 // `register --resume`, the Archive List and abandoning a registration
 // (decision 0025) read it back to tell an attempt that still runs from one
 // that has ended. A process id means something only on the computer that
-// gave it out, so the record names the computer too (HostInfo::host).
+// gave it out, so the record names the computer too (HostInfo::host). The
+// record of an unfinished relocation (decision 0026) names its attempt's
+// process the same way, with "stopped" the same way, and is judged the same.
 #include "core/interfaces.h"
 
 #include <nlohmann/json.hpp>

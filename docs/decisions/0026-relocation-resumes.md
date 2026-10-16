@@ -1,0 +1,107 @@
+---
+status: accepted
+date: 2026-10-16
+amends: HANDOFF §B8 (the record of an unfinished relocation), §B11.4 (a relocation resumes; one unfinished relocation per archive; abandoning one), §B16 (`archive relocate --resume`, `archive abandon-relocation`, `unfinished_relocation` in `archive list|show --json`), §B17 (Archive List: relocations, and their Abandon), decision 0004 (how a relocation resumes), decision 0023 (point 3: what records a revision also removes the record of a relocation that creates it; point 5: the refusal that leaves the revision to a registration), decision 0025 (point 1: that refusal's words)
+---
+
+# Relocation resumes
+
+Decision 0004 promised that relocation "is resumable like any FULL verify (R-104)", and §B16 shows `archive relocate <uuid> <root_path> [--resume]`, but a relocation kept nothing while it ran. Interrupted (Ctrl+C, the new disk unplugged, the computer restarted, a record that could not be written), it had read the new carrier for nothing, often for hours, and the next attempt read all of it again. Nothing showed it either: the Archive List (decision 0022) knows registrations and verifications only.
+
+## Decision
+
+1. **The record.** A relocation keeps a record of its own in `settings`, under `relocation:<archive_uuid>`: one per archive, never a verification's `run:<run_id>`. So `verify --resume` cannot take it over, and decision 0022's rule that a later verification of the archive supersedes an unfinished one never hides it. The record is a JSON object; as with the records of decision 0022, members are added, none is removed or changes its meaning, and a reader ignores members it does not know:
+
+   | Member | Meaning |
+   |---|---|
+   | `archive_uuid`, `label` | the archive |
+   | `revision` | N, the revision it verifies against; it creates N+1 |
+   | `run_id` | the run its checkpoints are saved under, and the id of its FULL verification once recorded |
+   | `started` | when its first attempt started |
+   | `root` | the new root, where its latest attempt reads (UTF-8) |
+   | `root_subpath` | that root's folder on its volume at the start (§B2 form) |
+   | `evidence` | the new carrier's media evidence at the start: `seen_at`, and `volume`, the `VolumeInfo` as `media_evidence.volume_json` holds it |
+   | `files_total`, `bytes_total` | the files (and streams) of rN whose content has hashes, and their bytes: what the checkpoints count (as a verification's, decision 0022) |
+   | `updated`, `stopped` | as in a registration's plan (decision 0022) |
+   | `process` | the process that runs its attempt (decision 0024) |
+   | `resumes` | how often it was resumed |
+
+   The record is written in one write transaction before the new root is scanned (it waits for the write lock as a record does, decision 0023), again while the relocation works (`updated`, every 30 seconds), and once more, with `stopped`, by an attempt that ends without finishing. A write changes the record only while the key holds this relocation's record (its `run_id`) and N+1 is not recorded.
+
+2. **Checkpoints.** The entries whose content matched are saved as a verification's are (R-104): into `verify_progress` under the record's `run_id`, every 1 000 entries or 60 seconds, and the last ones when an attempt stops. Each checkpoint looks first, in its own transaction, whether N+1 is recorded (by another operation) or the key no longer holds this relocation's record (abandoned); then the attempt stops, and saves nothing.
+
+3. **`archive relocate <uuid> <root_path> --resume`** continues the archive's unfinished relocation. In the transaction that takes it over, before the new root is scanned:
+   - There must be one; otherwise "archive U has no unfinished relocation to resume" (exit 12).
+   - One whose revision N+1 is recorded by now (by an operation that left the record, point 5) can never finish: its record and checkpoints go, and the resume stops: "revision N+1 of archive U was recorded by another operation; the unfinished relocation can no longer finish, and its saved progress was removed" (exit 12).
+   - R-104: the archive must still be at revision N; otherwise "archive U is at revision M, not at revision N that its unfinished relocation verifies; it cannot be resumed (abandon it with `archive abandon-relocation U`)" (exit 12).
+   - Decision 0024: never while the process that ran the attempt before still runs on this computer: "this relocation is still running in process N (P) on this computer; resume it once that process has ended" (exit 12). The record is judged as a registration's plan is (decision 0024, point 2); where its attempt is not known (another computer), the resume goes ahead, and the first to record the revision wins (decision 0023).
+   - The new root must be on the volume the relocation started on, as identity matching tells it (§B10) against the evidence in the record: `MATCH`, or `MATCH_WEAK` where a serial or the filesystem id cannot be read; not `MIGRATED`, `MISMATCH` or another volume. And in the same folder on it (`root_subpath`, compared as decision 0001 compares roots). Otherwise: "the volume or folder of this root is not the one the unfinished relocation of archive U started on ("R"); resume it there, or abandon it with `archive abandon-relocation U` and start again" (exit 12). The path is not compared: the same disk under another drive letter or mount point resumes, and the record names the path it reads now.
+
+   Then the record names this attempt's process, without the stop mark of the attempt before. The relocation scans the new root and reads every entry that did not match before; an entry that did, and whose size is unchanged, is not read again and is carried into r(N+1) with rN's recorded hashes, as a resumed verification skips it (its metadata is compared again, and r(N+1) records the new carrier's).
+
+4. **One unfinished relocation per archive.** `archive relocate` without `--resume` is refused while a relocation of the archive is unfinished, whether it runs or stopped, and changes nothing: "an unfinished relocation of archive U (to "R") exists; resume it with `archive relocate U <root_path> --resume`, or abandon it with `archive abandon-relocation U`" (exit 12). A record whose N+1 is recorded is not unfinished (point 3): it goes, and the new relocation begins. Two relocations started at once cannot both begin: the record is made in a write transaction that looks for another first.
+
+5. **How a relocation ends.**
+   - **Recorded.** In the transaction that records r(N+1) (decision 0023, unchanged: N+1 found not recorded, a registration with saved files of N+1 left its revision, the plan of N+1 removed, the manifest named last), the record and its checkpoints go. The FULL verification it records ran from the relocation's start (`started`); its `counts_json` says how often it was `resumed`, when it was.
+   - **The new carrier does not hold the content** (decision 0004: `Modified`, `Missing`, `New`, `TypeChanged`, `Unreadable`, `Unrepresentable`): the relocation ends, and its record and checkpoints go. What the operator does next, copying again, changes the carrier: what matched before then says nothing, and the next relocation reads it all.
+   - **Its revision recorded by another operation** (a registration of N+1 that recorded first, an import): it ends and records nothing. Decision 0023, point 3, now holds for relocations too: what records revision N+1 also removes, in its transaction, the record and checkpoints of a relocation that creates N+1. A registration does; an import does not (as it leaves plans), and then the relocation's next checkpoint, record or resume removes it.
+   - **Interrupted** (cancelled, its device removed, a scan that failed, a record that could not be written, such as a database that stayed locked or a manifest that could not be named), or **refused because a registration of N+1 has saved files** (decision 0023): the record and its checkpoints stay, the record says it stopped, and `--resume` continues. An interruption reads "relocation was interrupted; continue it with `archive relocate U <root_path> --resume`" (exit 4). The refusal now says both ways on: "an unfinished registration of archive U (root "R") is creating revision N; this relocation recorded nothing (finish that registration with `register --resume`, then relocate again; or abandon it with `archive abandon-registration U`, then continue this relocation with `archive relocate U <root_path> --resume`)" (exit 12). A registration that finishes takes N+1, which ends the relocation (above).
+
+6. **Abandoning: `archive abandon-relocation <uuid> [--confirm] [--json]`**, a command of its own, and **Abandon...** on the row of a stopped relocation in the Archive List. In one write transaction it removes the relocation's record and its checkpoints, and nothing else: no archive, revision, index, manifest, media evidence or history (R-18), nothing on the media (R-03). It follows decision 0025's rules: refused (exit 12) while its attempt's process runs on this computer ("the relocation of archive U is still running in process N (P) on this computer; abandon it once that process has ended"), or, where no process can be checked, while its record said less than 3 minutes ago that it works ("an attempt of the relocation of archive U said it was working less than 3 minutes ago; abandon it once it has stopped"); the GUI names the relocation it showed (its `run_id`), and one that is another by now is refused ("the unfinished relocation of archive U is no longer the one shown ..."). Without `--confirm` the CLI shows what abandoning removes (the archive, the revision it verifies, the new root, when it started, the files and bytes matched) and exits 12; with `--json` it prints that as `relocation`. With `--confirm` it exits 0, and `--json` prints the relocation abandoned. An attempt of a relocation abandoned where this computer cannot see it stops at its next checkpoint or at its record: "the unfinished relocation of archive U was abandoned while this attempt ran; nothing was changed" (exit 12).
+
+   `archive abandon-registration` does not cover it:
+   - A relocation is not a registration (the glossary: relocation's _Avoid_ is re-registration): it reads a copy and records the hashes of rN, it never takes a baseline.
+   - An archive can have both at once: an unfinished `register --new-revision` of N+1 and an unfinished relocation against N, the case of decisions 0023 and 0025. One command would have to guess which the operator means, and the wrong guess throws hours of reading away.
+   - What they remove differs: a registration's plan, its checkpoints in `files`, and with a first registration the archive's record (decision 0025); a relocation's record and its checkpoints in `verify_progress`, never the archive, which has revision N.
+
+7. **Where it shows.**
+   - **The Archive List** (decision 0022) shows an unfinished relocation as an operation of its own kind, "Relocation": the archive's label, the new root, its progress from its checkpoints (each entry's size from the index of rN, as a verification's) against its record's totals, and its state, which its record and its process tell as a registration's plan does (decision 0024): `running`, `no progress reported for N minutes; its process is still running`, `stopped; it can be resumed`, or, while the archive is at another revision, `stopped; it cannot be resumed (the archive has a newer revision)`. Its tooltip names the process. The note above the table says "Registrations, verifications and relocations that have not finished, ...". A stopped one has **Abandon...**, which reads what abandoning removes with the CLI's check (`abandonable_relocation`) and then asks, with **Cancel** as the default: "Abandon the unfinished relocation of ARCH-0007? ... Its saved progress will be lost: N files (S) matched so far. It cannot be resumed afterwards. The archive, its revisions, manifests and the verification history are not changed."
+   - **`archive list --json` and `archive show <uuid> --json`** give an archive whose relocation is unfinished the member `unfinished_relocation`: `root`, `revision` (the one it verifies), `run_id`, `started`, `updated`, `stopped` (null while it may run), `state`, `resumable`, `files_done` and `bytes_done` (null where the checkpoints are not counted, decision 0022), `files_total`, `bytes_total`, and `process` (`id`, `program`, `host`) when the record names one. `state` is judged from this one read as the Archive List judges its first: `running`, `held_up` (its process runs, its record has said nothing for minutes), `stopped`; for a record that says nothing of its state, `waiting`, `quiet` or `unknown`. `archive relocate --json` says whether it was `resumed`.
+
+## Why
+
+Relocation exists so that an archive stays verifiable when its carrier goes away (decision 0004, §A1); the new carrier is read in full, which for a whole disk takes many hours. A relocation that starts over after every interruption, a USB disk that drops off or a computer that restarts, is the relocation that never finishes. Verification and registration have resumed since M4 (R-104); relocation, the same FULL read, now does too.
+
+The record follows a registration's plan, which the Archive List, decisions 0024 and 0025 already read, judge and abandon: one per archive, under the archive's uuid, so the operator finishes or gives up the relocation by naming the archive, and saved progress always belongs to one relocation. Its checkpoints follow a verification's: the relocation's FULL verification of the new carrier is what they record.
+
+A checkpoint says that this entry, in this folder of this volume, matched when it was read. R-104 trusts it only while that still holds: the archive at the same revision, the same identity. A disk formatted or replaced since, another disk, or another folder says nothing of what matched before, so the resume compares the volume with the evidence recorded at the start, by the rules that identify archives (§B10), and the folder on it. `MIGRATED` (the same filesystem in another enclosure since the start) is refused as well: the relocation records the carrier it reads, and its checkpoints were made on another; starting again settles it. The path is left out, as drive letters and mount points change between attaches.
+
+A copy that differs ends the relocation for the same reason: the operator's next step is to change the carrier, and only a full read proves what it then holds. Resuming would accept a damaged second copy of a file that matched in the first.
+
+Whatever records N+1 makes a relocation against N impossible (R-15 never lets the archive go back to N). Removing its record then, in the same transaction, is decision 0023's rule for plans: otherwise the record and its checkpoints would stay, listed as a relocation that cannot be resumed, until the operator abandoned it or the archive's next relocation began.
+
+Rejected alternatives:
+
+- A verification's record (`run:<run_id>`) for the relocation: `verify --resume` would take it over, and decision 0022 hides a run that a later verification of the archive supersedes, and one whose archive has another revision once it has said nothing for 5 minutes.
+- Checkpoints in `files` under N+1, as a registration's: a relocation leaves N+1 to a registration that has saved files there (decision 0023) and would take its own for one; the two would mix; and `repo rebuild-index` empties `files`.
+- `archive abandon-registration` for relocations as well (point 6).
+- Resuming after a copy that differed, so that a repaired copy is read only where it failed: the rest of the carrier may have changed with the repair, and a relocation is accepted only when every entry matches (decision 0004).
+- Comparing the root path at a resume: a drive letter that changed would refuse it for nothing; the volume's identity and the folder on it are what the checkpoints depend on.
+- Recording an `INCOMPLETE` verification in the history for each interrupted attempt, as a verification does: a relocation records nothing until it records r(N+1) ("nothing was changed"), and its history is the one FULL verification of r(N+1), which says how often it was resumed.
+- Letting a new relocation take over a stopped one's record without `--resume`: the operator would not see that an earlier relocation, possibly to another disk, is dropped with its saved progress.
+
+## Consequences
+
+- No change to the database schema, the manifests or the golden test: `settings` gains `relocation:<archive_uuid>` records, and `verify_progress` holds relocations' checkpoints beside verifications'.
+- Core: `RelocateRequest::resume`, `RelocateServices::processes` (the composition root passes `platform::make_process_table()`), `RelocateOutcome::resumed`; `ArchiveStore::unfinished_relocations`, `update_relocation`, `relocation_recorded`, `remove_relocation`, `remove_relocation_creating`, `progress_count`; `Heartbeat::only_while_relocating`; `abandonable_relocation` and `abandon_relocation`; a checkpoint of `compare_with_manifest` returns whether the comparison goes on. Decision 0024's `judge_attempt` judges a relocation's record as a registration's plan.
+- CLI: `archive relocate <uuid> --resume <root_path>` reads the root as the option's value, as `register --resume <root>` does; `--resume` followed by another option (`--resume --json`) is the flag, for `register` too; a root that is not a folder is a usage error (exit 10), before anything is recorded.
+- A relocation of a version before this decision keeps no record. One that runs while this version's relocation of the same archive is unfinished does not look for it; the first to record the revision wins (decision 0023), and the other's record goes with its next checkpoint, record or resume.
+- The stop mark is best effort, as decision 0022's: when it cannot be written (the database locked), the record reads as running until its `updated` is 3 minutes old, or stopped at once where its process is seen to have ended.
+- The FULL verification a resumed relocation records spans its attempts: `started` is the relocation's, and the entries matched before a resume were read then, not at `finished`.
+- The glossary names it: an abandoned relocation.
+- Tests: the record and the checkpoints of a relocation killed at about half; a relocation without `--resume` refused, naming both ways out, reading nothing; the resume reading only the rest (by bytes), carrying rN's hashes into every entry of r(N+1), recording one FULL verification that says it was resumed, and leaving nothing to resume; a resume refused on a formatted volume or in another folder, reading nothing, and going ahead on the same disk at another mount point; a registration of the old carrier that records N+1 and removes the relocation, a record left by another operation removed by the resume, and one at another revision refused; a resume refused while the attempt before runs and going ahead once its id belongs to a later process; while a resumed relocation runs, another relocation and a second resume on the same computer refused, reading nothing; two attempts on two computers, the first to record winning; a relocation that loses its revision to a registration while it hashes, stopping before its manifest; the heartbeat writing only its own relocation's record; a copy that differs ending the relocation, and the next one reading it all; a relocation cancelled at its record resuming without reading; the refusal for a registration with saved files keeping the relocation, which a resume records once the registration is abandoned; abandoning, which removes the record and checkpoints only (row by row of every table), refused while the attempt runs, while another computer's record is fresh, and for another relocation than the one shown; an attempt abandoned while it hashes or while it writes its manifest, recording nothing; the Archive List's row (kind, progress, state, process, Abandon, not resumable) in both languages and the one-read states of `--json`; the CLI end to end (a relocation stopped at its record, refused without `--resume`, `archive show --json` and `archive list --json`, resumed, another abandoned with and without `--confirm`). A mutation check removed each guard in turn, and each removal failed the test meant for it.
+
+### Interface terms (decision 0017)
+
+| English | 繁體中文 |
+|---|---|
+| Relocation (the Archive List's operation) | 搬移 |
+| abandon, Abandon..., abandoned relocation | 放棄、放棄…、已放棄的搬移 |
+| Abandon the unfinished relocation of L? | 要放棄 L 未完成的搬移嗎？ |
+| matched so far | 目前已比對相符 |
+| new root | 新根目錄 |
+| relocation was interrupted; continue it with `archive relocate U <root_path> --resume` | 搬移已中斷；請以 `archive relocate U <root_path> --resume` 繼續 |
+| an unfinished relocation of archive U (to "R") exists; resume it with ..., or abandon it with `archive abandon-relocation U` | 封存 U 有一個未完成的搬移（至「R」）；請以 … 繼續，或以 `archive abandon-relocation U` 放棄它 |
+| this relocation is still running in process N (P) on this computer; resume it once that process has ended | 此搬移仍在這台電腦的處理程序 N（P）中執行；請等該處理程序結束後再繼續 |
+| the volume or folder of this root is not the one the unfinished relocation of archive U started on | 此根目錄所在的磁碟區或資料夾，不是封存 U 未完成的搬移開始時的那一個 |
+| archive U has no unfinished relocation | 封存 U 沒有未完成的搬移 |

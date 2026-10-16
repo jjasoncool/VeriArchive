@@ -3,6 +3,7 @@
 #include "app/unfinished_operations.h"
 #include "common/time.h"
 #include "common/utf8.h"
+#include "core/engine/relocate_engine.h"
 #include "engine_fixture.h"
 #include "test_repository.h"
 
@@ -1145,6 +1146,99 @@ void a_registration_taken_up_after_its_process_ended_runs()
     CHECK(watch.operation().attempt == va::AttemptState::Unknown && !watch.operation().updated);
 }
 
+// ---- A relocation (decision 0026) ------------------------------------------
+
+// An unfinished relocation is listed with the registrations and
+// verifications: its new root, the revision it verifies against, its
+// progress from its checkpoints against the totals of its record, and its
+// state, which its record and its process tell as a registration's do
+// (decision 0024). A stopped one may be abandoned; one whose process runs
+// may not. The command line's --json judges it from one read.
+void lists_an_unfinished_relocation()
+{
+    test::EngineFixture fixture;
+    auto second = test::fake_volume(fixture.archive.root() / "new");
+    second.filesystem_uuid = "5555666677778888";
+    second.devices.front().serial = "NEW-DISK";
+    fixture.media.extra_volumes.push_back(second);
+    fixture.archive.add_file("old/a.txt", "aaaa"); // sample data
+    fixture.archive.add_file("old/b.txt", "bbbbbb");
+    const auto registered = fixture.register_root(fixture.archive.root() / "old");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    fixture.archive.add_file("new/a.txt", "aaaa");
+    fixture.archive.add_file("new/b.txt", "bbbbbb").open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto interrupted = va::relocate_archive(services,
+        {registered->archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete);
+
+    test::FakeProcessTable window;
+    window.self = {9999, "boot-1:9999", "veriarchive-gui.exe"};
+    const va::app::AttemptCheck attempts{&window, "test-host", {}};
+    const auto read_one = [&] {
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+        CHECK(read && read->operations.size() == 1);
+        return read && read->operations.size() == 1 ? read->operations.front() : UnfinishedOperation{};
+    };
+    const auto stopped = read_one();
+    CHECK(stopped.kind == va::app::OperationKind::Relocation &&
+          stopped.key == "relocation:" + registered->archive_uuid && stopped.label == "ARCH-0001");
+    CHECK(stopped.root == va::path_to_utf8(fixture.archive.root() / "new") && stopped.revision == 1 &&
+          !stopped.run_id.empty());
+    CHECK(stopped.files_done == 1 && stopped.bytes_done == 4 && stopped.files_total == 2 && stopped.bytes_total == 10);
+    CHECK(stopped.recorded_stopped && stopped.resumable && stopped.done_counted);
+    CHECK(stopped.process && stopped.process->process.id == 4242);
+
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const Clock::time_point start{};
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    OperationWatch watch;
+    watch.update(stopped, start, now);
+    auto row = describe_operation(english, watch, start, now);
+    CHECK(row.kind == "Relocation" && row.state == "stopped; it can be resumed" && row.abandonable);
+    CHECK(row.progress == "4 B of 10 B (40%)" && row.details == "1 of 2 files");
+    CHECK(row.process == "Process: 4242 (veriarchive-cli.exe)" && row.run_id.empty());
+    CHECK(describe_operation(chinese, watch, start, now).kind == "搬移");
+    CHECK(va::app::state_of_one_read(stopped, now) == OperationState::Stopped);
+    CHECK(va::app::state_code(OperationState::Stopped) == "stopped");
+
+    // Its process runs again (a resume that has not checkpointed yet): it
+    // runs, and is not offered for abandoning.
+    auto record = nlohmann::json::parse(fixture.store.setting(stopped.key).value_or(""), nullptr, false);
+    record.erase("stopped");
+    record["updated"] = va::current_timestamp();
+    CHECK(fixture.store.set_setting(stopped.key, record.dump()));
+    window.others = {fixture.processes.self};
+    const auto running = read_one();
+    CHECK(running.attempt == va::AttemptState::Running && !running.recorded_stopped);
+    OperationWatch alive;
+    alive.update(running, start, now);
+    row = describe_operation(english, alive, start, now);
+    CHECK(row.state == "running" && !row.abandonable);
+    CHECK(va::app::state_code(va::app::state_of_one_read(running, now)) == "running");
+    CHECK(va::app::state_code(va::app::state_of_one_read(running, now + 10min)) == "held_up");
+
+    // One whose archive is at a newer revision than the one it verifies
+    // cannot be resumed (R-104), and says so.
+    record["revision"] = 0;
+    record["stopped"] = va::current_timestamp();
+    CHECK(fixture.store.set_setting(stopped.key, record.dump()));
+    const auto outdated = read_one();
+    CHECK(!outdated.resumable && outdated.revision == 0);
+    OperationWatch dead;
+    dead.update(outdated, start, now);
+    row = describe_operation(english, dead, start, now);
+    CHECK(row.state == "stopped; it cannot be resumed (the archive has a newer revision)" && row.abandonable);
+}
+
 } // namespace
 
 void unfinished_operations_tests()
@@ -1170,4 +1264,5 @@ void unfinished_operations_tests()
     a_registration_whose_process_ended_reads_stopped_at_once();
     a_registration_whose_process_runs_is_held_up_not_stopped();
     a_registration_taken_up_after_its_process_ended_runs();
+    lists_an_unfinished_relocation();
 }

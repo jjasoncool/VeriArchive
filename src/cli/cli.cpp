@@ -22,9 +22,9 @@ void print_usage(const app::Text& text)
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
-        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path>\n"
+        "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
-        "  archive abandon-registration <uuid> [--confirm]\n"
+        "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n");

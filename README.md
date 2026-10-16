@@ -89,7 +89,8 @@ veriarchive-cli export-sha256sums <uuid> --out sums.txt   # check later with sha
 
 More: `register --new-revision | --force-new-archive | --copy-of UUID | --write-media-copy |
 --resume`, `verify --full ... --resume RUN_ID`,
-`archive show | retire | relocate | abandon-registration`, `export`, `import`, `repo rebuild-index`.
+`archive show | retire | relocate [--resume] | abandon-registration | abandon-relocation`, `export`, `import`,
+`repo rebuild-index`.
 Every command accepts `--json`. Exit codes: 0 passed, 2 passed with warnings, 3 failed, 4
 incomplete, 10 usage, 11 repository, 12 needs an operator decision.
 

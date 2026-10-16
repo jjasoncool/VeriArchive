@@ -256,6 +256,8 @@ veriarchive-cli archive relocate <uuid> <root>    # after moving an archive to a
 veriarchive-cli archive compare <uuid> <uuid>     # do two archives hold the same content? (see above)
 ```
 
+An interrupted `archive relocate` keeps what it has matched and is listed with the unfinished operations: continue it with `archive relocate <uuid> <root> --resume`, or give it up with `archive abandon-relocation <uuid> --confirm`.
+
 `archive show`, `retire`, `relocate`, `compare`, `history`, `export` and `export-sha256sums` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
 
 ## Verification history

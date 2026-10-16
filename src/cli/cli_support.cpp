@@ -46,12 +46,14 @@ Arguments parse_arguments(const std::vector<std::string>& raw, std::string& erro
             arguments.flags.insert(token);
             continue;
         }
+        // `register ... --resume` and `archive relocate ... --resume` are
+        // flags; `verify ... --resume RUN_ID` takes a value (§B16). Followed
+        // by another option (`--resume --json`), it is the flag too.
+        if (token == "--resume" && (index + 1 >= raw.size() || raw[index + 1].starts_with("--"))) {
+            arguments.flags.insert(token);
+            continue;
+        }
         if (index + 1 >= raw.size()) {
-            // `register ... --resume` is a flag; `verify ... --resume RUN_ID` takes a value (§B16).
-            if (token == "--resume") {
-                arguments.flags.insert(token);
-                continue;
-            }
             if (error.empty()) {
                 error = "option " + token + " needs a value";
             }
