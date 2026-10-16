@@ -114,6 +114,7 @@ if(WIN32)
         src/platform/windows/file_writer_win.cpp
         src/platform/windows/fs_access_win.cpp
         src/platform/windows/interrupt_win.cpp
+        src/platform/windows/long_path.cpp
         src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
         src/platform/windows/process_table_win.cpp
@@ -283,7 +284,7 @@ if(BUILD_TESTING)
     endif()
     if(NOT WIN32)
         # Pure C++ path handling; tested on every OS although only Windows uses it.
-        target_sources(veriarchive_tests PRIVATE src/platform/windows/subst_drive.cpp)
+        target_sources(veriarchive_tests PRIVATE src/platform/windows/long_path.cpp src/platform/windows/subst_drive.cpp)
     endif()
     # The GUI's choice of the media identity it shows is plain C++ without
     # GTK, so it is tested also where the GUI is not built.

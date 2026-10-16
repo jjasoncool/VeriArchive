@@ -3,6 +3,7 @@
 // flush() ahead of the commit makes the data durable, and leaves the commit
 // only the rename (decision 0023).
 #include "platform/file_writer.h"
+#include "platform/windows/long_path.h"
 #include "platform/windows/win_util.h"
 
 #include <atomic>
@@ -87,7 +88,7 @@ public:
     std::expected<std::unique_ptr<IOutputFile>, IoError> create(
         const std::filesystem::path& destination) override
     {
-        const auto target = long_path(destination);
+        const auto target = long_path(destination.native());
         for (int attempt = 0; attempt < 64; ++attempt) {
             const auto temporary = target + L".tmp-" + std::to_wstring(GetCurrentProcessId()) +
                                    L"-" + std::to_wstring(temporary_counter++);
@@ -105,7 +106,7 @@ public:
 
     std::expected<void, IoError> remove(const std::filesystem::path& file) override
     {
-        if (!DeleteFileW(long_path(file).c_str())) {
+        if (!DeleteFileW(long_path(file.native()).c_str())) {
             return std::unexpected(error_from_win32(GetLastError(), "DeleteFileW"));
         }
         return {};

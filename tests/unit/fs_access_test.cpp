@@ -88,6 +88,17 @@ void fs_access_tests()
     const auto missing = access->open(root / "missing", va::ReadOptions{});
     CHECK(!missing && missing.error().kind == va::IoErrorKind::NotFound);
 
+    // On Windows a folder given in the \\?\ form, as it may be typed, is the
+    // same folder: it lists the same entries and its files read the same.
+    if (std::filesystem::path::preferred_separator == '\\') {
+        auto verbatim = std::filesystem::path(R"(\\?\)");
+        verbatim += root;
+        const auto verbatim_listed = access->list(verbatim);
+        CHECK(verbatim_listed && listed && verbatim_listed->size() == listed->size());
+        auto verbatim_source = access->open(verbatim / "a.txt", va::ReadOptions{});
+        CHECK(verbatim_source && read_all(**verbatim_source) == content);
+    }
+
     // A link to a directory is listed as a link and never followed; its target
     // uses '/' separators (decision 0008).
     bool created = false;

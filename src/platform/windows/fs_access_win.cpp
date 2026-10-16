@@ -6,6 +6,7 @@
 //    sector-aligned offsets, lengths and buffers: alignment() tells the caller.
 //  - Link targets are returned in the canonical form of decision 0008.
 #include "platform/file_system.h"
+#include "platform/windows/long_path.h"
 #include "platform/windows/win_util.h"
 
 #include "common/utf8.h"
@@ -49,7 +50,7 @@ std::int64_t filetime_to_unix_ns(const FILETIME& time)
 
 std::expected<std::vector<BYTE>, IoError> read_reparse_data(const std::filesystem::path& path)
 {
-    UniqueHandle handle(CreateFileW(long_path(path).c_str(), FILE_READ_ATTRIBUTES,
+    UniqueHandle handle(CreateFileW(long_path(path.native()).c_str(), FILE_READ_ATTRIBUTES,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr));
     if (!handle.valid()) {
@@ -183,7 +184,7 @@ public:
         // mounted in a folder, whose mount point ends with one) takes no
         // second one: after \\?\ Windows keeps the path as it is, and a
         // folder name followed by "\\" is an invalid name (Win32 error 123).
-        auto pattern = long_path(directory);
+        auto pattern = long_path(directory.native());
         if (!pattern.ends_with(L'\\')) {
             pattern += L'\\';
         }
@@ -244,7 +245,7 @@ public:
         if (options.uncached) {
             flags |= FILE_FLAG_NO_BUFFERING;
         }
-        UniqueHandle handle(CreateFileW(long_path(file).c_str(), GENERIC_READ,
+        UniqueHandle handle(CreateFileW(long_path(file.native()).c_str(), GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, flags,
             nullptr));
         if (!handle.valid()) {

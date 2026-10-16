@@ -55,21 +55,4 @@ IoError error_from_win32(DWORD code, std::string operation)
                                               std::to_string(code) + ")"};
 }
 
-std::wstring long_path(const std::filesystem::path& path)
-{
-    std::wstring text = path.lexically_normal().native();
-    for (auto& character : text) {
-        if (character == L'/') {
-            character = L'\\';
-        }
-    }
-    if (text.starts_with(L"\\\\?\\") || !path.is_absolute()) {
-        return text;
-    }
-    if (text.starts_with(L"\\\\")) {
-        return L"\\\\?\\UNC\\" + text.substr(2);
-    }
-    return L"\\\\?\\" + text;
-}
-
 } // namespace va::platform::windows

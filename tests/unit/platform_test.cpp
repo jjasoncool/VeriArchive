@@ -5,6 +5,7 @@
 #include "platform/media_enumerator.h"
 #include "platform/platform_services.h"
 #include "platform/process_table.h"
+#include "platform/windows/long_path.h"
 
 #include <nlohmann/json.hpp>
 
@@ -37,6 +38,44 @@ void mountinfo_is_parsed()
     CHECK(disk && disk->mount_id == 40);
     const auto root = mount_containing(mounts, "/media/user/My Diskette");
     CHECK(root && root->mount_id == 22);
+}
+
+// R-23: the \\?\ form in which Windows opens a path of any length names what
+// the path names, also a network path and a path given in that form already,
+// both of which the C++ library reads as a path on the current drive. Plain
+// C++, so it is tested on every OS although only Windows uses it.
+void long_paths_keep_their_drive_or_share()
+{
+    using va::platform::windows::long_path;
+    // From the root of a drive letter: '/' is '\', "." and ".." are resolved,
+    // never above the root, and a separator at the end stays.
+    CHECK(long_path(LR"(C:\x)") == LR"(\\?\C:\x)");
+    CHECK(long_path(L"C:/Data/./a/../b") == LR"(\\?\C:\Data\b)");
+    CHECK(long_path(LR"(C:\Data\\b)") == LR"(\\?\C:\Data\b)");
+    CHECK(long_path(LR"(C:\相片\2026)") == LR"(\\?\C:\相片\2026)");
+    CHECK(long_path(LR"(C:\..\x)") == LR"(\\?\C:\x)");
+    CHECK(long_path(LR"(C:\Data\..)") == LR"(\\?\C:\)");
+    CHECK(long_path(LR"(C:\Data\a\..)") == LR"(\\?\C:\Data\)");
+    CHECK(long_path(LR"(C:\)") == LR"(\\?\C:\)");
+    CHECK(long_path(LR"(C:\mnt\vol\)") == LR"(\\?\C:\mnt\vol\)");
+    // A network path keeps its server and share.
+    CHECK(long_path(LR"(\\server\share\a\..\b)") == LR"(\\?\UNC\server\share\b)");
+    CHECK(long_path(L"//server/share/dir/") == LR"(\\?\UNC\server\share\dir\)");
+    CHECK(long_path(LR"(\\server\share)") == LR"(\\?\UNC\server\share)");
+    CHECK(long_path(LR"(\\server\share\..\..\x)") == LR"(\\?\UNC\server\share\x)");
+    // A path in the \\?\ or \\.\ form already is taken as it is, but for '/'.
+    CHECK(long_path(LR"(\\?\C:\x)") == LR"(\\?\C:\x)");
+    CHECK(long_path(LR"(\\?\C:\a\..\x)") == LR"(\\?\C:\a\..\x)");
+    CHECK(long_path(L"//?/C:/x") == LR"(\\?\C:\x)");
+    CHECK(long_path(LR"(\\?\UNC\server\share\x)") == LR"(\\?\UNC\server\share\x)");
+    CHECK(long_path(LR"(\\.\C:\x)") == LR"(\\.\C:\x)");
+    // Windows reads any other path as usual.
+    CHECK(long_path(L"relative/a/../b") == LR"(relative\a\..\b)");
+    CHECK(long_path(LR"(\Data)") == LR"(\Data)");
+    CHECK(long_path(L"C:Data") == L"C:Data");
+    CHECK(long_path(LR"(\\server)") == LR"(\\server)");
+    CHECK(long_path(LR"(\\server\)") == LR"(\\server\)");
+    CHECK(long_path(L"").empty());
 }
 
 void network_types_are_recognised()
@@ -136,6 +175,7 @@ void platform_tests()
     process_table_tells_running_from_ended();
     media_enumeration_identifies_local_volume();
     mountinfo_is_parsed();
+    long_paths_keep_their_drive_or_share();
     network_types_are_recognised();
     network_detection_fails_closed();
 }

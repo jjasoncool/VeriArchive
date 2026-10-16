@@ -85,6 +85,19 @@ void file_writer_tests()
     const auto missing = writer->remove(target);
     CHECK(!missing && missing.error().kind == va::IoErrorKind::NotFound);
 
+    // On Windows a folder given in the \\?\ form, as it may be typed for
+    // export --out, is the same folder: the file is written there and
+    // removed from there.
+    if (std::filesystem::path::preferred_separator == '\\') {
+        auto verbatim = std::filesystem::path(R"(\\?\)");
+        verbatim += root;
+        CHECK(va::write_file_atomically(*writer, verbatim / "sums.txt", "five"));
+        CHECK(read_all(root / "sums.txt") == "five");
+        CHECK(count_entries(root) == 1);
+        CHECK(writer->remove(verbatim / "sums.txt"));
+        CHECK(!std::filesystem::exists(root / "sums.txt"));
+    }
+
     std::error_code error;
     std::filesystem::remove_all(root, error);
 }

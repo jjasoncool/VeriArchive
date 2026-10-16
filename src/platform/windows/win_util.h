@@ -5,16 +5,12 @@
 
 #include "common/error.h"
 
-#include <filesystem>
 #include <string>
 
 namespace va::platform::windows {
 
 // Maps a Win32 error code to the platform-neutral error taxonomy (§B9).
 IoError error_from_win32(DWORD code, std::string operation);
-
-// Absolute paths get the \\?\ (or \\?\UNC\) prefix so they may exceed MAX_PATH (R-23).
-std::wstring long_path(const std::filesystem::path& path);
 
 // Owns a HANDLE and closes it when it goes out of scope (RAII).
 class UniqueHandle {
