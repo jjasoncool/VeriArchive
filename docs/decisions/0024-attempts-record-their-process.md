@@ -78,6 +78,7 @@ Rejected alternatives:
 
 ## Consequences
 
+- Amended by decision 0030: the transaction of point 3 refuses a plan made for an older revision than its archive has now, as after an import of a later revision, once the plan is still the one it found and before it judges the attempt before: such a registration can no longer finish, and the resume stops (exit 12), changes nothing and names only the abandon: "the unfinished registration of archive U (root "R") would create revision N, but the archive now has a later revision (M); the registration can no longer finish: abandon it with `archive abandon-registration U`".
 - §B8: a registration's plan gains `process`; no schema change, and the manifests and the golden test are unchanged. A reader ignores members it does not know (decision 0022), so older versions read these plans.
 - §B9: `IProcessTable`, with `platform::make_process_table()`, implemented on Windows and Linux; the composition roots pass it to registration (`RegisterServices::processes`) and to the Archive List's reads.
 - A process that hangs keeps its registration: the resume says which process it is, and the operator ends it (Task Manager, `kill`) and resumes, or abandons the registration (decision 0025).
