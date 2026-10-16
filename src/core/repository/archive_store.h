@@ -17,6 +17,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace va {
@@ -64,7 +65,7 @@ struct VerifyRunRecord {
     std::optional<std::uint64_t> coverage_bytes;
     std::optional<std::uint64_t> coverage_chunks;
     std::string sample_seed;
-    std::string counts_json;
+    std::string counts_json;            // the item counts ("items"), and what the run says of itself (read_no_media)
     std::string failure_classes;        // comma-separated run-level failure classes
     std::string key_id;
     std::string host;
@@ -72,6 +73,11 @@ struct VerifyRunRecord {
     std::string prev_hash;              // filled in by append_verify_run
     std::string row_hash;               // filled in by append_verify_run
 };
+
+// Whether a recorded run read no media, by its counts (`counts_json`): those
+// of a verification that failed on its manifest before it looked for the
+// media say "media_read": false (decision 0028). Every other run read it.
+bool read_no_media(std::string_view counts_json);
 
 struct VerifyItemRecord {
     std::string run_id;
@@ -316,9 +322,10 @@ public:
     // or started after it stopped; for a run never recorded, one that started,
     // worked or finished when it had been silent for minutes, or, once it has
     // been silent for minutes at `now`, one started after it last said
-    // anything that PASSED (with warnings or not). `counted`: the checkpoints
-    // of runs recorded INCOMPLETE, counted by an earlier read; such a run
-    // never changes, so it is not counted again.
+    // anything that PASSED (with warnings or not). A verification that read
+    // no media (read_no_media) supersedes none (decision 0028). `counted`: the
+    // checkpoints of runs recorded INCOMPLETE, counted by an earlier read;
+    // such a run never changes, so it is not counted again.
     std::expected<std::vector<UnfinishedVerification>, IoError> unfinished_verifications(
         std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted = {});
     // Every relocation whose record exists (decision 0026), its checkpoints

@@ -220,6 +220,16 @@ std::string verify_run_hash_input(const VerifyRunRecord& run)
     return object.str();
 }
 
+bool read_no_media(std::string_view counts_json)
+{
+    const auto counts = nlohmann::json::parse(counts_json, nullptr, false);
+    if (!counts.is_object()) {
+        return false;
+    }
+    const auto media_read = counts.find("media_read");
+    return media_read != counts.end() && media_read->is_boolean() && !media_read->get<bool>();
+}
+
 ArchiveStore::ArchiveStore(SqliteDatabase database) : database_(std::move(database)) {}
 
 std::expected<ArchiveStore, IoError> ArchiveStore::open(
@@ -1223,8 +1233,8 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
     auto archive = database_.prepare("SELECT label, current_revision FROM archives WHERE archive_uuid = ?");
     // Every run of an archive ever recorded, in the order recorded (rowid).
     // verify_runs holds one row per verification, so this stays small.
-    auto history =
-        database_.prepare("SELECT rowid, started, finished, result FROM verify_runs WHERE archive_uuid = ?");
+    auto history = database_.prepare(
+        "SELECT rowid, started, finished, result, counts_json FROM verify_runs WHERE archive_uuid = ?");
     // Each checkpointed entry's size comes from the files index of the revision,
     // looked up by its primary key.
     auto matched = database_.prepare(
@@ -1311,7 +1321,11 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         candidates.push_back(std::move(candidate));
     }
 
-    // The history of each archive with an unfinished run.
+    // The history of each archive with an unfinished run. A verification that
+    // read no media (decision 0028: it failed on its manifest before it
+    // looked for the media) did none of a run's work and is no newer attempt
+    // to follow, so it is left out: it supersedes nothing, and a run that it
+    // was to resume stays listed, for a resume once the manifest is restored.
     struct Recorded {
         std::int64_t row;   // rowid: rows are numbered in the order recorded
         Timestamp started;
@@ -1333,6 +1347,9 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
             }
             if (!*row) {
                 break;
+            }
+            if (read_no_media(history->text(4))) {
+                continue;
             }
             rows.push_back({history->integer(0), history->text(1), history->text(2), history->text(3)});
         }

@@ -208,13 +208,17 @@ void add_run_setting(va::ArchiveStore& store, const std::string& run_id, const s
                                                   R"(","revision":1,"started":")" + started + R"(")" + more + "}"));
 }
 
-// A recorded run of the sample archive.
+// A recorded run of the sample archive, with `counts_json` when given.
 void record_run(va::ArchiveStore& store, const TestRepository& repository, const std::string& run_id,
-    const std::string& result, const std::string& started, const std::string& finished)
+    const std::string& result, const std::string& started, const std::string& finished,
+    const std::string& counts_json = "")
 {
     auto record = run(run_id, result);
     record.started = started;
     record.finished = finished;
+    if (!counts_json.empty()) {
+        record.counts_json = counts_json;
+    }
     CHECK(store.append_verify_run(record, repository.context.repository_uuid));
 }
 
@@ -439,6 +443,36 @@ void superseded_verifications_are_left_out()
         CHECK(unfinished_run_ids(store) == std::vector<std::string>{"killed"});
         record_run(store, repository, "warned", "PASSED_WITH_WARNINGS", "2026-10-10T00:31:00Z",
             "2026-10-10T00:33:30Z");
+        CHECK(unfinished_run_ids(store).empty());
+    }
+    // A verification that read no media, whose counts say so (decision 0028:
+    // it failed on its manifest before it looked for the media), did none of
+    // an unfinished run's work and is no newer attempt to follow: it
+    // supersedes neither a run recorded INCOMPLETE before it nor one whose
+    // process was killed long before it ended. A later verification that read
+    // the media, whatever its result, does. Sample data only.
+    const std::string read_no_media = R"({"items":{},"media_read":false})";
+    {
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "interrupted", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T01:00:00Z")");
+        record_run(store, repository, "interrupted", "INCOMPLETE", "2026-10-10T00:00:00Z", "2026-10-10T01:00:00Z");
+        record_run(store, repository, "unread", "FAILED", "2026-10-11T00:00:00Z", "2026-10-11T00:00:01Z",
+            read_no_media);
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"interrupted"});
+        record_run(store, repository, "read", "FAILED", "2026-10-12T00:00:00Z", "2026-10-12T00:10:00Z");
+        CHECK(unfinished_run_ids(store).empty());
+    }
+    {
+        TestRepository repository;
+        auto store = repository.store();
+        add_verified_archive(store);
+        add_run_setting(store, "killed", "2026-10-10T00:00:00Z", R"(,"updated":"2026-10-10T00:30:00Z")");
+        record_run(store, repository, "unread", "FAILED", "2026-10-10T02:00:00Z", "2026-10-10T02:00:01Z",
+            read_no_media);
+        CHECK(unfinished_run_ids(store) == std::vector<std::string>{"killed"});
+        record_run(store, repository, "read", "FAILED", "2026-10-10T03:00:00Z", "2026-10-10T03:10:00Z");
         CHECK(unfinished_run_ids(store).empty());
     }
 }

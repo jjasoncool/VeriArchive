@@ -169,8 +169,10 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
 // Decision 0028: the archive is known, and the manifest of its current
 // revision cannot be used. The verification FAILED before anything was
 // looked for on the media: it reads nothing and records no media evidence,
-// and its run joins the history's hash chain like any run (R-18, R-90). A run
-// it was to resume stays as it was, for a resume once the manifest is restored.
+// and its run joins the history's hash chain like any run (R-18, R-90), its
+// counts saying that it read no media (read_no_media). A run it was to resume
+// stays as it was, for a resume once the manifest is restored, and stays
+// listed with the unfinished operations: such a run supersedes none.
 std::expected<VerifyOutcome, VerifyStop> failed_on_its_manifest(VerifyServices& services,
     const ArchiveRecord& archive, const ManifestLoadFailure& failure, const Timestamp& started)
 {
@@ -193,7 +195,7 @@ std::expected<VerifyOutcome, VerifyStop> failed_on_its_manifest(VerifyServices& 
     run.finished = current_timestamp();
     run.result = outcome.result;
     run.coverage_bytes = 0;
-    run.counts_json = nlohmann::json{{"items", outcome.counts}}.dump();
+    run.counts_json = nlohmann::json{{"items", outcome.counts}, {"media_read", false}}.dump();
     run.failure_classes = failure.failure_class;
     run.host = services.host.host;
     run.app_version = services.host.app_version;

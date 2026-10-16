@@ -754,11 +754,25 @@ void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
     }
 }
 
+// Whether the run `run_id` is listed with the unfinished operations, as the
+// Archive List reads them (decision 0022): stopped, and one to resume.
+bool listed_to_resume(EngineFixture& fixture, const std::string& run_id)
+{
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto runs = fixture.store.unfinished_verifications(now);
+    return runs && std::ranges::any_of(*runs, [&](const va::UnfinishedVerification& run) {
+        return run.run_id == run_id && run.recorded_incomplete && run.resumable;
+    });
+}
+
 // A resumed run (`verify --resume`) names its archive too. When the manifest
 // of the archive's revision cannot be used (here it is missing), the resume
-// FAILS at once, recorded as above, and leaves the interrupted run as it was:
-// its record and its checkpoints stay. With the manifest restored, the run
-// resumes without reading again what it verified.
+// FAILS at once, recorded as above, its counts saying that it read no media,
+// and leaves the interrupted run as it was: its record and its checkpoints
+// stay, and the Archive List still lists it as one to resume, which a
+// verification that read no media never supersedes; so does a verification
+// of the archive by its uuid that fails the same way. With the manifest
+// restored, the run resumes without reading again what it verified.
 void a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run()
 {
     EngineFixture fixture;
@@ -776,6 +790,7 @@ void a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run()
     fixture.archive.node("f5").open_error.reset();
     const auto checkpoints = fixture.store.progress(interrupted->run_id);
     CHECK(checkpoints && !checkpoints->empty());
+    CHECK(listed_to_resume(fixture, interrupted->run_id));
 
     const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), registered->archive_uuid, 1);
     const auto kept = file_bytes(path);
@@ -794,13 +809,25 @@ void a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run()
     CHECK(record && !record->empty());
     const auto still = fixture.store.progress(interrupted->run_id);
     CHECK(still && checkpoints && *still == *checkpoints);
+    const auto recorded = fixture.store.verify_runs(registered->archive_uuid);
+    CHECK(recorded && recorded->size() == 2 &&
+          nlohmann::json::parse(recorded->back().counts_json, nullptr, false).value("media_read", true) == false);
+    CHECK(listed_to_resume(fixture, interrupted->run_id));
+
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = registered->archive_uuid;
+    const auto named = fixture.verify(by_uuid);
+    CHECK(named && named->result == "FAILED" && !named->media_read);
+    CHECK(listed_to_resume(fixture, interrupted->run_id));
 
     write_bytes(path, kept);
+    CHECK(listed_to_resume(fixture, interrupted->run_id));
     const auto resumed = fixture.verify(request);
     CHECK(resumed && resumed->result == "PASSED" && resumed->resumed_from == interrupted->run_id);
     CHECK(fixture.archive.bytes_read == 9000 - interrupted->coverage_bytes);
     const auto runs = fixture.store.verify_runs(registered->archive_uuid);
-    CHECK(runs && runs->size() == 3);
+    CHECK(runs && runs->size() == 4);
+    CHECK(!listed_to_resume(fixture, interrupted->run_id));
 }
 
 // A named archive is never "the archive that may be at this root" (decision
