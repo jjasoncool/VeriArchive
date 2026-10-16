@@ -726,7 +726,7 @@ private:
 std::string restore_message(const va::Uuid& archive_uuid, const std::string& what)
 {
     return "the manifest of revision 1 (manifests/" + archive_uuid + "/r0001.vam) " + what +
-           "; restore it from a backup of the repository";
+           test::put_back(archive_uuid, 1);
 }
 
 // What is wrong when the index differs from the manifest at the place of
@@ -1011,8 +1011,7 @@ void an_archive_at_a_revision_the_index_has_no_record_of()
         const auto manifest = "manifests/" + fixture.archive_uuid + "/r0002.vam";
         const auto no_record = "the repository's index has no record of the manifest of revision 2 (" + manifest + ")";
         const std::string rebuild = "; rebuild the index with `repo rebuild-index`";
-        const std::string restore =
-            "; restore it from a backup of the repository, then rebuild the index with `repo rebuild-index`";
+        const auto restore = test::put_back(fixture.archive_uuid, 2);
         std::string what_is_wrong = no_record;
         std::string message = no_record + rebuild;
         auto file = va::UnusableManifest::File::Readable;

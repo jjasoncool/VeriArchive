@@ -23,6 +23,24 @@ inline std::string already_recorded_message(const va::Uuid& archive_uuid, std::u
            "relocation); this attempt recorded nothing";
 }
 
+// How the plain message of a manifest that is missing, cannot be read or has
+// changed says to fix it (decision 0028): put it back with `import` of its
+// file (point 7), and for the archive's latest revision (`latest`), where
+// nothing holds it, register the next revision over the lost manifest
+// (point 8). What comes after what is wrong.
+inline std::string put_back(const va::Uuid& archive_uuid, std::uint32_t revision, bool latest = true)
+{
+    auto text = "; put it back with `import <folder>/" + std::format("r{:04}.vam", revision) +
+                "` from a backup of the repository, an export of revision " + std::to_string(revision) +
+                ", or the media copy in the archive's .veriarchive folder, where registration wrote one";
+    if (latest) {
+        text += "; if none of these holds it, register revision " + std::to_string(revision + 1) +
+                " from what the archive's root holds now with `register <root_path> --lost-manifest " + archive_uuid +
+                "`";
+    }
+    return text;
+}
+
 inline va::VolumeInfo fake_volume(const std::filesystem::path& mount_point)
 {
     va::VolumeInfo volume;

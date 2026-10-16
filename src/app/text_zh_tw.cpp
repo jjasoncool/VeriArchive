@@ -70,6 +70,7 @@ constexpr CatalogEntry entries[] = {
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
+        "           [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"
@@ -84,6 +85,7 @@ constexpr CatalogEntry entries[] = {
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
+        "           [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"
@@ -158,9 +160,24 @@ constexpr CatalogEntry entries[] = {
         "在媒體上保留一份副本）。"},
     {"media copy: {}", "媒體副本：{}"},
     {"usage: register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]",
+        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume] [--lost-manifest UUID [--confirm]]",
         "用法：register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]"},
+        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume] [--lost-manifest UUID [--confirm]]"},
+    // A registration over a lost manifest (decision 0028, point 8): what it
+    // would register, said before the operator confirms it, and its outcome.
+    {"Lost manifest of {} ({}), revision {}", "無法取回的清單檔：{}（{}），版次 {}", Match::FormatOnly},
+    {"Registering revision {} from this root takes what it holds now as the archive's new baseline, without "
+        "comparing it with revision {}, whose manifest is lost: damage since revision {} was registered would not be "
+        "found. Do this only where no backup of the repository, export of revision {} or media copy holds that "
+        "manifest. The archive keeps its verification history and its hash chain, and never goes back to an earlier "
+        "revision.",
+        "從此根目錄註冊版次 {0}，會把它目前的內容當作封存新的基準，而不與清單檔已無法取回的版次 {1} 比對："
+        "自版次 {2} 註冊以來發生的損壞將不會被發現。只有在儲存庫的備份、版次 {3} 的匯出檔和媒體副本中都沒有"
+        "該清單檔時，才這麼做。封存會保留它的驗證歷程及其雜湊鏈，也絕不會回到較早的版次。",
+        Match::FormatOnly},
+    {"run the command again with --confirm to register revision {}", "若要註冊版次 {}，請加上 --confirm 再執行一次"},
+    {"revision {}, whose manifest was lost, was left out of the index; its verifications stay in the history",
+        "清單檔已無法取回的版次 {} 已從索引移除；它的驗證紀錄仍保留在歷程中", Match::FormatOnly},
     {"--io takes hdd or ssd", "--io 只接受 hdd 或 ssd"},
     {"not a directory: {}", "不是資料夾：{}"},
     // A root refused before anything of it is read (decision 0029), from src/app/typed_path.cpp; the
@@ -476,6 +493,9 @@ constexpr CatalogEntry entries[] = {
     {"The baseline exists only in the repository: back up RepositoryRoot.",
         "基準只存在於儲存庫中：請備份儲存庫根目錄。"},
     {"Media copy: {}", "媒體副本：{}"},
+    // A registration over a lost manifest resumed in Register Archive (decision 0028, point 8).
+    {"Revision {}, whose manifest was lost, was left out of the index; its verifications stay in the history.",
+        "清單檔已無法取回的版次 {} 已從索引移除；它的驗證紀錄仍保留在歷程中。", Match::FormatOnly},
     {"Another operation is running.", "已有其他作業正在執行。"},
     {"Open a repository first (Settings).", "請先開啟儲存庫（見「設定」）。"},
     {"Choose the folder or volume to register.", "請選擇要註冊的資料夾或磁碟區。"},
@@ -640,6 +660,21 @@ constexpr CatalogEntry entries[] = {
     {"revision {} of archive {} was recorded by another operation before this registration could begin; nothing was "
         "changed (run `register --new-revision` again)",
         "封存 {1} 的版次 {0} 已在這次註冊開始前由其他作業記錄；未做任何變更（請再執行一次 `register --new-revision`）"},
+    // A registration over a lost manifest (decision 0028, point 8), refused.
+    {"--lost-manifest takes none of --label, --new-revision, --force-new-archive and --resume",
+        "--lost-manifest 不能與 --label、--new-revision、--force-new-archive 或 --resume 一起使用"},
+    {"--confirm is used only with --lost-manifest", "--confirm 只能與 --lost-manifest 一起使用"},
+    {"the manifest of revision {} of archive {} can be used: register its next revision with `register <root_path> "
+        "--new-revision`",
+        "封存 {1} 版次 {0} 的清單檔可以使用：請以 `register <root_path> --new-revision` 註冊它的下一個版次"},
+    {"the manifest of revision {} of archive {} is not lost: {}", "封存 {1} 版次 {0} 的清單檔並沒有遺失：{2}",
+        Match::Cause},
+    {"the identity file of this root (.veriarchive/identity.json) names archive {}, not archive {}",
+        "此根目錄的身分檔案（.veriarchive/identity.json）指向封存 {}，而不是封存 {}"},
+    {"the media copy at this root holds the manifest of revision {} of archive {}: put it back with `import {}`",
+        "此根目錄的媒體副本中有封存 {1} 版次 {0} 的清單檔：請以 `import {2}` 放回該清單檔"},
+    {"the root overlaps archive {} on the same volume (decision 0001)",
+        "根目錄與同一磁碟區上的封存 {} 重疊（決策紀錄 0001）"},
     // src/core/engine/abandon_registration.cpp
     {"archive {} has no unfinished registration", "封存 {} 沒有未完成的註冊"},
     {"the unfinished registration of archive {} is no longer the one shown (it was resumed, finished or "
@@ -899,13 +934,51 @@ constexpr CatalogEntry entries[] = {
     {"the manifest differs from the repository record", "清單檔與儲存庫的紀錄不符"},
     {"revision {} is older than the known revision {}", "版次 {} 比已知的版次 {} 舊"},
     // A manifest that cannot be used, and how to fix it (decision 0028). The
-    // index's copy of a header is never taken for the manifest's (R-14).
-    {"the manifest of revision {} ({}) is missing; restore it from a backup of the repository",
-        "版次 {} 的清單檔（{}）已遺失；請從儲存庫的備份還原該清單檔"},
-    {"the manifest of revision {} ({}) cannot be read: {}; restore it from a backup of the repository",
-        "無法讀取版次 {} 的清單檔（{}）：{}；請從儲存庫的備份還原該清單檔", Match::Cause},
-    {"the manifest of revision {} ({}) has changed: {}; restore it from a backup of the repository",
-        "版次 {} 的清單檔（{}）已被變更：{}；請從儲存庫的備份還原該清單檔", Match::Cause},
+    // index's copy of a header is never taken for the manifest's (R-14). One
+    // that is missing, cannot be read or has changed is put back with `import`
+    // of its file (point 7); for the archive's latest revision the message
+    // ends with the last resort, a registration over its lost manifest (point 8).
+    {"the manifest of revision {} ({}) is missing; put it back with `import <folder>/{}` from a backup of the "
+        "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one; if none of these holds it, register revision {} from what the archive's root holds "
+        "now with `register <root_path> --lost-manifest {}`",
+        "版次 {0} 的清單檔（{1}）已遺失；請以 `import <folder>/{2}` 從儲存庫的備份、版次 {3} 的匯出檔，或封存 "
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
+        "--lost-manifest {5}` 用封存根目錄目前的內容註冊版次 {4}"},
+    {"the manifest of revision {} ({}) cannot be read: {}; put it back with `import <folder>/{}` from a backup of "
+        "the repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one; if none of these holds it, register revision {} from what the archive's root holds "
+        "now with `register <root_path> --lost-manifest {}`",
+        "無法讀取版次 {0} 的清單檔（{1}）：{2}；請以 `import <folder>/{3}` 從儲存庫的備份、版次 {4} 的匯出檔，"
+        "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
+        "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
+        Match::Cause},
+    {"the manifest of revision {} ({}) has changed: {}; put it back with `import <folder>/{}` from a backup of the "
+        "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one; if none of these holds it, register revision {} from what the archive's root holds "
+        "now with `register <root_path> --lost-manifest {}`",
+        "版次 {0} 的清單檔（{1}）已被變更：{2}；請以 `import <folder>/{3}` 從儲存庫的備份、版次 {4} 的匯出檔，"
+        "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
+        "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
+        Match::Cause},
+    // The same of an earlier revision, which has a later revision already.
+    {"the manifest of revision {} ({}) is missing; put it back with `import <folder>/{}` from a backup of the "
+        "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one",
+        "版次 {} 的清單檔（{}）已遺失；請以 `import <folder>/{}` 從儲存庫的備份、版次 {} 的匯出檔，或封存 "
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔"},
+    {"the manifest of revision {} ({}) cannot be read: {}; put it back with `import <folder>/{}` from a backup of "
+        "the repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one",
+        "無法讀取版次 {} 的清單檔（{}）：{}；請以 `import <folder>/{}` 從儲存庫的備份、版次 {} 的匯出檔，或封存 "
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔",
+        Match::Cause},
+    {"the manifest of revision {} ({}) has changed: {}; put it back with `import <folder>/{}` from a backup of the "
+        "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
+        "registration wrote one",
+        "版次 {} 的清單檔（{}）已被變更：{}；請以 `import <folder>/{}` 從儲存庫的備份、版次 {} 的匯出檔，或封存 "
+        ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔",
+        Match::Cause},
     {"the repository's index differs from the manifest of revision {} ({}); rebuild the index with "
         "`repo rebuild-index`",
         "儲存庫的索引與版次 {} 的清單檔（{}）不符；請以 `repo rebuild-index` 重建索引"},
@@ -913,15 +986,22 @@ constexpr CatalogEntry entries[] = {
     {"its body does not match its header", "其主體與標頭不符"},
     {"it gave other bytes when it was read again", "再次讀取時得到不同的內容"},
     // The manifest of the archive's revision of which the index has no record,
-    // as where `repo rebuild-index` could not read it (decision 0028).
-    {"the repository's index has no record of the manifest of revision {} ({}), which is missing; restore it "
-        "from a backup of the repository, then rebuild the index with `repo rebuild-index`",
-        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄，而該清單檔已遺失；請從儲存庫的備份還原該清單檔，"
-        "再以 `repo rebuild-index` 重建索引"},
-    {"the repository's index has no record of the manifest of revision {} ({}), which cannot be read: {}; "
-        "restore it from a backup of the repository, then rebuild the index with `repo rebuild-index`",
-        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄，而且無法讀取該清單檔：{}；請從儲存庫的備份還原該清單檔，"
-        "再以 `repo rebuild-index` 重建索引",
+    // as where `repo rebuild-index` could not read it (decision 0028). The
+    // import that puts it back records it.
+    {"the repository's index has no record of the manifest of revision {} ({}), which is missing; put it back with "
+        "`import <folder>/{}` from a backup of the repository, an export of revision {}, or the media copy in the "
+        "archive's .veriarchive folder, where registration wrote one; if none of these holds it, register revision "
+        "{} from what the archive's root holds now with `register <root_path> --lost-manifest {}`",
+        "儲存庫的索引沒有版次 {0} 的清單檔（{1}）的紀錄，而該清單檔已遺失；請以 `import <folder>/{2}` 從儲存庫的"
+        "備份、版次 {3} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，"
+        "請以 `register <root_path> --lost-manifest {5}` 用封存根目錄目前的內容註冊版次 {4}"},
+    {"the repository's index has no record of the manifest of revision {} ({}), which cannot be read: {}; put it "
+        "back with `import <folder>/{}` from a backup of the repository, an export of revision {}, or the media copy "
+        "in the archive's .veriarchive folder, where registration wrote one; if none of these holds it, register "
+        "revision {} from what the archive's root holds now with `register <root_path> --lost-manifest {}`",
+        "儲存庫的索引沒有版次 {0} 的清單檔（{1}）的紀錄，而且無法讀取該清單檔：{2}；請以 `import <folder>/{3}` "
+        "從儲存庫的備份、版次 {4} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；"
+        "若這些都沒有，請以 `register <root_path> --lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
         Match::Cause},
     {"the repository's index has no record of the manifest of revision {} ({}); rebuild the index with "
         "`repo rebuild-index`",

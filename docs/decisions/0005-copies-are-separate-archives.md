@@ -12,4 +12,5 @@ Keeping the same content on several media (3-2-1) could be modelled as one archi
 
 - `copy_of` lives in the manifest header, not only in SQLite, so it survives `repo rebuild-index` (R-80). It is omitted when absent, so existing golden manifests are byte-identical; a golden case with `copy_of` must be added.
 - Relocation (decision 0004) carries `copy_of` forward to the new revision.
+- Amended by decision 0028 (point 8): a registration over a lost manifest names the original as `--copy-of` names it, otherwise as the newest manifest of the archive that can be used names it, as the lost manifest's own `copy_of` is no longer known.
 - "Only one healthy copy left" warnings need the one-archive-many-copies model and are deferred.

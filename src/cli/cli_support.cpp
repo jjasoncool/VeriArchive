@@ -12,6 +12,7 @@ namespace {
 
 const std::set<std::string> value_options{
     "--config", "--repository", "--lang", "--label", "--io", "--resume", "--out", "--copy-of", "--seed",
+    "--lost-manifest",
 };
 
 } // namespace

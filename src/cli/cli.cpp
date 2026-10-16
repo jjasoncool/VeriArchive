@@ -20,6 +20,7 @@ void print_usage(const app::Text& text)
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
         "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
+        "           [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> | relocate <uuid> <root_path> [--resume]\n"

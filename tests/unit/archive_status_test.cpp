@@ -142,16 +142,16 @@ void a_damaged_archive_never_stops_the_list()
           listed_b.unusable_manifest->kind == va::UnusableManifest::Kind::Missing &&
           va::failure_class_of(*listed_b.unusable_manifest) == "RepositoryError" &&
           va::plain_message(*listed_b.unusable_manifest) ==
-              "the manifest of revision 1 (manifests/" + b->archive_uuid +
-                  "/r0001.vam) is missing; restore it from a backup of the repository");
+              "the manifest of revision 1 (manifests/" + b->archive_uuid + "/r0001.vam) is missing" +
+                  test::put_back(b->archive_uuid, 1));
     CHECK(listed_b.last_full && listed_b.last_full->result == "PASSED" && !listed_b.full_overdue);
     CHECK(listed_c.archive.archive_uuid == c->archive_uuid && !listed_c.header && listed_c.unusable_manifest &&
           listed_c.unusable_manifest->kind == va::UnusableManifest::Kind::Changed &&
           va::failure_class_of(*listed_c.unusable_manifest) == "ManifestHashMismatch" &&
           va::plain_message(*listed_c.unusable_manifest) ==
               "the manifest of revision 1 (manifests/" + c->archive_uuid +
-                  "/r0001.vam) has changed: its first line differs from what the repository recorded; restore it "
-                  "from a backup of the repository");
+                  "/r0001.vam) has changed: its first line differs from what the repository recorded" +
+                  test::put_back(c->archive_uuid, 1));
     CHECK(!listed_c.last_full && !listed_c.full_overdue);
 
     const auto now = days_from_now(0);

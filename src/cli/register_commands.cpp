@@ -1,6 +1,8 @@
 // `register <root_path>`: create an archive (or a new revision of one) from a
 // directory tree (M3). Exit code 2 when some files could not be read at
-// registration (decision 0010).
+// registration (decision 0010). With `--lost-manifest <uuid>`, the next
+// revision of an archive whose latest manifest is lost, once confirmed
+// (decision 0028, point 8).
 #include "cli/commands.h"
 
 #include "common/utf8.h"
@@ -21,12 +23,58 @@ int failure_code(RegisterFailure::Kind kind)
     case RegisterFailure::Kind::Invalid:
         return exit_code::usage;
     case RegisterFailure::Kind::Refused:
+    case RegisterFailure::Kind::Unconfirmed:
         return exit_code::identity_decision;
     case RegisterFailure::Kind::Incomplete:
         return exit_code::incomplete;
     default:
         return exit_code::repository;
     }
+}
+
+// A registration over a lost manifest as --json gives it before it is
+// confirmed (decision 0028, point 8).
+nlohmann::json lost_manifest_json(const LostManifestRegistration& registration)
+{
+    const auto& manifest = registration.manifest;
+    return {
+        {"archive_uuid", registration.archive_uuid},
+        {"label", registration.label},
+        {"lost_revision", registration.lost_revision},
+        {"revision", registration.revision},
+        {"root", registration.root},
+        {"manifest_problem", {{"kind", kind_code(manifest.kind)}, {"revision", manifest.revision},
+                                 {"manifest", manifest.manifest}, {"message", plain_message(manifest)}}},
+    };
+}
+
+// Decision 0028, point 8: what a registration over a lost manifest would do,
+// said before the operator confirms it, as `archive abandon-registration`
+// says what it would remove: the root's content becomes the new baseline
+// without being compared with the lost revision.
+int unconfirmed(const Arguments& arguments, const RegisterFailure& failure)
+{
+    const auto& registration = *failure.lost_manifest;
+    const int code = failure_code(failure.kind);
+    if (arguments.json) {
+        print_json({{"error", failure.message}, {"exit_code", code}, {"registration", lost_manifest_json(registration)}});
+        return code;
+    }
+    const auto& text = arguments.text;
+    std::cout << text.format("Lost manifest of {} ({}), revision {}", registration.label, registration.archive_uuid,
+                     registration.lost_revision)
+              << "\n  " << text(what_is_wrong_with(registration.manifest)) << "\n  "
+              << text.format("root: {}", registration.root) << '\n'
+              << text.format("Registering revision {} from this root takes what it holds now as the archive's new "
+                             "baseline, without comparing it with revision {}, whose manifest is lost: damage since "
+                             "revision {} was registered would not be found. Do this only where no backup of the "
+                             "repository, export of revision {} or media copy holds that manifest. The archive "
+                             "keeps its verification history and its hash chain, and never goes back to an earlier "
+                             "revision.",
+                     registration.revision, registration.lost_revision, registration.lost_revision,
+                     registration.lost_revision)
+              << '\n';
+    return report_failure(arguments, {code, failure.message});
 }
 
 void print_outcome(const app::Text& text, const RegisterOutcome& outcome, const std::filesystem::path& root)
@@ -53,6 +101,16 @@ void print_outcome(const app::Text& text, const RegisterOutcome& outcome, const 
     for (const auto& warning : outcome.warnings) {
         std::cout << "  " << text.format("warning: {}", text(warning)) << '\n';
     }
+    // Decision 0028, point 8: the record of the revision whose manifest was
+    // lost left the index, as `repo rebuild-index` leaves out an earlier
+    // revision whose manifest it cannot read.
+    if (outcome.lost_revision && outcome.lost_revision_left_out) {
+        std::cout << "  "
+                  << text.format("revision {}, whose manifest was lost, was left out of the index; its verifications "
+                                 "stay in the history",
+                         *outcome.lost_revision)
+                  << '\n';
+    }
     // D5: without a media copy, the repository holds the only copy of the baseline.
     if (outcome.media_copy.empty()) {
         std::cout << "  "
@@ -74,7 +132,7 @@ nlohmann::json outcome_json(const RegisterOutcome& outcome)
     for (const auto& mount_point : outcome.skipped_mount_points) {
         mount_points.push_back(mount_point.p);
     }
-    return {
+    nlohmann::json json{
         {"archive_uuid", outcome.archive_uuid},
         {"label", outcome.label},
         {"revision", outcome.revision},
@@ -86,6 +144,11 @@ nlohmann::json outcome_json(const RegisterOutcome& outcome)
         {"manifest", path_to_utf8(outcome.manifest)},
         {"media_copy", path_to_utf8(outcome.media_copy)},
     };
+    // Only a registration over a lost manifest has it (decision 0028, point 8).
+    if (outcome.lost_revision) {
+        json["lost_manifest"] = {{"revision", *outcome.lost_revision}, {"left_out", outcome.lost_revision_left_out}};
+    }
+    return json;
 }
 
 } // namespace
@@ -93,7 +156,8 @@ nlohmann::json outcome_json(const RegisterOutcome& outcome)
 int register_command(const Arguments& arguments)
 {
     if (const auto problem = check_options(arguments,
-            {"--new-revision", "--force-new-archive", "--resume", "--write-media-copy"}, {"--label", "--io", "--copy-of", "--resume"})) {
+            {"--new-revision", "--force-new-archive", "--resume", "--write-media-copy", "--confirm"},
+            {"--label", "--io", "--copy-of", "--resume", "--lost-manifest"})) {
         return report_failure(arguments, *problem);
     }
     // `register --resume <root>` reads the root as the option's value.
@@ -104,7 +168,8 @@ int register_command(const Arguments& arguments)
     if (words.size() != 2) {
         return report_failure(arguments, {exit_code::usage,
             "usage: register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-            "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]"});
+            "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume] "
+            "[--lost-manifest UUID [--confirm]]"});
     }
 
     RegisterRequest request;
@@ -115,6 +180,7 @@ int register_command(const Arguments& arguments)
     request.copy_of = arguments.value("--copy-of");
     request.new_revision = arguments.has("--new-revision");
     request.force_new_archive = arguments.has("--force-new-archive");
+    request.confirmed = arguments.has("--confirm");
     if (const auto io = arguments.value("--io")) {
         if (*io != "hdd" && *io != "ssd") {
             return report_failure(arguments, {exit_code::usage, "--io takes hdd or ssd"});
@@ -136,6 +202,15 @@ int register_command(const Arguments& arguments)
     if (!store) {
         return report_failure(arguments, {exit_code::repository, store.error().message});
     }
+    // The archive whose manifest is lost, named as `archive show` names one:
+    // its uuid, or a unique prefix of at least 8 characters.
+    if (const auto lost = arguments.value("--lost-manifest")) {
+        auto archive_uuid = find_archive_uuid(*store, *lost);
+        if (!archive_uuid) {
+            return report_failure(arguments, archive_uuid.error());
+        }
+        request.lost_manifest_of = std::move(*archive_uuid);
+    }
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();
     const auto media = platform::make_media_enumerator();
@@ -149,6 +224,9 @@ int register_command(const Arguments& arguments)
     const auto outcome = register_archive(services, request, cancel, progress);
     progress.finish();
     if (!outcome) {
+        if (outcome.error().kind == RegisterFailure::Kind::Unconfirmed && outcome.error().lost_manifest) {
+            return unconfirmed(arguments, outcome.error());
+        }
         return report_failure(arguments, {failure_code(outcome.error().kind), outcome.error().message});
     }
 

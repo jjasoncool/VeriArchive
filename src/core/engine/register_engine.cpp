@@ -11,11 +11,13 @@
 #include "core/engine/transfer.h"
 #include "core/identity/volume_json.h"
 #include "core/write_file.h"
+#include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
 #include "core/scan/scanner.h"
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <map>
 #include <regex>
 #include <thread>
@@ -69,6 +71,10 @@ struct Plan {
     Timestamp created;
     bool new_archive = true;
     std::string root; // the root it registers (UTF-8), as its plan names it
+    // A registration over a lost manifest (decision 0028, point 8): the
+    // revision whose manifest is lost, which this one follows. The plan
+    // names it ("lost_manifest"), so that a resume records as it would have.
+    std::optional<std::uint32_t> lost_revision;
 };
 
 // Two attempts of one registration can run at once (`register --resume` while
@@ -279,6 +285,9 @@ nlohmann::json plan_json(const Plan& plan, const std::filesystem::path& root)
     if (plan.copy_of) {
         json["copy_of"] = *plan.copy_of;
     }
+    if (plan.lost_revision) {
+        json["lost_manifest"] = *plan.lost_revision;
+    }
     return json;
 }
 
@@ -310,6 +319,9 @@ std::expected<std::optional<Plan>, IoError> find_pending(ArchiveStore& store, co
         plan.root = json["root"].get<std::string>();
         if (json.contains("copy_of")) {
             plan.copy_of = json["copy_of"].get<std::string>();
+        }
+        if (const auto lost = json.find("lost_manifest"); lost != json.end() && lost->is_number_unsigned()) {
+            plan.lost_revision = lost->get<std::uint32_t>();
         }
         return std::optional<Plan>(plan);
     }
@@ -385,6 +397,136 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
     return target;
 }
 
+// The archive named for a registration over its lost manifest (decision 0028,
+// point 8), and what is wrong with the manifest of its revision.
+struct LostManifest {
+    ArchiveRecord archive;
+    UnusableManifest manifest;
+};
+
+// What only the index gets wrong of an intact manifest: rebuilt from the
+// manifests (R-80), it is used again, so nothing of it is lost.
+bool intact(const UnusableManifest& unusable)
+{
+    return unusable.kind == UnusableManifest::Kind::IndexDiffers ||
+           (unusable.kind == UnusableManifest::Kind::NotIndexed && unusable.file == UnusableManifest::File::Readable);
+}
+
+// The media copy of the lost revision's manifest at the root (R-89), in its
+// .veriarchive folder, when `import` would put it back: of a recorded
+// revision, a file whose line 1 has the BLAKE3 recorded for it and whose body
+// is the one that line names, as the import tells the manifest recorded
+// (decision 0028, point 7); where the index has no record of the revision, a
+// file that reads as its manifest, every entry to the end of its body, as the
+// import reads a manifest that it records.
+std::optional<std::filesystem::path> media_copy_to_import(IFileSystemAccess& files,
+    const std::filesystem::path& root, const LostManifest& lost, const std::optional<RevisionRecord>& record)
+{
+    const auto revision = lost.manifest.revision;
+    const auto path = root / ".veriarchive" / path_from_utf8(std::format("r{:04}.vam", revision));
+    if (record) {
+        return ManifestReader::open(files, path, record->header_blake3) ? std::optional(path) : std::nullopt;
+    }
+    auto reader = ManifestReader::open(files, path);
+    if (!reader || reader->header().archive_uuid != lost.archive.archive_uuid ||
+        reader->header().revision != revision) {
+        return std::nullopt;
+    }
+    for (;;) {
+        const auto next = reader->next();
+        if (!next) {
+            return std::nullopt;
+        }
+        if (!*next) {
+            return path;
+        }
+    }
+}
+
+// Decision 0028, point 8: a registration over a lost manifest registers the
+// next revision of the archive it names, whose latest manifest cannot be used
+// in a way that only putting the manifest back fixes (missing, unreadable or
+// changed; an index that differs from an intact manifest is rebuilt instead),
+// from a root that is plainly no other archive's. The archive is named, as
+// matching cannot find it: only the lost manifest recorded its carrier and
+// its root. So the root is the operator's word, and refused only where it is
+// plainly another archive's: an identity file on it that names another
+// archive, or a root that overlaps the root of an archive whose manifest can
+// be used on the same volume (decision 0001). And where the root still holds
+// the lost manifest as a media copy that `import` would put back, it says to
+// import that instead: the manifest is not lost.
+std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServices& services,
+    const RegisterRequest& request, const MediaEvidence& evidence, const std::string& root_subpath)
+{
+    using Kind = RegisterFailure::Kind;
+    auto& store = services.store;
+    const auto& uuid = *request.lost_manifest_of;
+    const auto archive = store.find_archive(uuid);
+    if (!archive) {
+        return fail(Kind::Repository, archive.error().message);
+    }
+    if (!*archive) {
+        return fail(Kind::Refused, "no archive " + uuid);
+    }
+    if ((*archive)->current_revision == 0) {
+        return fail(Kind::Refused, "archive " + uuid + " has no revision yet");
+    }
+    const auto revision = (*archive)->current_revision;
+    // Checked as a verification of the archive by its uuid checks it before
+    // it looks for the media (decision 0028, point 3).
+    const auto checked =
+        check_recorded_manifest(store, services.repository_files, services.layout, uuid, revision);
+    if (checked) {
+        return fail(Kind::Refused, "the manifest of revision " + std::to_string(revision) + " of archive " + uuid +
+                                       " can be used: register its next revision with `register <root_path> "
+                                       "--new-revision`");
+    }
+    if (!checked.error().unusable) {
+        return fail(Kind::Repository, checked.error().message);
+    }
+    const auto& unusable = *checked.error().unusable;
+    if (intact(unusable)) {
+        return fail(Kind::Refused, "the manifest of revision " + std::to_string(revision) + " of archive " + uuid +
+                                       " is not lost: " + plain_message(unusable));
+    }
+    LostManifest lost{**archive, unusable};
+
+    if (const auto claimed = read_identity_claim(services.archive_files, request.root); claimed && *claimed != uuid) {
+        return fail(Kind::Refused, "the identity file of this root (.veriarchive/identity.json) names archive " +
+                                       *claimed + ", not archive " + uuid);
+    }
+    const auto record = store.revision(uuid, revision);
+    if (!record) {
+        return fail(Kind::Repository, record.error().message);
+    }
+    if (const auto copy = media_copy_to_import(services.archive_files, request.root, lost, *record)) {
+        return fail(Kind::Refused, "the media copy at this root holds the manifest of revision " +
+                                       std::to_string(revision) + " of archive " + uuid + ": put it back with `import " +
+                                       path_to_utf8(*copy) + "`");
+    }
+    // As a relocation's new root (decision 0001): earlier carriers of
+    // another archive never make one overlap.
+    const auto pool = load_candidate_pool(store, services.repository_files, services.layout);
+    if (!pool) {
+        return fail(Kind::Repository, pool.error().message);
+    }
+    for (const auto& candidate : pool->candidates) {
+        // The archive itself, where matching reads its manifest's line 1,
+        // which may be intact while its body is not.
+        if (candidate.archive_uuid == uuid) {
+            continue;
+        }
+        const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
+        const bool same_volume = match.result == MatchResult::Match || match.result == MatchResult::MatchWeak ||
+                                 match.result == MatchResult::Migrated;
+        if (same_volume && roots_overlap(candidate.root_subpath, root_subpath)) {
+            return fail(Kind::Refused,
+                "the root overlaps archive " + candidate.archive_uuid + " on the same volume (decision 0001)");
+        }
+    }
+    return lost;
+}
+
 } // namespace
 
 std::expected<RegisterOutcome, RegisterFailure> register_archive(
@@ -400,6 +542,16 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     }
     if (request.copy_of && !is_canonical_uuid(*request.copy_of)) {
         return fail(Kind::Invalid, "--copy-of needs an archive uuid");
+    }
+    // A registration over a lost manifest names the archive and its revision
+    // itself (decision 0028, point 8); a resume continues the plan as it is.
+    if (request.lost_manifest_of &&
+        (request.label || request.new_revision || request.force_new_archive || request.resume)) {
+        return fail(Kind::Invalid, "--lost-manifest takes none of --label, --new-revision, --force-new-archive and "
+                                   "--resume");
+    }
+    if (request.confirmed && !request.lost_manifest_of) {
+        return fail(Kind::Invalid, "--confirm is used only with --lost-manifest");
     }
 
     const auto volume = services.media.volume_for_path(request.root);
@@ -560,20 +712,36 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                                            "`archive abandon-registration " +
                                            (*pending)->archive_uuid + "`");
         }
-        auto candidates = load_candidates(store, services.repository_files, services.layout);
-        if (!candidates) {
-            return fail(Kind::Repository, candidates.error().message);
+        // The archive that receives a new revision: the one named for a
+        // registration over its lost manifest (decision 0028, point 8), or
+        // the one that matching finds at this root (R-97).
+        std::optional<Uuid> target;
+        std::optional<LostManifest> lost;
+        if (request.lost_manifest_of) {
+            auto named = lost_manifest_target(services, request, evidence, *root_subpath);
+            if (!named) {
+                return std::unexpected(named.error());
+            }
+            target = named->archive.archive_uuid;
+            lost = std::move(*named);
+        } else {
+            auto candidates = load_candidates(store, services.repository_files, services.layout);
+            if (!candidates) {
+                return fail(Kind::Repository, candidates.error().message);
+            }
+            const auto checked = check_existing_archives(services, *candidates, evidence, *root_subpath, request);
+            if (!checked) {
+                return std::unexpected(checked.error());
+            }
+            if (*checked) {
+                target = (*checked)->archive_uuid;
+            }
         }
-        const auto checked = check_existing_archives(services, *candidates, evidence, *root_subpath, request);
-        if (!checked) {
-            return std::unexpected(checked.error());
-        }
-        const std::optional<ArchiveCandidate>& target = *checked;
         plan.created = current_timestamp();
         plan.copy_of = request.copy_of;
         plan.root = path_to_utf8(request.root);
         if (target) {
-            const auto found = store.find_archive(target->archive_uuid);
+            const auto found = store.find_archive(*target);
             if (!found || !*found) {
                 return fail(Kind::Repository, "the archive to re-baseline is missing from the database");
             }
@@ -582,7 +750,28 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             plan.archive_uuid = existing->archive_uuid;
             plan.revision = existing->current_revision + 1;
             plan.label = existing->label;
-            if (!plan.copy_of) {
+            if (lost) {
+                plan.lost_revision = existing->current_revision;
+            }
+            if (!plan.copy_of && lost) {
+                // A copy stays a copy (decision 0005): as the newest of the
+                // archive's manifests that can be used says, the latest one
+                // being lost; never the index's copy of a header (R-14).
+                const auto revisions = store.revisions(existing->archive_uuid);
+                if (!revisions) {
+                    return fail(Kind::Repository, revisions.error().message);
+                }
+                for (auto earlier = revisions->rbegin(); earlier != revisions->rend(); ++earlier) {
+                    if (earlier->revision >= existing->current_revision) {
+                        continue;
+                    }
+                    if (const auto header =
+                            load_recorded_header(services.repository_files, services.layout, *earlier)) {
+                        plan.copy_of = header->copy_of;
+                        break;
+                    }
+                }
+            } else if (!plan.copy_of) {
                 // A copy stays a copy (decision 0005): as the latest
                 // revision's manifest says, never the index's copy of it.
                 const auto previous = store.revision(existing->archive_uuid, existing->current_revision);
@@ -609,6 +798,16 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 }
                 plan.label = *label;
             }
+        }
+        // Decision 0028, point 8: what the root holds now becomes the
+        // archive's new baseline without being compared with the lost
+        // revision. Unless the operator confirmed that, nothing is written:
+        // the registration says what it would register.
+        if (lost && !request.confirmed) {
+            return std::unexpected(RegisterFailure{Kind::Unconfirmed,
+                "run the command again with --confirm to register revision " + std::to_string(plan.revision),
+                LostManifestRegistration{plan.archive_uuid, plan.label, *plan.lost_revision, plan.revision, plan.root,
+                    lost->manifest}});
         }
         // Recorded before any work, so an interruption leaves a resumable
         // registration. The plan names the process that runs this attempt
@@ -892,6 +1091,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     outcome.archive_uuid = plan.archive_uuid;
     outcome.label = plan.label;
     outcome.revision = plan.revision;
+    outcome.lost_revision = plan.lost_revision;
 
     ManifestHeader header;
     header.archive_uuid = plan.archive_uuid;
@@ -1002,7 +1202,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             archive = {plan.archive_uuid, plan.label, plan.created, 0, "", "", ""};
         }
         archive.current_revision = plan.revision;
-        archive.status = "REGISTERED";
+        // A retired archive registered over its lost manifest stays retired
+        // (decision 0028, point 8).
+        if (!plan.lost_revision || archive.status != "RETIRED") {
+            archive.status = "REGISTERED";
+        }
         archive.root_subpath = *root_subpath;
         if (auto updated = store.update_archive(archive); !updated) {
             return updated;
@@ -1020,13 +1224,42 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (auto indexed = store.insert_file_rows(plan.archive_uuid, plan.revision, entries); !indexed) {
             return indexed;
         }
-        EvidenceRecord evidence_record{plan.archive_uuid, "", evidence.seen_at,
-            volume_to_json_text(*volume), plan.new_archive ? "UNKNOWN" : "MATCH", "registered"};
+        // A registration over a lost manifest matched nothing: the archive's
+        // carrier was the lost manifest's to record (decision 0028, point 8).
+        EvidenceRecord evidence_record{plan.archive_uuid, "", evidence.seen_at, volume_to_json_text(*volume),
+            plan.new_archive || plan.lost_revision ? "UNKNOWN" : "MATCH",
+            plan.lost_revision ? "registered over the lost manifest of revision " + std::to_string(*plan.lost_revision)
+                               : std::string("registered")};
         if (auto inserted = store.insert_evidence(evidence_record); !inserted) {
             return inserted;
         }
         if (auto removed = store.remove_setting(pending_key(plan.archive_uuid)); !removed) {
             return removed;
+        }
+        // Decision 0028, point 8: the revision whose manifest was lost is an
+        // earlier revision now, whose manifest matching reads for the earlier
+        // carriers (decision 0004). Its record goes with its index where that
+        // manifest still cannot be used as an earlier revision's is read
+        // (line 1), as `repo rebuild-index` leaves out an earlier revision
+        // whose manifest it cannot read: kept, it would stop every
+        // verification and registration whose matching reads the earlier
+        // carriers. Put back meanwhile, it stays. And the archive's mark of a
+        // manifest the last rebuild skipped names the lost one: its revision
+        // has a manifest written now.
+        if (plan.lost_revision) {
+            const auto lost_record = store.revision(plan.archive_uuid, *plan.lost_revision);
+            if (!lost_record) {
+                return std::unexpected(lost_record.error());
+            }
+            if (*lost_record && !load_recorded_header(services.repository_files, services.layout, **lost_record)) {
+                if (auto removed = store.remove_revision(plan.archive_uuid, *plan.lost_revision); !removed) {
+                    return removed;
+                }
+                outcome.lost_revision_left_out = true;
+            }
+            if (auto unmarked = store.remove_setting(skipped_manifest_key(plan.archive_uuid)); !unmarked) {
+                return unmarked;
+            }
         }
         // An unfinished relocation of the archive that creates this revision
         // can never finish once it is recorded: its record and its saved

@@ -282,6 +282,13 @@ public:
     std::expected<std::vector<RevisionRecord>, IoError> revisions(const Uuid& archive_uuid);
     std::expected<std::optional<RevisionRecord>, IoError> revision(
         const Uuid& archive_uuid, std::uint32_t revision);
+    // Removes the record of this revision of the archive and its index (its
+    // rows of files), and nothing else: the record of the revision whose
+    // manifest was lost, once a registration over that lost manifest records
+    // the next revision (decision 0028, point 8), as `repo rebuild-index`
+    // leaves out an earlier revision whose manifest it cannot read. Inside a
+    // write transaction.
+    std::expected<void, IoError> remove_revision(const Uuid& archive_uuid, std::uint32_t revision);
 
     std::expected<void, IoError> insert_evidence(const EvidenceRecord& evidence);
 

@@ -5,6 +5,10 @@
 #include "common/utf8.h"
 #include "core/engine/recorded_manifest.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <span>
 #include <string_view>
 
 namespace va {
@@ -88,12 +92,34 @@ std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSy
             }
             const auto header = load_recorded_header(repository_files, layout, revision);
             if (!header) {
-                return std::unexpected(IoError{IoErrorKind::Other, 0, plain_message(header.error())});
+                // An earlier revision's: it has a later revision already.
+                auto unusable = header.error();
+                unusable.latest = false;
+                return std::unexpected(IoError{IoErrorKind::Other, 0, plain_message(unusable)});
             }
             candidate.previous_carriers.push_back({header->identity, header->root_subpath});
         }
     }
     return match_identity(evidence, root_subpath, candidates);
+}
+
+std::optional<Uuid> read_identity_claim(IFileSystemAccess& files, const std::filesystem::path& root)
+{
+    auto source = files.open(root / ".veriarchive" / "identity.json", ReadOptions{false, true});
+    if (!source) {
+        return std::nullopt;
+    }
+    std::string text(static_cast<std::size_t>(std::min<std::uint64_t>((*source)->size(), 65536)), '\0');
+    const auto count = (*source)->read(0, std::as_writable_bytes(std::span(text.data(), text.size())));
+    if (!count) {
+        return std::nullopt;
+    }
+    text.resize(*count);
+    const auto json = nlohmann::json::parse(text, nullptr, false);
+    if (!json.is_object() || !json.contains("archive_uuid") || !json["archive_uuid"].is_string()) {
+        return std::nullopt;
+    }
+    return json["archive_uuid"].get<std::string>();
 }
 
 std::expected<std::string, IoError> root_subpath_of(

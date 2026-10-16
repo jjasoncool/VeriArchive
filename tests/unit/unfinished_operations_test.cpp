@@ -164,8 +164,8 @@ void an_older_verification_takes_its_totals_from_the_manifest()
     std::filesystem::remove(registered->manifest);
     const auto gone = read_older();
     CHECK(gone && gone->files_total == 0 && gone->root.empty() &&
-          gone->totals_failure == "the manifest of revision 1 (manifests/" + uuid +
-                                      "/r0001.vam) is missing; restore it from a backup of the repository");
+          gone->totals_failure ==
+              "the manifest of revision 1 (manifests/" + uuid + "/r0001.vam) is missing" + test::put_back(uuid, 1));
 }
 
 // Watching reads a database, never creates one: a repository folder whose

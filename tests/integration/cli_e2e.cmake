@@ -777,8 +777,8 @@ run_cli("0" history "${copy_prefix}")
 run_cli("0" history "${archive_prefix}" --json)
 set(history_json "${last_output}")
 file(RENAME "${RECORDED}.kept" "${RECORDED}")
-set(changed_manifest "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; restore it from a backup of the repository")
-set(changed_chinese "版次 2 的清單檔（manifests/${archive_uuid}/r0002.vam）已被變更：其第一行與儲存庫所記錄的不同；請從儲存庫的備份還原該清單檔")
+set(changed_manifest "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; put it back with `import <folder>/r0002.vam` from a backup of the repository, an export of revision 2, or the media copy in the archive's .veriarchive folder, where registration wrote one; if none of these holds it, register revision 3 from what the archive's root holds now with `register <root_path> --lost-manifest ${archive_uuid}`")
+set(changed_chinese "版次 2 的清單檔（manifests/${archive_uuid}/r0002.vam）已被變更：其第一行與儲存庫所記錄的不同；請以 `import <folder>/r0002.vam` 從儲存庫的備份、版次 2 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> --lost-manifest ${archive_uuid}` 用封存根目錄目前的內容註冊版次 3")
 set(root_may_belong "this root may belong to archive ${archive_label} (${archive_uuid}), whose manifest cannot be used: the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; verify that archive by its uuid (`verify --full ${archive_uuid}`) to record the failure, then restore its manifest from a backup of the repository")
 string(FIND "${listed}" "\n    problem: ${changed_manifest}\n" in_list)
 string(FIND "${listed_chinese}" "\n    問題：${changed_chinese}\n" in_list_chinese)
@@ -919,7 +919,7 @@ if(NOT rebuild_kept EQUAL 1 OR NOT kept_revision EQUAL 2 OR NOT kept_place STREQ
         OR NOT kept_missing OR NOT kept_left_out EQUAL 0
         OR kept_chinese EQUAL -1 OR kept_english EQUAL -1 OR NOT skipped_revision EQUAL 2
         OR NOT skipped_kind STREQUAL "missing"
-        OR NOT skipped_message STREQUAL "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing; restore it from a backup of the repository"
+        OR NOT skipped_message STREQUAL "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing; put it back with `import <folder>/r0002.vam` from a backup of the repository, an export of revision 2, or the media copy in the archive's .veriarchive folder, where registration wrote one; if none of these holds it, register revision 3 from what the archive's root holds now with `register <root_path> --lost-manifest ${archive_uuid}`"
         OR NOT skipped_result STREQUAL "FAILED" OR skipped_read OR NOT skipped_verified_revision EQUAL 2
         OR skipped_by_root EQUAL -1)
     message(FATAL_ERROR "an archive whose latest manifest repo rebuild-index could not read: kept ${rebuild_kept}, "
@@ -948,7 +948,7 @@ file(RENAME "${EARLIER}" "${EARLIER}.away")
 run_cli("0;2" verify --full "${moving_uuid}")
 run_cli("0;2" verify --full "${MOVE_FROM}")
 run_cli("2" --lang en archive show "${moving_prefix}")
-string(FIND "${last_output}" "\n      problem: the manifest of revision 1 (${earlier_place}) is missing; restore it from a backup of the repository\n" earlier_shown)
+string(FIND "${last_output}" "\n      problem: the manifest of revision 1 (${earlier_place}) is missing; put it back with `import <folder>/r0001.vam` from a backup of the repository, an export of revision 1, or the media copy in the archive's .veriarchive folder, where registration wrote one\n" earlier_shown)
 run_cli("2" archive show "${moving_prefix}" --json)
 string(JSON earlier_kind GET "${last_output}" revisions 0 manifest_problem kind)
 string(JSON earlier_problem_revision GET "${last_output}" revisions 0 manifest_problem revision)
@@ -1072,6 +1072,65 @@ string(JSON media_revision GET "${last_output}" revision)
 if(media_restored EQUAL -1 OR NOT media_result MATCHES "^PASSED" OR NOT media_revision EQUAL 2)
     message(FATAL_ERROR "import of a media copy of a revision whose manifest is missing: ${media_result} at "
         "revision ${media_revision}")
+endif()
+
+# A registration over a lost manifest (decision 0028, point 8), of the same
+# sample folder at revision 2. While its manifest can be used, it is refused
+# (exit 12). With the manifest of revision 2 gone from the repository, `archive
+# list` says how to put it back and names the last resort, and the
+# registration over it is refused while the folder's .veriarchive holds the
+# media copy that `import` puts back, naming the import. With that copy moved
+# away, not confirmed, it says what it would register and changes nothing (exit
+# 12), in either language and in --json. Confirmed, it registers revision 3
+# from the folder, leaving revision 2 out of the index: the archive verifies
+# at revision 3, is listed without a problem, and its history chain is intact.
+string(SUBSTRING "${media_uuid}" 0 8 media_prefix)
+run_cli("12" --lang en register "${MEDIA}" --lost-manifest "${media_prefix}")
+string(FIND "${last_errors}" "error: the manifest of revision 2 of archive ${media_uuid} can be used" media_usable)
+file(REMOVE "${WORK}/repo/manifests/${media_uuid}/r0002.vam")
+run_cli("2" --lang en archive list)
+string(FIND "${last_output}" "or the media copy in the archive's .veriarchive folder, where registration wrote one; if none of these holds it, register revision 3 from what the archive's root holds now with `register <root_path> --lost-manifest ${media_uuid}`\n" media_last_resort)
+run_cli("12" --lang en register "${MEDIA}" --lost-manifest "${media_prefix}")
+string(FIND "${last_errors}" "error: the media copy at this root holds the manifest of revision 2 of archive ${media_uuid}: put it back with `import " media_import_named)
+file(RENAME "${MEDIA}/.veriarchive/r0002.vam" "${WORK}/media-copy-r0002.vam")
+run_cli("12" --lang en register "${MEDIA}" --lost-manifest "${media_prefix}")
+set(media_asked "${last_output}")
+set(media_asked_error "${last_errors}")
+run_cli("12" register "${MEDIA}" --lost-manifest "${media_prefix}")
+set(media_asked_chinese "${last_output}${last_errors}")
+run_cli("12" register "${MEDIA}" --lost-manifest "${media_prefix}" --json)
+string(JSON asked_revision GET "${last_output}" registration revision)
+string(JSON asked_lost GET "${last_output}" registration lost_revision)
+string(JSON asked_kind GET "${last_output}" registration manifest_problem kind)
+run_cli("2" archive show "${media_prefix}" --json)
+string(JSON asked_unchanged GET "${last_output}" revision)
+run_cli("0" register "${MEDIA}" --lost-manifest "${media_prefix}" --confirm --json)
+string(JSON over_revision GET "${last_output}" revision)
+string(JSON over_lost GET "${last_output}" lost_manifest revision)
+string(JSON over_left_out GET "${last_output}" lost_manifest left_out)
+run_cli("0" archive list)
+run_cli("0" archive show "${media_prefix}" --json)
+string(JSON media_revisions LENGTH "${last_output}" revisions)
+string(JSON media_first GET "${last_output}" revisions 0 revision)
+string(JSON media_latest GET "${last_output}" revisions 1 revision)
+run_cli("0;2" verify --full "${media_uuid}" --json)
+string(JSON over_verified GET "${last_output}" result)
+string(JSON over_verified_revision GET "${last_output}" revision)
+run_cli("0" repo verify-history)
+if(media_usable EQUAL -1 OR media_last_resort EQUAL -1 OR media_import_named EQUAL -1
+        OR NOT media_asked MATCHES "^Lost manifest of ARCH-[0-9]+ \\(${media_uuid}\\), revision 2\n  the manifest of revision 2 \\(manifests/${media_uuid}/r0002[.]vam\\) is missing\n  root: [^\n]+\nRegistering revision 3 from this root takes what it holds now as the archive's new baseline, without comparing it with revision 2, whose manifest is lost: damage since revision 2 was registered would not be found[.]"
+        OR NOT media_asked_error STREQUAL "error: run the command again with --confirm to register revision 3\n"
+        OR NOT media_asked_chinese MATCHES "^無法取回的清單檔：ARCH-[0-9]+（${media_uuid}），版次 2\n"
+        OR NOT media_asked_chinese MATCHES "錯誤：若要註冊版次 3，請加上 --confirm 再執行一次\n$"
+        OR NOT asked_revision EQUAL 3 OR NOT asked_lost EQUAL 2 OR NOT asked_kind STREQUAL "missing"
+        OR NOT asked_unchanged EQUAL 2 OR NOT over_revision EQUAL 3 OR NOT over_lost EQUAL 2 OR NOT over_left_out
+        OR NOT media_revisions EQUAL 2 OR NOT media_first EQUAL 1 OR NOT media_latest EQUAL 3
+        OR NOT over_verified MATCHES "^PASSED" OR NOT over_verified_revision EQUAL 3)
+    message(FATAL_ERROR "a registration over a lost manifest: usable ${media_usable}, last resort ${media_last_resort}, "
+        "import named ${media_import_named}, asked r${asked_revision} over r${asked_lost} (${asked_kind}), archive at "
+        "r${asked_unchanged}; registered r${over_revision} over r${over_lost}, left out ${over_left_out}, revisions "
+        "${media_revisions} (r${media_first}, r${media_latest}), verified ${over_verified} at r${over_verified_revision}"
+        "\n${media_asked}\n${media_asked_error}\n${media_asked_chinese}")
 endif()
 
 message(STATUS "veriarchive-cli end-to-end test passed")

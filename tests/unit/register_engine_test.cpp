@@ -4,7 +4,9 @@
 
 #include "common/time.h"
 #include "core/engine/abandon_registration.h"
+#include "core/engine/archive_status.h"
 #include "core/engine/heartbeat.h"
+#include "core/engine/rebuild_index.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
@@ -209,8 +211,8 @@ void a_new_revision_reads_the_latest_header_from_its_manifest()
     const auto registered = va::register_archive(services, next, fixture.cancel, fixture.progress);
     CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
           registered.error().message == "the manifest of revision 1 (manifests/" + first->archive_uuid +
-                                            "/r0001.vam) cannot be read: denied (sample); restore it from a backup "
-                                            "of the repository");
+                                            "/r0001.vam) cannot be read: denied (sample)" +
+                                            test::put_back(first->archive_uuid, 1));
     const auto plans = fixture.store.settings_with_prefix("registration:");
     CHECK(plans && plans->empty());
 }
@@ -1997,6 +1999,432 @@ void a_registration_overtaken_before_its_plan_writes_nothing()
     }
 }
 
+// ---- A registration over a lost manifest (decision 0028, point 8)
+
+// The rows of `table` in the fixture's database, as another process would read them.
+std::int64_t rows_of(Fixture& fixture, const std::string& table)
+{
+    sqlite3* database = nullptr;
+    const auto name = fixture.repository.context.repo.database().u8string();
+    std::int64_t rows = -1;
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY, nullptr) ==
+        SQLITE_OK) {
+        sqlite3_stmt* statement = nullptr;
+        const auto sql = "SELECT COUNT(*) FROM " + table;
+        if (sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) == SQLITE_OK &&
+            sqlite3_step(statement) == SQLITE_ROW) {
+            rows = sqlite3_column_int64(statement, 0);
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return rows;
+}
+
+// The match result and the note of the newest media evidence.
+std::string newest_evidence(Fixture& fixture)
+{
+    sqlite3* database = nullptr;
+    const auto name = fixture.repository.context.repo.database().u8string();
+    std::string evidence;
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY, nullptr) ==
+        SQLITE_OK) {
+        sqlite3_stmt* statement = nullptr;
+        if (sqlite3_prepare_v2(database,
+                "SELECT match_result || ' / ' || operator_note FROM media_evidence ORDER BY id DESC LIMIT 1", -1,
+                &statement, nullptr) == SQLITE_OK &&
+            sqlite3_step(statement) == SQLITE_ROW) {
+            evidence = reinterpret_cast<const char*>(sqlite3_column_text(statement, 0));
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return evidence;
+}
+
+// An archive at /vol/a (sample data) registered twice, and verified at
+// revision 2 by its uuid; its archive uuid. `media_copy`: both registrations
+// write a media copy on it (R-89).
+va::Uuid archive_a_registered_twice(Fixture& fixture, bool media_copy = false)
+{
+    fixture.archive.add_file("a/SAMPLE-one.txt", "one (sample data)");
+    auto first = at("/vol/a");
+    first.write_media_copy = media_copy;
+    const auto registered = fixture.run(first);
+    fixture.archive.add_file("a/SAMPLE-two.txt", "two (sample data)");
+    auto second = at("/vol/a");
+    second.new_revision = true;
+    second.write_media_copy = media_copy;
+    const auto again = fixture.run(second);
+    CHECK(registered && again && again->revision == 2);
+    if (!registered) {
+        return {};
+    }
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = registered->archive_uuid;
+    const auto verified = fixture.verify(by_uuid);
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+    return registered->archive_uuid;
+}
+
+va::RegisterRequest over_lost_manifest(const std::filesystem::path& root, const va::Uuid& archive_uuid, bool confirmed)
+{
+    auto request = at(root);
+    request.lost_manifest_of = archive_uuid;
+    request.confirmed = confirmed;
+    return request;
+}
+
+std::vector<std::uint32_t> revisions_of(Fixture& fixture, const va::Uuid& archive_uuid)
+{
+    std::vector<std::uint32_t> numbers;
+    if (const auto revisions = fixture.store.revisions(archive_uuid)) {
+        for (const auto& revision : *revisions) {
+            numbers.push_back(revision.revision);
+        }
+    }
+    return numbers;
+}
+
+// Decision 0028, point 8: the latest manifest of archive A (revision 2, at
+// /vol/a, verified there) is lost (sample damage): it is gone, its first line
+// changed, its body changed (which `repo rebuild-index` skipped, marking the
+// archive), or it is gone with its record, so that the index has no record
+// of it. Meanwhile a registration of a new folder of the volume stops on it,
+// unless only the body changed, which matching does not read (line 1 alone).
+// A registration over the lost manifest that is not confirmed says what it
+// would register, and writes and reads nothing of it. Confirmed, it registers
+// revision 3 from the root, which supersedes revision 2: the archive is at
+// revision 3, never back at an earlier one; its history keeps its run and an
+// intact hash chain; the record of revision 2 leaves the index with its rows
+// where its manifest's first line cannot be used, and stays where it can (only
+// its body changed); the rebuild's mark goes; the root's media evidence says
+// that it matched nothing. The archive then verifies at revision 3, is listed
+// without a problem, also with its earlier revisions read, and a
+// registration of a new folder goes ahead.
+void a_registration_over_a_lost_manifest_registers_the_next_revision()
+{
+    enum class Case { Missing, FirstLine, Body, NotIndexed };
+    for (const auto what : {Case::Missing, Case::FirstLine, Case::Body, Case::NotIndexed}) {
+        Fixture fixture;
+        const auto archive_uuid = archive_a_registered_twice(fixture);
+        const auto& layout = fixture.repository.context.repo;
+        const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+        auto bytes = read_bytes(second);
+        auto kind = va::UnusableManifest::Kind::Missing;
+        if (what == Case::Missing || what == Case::NotIndexed) {
+            std::filesystem::remove(second);
+        } else if (what == Case::FirstLine) {
+            bytes[bytes.find("\"volume_label\":\"ARCHIVE\"") + 16] ^= 0x01; // "ARCHIVE" -> "@RCHIVE"
+            std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
+            kind = va::UnusableManifest::Kind::Changed;
+        } else {
+            bytes[bytes.size() - 5] ^= 0x01;
+            std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
+            kind = va::UnusableManifest::Kind::Changed;
+            const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+            CHECK(rebuilt && rebuilt->revisions_kept.size() == 1);
+            CHECK(!fixture.store.setting(va::skipped_manifest_key(archive_uuid)).value_or("").empty());
+        }
+        if (what == Case::NotIndexed) {
+            fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; "
+                                       "DELETE FROM files WHERE revision = 2");
+            kind = va::UnusableManifest::Kind::NotIndexed;
+        }
+        fixture.archive.add_file("b/SAMPLE-three.txt", "three (sample data)");
+        fixture.archive.add_file("c/SAMPLE-four.txt", "four (sample data)");
+        const auto stopped = fixture.run(at("/vol/b"));
+        if (what == Case::Body) {
+            CHECK(stopped.has_value());
+        } else {
+            CHECK(!stopped && stopped.error().kind == va::RegisterFailure::Kind::Repository &&
+                  stopped.error().message.ends_with(test::put_back(archive_uuid, 2)));
+        }
+
+        // Not confirmed: what it would register, and nothing written.
+        const auto runs_before = rows_of(fixture, "verify_runs");
+        const auto evidence_before = rows_of(fixture, "media_evidence");
+        const auto revisions_before = revisions_of(fixture, archive_uuid);
+        fixture.archive.bytes_read = 0;
+        const auto asked = fixture.run(over_lost_manifest("/vol/a", archive_uuid, false));
+        CHECK(!asked && asked.error().kind == va::RegisterFailure::Kind::Unconfirmed &&
+              asked.error().message == "run the command again with --confirm to register revision 3");
+        CHECK(!asked && asked.error().lost_manifest && asked.error().lost_manifest->archive_uuid == archive_uuid &&
+              asked.error().lost_manifest->label == "ARCH-0001" && asked.error().lost_manifest->lost_revision == 2 &&
+              asked.error().lost_manifest->revision == 3 && asked.error().lost_manifest->root == "/vol/a" &&
+              asked.error().lost_manifest->manifest.kind == kind &&
+              va::plain_message(asked.error().lost_manifest->manifest).ends_with(test::put_back(archive_uuid, 2)));
+        if (asked) {
+            std::cerr << "  not confirmed: registered revision " << asked->revision << '\n';
+        }
+        CHECK(fixture.archive.bytes_read == 0 && rows_of(fixture, "media_evidence") == evidence_before &&
+              revisions_of(fixture, archive_uuid) == revisions_before);
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+        auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive && (*archive)->current_revision == 2);
+
+        // Confirmed: revision 3 from what the root holds now.
+        const auto registered = fixture.run(over_lost_manifest("/vol/a", archive_uuid, true));
+        const bool left_out = what == Case::Missing || what == Case::FirstLine;
+        CHECK(registered && registered->revision == 3 && registered->lost_revision == std::optional<std::uint32_t>(2) &&
+              registered->lost_revision_left_out == left_out && registered->counts.files == 2);
+        if (!registered) {
+            std::cerr << "  over the lost manifest: " << registered.error().message << '\n';
+            continue;
+        }
+        archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive && (*archive)->current_revision == 3 && (*archive)->status == "REGISTERED" &&
+              (*archive)->root_subpath == "a");
+        const auto expected = what == Case::Body ? std::vector<std::uint32_t>{1, 2, 3} : std::vector<std::uint32_t>{1, 3};
+        CHECK(revisions_of(fixture, archive_uuid) == expected);
+        const auto rows = fixture.store.file_row_count(archive_uuid, 2);
+        CHECK(rows && rows->files == (what == Case::Body ? 2u : 0u));
+        auto reader = va::ManifestReader::open(*fixture.repository.files, registered->manifest);
+        CHECK(reader && reader->header().revision == 3 && reader->header().supersedes == 2u &&
+              reader->header().root_subpath == "a");
+        CHECK(rows_of(fixture, "verify_runs") == runs_before);
+        const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
+        CHECK(chain && chain->runs == 1 && !chain->first_broken_run);
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+        CHECK(fixture.store.setting(va::skipped_manifest_key(archive_uuid)).value_or("x").empty());
+        CHECK(newest_evidence(fixture) == "UNKNOWN / registered over the lost manifest of revision 2");
+
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = archive_uuid;
+        const auto verified = fixture.verify(by_uuid);
+        CHECK(verified && verified->result == "PASSED" && verified->revision == 3 && verified->media_read);
+        const auto statuses = va::archive_statuses(fixture.store, *fixture.repository.files, layout, va::Policy{},
+            std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()),
+            va::StatusSelection{archive_uuid, true, true});
+        CHECK(statuses && statuses->size() == 1 && statuses->front().header &&
+              !statuses->front().unusable_manifest && statuses->front().earlier_unusable.empty());
+        const auto other = fixture.run(at("/vol/c"));
+        CHECK(other && other->revision == 1 && other->archive_uuid != archive_uuid);
+        if (!other) {
+            std::cerr << "  the new folder after the lost manifest: " << other.error().message << '\n';
+        }
+    }
+}
+
+// Decision 0028, point 8: nothing is registered over a manifest that is not
+// lost, and the request names the archive and its revision alone. Refused,
+// writing nothing: an archive whose manifest can be used (register its next
+// revision as usual), one whose index only differs from the intact manifest
+// or has no record of a manifest that reads as its own (rebuild the index),
+// one whose first registration never finished, and an archive that is not in
+// the repository. A label, --new-revision, --force-new-archive and --resume
+// are usage errors beside it, as is --confirm without it.
+void a_registration_over_a_manifest_that_is_not_lost_is_refused()
+{
+    {
+        Fixture fixture;
+        const auto archive_uuid = archive_a_registered_twice(fixture);
+        const auto usable = fixture.run(over_lost_manifest("/vol/a", archive_uuid, true));
+        CHECK(!usable && usable.error().kind == va::RegisterFailure::Kind::Refused &&
+              usable.error().message == "the manifest of revision 2 of archive " + archive_uuid +
+                                            " can be used: register its next revision with `register <root_path> "
+                                            "--new-revision`");
+
+        fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
+                                   "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"') WHERE revision = 2");
+        const auto differs = fixture.run(over_lost_manifest("/vol/a", archive_uuid, true));
+        CHECK(!differs && differs.error().kind == va::RegisterFailure::Kind::Refused &&
+              differs.error().message ==
+                  "the manifest of revision 2 of archive " + archive_uuid +
+                      " is not lost: the repository's index differs from the manifest of revision 2 (manifests/" +
+                      archive_uuid + "/r0002.vam); rebuild the index with `repo rebuild-index`");
+        fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; "
+                                   "DELETE FROM files WHERE revision = 2");
+        const auto not_indexed = fixture.run(over_lost_manifest("/vol/a", archive_uuid, true));
+        CHECK(!not_indexed && not_indexed.error().kind == va::RegisterFailure::Kind::Refused &&
+              not_indexed.error().message ==
+                  "the manifest of revision 2 of archive " + archive_uuid +
+                      " is not lost: the repository's index has no record of the manifest of revision 2 (manifests/" +
+                      archive_uuid + "/r0002.vam); rebuild the index with `repo rebuild-index`");
+        CHECK(revisions_of(fixture, archive_uuid) == std::vector<std::uint32_t>{1});
+        const auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive && (*archive)->current_revision == 2);
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+
+        const va::Uuid unknown = "c0ffee00-0000-4000-8000-0000000000aa"; // sample data
+        const auto none = fixture.run(over_lost_manifest("/vol/a", unknown, true));
+        CHECK(!none && none.error().kind == va::RegisterFailure::Kind::Refused &&
+              none.error().message == "no archive " + unknown);
+
+        auto labelled = over_lost_manifest("/vol/a", archive_uuid, true);
+        labelled.label = "ARCH-0009";
+        auto new_revision = over_lost_manifest("/vol/a", archive_uuid, true);
+        new_revision.new_revision = true;
+        auto separate = over_lost_manifest("/vol/a", archive_uuid, true);
+        separate.force_new_archive = true;
+        auto resumed = over_lost_manifest("/vol/a", archive_uuid, true);
+        resumed.resume = true;
+        for (const auto& request : {labelled, new_revision, separate, resumed}) {
+            const auto refused = fixture.run(request);
+            CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Invalid &&
+                  refused.error().message == "--lost-manifest takes none of --label, --new-revision, "
+                                             "--force-new-archive and --resume");
+        }
+        auto confirmed_alone = at("/vol/a");
+        confirmed_alone.confirmed = true;
+        const auto alone = fixture.run(confirmed_alone);
+        CHECK(!alone && alone.error().kind == va::RegisterFailure::Kind::Invalid &&
+              alone.error().message == "--confirm is used only with --lost-manifest");
+    }
+    {
+        Fixture fixture;
+        const auto interrupted_uuid = interrupted_sample_registration(fixture);
+        const auto first = fixture.run(over_lost_manifest("/vol/photos", interrupted_uuid, true));
+        CHECK(!first && first.error().kind == va::RegisterFailure::Kind::Refused &&
+              first.error().message == "archive " + interrupted_uuid + " has no revision yet");
+    }
+}
+
+// Decision 0028, point 8: the root of a registration over a lost manifest is
+// the operator's word, as only the lost manifest recorded the archive's root,
+// and it is refused where it is plainly not the archive's: where it overlaps
+// the root of an archive whose manifest can be used on the same volume (here
+// B at /vol/b), and where its identity file names another archive. Where the
+// root holds the lost manifest as a media copy that `import` puts back, the
+// registration says to import it instead; imported, the manifest can be used
+// again. A media copy that is not the one recorded, as one with a byte of its
+// body changed, puts nothing back, and does not stop the registration. Where
+// the index has no record of the manifest either, a media copy that reads as
+// it says the same. Sample data throughout.
+void a_registration_over_a_lost_manifest_needs_the_archives_own_root()
+{
+    Fixture fixture;
+    const auto archive_uuid = archive_a_registered_twice(fixture, true);
+    fixture.archive.add_file("b/SAMPLE-three.txt", "three (sample data)");
+    const auto b = fixture.run(at("/vol/b"));
+    CHECK(b.has_value());
+    if (!b) {
+        return;
+    }
+    const auto& layout = fixture.repository.context.repo;
+    const auto recorded = va::manifest_path(layout.manifests(), archive_uuid, 2);
+    const auto kept = read_bytes(recorded);
+    std::filesystem::remove(recorded);
+    const auto refused = [&](const std::filesystem::path& root, const std::string& message) {
+        const auto registered = fixture.run(over_lost_manifest(root, archive_uuid, false));
+        CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Refused &&
+              registered.error().message == message);
+        if (!registered && registered.error().message != message) {
+            std::cerr << "  at " << va::path_to_utf8(root) << ": " << registered.error().message << '\n';
+        }
+    };
+    const auto asks = [&](const std::filesystem::path& root) {
+        const auto registered = fixture.run(over_lost_manifest(root, archive_uuid, false));
+        CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Unconfirmed);
+        if (!registered && registered.error().kind != va::RegisterFailure::Kind::Unconfirmed) {
+            std::cerr << "  at " << va::path_to_utf8(root) << ": " << registered.error().message << '\n';
+        }
+    };
+    const auto overlaps_b = "the root overlaps archive " + b->archive_uuid + " on the same volume (decision 0001)";
+    refused("/vol/b", overlaps_b);
+    refused("/vol", overlaps_b);
+
+    // The media copy that the registration of revision 2 wrote on A.
+    const auto copy = std::filesystem::path("/vol/a") / ".veriarchive" / "r0002.vam";
+    const auto import_it = "the media copy at this root holds the manifest of revision 2 of archive " + archive_uuid +
+                           ": put it back with `import " + va::path_to_utf8(copy) + "`";
+    refused("/vol/a", import_it);
+    const auto copy_bytes = fixture.archive.content_at(copy);
+    auto damaged = copy_bytes;
+    damaged[damaged.size() - 5] ^= 0x01;
+    fixture.archive.put(copy, damaged);
+    asks("/vol/a");
+    // The identity file that the media copy wrote names A: another archive's stops it.
+    const auto identity = std::filesystem::path("/vol/a") / ".veriarchive" / "identity.json";
+    const auto identity_bytes = fixture.archive.content_at(identity);
+    CHECK(identity_bytes.contains(archive_uuid));
+    fixture.archive.put(identity, "{\"archive_uuid\":\"" + b->archive_uuid + "\"}");
+    refused("/vol/a", "the identity file of this root (.veriarchive/identity.json) names archive " + b->archive_uuid +
+                          ", not archive " + archive_uuid);
+    fixture.archive.put(identity, identity_bytes);
+    fixture.archive.add_directory("a/sub");
+    asks("/vol/a/sub");
+
+    // The index has no record of it either: the copy reads as its manifest.
+    fixture.archive.put(copy, copy_bytes);
+    fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; DELETE FROM files WHERE revision = 2");
+    refused("/vol/a", import_it);
+    const auto imported = va::import_manifest(fixture.store, fixture.archive, *fixture.repository.writer, layout, copy,
+        false);
+    CHECK(imported && imported->revision == 2 && !imported->already_present);
+    refused("/vol/a", "the manifest of revision 2 of archive " + archive_uuid +
+                          " can be used: register its next revision with `register <root_path> --new-revision`");
+    CHECK(read_bytes(recorded) == kept);
+    CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+}
+
+// Decision 0028, point 8: a registration over a lost manifest resumes as any
+// registration (R-104): its plan names the lost revision, and the attempt
+// that records the next revision leaves the lost revision's record out of
+// the index as the first attempt would have. Where the manifest was put back
+// meanwhile, the record of its revision stays, and the next revision is
+// registered all the same, as the operator confirmed. A retired archive takes
+// its next revision this way and stays retired, and the new revision names the
+// original that the archive is a copy of, as its newest manifest that can be
+// used says (decision 0005). Sample data.
+void a_registration_over_a_lost_manifest_resumes()
+{
+    for (const bool put_back_meanwhile : {false, true}) {
+        Fixture fixture;
+        const va::Uuid original = "c0ffee00-0000-4000-8000-000000000028"; // sample data
+        fixture.archive.add_file("a/SAMPLE-one.txt", "one (sample data)");
+        auto first = at("/vol/a");
+        first.copy_of = original;
+        const auto registered = fixture.run(first);
+        fixture.archive.add_file("a/SAMPLE-two.txt", "two (sample data)");
+        auto second = at("/vol/a");
+        second.new_revision = true;
+        CHECK(registered && fixture.run(second).has_value());
+        if (!registered) {
+            return;
+        }
+        const auto& archive_uuid = registered->archive_uuid;
+        auto archive = fixture.store.find_archive(archive_uuid);
+        if (archive && *archive) {
+            (*archive)->status = "RETIRED";
+            CHECK(fixture.store.update_archive(**archive));
+        }
+        const auto recorded = va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2);
+        const auto kept = read_bytes(recorded);
+        std::filesystem::remove(recorded);
+
+        fixture.archive.node("a/SAMPLE-two.txt").open_error =
+            va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged (sample)"};
+        const auto interrupted = fixture.run(over_lost_manifest("/vol/a", archive_uuid, true));
+        CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+        fixture.archive.node("a/SAMPLE-two.txt").open_error.reset();
+        const auto plan = nlohmann::json::parse(fixture.store.setting("registration:" + archive_uuid).value_or(""),
+            nullptr, false);
+        CHECK(plan.is_object() && plan.value("lost_manifest", 0u) == 2u && plan.value("revision", 0u) == 3u);
+        CHECK(revisions_of(fixture, archive_uuid) == (std::vector<std::uint32_t>{1, 2}));
+        if (put_back_meanwhile) {
+            std::ofstream(recorded, std::ios::binary | std::ios::trunc) << kept;
+        }
+
+        auto resume = at("/vol/a");
+        resume.resume = true;
+        const auto resumed = fixture.run(resume);
+        CHECK(resumed && resumed->revision == 3 && resumed->lost_revision == std::optional<std::uint32_t>(2) &&
+              resumed->lost_revision_left_out == !put_back_meanwhile);
+        if (!resumed) {
+            std::cerr << "  resumed over the lost manifest: " << resumed.error().message << '\n';
+            continue;
+        }
+        CHECK(revisions_of(fixture, archive_uuid) ==
+              (put_back_meanwhile ? std::vector<std::uint32_t>{1, 2, 3} : std::vector<std::uint32_t>{1, 3}));
+        archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive && (*archive)->current_revision == 3 && (*archive)->status == "RETIRED");
+        auto reader = va::ManifestReader::open(*fixture.repository.files, resumed->manifest);
+        CHECK(reader && reader->header().copy_of == std::optional<va::Uuid>(original) &&
+              reader->header().supersedes == 2u);
+    }
+}
+
 } // namespace
 
 void register_engine_tests()
@@ -2044,4 +2472,8 @@ void register_engine_tests()
     an_interrupted_registration_made_for_an_older_revision_says_to_abandon_it();
     a_cancelled_resume_of_a_plan_made_for_an_older_revision_says_to_abandon_it();
     a_registration_overtaken_before_its_plan_writes_nothing();
+    a_registration_over_a_lost_manifest_registers_the_next_revision();
+    a_registration_over_a_manifest_that_is_not_lost_is_refused();
+    a_registration_over_a_lost_manifest_needs_the_archives_own_root();
+    a_registration_over_a_lost_manifest_resumes();
 }

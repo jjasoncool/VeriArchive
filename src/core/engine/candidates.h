@@ -66,6 +66,11 @@ std::expected<MatchOutcome, IoError> match_recorded(ArchiveStore& store, IFileSy
     const RepositoryLayout& layout, const MediaEvidence& evidence, std::string_view root_subpath,
     std::span<ArchiveCandidate> candidates);
 
+// The archive that the identity file at `root` names (.veriarchive/identity.json,
+// written with a media copy, R-89): a claim, not a proof (§B1.2). Nothing where
+// there is no such file, or it names no archive.
+std::optional<Uuid> read_identity_claim(IFileSystemAccess& files, const std::filesystem::path& root);
+
 // Path of the archive root relative to its volume's mount point, as an
 // ArchivePath string ("" for the volume root).
 std::expected<std::string, IoError> root_subpath_of(

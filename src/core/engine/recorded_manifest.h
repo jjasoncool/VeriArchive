@@ -56,6 +56,13 @@ struct UnusableManifest {
     std::string manifest;  // where it is in the repository, '/'-separated (manifest_relpath)
     std::string cause;
     File file = File::Readable;  // NotIndexed only
+    // The manifest of the archive's latest revision, as the archive's record
+    // says it; false for an earlier revision, whose manifest matching reads
+    // for the earlier carriers (decision 0004). Only a latest manifest that
+    // nothing puts back has the last resort of a lost manifest: the archive's
+    // next revision, registered from what its root holds now (decision 0028,
+    // point 8).
+    bool latest = true;
 };
 
 // The run-level failure class (§A6) of a verification whose manifest cannot
@@ -73,14 +80,20 @@ std::string_view kind_code(UnusableManifest::Kind kind);
 // index has no record of the manifest of revision 2 (...), which is missing".
 std::string what_is_wrong_with(const UnusableManifest& unusable);
 
-// The plain message: what is wrong, then how to fix it, which is to restore
-// the manifest from a backup of the repository (R-86) or, where only the
-// index differs from a manifest that is the one recorded (IndexDiffers), to
-// rebuild the index (R-80). Rebuilding the index from a manifest that is
-// missing or has changed would take what the file holds now for the truth.
-// Where the index has no record of the manifest (NotIndexed), only
-// rebuilding the index records it again: after the manifest is restored,
-// where it is missing or cannot be read.
+// The plain message: what is wrong, then how to fix it. Where only the index
+// differs from a manifest that is the one recorded (IndexDiffers), or has no
+// record of a manifest that reads as the one of that revision (NotIndexed,
+// File::Readable), the manifest is intact and the index is rebuilt (R-80).
+// Otherwise the manifest is missing, cannot be read or has changed, and
+// rebuilding the index from it would take what the file holds now for the
+// truth: it is put back first, with `import` of its file from a backup of
+// the repository (R-86), an export of that revision (R-87) or the media copy
+// that registration wrote (R-89), as the import puts back the manifest
+// recorded, or records it where the index has no record of it (decision
+// 0028, point 7). For the latest revision (`latest`) the message ends with
+// the last resort where none of these holds it: the archive's next revision,
+// registered from what its root holds now with `register <root_path>
+// --lost-manifest <archive_uuid>` (decision 0028, point 8).
 std::string plain_message(const UnusableManifest& unusable);
 
 // The place of the manifest of `revision` of the archive in the repository

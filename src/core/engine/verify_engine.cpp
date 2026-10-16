@@ -134,25 +134,6 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
     return holding.front();
 }
 
-std::optional<Uuid> read_identity_claim(IFileSystemAccess& files, const std::filesystem::path& root)
-{
-    auto source = files.open(root / ".veriarchive" / "identity.json", ReadOptions{false, true});
-    if (!source) {
-        return std::nullopt;
-    }
-    std::string text(static_cast<std::size_t>(std::min<std::uint64_t>((*source)->size(), 65536)), '\0');
-    const auto count = (*source)->read(0, std::as_writable_bytes(std::span(text.data(), text.size())));
-    if (!count) {
-        return std::nullopt;
-    }
-    text.resize(*count);
-    const auto json = nlohmann::json::parse(text, nullptr, false);
-    if (!json.is_object() || !json.contains("archive_uuid") || !json["archive_uuid"].is_string()) {
-        return std::nullopt;
-    }
-    return json["archive_uuid"].get<std::string>();
-}
-
 // A run in progress is described in settings ("run:<id>") so an interrupted
 // run can be resumed even when the process was killed before recording it.
 std::string run_setting(const std::string& run_id)

@@ -175,7 +175,11 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
                 if (auto loaded = load_recorded_header(*repository_files, layout, *older->second)) {
                     header = std::move(*loaded);
                 } else {
-                    header = std::unexpected(plain_message(loaded.error()));
+                    // The run's revision is the archive's latest exactly where
+                    // the run can be resumed (R-104).
+                    auto unusable = loaded.error();
+                    unusable.latest = verification.resumable;
+                    header = std::unexpected(plain_message(unusable));
                 }
             }
             if (!header) {

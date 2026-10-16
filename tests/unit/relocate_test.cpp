@@ -306,8 +306,8 @@ void an_earlier_revision_is_read_only_where_matching_needs_it()
     }
 
     const auto names_first = [&](const std::string& message) {
-        return message == "the manifest of revision 1 (manifests/" + fixture.archive_uuid +
-                              "/r0001.vam) is missing; restore it from a backup of the repository";
+        return message == "the manifest of revision 1 (manifests/" + fixture.archive_uuid + "/r0001.vam) is missing" +
+                              test::put_back(fixture.archive_uuid, 1, false);
     };
     const auto old = fixture.verify(fixture.archive.root() / "old");
     CHECK(!old && old.error().kind == va::VerifyStop::Kind::Repository && names_first(old.error().message));

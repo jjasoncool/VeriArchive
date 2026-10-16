@@ -33,6 +33,13 @@ std::string report(const app::Text& text, const RegisterOutcome& outcome)
     for (const auto& warning : outcome.warnings) {
         body += text.format("Warning: {}", text(warning)) + "\n";
     }
+    // A registration over a lost manifest, resumed here (decision 0028, point 8).
+    if (outcome.lost_revision && outcome.lost_revision_left_out) {
+        body += text.format("Revision {}, whose manifest was lost, was left out of the index; its verifications "
+                            "stay in the history.",
+                    *outcome.lost_revision) +
+                "\n";
+    }
     body += outcome.media_copy.empty()
                 ? "\n" + text("The baseline exists only in the repository: back up RepositoryRoot.") + "\n"
                 : "\n" + text.format("Media copy: {}", path_to_utf8(outcome.media_copy)) + "\n";

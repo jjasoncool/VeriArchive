@@ -87,7 +87,9 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
                     continue;
                 }
                 if (auto header = load_recorded_header(repository_files, layout, revision); !header) {
-                    status.earlier_unusable.push_back(std::move(header.error()));
+                    auto unusable = std::move(header.error());
+                    unusable.latest = false;
+                    status.earlier_unusable.push_back(std::move(unusable));
                 }
             }
         }

@@ -732,6 +732,18 @@ std::expected<std::optional<RevisionRecord>, IoError> ArchiveStore::revision(
     return std::optional<RevisionRecord>{};
 }
 
+std::expected<void, IoError> ArchiveStore::remove_revision(const Uuid& archive_uuid, std::uint32_t revision)
+{
+    auto statement = database_.prepare("DELETE FROM archive_revisions WHERE archive_uuid = ? AND revision = ?");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    if (auto removed = statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision)).run(); !removed) {
+        return removed;
+    }
+    return delete_file_rows(archive_uuid, revision);
+}
+
 std::expected<void, IoError> ArchiveStore::insert_evidence(const EvidenceRecord& evidence)
 {
     auto statement = database_.prepare(

@@ -42,6 +42,10 @@ _Avoid_: version, snapshot
 The `.vam` file holding one revision's header and entries; its validated bytes are the integrity truth.
 _Avoid_: checksum file, index
 
+**Lost manifest**:
+The manifest of an archive's latest revision that is missing or cannot be used, and that nothing can put back: no backup of the repository, export of that revision or media copy holds it. The archive then takes its next revision from what its root holds now, in a registration over its lost manifest (`register --lost-manifest`), which compares nothing with the lost revision.
+_Avoid_: missing manifest (a missing one may still be put back), deleted manifest
+
 **Entry**:
 One item recorded in a manifest: a file, directory, link, or alternate data stream.
 _Avoid_: file (when directories, links, or streams are included)
