@@ -978,10 +978,11 @@ void an_attempt_that_loses_while_hashing_changes_nothing()
 
 // Decision 0023: a resume that finds the revision of its plan recorded stops
 // before it reads the media, and records nothing. Here the plan is still
-// there: another operation recorded the revision and left it (an import, an
-// older version; the other attempt of a registration removes it when it
-// records). Such a plan can never be finished, so the resume removes it,
-// and the root takes another registration.
+// there: another operation recorded the revision and left it (one of an
+// older version; the other attempt of a registration, a relocation and an
+// import remove it when they record, decision 0030). Such a plan can never
+// be finished, so the resume removes it, and the root takes another
+// registration.
 void a_resume_of_a_recorded_revision_reads_nothing()
 {
     Fixture fixture;

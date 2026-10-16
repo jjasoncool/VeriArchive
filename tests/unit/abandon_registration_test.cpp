@@ -318,8 +318,9 @@ void abandoning_keeps_an_archive_whose_index_lost_its_revision()
 //   which no version writes, while the record says the archive never had a
 //   revision;
 // - a first registration's plan, whose revision 1 another operation recorded
-//   and left the plan (an import, decision 0023), after which the index lost
-//   that revision: the record says revision 1, though the index has none.
+//   and left the plan (one of an older version, decision 0023), after which
+//   the index lost that revision: the record says revision 1, though the
+//   index has none.
 // Each keeps the archive's record; the plan and the saved progress go.
 void a_first_registration_is_told_by_its_plan_and_the_record()
 {
@@ -332,7 +333,7 @@ void a_first_registration_is_told_by_its_plan_and_the_record()
             CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
         } else if (const auto found = fixture.store.find_archive(archive_uuid); found && *found) {
             auto record = **found;
-            record.current_revision = 1;  // as the import recorded it
+            record.current_revision = 1;  // as that operation recorded it
             CHECK(fixture.store.update_archive(record));
         }
         const auto revisions = fixture.store.revisions(archive_uuid);
@@ -445,8 +446,8 @@ void abandoning_judges_an_unseen_attempt_by_its_plan()
     CHECK(abandoned.has_value());
 }
 
-// A plan whose revision another operation recorded and left (an import, an
-// older version; decision 0023): its rows are the recorded revision's index,
+// A plan whose revision another operation recorded and left (one of an older
+// version; decision 0023): its rows are the recorded revision's index,
 // not saved progress. Abandoning removes the plan alone, and the archive,
 // which has a revision, stays.
 void abandoning_leaves_a_recorded_revision_alone()

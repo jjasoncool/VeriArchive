@@ -375,6 +375,18 @@ void translation_tests()
     CHECK(chinese("error: run " + run + " is an interrupted attempt of a relocation of archive " + uuid +
                   " that has ended; nothing is left to resume") ==
           "錯誤：執行 " + run + " 是封存 " + uuid + " 某次搬移中斷時留下的紀錄，該搬移已結束；沒有可繼續的作業");
+    // An import that loses its revision, or leaves it to a registration with
+    // saved files (decision 0030).
+    CHECK(chinese("error: revision 2 of archive " + uuid + " was recorded by another operation while this import ran; "
+                  "nothing was imported (import it again to compare it with the recorded manifest)") ==
+          "錯誤：封存 " + uuid + " 的版次 2 已在這次匯入期間由其他作業記錄；未匯入任何內容（再匯入一次，即可與已記錄的清單檔比較）");
+    CHECK(chinese("an unfinished registration of archive " + uuid + " (root \"Z:\\範例\") is creating revision 2; "
+                  "nothing was imported (finish that registration with `register --resume`, or abandon it with "
+                  "`archive abandon-registration " + uuid + "` and import again)") ==
+          "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；未匯入任何內容（請以 `register --resume` "
+          "完成該註冊，或以 `archive abandon-registration " + uuid + "` 放棄它後再匯入一次）");
+    CHECK(chinese("ManifestHashMismatch: the manifest changed while it was imported; nothing was imported") ==
+          "清單檔雜湊不符：清單檔在匯入期間被變更；未匯入任何內容");
     // A cause that a hint follows is translated too, and the uuid after it is
     // carried over.
     CHECK(chinese.format("RELOCATION REFUSED: {}",

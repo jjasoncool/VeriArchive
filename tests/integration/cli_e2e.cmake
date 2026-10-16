@@ -488,4 +488,32 @@ run_cli("0" --repository "${WORK}/repo2" repo init)
 run_cli("0" import "${WORK}/export/r0001.vam")
 run_cli("0" import "${WORK}/export/r0001.vam")
 
+# An import leaves the revision to an unfinished registration of it that has
+# saved files (decision 0030). The first repository records revision 2 of the
+# archive and exports it. In the second, a registration of the same revision
+# stops at its record, keeping the files it hashed, while a folder stands
+# where its manifest belongs (sample data). The import of revision 2 is then
+# refused (exit 12), naming the way on, and records once the registration is
+# abandoned.
+set(GLOBAL --config "${WORK}/config.json")
+run_cli("0;2" register "${ROOT}" --new-revision)
+run_cli("0" export "${archive_prefix}" --out "${WORK}/export2")
+set(GLOBAL --config "${WORK}/config2.json")
+set(BLOCKER "${WORK}/repo2/manifests/${archive_uuid}/r0002.vam")
+file(MAKE_DIRECTORY "${BLOCKER}")
+run_cli("11" register "${ROOT}" --new-revision)
+file(REMOVE_RECURSE "${BLOCKER}")
+run_cli("12" --lang en import "${WORK}/export2/r0002.vam")
+if(NOT last_errors MATCHES "is creating revision 2; nothing was imported"
+        OR NOT last_errors MATCHES "archive abandon-registration ${archive_uuid}")
+    message(FATAL_ERROR "import over a registration's saved files:\n${last_errors}")
+endif()
+run_cli("0" archive abandon-registration "${archive_prefix}" --confirm)
+run_cli("0" import "${WORK}/export2/r0002.vam" --json)
+string(JSON imported_revision GET "${last_output}" revision)
+string(JSON imported_before GET "${last_output}" already_present)
+if(NOT imported_revision EQUAL 2 OR imported_before)
+    message(FATAL_ERROR "import after the registration was abandoned:\n${last_output}")
+endif()
+
 message(STATUS "veriarchive-cli end-to-end test passed")

@@ -1015,8 +1015,8 @@ void an_interrupted_attempt_is_recorded_incomplete()
 // --new-revision`) records revision 2, the revision the relocation would
 // create: the registration's record removes the relocation's record and
 // saved progress, which can never finish now, and nothing is left to resume.
-// A record that another operation left behind (one that does not remove it,
-// such as an import) goes with the resume that finds its revision recorded.
+// A record that another operation left behind (one of an older version, which
+// does not remove it) goes with the resume that finds its revision recorded.
 // One whose archive is at another revision without that (rebuild-index after
 // a manifest it skipped) is refused, and stays for the operator to abandon.
 void a_resume_needs_the_revision_it_verifies()
@@ -1064,9 +1064,10 @@ void a_resume_needs_the_revision_it_verifies()
 }
 
 // A record whose revision another operation recorded, leaving the record
-// behind (as an import does), is not unfinished (decision 0026, point 4): a
-// relocation without --resume removes it and its checkpoints, begins one of
-// its own, reads the whole carrier and records the revision after.
+// behind (as one of an older version does), is not unfinished (decision
+// 0026, point 4): a relocation without --resume removes it and its
+// checkpoints, begins one of its own, reads the whole carrier and records the
+// revision after.
 void a_relocation_replaces_a_record_that_can_no_longer_finish()
 {
     RelocationFixture fixture(true);

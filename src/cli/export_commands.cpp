@@ -1,7 +1,9 @@
 // Moving data out of and into the repository:
 //  - `export-sha256sums <uuid> --out FILE`: GNU sha256sum file for the latest
 //    revision (R-67); check it from the archive root with `sha256sum -c FILE`.
-//  - `export <uuid> --out DIR` and `import <file.vam> [--force-rollback]` (R-87).
+//  - `export <uuid> --out DIR` and `import <file.vam> [--force-rollback]` (R-87;
+//    an import exits 12 when another operation records its revision first, or
+//    a registration with saved files creates it, decision 0030).
 #include "cli/commands.h"
 
 #include "common/utf8.h"
@@ -127,6 +129,12 @@ int import_command(const Arguments& arguments)
     const auto imported = import_manifest(*store, *files, *session->writer, session->context.repo,
         app::typed_path(arguments.words[1]), arguments.has("--force-rollback"));
     if (!imported) {
+        // Another operation recorded the revision meanwhile, or a registration
+        // with saved files creates it: refused, as registration and relocation
+        // refuse (decision 0030).
+        if (imported.error().kind == ImportFailure::Kind::Refused) {
+            return report_failure(arguments, {exit_code::identity_decision, imported.error().message});
+        }
         return report_failure(arguments, {exit_code::failed,
             imported.error().failure_class + ": " + imported.error().message});
     }

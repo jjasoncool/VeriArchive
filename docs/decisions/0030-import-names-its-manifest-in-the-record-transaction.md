@@ -1,0 +1,53 @@
+---
+status: accepted
+date: 2026-10-16
+amends: HANDOFF §B7.5 (R-87: when an imported manifest gets its name; what an import does to the operations that create its revision), §B16 (`import` exits `12`), decision 0023 (point 3 and its consequence on `import`), decision 0026 (point 5: what an import does to a relocation that creates its revision)
+---
+
+# An imported manifest gets its name in the transaction that records its revision
+
+Decision 0023 made registration and relocation give their manifest its name inside the write transaction that records its revision, and left `import` to be changed the same way. `import <file.vam>` copied the manifest to `manifests/<archive_uuid>/rNNNN.vam` through `IFileWriter`, whose commit replaces the destination (decision 0011), and recorded the revision afterwards. Two imports of one revision at once (two exports of it, from two repositories), or an import while a registration or a relocation records the same revision, could therefore replace the manifest that the other had recorded: the recorded header hash no longer matched the file, and every later verification of the intact archive failed with `ManifestHashMismatch` (R-14). An import also left the plan of a registration and the record of a relocation that create the revision it recorded, though neither can finish any more (decisions 0023, 0026), and over a registration's saved files of that revision its index insert failed in SQLite's own words (`UNIQUE constraint failed: files...`, exit 3).
+
+## Decision
+
+1. **Copied without a lock, named under it.** `import` validates the manifest and checks R-15 as before (R-87), then copies its bytes into a temporary file beside `rNNNN.vam` and flushes it to stable storage (`IOutputFile::flush`), without holding the database lock. The copy is the bytes validated: line 1 is the header line read, and the rest has the header's body BLAKE3 and length; otherwise nothing is staged: "the manifest changed while it was imported; nothing was imported" (`ManifestHashMismatch`, exit 3). The transaction that records the revision waits for the write lock as a registration's record does (decision 0023: `begin_waiting`, up to 2 minutes), then finds the revision not recorded, checks R-15 again (point 5), leaves the revision to a registration with saved files of it (point 3), removes what can no longer finish (point 4), writes the archive record, the revision record and its index, renames the temporary file to `rNNNN.vam` last, and commits. So an imported manifest never replaces a recorded one, and a revision is recorded only with the bytes this import validated under its name. V1.1's signature file (`rNNNN.vam.sig`, R-63) is to be staged and named the same way, in the same transaction.
+2. **The first to record wins.** An import that finds its revision recorded, by another import, a registration or a relocation, stops: "revision N of archive U was recorded by another operation while this import ran; nothing was imported (import it again to compare it with the recorded manifest)" (exit 12). It changes nothing: not the recorded manifest, its index or the archive record, nor any plan or relocation record. Its temporary file goes with it. Imported again, the manifest is compared byte for byte with the recorded one (R-87): identical bytes are already present, other bytes are a `ManifestHashMismatch`.
+3. **A registration's saved files keep the revision.** As a relocation does (decision 0023, point 5), an import leaves the revision to an unfinished registration creating it once that registration has saved files hashed for it (R-104): "an unfinished registration of archive U (root "R") is creating revision N; nothing was imported (finish that registration with `register --resume`, or abandon it with `archive abandon-registration U` and import again)" (exit 12). Rows under the revision that no plan names are no registration's saved progress (decision 0026, point 8), left by a crash: the revision's index replaces them.
+4. **What can no longer finish goes with the record.** Once the revision is recorded, a registration creating it that has saved nothing, and a relocation creating it, can never finish: the registration's plan, and the relocation's record and saved progress, are removed in the record's transaction, as a registration's and a relocation's own records remove them (decisions 0023, 0026). An archive whose first registration in this repository is unfinished (`REGISTRATION_INCOMPLETE`, revision 0) is `REGISTERED` once a revision of it is imported; it keeps its own label (R-33).
+5. **R-15 in the record's transaction.** A higher revision of the archive may be recorded while the manifest is copied. Without `--force-rollback`, the transaction refuses an older revision as the check before the copy does: "revision N is older than the known revision M; pass --force-rollback to import it anyway" (`ManifestRevisionRollback`, exit 3).
+
+## Why
+
+Validated manifest bytes are the truth (R-14): a record whose file another operation replaced makes every verification of an intact archive fail, and a recorded revision whose file is not the validated one cannot even be imported again (R-87 finds other bytes recorded). The rename is the one step that must be ordered with the record; copying a large manifest takes a while, during which the other operations' checkpoints must not wait for the lock.
+
+The copy is checked because an import reads its source twice: once to validate it and read its entries, once to copy it. A file still being written, or removable media read a second time, can give other bytes the second time.
+
+An import that loses stops as a registration or a relocation that loses does (exit 12, nothing changed): it cannot tell which operation recorded the revision, and the operator decides what comes next. The comparison of R-87 is the next import's step.
+
+A registration with saved files of the revision has hashed what may have taken hours; a relocation leaves the revision to it for that reason (decisions 0023, 0025), and an import does too. A plan or a relocation record whose revision is recorded is the operation's end, not its interruption (decision 0023): R-15 never lets it go back to that revision.
+
+Rejected alternatives:
+
+- Holding the write lock while the manifest is copied: the other operations' checkpoints and records would wait for it and fail (decision 0023).
+- A losing import that compares its bytes with the recorded manifest at once and reports identical bytes as already present (exit 0): the import that lost would read the recorded manifest in full as a side effect of losing, and it would end otherwise than a losing registration or relocation. The operator imports again to compare.
+- Discarding a registration's saved files to take the revision: throws away hashing unasked (decision 0025, D11 option b).
+- Refusing over rows that no plan names: no registration exists to finish or abandon, so nothing would ever let the import record; `repo rebuild-index` removes such rows as well (decision 0026, point 8).
+- Copying from the bytes read for validation instead of reading the source again: a manifest of gigabytes is read as a stream and not kept in memory.
+
+## Consequences
+
+- No change to the manifest bytes, the database schema or the golden test.
+- Core: `ImportFailure::Kind` (`Failed`, `Refused`); `import_manifest` stages its copy and names it in its record. CLI: `import` exits `12` for a refusal, without a failure class in its message.
+- `import` takes no `CancelToken`, as before: Ctrl+C while its record waits for the write lock ends the process, and its temporary file stays as a crashed attempt's does (decision 0023, point 4).
+- An import of a version before this decision still names its manifest before it records it: do not import with an older version while another operation may record the same revision.
+- An archive at revision N with an unfinished registration of N+1 that imports revision N+2 or later keeps that registration's plan, which creates another revision than the one recorded; as before this decision, its record would set the archive back to N+1.
+- Decision 0023, point 3 ("an import ... leaves the plan") and its consequence on `import`, and decision 0026, point 5 ("an import does not"), no longer hold: an import removes them in its record.
+- Tests: two imports of one revision at once, interleaved at the manifest in both orders (the second refused, the recorded manifest, its record and index the first's, no file left behind, and each imported again compared with the recorded manifest); an import that reaches its record while another holds the write lock for longer than a statement waits (refused, not locked); a registration with saved files of the revision (refused, naming both ways on, nothing changed, then recorded once the registration is abandoned); the plan of a first registration, of a later registration and the record and saved progress of a relocation removed with the revision they create, those of another revision kept, rows that no plan names replaced by the index, and the archive of an unfinished first registration registered under its own label; a higher revision recorded while the manifest is copied (refused unless forced); a source that changes between validation and copy, in its body or its header (nothing imported, nothing left behind); the CLI end to end (a registration of revision 2 stopped at its record, the import of revision 2 refused with exit 12, then recorded once that registration is abandoned). A mutation check removed each guard in turn (the revision found not recorded, naming the manifest only in the record, waiting for the write lock, R-15 in the transaction, the refusal over saved files, the removal of rows no plan names, of the plan and of the relocation record, the archive registered, both checks of the copy, the refusal of a lost import), and each removal failed the test meant for it.
+
+### Interface terms (decision 0017)
+
+| English | 繁體中文 |
+|---|---|
+| the manifest changed while it was imported; nothing was imported | 清單檔在匯入期間被變更；未匯入任何內容 |
+| revision N of archive U was recorded by another operation while this import ran; nothing was imported (import it again to compare it with the recorded manifest) | 封存 U 的版次 N 已在這次匯入期間由其他作業記錄；未匯入任何內容（再匯入一次，即可與已記錄的清單檔比較） |
+| an unfinished registration of archive U (root "R") is creating revision N; nothing was imported (finish that registration with `register --resume`, or abandon it with `archive abandon-registration U` and import again) | 封存 U 有一個未完成的註冊（根目錄「R」）正在建立版次 N；未匯入任何內容（請以 `register --resume` 完成該註冊，或以 `archive abandon-registration U` 放棄它後再匯入一次） |

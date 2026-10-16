@@ -814,6 +814,16 @@ constexpr CatalogEntry entries[] = {
     {"revision {} is older than the known revision {}; "
         "pass --force-rollback to import it anyway",
         "版次 {} 比已知的版次 {} 舊；若仍要匯入，請加上 --force-rollback"},
+    // An imported manifest gets its name in the transaction that records it (decision 0030).
+    {"the manifest changed while it was imported; nothing was imported", "清單檔在匯入期間被變更；未匯入任何內容"},
+    {"revision {} of archive {} was recorded by another operation while this import ran; nothing was imported "
+        "(import it again to compare it with the recorded manifest)",
+        "封存 {1} 的版次 {0} 已在這次匯入期間由其他作業記錄；未匯入任何內容（再匯入一次，即可與已記錄的清單檔比較）"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was imported "
+        "(finish that registration with `register --resume`, or abandon it with `archive abandon-registration {}` "
+        "and import again)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未匯入任何內容（請以 `register --resume` "
+        "完成該註冊，或以 `archive abandon-registration {}` 放棄它後再匯入一次）"},
     // src/core/engine/recorded_manifest.cpp
     {"revision {} is not recorded", "版次 {} 沒有紀錄"},
     {"the manifest differs from the repository record", "清單檔與儲存庫的紀錄不符"},

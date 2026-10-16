@@ -462,7 +462,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     auto comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
 
     // The revision was recorded by another operation, which may have left
-    // this record (an import): it can never finish, and goes.
+    // this record (one of an older version): it can never finish, and goes.
     const auto lost_to_another = [&] {
         stop_mark.ended = true;
         (void)store.write_transaction([&]() -> std::expected<void, IoError> {

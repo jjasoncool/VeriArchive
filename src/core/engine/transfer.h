@@ -2,6 +2,8 @@
 // Moving manifests between repositories (R-87): export copies a validated
 // rNNNN.vam plus identity.json; import validates a manifest, enforces rollback
 // protection (R-15) and indexes it. Labels may collide after import (R-88).
+// An imported manifest gets its name in the transaction that records its
+// revision, as a registration's and a relocation's do (decision 0030).
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
 
@@ -29,10 +31,22 @@ struct ImportResult {
 };
 
 struct ImportFailure {
-    std::string failure_class;      // ManifestHashMismatch | ManifestRevisionRollback | RepositoryError
+    // Failed: the manifest cannot be imported. Refused: another operation
+    // recorded its revision while this import ran, or an unfinished
+    // registration with saved files creates it; nothing was imported
+    // (decision 0030, exit 12).
+    enum class Kind { Failed, Refused };
+    std::string failure_class;      // ManifestHashMismatch | ManifestRevisionRollback | RepositoryError; empty when refused
     std::string message;
+    Kind kind = Kind::Failed;
 };
 
+// Copies the manifest under a temporary name and flushes it without a lock,
+// then, in one write transaction that waits for the write lock as a record
+// does (decision 0023), finds its revision not recorded, writes the records
+// and the index, and names the manifest last: a recorded manifest is never
+// replaced. In the same transaction it removes the plan of a registration and
+// the record of a relocation that create the revision, as their own records do.
 std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     IFileSystemAccess& files, IFileWriter& writer, const RepositoryLayout& layout,
     const std::filesystem::path& manifest, bool force_rollback);

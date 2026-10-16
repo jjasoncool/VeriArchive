@@ -158,13 +158,14 @@ std::unexpected<RegisterFailure> another_registration(const Uuid& archive_uuid,
 }
 
 // A plan whose revision is recorded can never be finished. An attempt of the
-// registration that records it removes it, and so does a relocation; another
-// operation (an import, an older version) leaves it, and then each resume
-// would stop at its start and the root would take no other registration. So
-// the attempt that finds the revision recorded removes the plan, if the key
-// still holds the plan of that revision: by then it may hold the plan of the
-// archive's next registration, which stays (decision 0023). Best effort: a
-// plan left behind goes with the next attempt that finds its revision recorded.
+// registration that records it removes it, and so do a relocation and an
+// import (decision 0030); an operation of an older version leaves it, and
+// then each resume would stop at its start and the root would take no other
+// registration. So the attempt that finds the revision recorded removes the
+// plan, if the key still holds the plan of that revision: by then it may hold
+// the plan of the archive's next registration, which stays (decision 0023).
+// Best effort: a plan left behind goes with the next attempt that finds its
+// revision recorded.
 void remove_dead_plan(ArchiveStore& store, const Plan& plan)
 {
     (void)store.write_transaction([&]() -> std::expected<void, IoError> {
