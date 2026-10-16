@@ -3,6 +3,14 @@
 // hashed and compared with the header's body.blake3 / body.length *before* any
 // entry is returned. Entries are then streamed one by one, so multi-gigabyte
 // manifests never have to fit in memory.
+//
+// The entries are read from the file a second time, and that read is hashed
+// as well: a file that changed since it was validated, or removable media
+// that gives other bytes the second time, would give entries that are not the
+// body validated. At the end of the body, next() fails with BodyMismatch when
+// what it read differs from the header's body (its BLAKE3, length and lines).
+// So a caller uses no entry before next() has returned the end of the body.
+#include "core/hash/hashers.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
 
@@ -25,12 +33,22 @@ public:
     const std::string& header_line() const { return header_line_; }
     const std::string& header_blake3() const { return header_blake3_; }
 
-    // The next entry in canonical order, or nullopt after the last one.
+    // The next entry in canonical order, or nullopt after the last one, once
+    // what the entries were read from is the body validated; otherwise
+    // BodyMismatch (see above).
     std::expected<std::optional<Entry>, ManifestFailure> next();
 
 private:
     ManifestReader() = default;
     std::expected<bool, ManifestFailure> read_line(std::string& line);
+
+    // What next() reads, hashed as it is read: from the end of open(), which
+    // validated the body, to the end of the body.
+    struct BodyRead {
+        Blake3Hasher hash;
+        std::uint64_t length = 0;
+        std::uint64_t lines = 0;
+    };
 
     std::unique_ptr<IByteSource> source_;
     std::vector<std::byte> buffer_;
@@ -41,6 +59,8 @@ private:
     std::string header_line_;
     std::string header_blake3_;
     std::optional<Entry> previous_;
+    std::unique_ptr<BodyRead> body_read_;
+    bool body_read_differs_ = false;
 };
 
 } // namespace va

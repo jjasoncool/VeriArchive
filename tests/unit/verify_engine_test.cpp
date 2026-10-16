@@ -7,6 +7,7 @@
 #include "core/engine/item_rules.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/hash/hashers.h"
 #include "core/manifest/manifest_writer.h"
 
 #include <nlohmann/json.hpp>
@@ -621,6 +622,38 @@ void a_named_archive_reads_no_other_manifest()
     }
 }
 
+// R-14: the archive is compared with the entries of the manifest validated.
+// They come from a second read of the recorded manifest; when that read gives
+// other bytes (sample data: one hex digit of the first entry's BLAKE3), the
+// verification fails with ManifestHashMismatch, recorded in the history,
+// rather than compare the archive with entries the manifest does not hold.
+void entries_read_otherwise_than_validated_fail()
+{
+    Registered fixture;
+    const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
+    std::string bytes;
+    {
+        std::ifstream input(path, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+    const auto b3 = va::blake3_hex("report bytes"); // the first entry, docs/report.pdf
+    auto other = b3;
+    other[0] = other[0] == '0' ? '1' : '0';
+    // Its first opening reads line 1 alone (the candidates); the second loads it.
+    test::SecondReadDiffers repository_files(*fixture.repository.files, "r0001.vam", 2, bytes.find('\n') + 1,
+        "\"b3\":\"" + b3, "\"b3\":\"" + other);
+    va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    const auto outcome = va::verify_full(services, request, fixture.cancel, fixture.progress);
+    CHECK(repository_files.differed());
+    CHECK(outcome && outcome->result == "FAILED" &&
+          outcome->failure_classes == std::vector<std::string>{"ManifestHashMismatch"} && outcome->items.empty());
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->front().failure_classes == "ManifestHashMismatch");
+}
+
 void item_rules()
 {
     CHECK(va::mtime_matches("ntfs", 1'000'000'000, 1'900'000'000));
@@ -676,5 +709,6 @@ void verify_engine_tests()
     an_index_that_differs_from_its_manifest_stops_every_use();
     a_manifest_that_is_not_the_one_recorded_stops_every_use();
     a_named_archive_reads_no_other_manifest();
+    entries_read_otherwise_than_validated_fail();
     item_rules();
 }

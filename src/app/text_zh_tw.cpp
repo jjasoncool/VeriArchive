@@ -910,6 +910,7 @@ constexpr CatalogEntry entries[] = {
     {"invalid manifest header: {}", "清單檔標頭無效：{}", Match::Cause},
     {"manifest body does not match its header (ManifestHashMismatch)",
         "清單檔主體與其標頭不符（清單檔雜湊不符）"},
+    {"the manifest changed while it was read (ManifestHashMismatch)", "清單檔在讀取期間被變更（清單檔雜湊不符）"},
     {"invalid manifest entry: {}", "清單檔項目無效：{}", Match::Cause},
     {"manifest entries out of canonical order", "清單檔項目未依標準順序排列"},
     // nlohmann::json's sentences (common/json_error.h removes the library's tag),

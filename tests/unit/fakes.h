@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace test {
@@ -427,6 +428,80 @@ private:
     va::IFileSystemAccess& inner_;
     std::string name_;
     std::function<void()> hook_;
+};
+
+// Passes everything to `inner`, except that the `nth` opening of a file named
+// `name` reads other bytes the second time it reads from `offset`, as
+// removable media read again may give them: there `from` is replaced by `to`
+// (of the same length) in what the read returns. The file is not changed.
+class SecondReadDiffers final : public va::IFileSystemAccess {
+public:
+    SecondReadDiffers(va::IFileSystemAccess& inner, std::string name, int nth, std::uint64_t offset, std::string from,
+        std::string to)
+        : inner_(inner), name_(std::move(name)), nth_(nth), offset_(offset), from_(std::move(from)), to_(std::move(to))
+    {
+    }
+    // Whether a read gave the other bytes.
+    bool differed() const { return differed_; }
+
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        auto source = inner_.open(file, options);
+        if (!source || va::path_to_utf8(file.filename()) != name_ || ++opened_ != nth_) {
+            return source;
+        }
+        return std::make_unique<Source>(std::move(*source), *this);
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    class Source final : public va::IByteSource {
+    public:
+        Source(std::unique_ptr<va::IByteSource> inner, SecondReadDiffers& owner)
+            : inner_(std::move(inner)), owner_(owner)
+        {
+        }
+        std::expected<std::size_t, va::IoError> read(std::uint64_t offset, std::span<std::byte> output) override
+        {
+            const auto count = inner_->read(offset, output);
+            if (count && offset == owner_.offset_ && ++reads_at_offset_ == 2) {
+                const std::string_view read(reinterpret_cast<const char*>(output.data()), *count);
+                if (const auto at = read.find(owner_.from_); at != std::string_view::npos) {
+                    std::memcpy(output.data() + at, owner_.to_.data(), owner_.to_.size());
+                    owner_.differed_ = true;
+                }
+            }
+            return count;
+        }
+        std::uint64_t size() const override { return inner_->size(); }
+        std::size_t alignment() const override { return inner_->alignment(); }
+
+    private:
+        std::unique_ptr<va::IByteSource> inner_;
+        SecondReadDiffers& owner_;
+        int reads_at_offset_ = 0;
+    };
+
+    va::IFileSystemAccess& inner_;
+    std::string name_;
+    int nth_;
+    std::uint64_t offset_;
+    std::string from_;
+    std::string to_;
+    int opened_ = 0;
+    bool differed_ = false;
 };
 
 } // namespace test

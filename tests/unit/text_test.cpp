@@ -286,6 +286,10 @@ void translation_tests()
           "無法讀取清單檔 " + uuid + "/r0002.vam：標頭與其檔名不符");
     CHECK(chinese("cannot read manifest " + uuid + "/r0003.vam: invalid manifest header: key 'format' not found") ==
           "無法讀取清單檔 " + uuid + "/r0003.vam：清單檔標頭無效：找不到欄位「format」");
+    // The entries read again give other bytes than the body validated.
+    CHECK(chinese("cannot read manifest " + uuid + "/r0004.vam: the manifest changed while it was read "
+                  "(ManifestHashMismatch)") ==
+          "無法讀取清單檔 " + uuid + "/r0004.vam：清單檔在讀取期間被變更（清單檔雜湊不符）");
     CHECK(chinese("cannot list the manifests of archive " + uuid + ": FindFirstFileExW failed (Win32 error 5)") ==
           "無法列出封存 " + uuid + " 的清單檔：FindFirstFileExW 失敗（Win32 錯誤 5）");
     CHECK(chinese.format("skipped: {}", chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest")) ==

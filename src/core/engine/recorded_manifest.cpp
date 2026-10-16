@@ -77,7 +77,11 @@ std::expected<RecordedManifest, ManifestLoadFailure> load_recorded_manifest(
     for (;;) {
         auto next = reader->next();
         if (!next) {
-            return fail("RepositoryError", next.error().message);
+            // The entries come from a second read of the manifest, checked at
+            // the end of the body as the first was.
+            return fail(next.error().kind == ManifestFailure::Kind::BodyMismatch ? "ManifestHashMismatch"
+                                                                                : "RepositoryError",
+                next.error().message);
         }
         if (!*next) {
             return manifest;

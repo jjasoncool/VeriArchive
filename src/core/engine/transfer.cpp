@@ -23,6 +23,10 @@ std::unexpected<ImportFailure> refuse(std::string message)
     return std::unexpected(ImportFailure{"", std::move(message), ImportFailure::Kind::Refused});
 }
 
+// A read of the source that gives other bytes than the one validated: its
+// entries, or the copy (decision 0030).
+constexpr const char* changed_while_imported = "the manifest changed while it was imported; nothing was imported";
+
 // R-15: the highest revision of the archive that the repository knows.
 std::uint32_t highest_revision(const std::vector<RevisionRecord>& known)
 {
@@ -85,7 +89,7 @@ std::expected<std::unique_ptr<IOutputFile>, ImportFailure> stage_manifest(IFileS
     }
     if (first_line != header_line + '\n' || body_length != header.body_length ||
         body_hash.finish_hex() != header.body_blake3) {
-        return fail("ManifestHashMismatch", "the manifest changed while it was imported; nothing was imported");
+        return fail("ManifestHashMismatch", changed_while_imported);
     }
     if (auto flushed = (*output)->flush(); !flushed) {
         return fail("RepositoryError", flushed.error().message);
@@ -212,10 +216,17 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
         return fail("ManifestRevisionRollback", rollback_message(header.revision, highest));
     }
 
+    // The index is made of these entries, read from the source a second time:
+    // they are used only when what they were read from is the body validated,
+    // which the reader checks at the end of the body, as the copy below is
+    // checked (decision 0030).
     std::vector<Entry> entries;
     for (;;) {
         auto next = reader->next();
         if (!next) {
+            if (next.error().kind == ManifestFailure::Kind::BodyMismatch) {
+                return fail("ManifestHashMismatch", changed_while_imported);
+            }
             return fail("RepositoryError", next.error().message);
         }
         if (!*next) {

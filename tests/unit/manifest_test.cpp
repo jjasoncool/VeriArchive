@@ -1,5 +1,7 @@
 #include "test_support.h"
 
+#include "fakes.h"
+
 #include "common/json_error.h"
 #include "common/utf8.h"
 #include "core/hash/hashers.h"
@@ -318,6 +320,59 @@ void malformed_manifests_say_why()
     std::filesystem::remove_all(root, error);
 }
 
+// R-62: the entries come from a second read of the file, after open()
+// validated the body. When that read gives other bytes (sample data: one hex
+// digit of the first entry's BLAKE3, as removable media read again might),
+// the entries read are not the body validated: the end of the body fails with
+// BodyMismatch, also when asked again. Read as the file is, the end of the
+// body is the end.
+void entries_are_read_from_the_body_validated()
+{
+    const auto root = temporary_directory("va-manifest-second-read-");
+    const auto writer = va::platform::make_file_writer();
+    const auto files = va::platform::make_file_system_access();
+    const auto path = root / "r0001.vam";
+    va::ManifestWriter manifest(*writer, *files, path);
+    CHECK(manifest.add(file("a.txt", "one")));
+    CHECK(manifest.add(file("b.txt", "two")));
+    auto written = manifest.finish(golden_header());
+    CHECK(written && written->file->commit());
+    const auto bytes = read_file(path);
+    const auto b3 = va::blake3_hex("one");
+    auto other = b3;
+    other[0] = other[0] == '0' ? '1' : '0';
+
+    test::SecondReadDiffers differing(*files, "r0001.vam", 1, bytes.find('\n') + 1, "\"b3\":\"" + b3,
+        "\"b3\":\"" + other);
+    auto reader = va::ManifestReader::open(differing, path);
+    CHECK(reader.has_value());
+    if (reader) {
+        const auto first = reader->next();
+        CHECK(first && *first && (**first).b3 == other); // read, but not yet trusted
+        const auto second = reader->next();
+        CHECK(second && *second && (**second).path.p == "b.txt");
+        const auto end = reader->next();
+        CHECK(!end && end.error().kind == va::ManifestFailure::Kind::BodyMismatch &&
+              end.error().message == "the manifest changed while it was read (ManifestHashMismatch)");
+        const auto again = reader->next();
+        CHECK(!again && again.error().kind == va::ManifestFailure::Kind::BodyMismatch);
+    }
+    CHECK(differing.differed());
+
+    auto unchanged = va::ManifestReader::open(*files, path);
+    CHECK(unchanged.has_value());
+    if (unchanged) {
+        std::size_t entries = 0;
+        for (auto next = unchanged->next(); next && *next; next = unchanged->next()) {
+            ++entries;
+        }
+        const auto end = unchanged->next();
+        CHECK(entries == 2 && end && !*end);
+    }
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 } // namespace
 
 void manifest_tests()
@@ -326,4 +381,5 @@ void manifest_tests()
     writers_of_one_revision_keep_their_own_body();
     out_of_order_entries_are_rejected();
     malformed_manifests_say_why();
+    entries_are_read_from_the_body_validated();
 }

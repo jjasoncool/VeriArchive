@@ -35,6 +35,13 @@ std::expected<bool, ManifestFailure> ManifestReader::read_line(std::string& line
                 }
                 return false;
             }
+            if (body_read_) {
+                const auto piece = std::span<const std::byte>(buffer_.data(), *count);
+                body_read_->hash.update(piece);
+                body_read_->length += *count;
+                body_read_->lines +=
+                    static_cast<std::uint64_t>(std::count(piece.begin(), piece.end(), std::byte{'\n'}));
+            }
             offset_ += *count;
             buffer_start_ = 0;
             buffer_end_ = *count;
@@ -104,6 +111,8 @@ std::expected<ManifestReader, ManifestFailure> ManifestReader::open(
 
     reader.offset_ = body_start;
     reader.buffer_start_ = reader.buffer_end_ = 0;
+    // The entries are read again from here: what they come from is hashed too.
+    reader.body_read_ = std::make_unique<BodyRead>();
     return reader;
 }
 
@@ -138,6 +147,18 @@ std::expected<std::optional<Entry>, ManifestFailure> ManifestReader::next()
             return std::unexpected(has_line.error());
         }
         if (!*has_line) {
+            // The end of the body: the entries count only when what they were
+            // read from is the body that open() validated (R-62).
+            if (body_read_) {
+                body_read_differs_ = body_read_->length != header_.body_length ||
+                                     body_read_->lines != header_.body_lines ||
+                                     body_read_->hash.finish_hex() != header_.body_blake3;
+                body_read_.reset();
+            }
+            if (body_read_differs_) {
+                return std::unexpected(ManifestFailure{ManifestFailure::Kind::BodyMismatch,
+                    "the manifest changed while it was read (ManifestHashMismatch)"});
+            }
             return std::optional<Entry>{};
         }
         Entry entry;
