@@ -217,18 +217,23 @@ nlohmann::json plan_json(const Plan& plan, const std::filesystem::path& root)
     return json;
 }
 
-// The unfinished registration of `root`, if there is one.
+// The unfinished registration of `root`, if there is one. Roots are compared
+// as the folders they name: a plan that an older version recorded for a root
+// typed with a trailing separator ("D:\Photos\") is the plan of "D:\Photos".
 std::expected<std::optional<Plan>, IoError> find_pending(ArchiveStore& store, const std::filesystem::path& root)
 {
     const auto pending = store.settings_with_prefix("registration:");
     if (!pending) {
         return std::unexpected(pending.error());
     }
-    const auto wanted = unicode_fold(path_to_utf8(root.lexically_normal()));
+    const auto folder = [](const std::filesystem::path& path) {
+        return unicode_fold(path_to_utf8(without_trailing_separators(path.lexically_normal())));
+    };
+    const auto wanted = folder(root);
     for (const auto& [key, value] : *pending) {
         const auto json = nlohmann::json::parse(value, nullptr, false);
         if (!json.is_object() || !json.contains("root") ||
-            unicode_fold(path_to_utf8(path_from_utf8(json["root"].get<std::string>()).lexically_normal())) != wanted) {
+            folder(path_from_utf8(json["root"].get<std::string>())) != wanted) {
             continue;
         }
         Plan plan;

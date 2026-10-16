@@ -69,6 +69,10 @@ void fs_access_tests()
         CHECK(by_name.contains("emptydir") && !by_name.at("emptydir").is_mount_point);
         CHECK(by_name.contains("a.txt") && by_name.at("a.txt").mtime_ns > 0);
     }
+    // The directory given with a separator at its end, as Windows reports a
+    // volume mounted in a folder, lists the same entries.
+    const auto with_separator = access->list(root / "");
+    CHECK(with_separator && listed && with_separator->size() == listed->size());
 
     // Uncached read (R-100) returns exactly the file's bytes, including the
     // final partial sector.

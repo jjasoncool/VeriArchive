@@ -138,7 +138,7 @@ std::filesystem::path user_path(const std::string& word)
 
 std::filesystem::path root_path(const std::string& word)
 {
-    return platform::resolve_subst_drive(user_path(word));
+    return platform::resolve_subst_drive(without_trailing_separators(user_path(word)));
 }
 
 bool names_archive(const Uuid& uuid, const std::string& word)

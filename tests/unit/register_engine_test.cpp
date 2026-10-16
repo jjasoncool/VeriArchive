@@ -218,6 +218,67 @@ void interrupted_registration_resumes()
     CHECK(verified && verified->result == "PASSED");
 }
 
+// A root typed with separators at its end, as shells complete a folder name,
+// is the folder before them; a root keeps its own. A backslash separates only
+// on Windows (R-40).
+void trailing_separators_leave_the_folder()
+{
+    const auto folder = [](const char* path) {
+        return va::path_to_utf8(va::without_trailing_separators(va::path_from_utf8(path)));
+    };
+    CHECK(folder("/vol/photos/") == "/vol/photos");
+    CHECK(folder("/vol/photos//") == "/vol/photos");
+    CHECK(folder("/vol/photos") == "/vol/photos");
+    CHECK(folder("photos/") == "photos");
+    CHECK(folder("/") == "/");
+    CHECK(folder("").empty());
+    if (std::filesystem::path::preferred_separator == '\\') {
+        CHECK(folder(R"(D:\Photos\)") == R"(D:\Photos)");
+        CHECK(folder("D:/Photos/") == "D:/Photos");
+        CHECK(folder(R"(D:\)") == R"(D:\)");
+        CHECK(folder("D:/") == "D:/");
+        CHECK(folder("D:") == "D:");
+        CHECK(folder(R"(\\server\share\dir\)") == R"(\\server\share\dir)");
+    } else {
+        CHECK(folder(R"(/vol/name\)") == R"(/vol/name\)");
+    }
+}
+
+// A plan that an older version recorded for a root typed with a trailing
+// separator is the plan of that folder: the root without the separator finds
+// it, so the registration is resumed rather than started again beside it.
+void a_plan_recorded_with_a_trailing_separator_is_found()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    fixture.archive.add_file("b.txt", "b (sample data)");
+    fixture.archive.node("b.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.run(at("/vol"));
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("b.txt").open_error.reset();
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->size() == 1);
+    if (!archives || archives->size() != 1) {
+        return;
+    }
+    const auto archive_uuid = archives->front().archive_uuid;
+    const auto key = "registration:" + archive_uuid;
+    auto plan = nlohmann::json::parse(fixture.store.setting(key).value_or(""), nullptr, false);
+    CHECK(plan.is_object() && plan.value("root", std::string{}) == "/vol");
+    plan["root"] = "/vol/";
+    CHECK(fixture.store.set_setting(key, plan.dump()));
+
+    const auto again = fixture.run(at("/vol"));
+    CHECK(!again && again.error().kind == va::RegisterFailure::Kind::Refused &&
+          again.error().message.find(archive_uuid) != std::string::npos);
+    auto request = at("/vol");
+    request.resume = true;
+    const auto resumed = fixture.run(request);
+    CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 && resumed->counts.files == 2);
+    const auto after = fixture.store.archives();
+    CHECK(after && after->size() == 1 && after->front().status == "REGISTERED");
+}
+
 // R-89: the optional media copy, and what verification makes of it.
 void media_copy_is_written_and_checked()
 {
@@ -1537,6 +1598,8 @@ void register_engine_tests()
     unreadable_files_are_recorded();
     retired_archive_takes_no_revision();
     interrupted_registration_resumes();
+    trailing_separators_leave_the_folder();
+    a_plan_recorded_with_a_trailing_separator_is_found();
     media_copy_is_written_and_checked();
     copied_identity_file_fails();
     unidentifiable_volume_fails();

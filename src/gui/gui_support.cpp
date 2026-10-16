@@ -2,6 +2,7 @@
 
 #include "app/progress_estimate.h"
 #include "common/utf8.h"
+#include "core/engine/candidates.h"
 #include "platform/platform_services.h"
 
 #include <algorithm>
@@ -105,7 +106,7 @@ std::filesystem::path entry_path(GtkWidget* entry)
 
 std::filesystem::path entry_root(GtkWidget* entry)
 {
-    return platform::resolve_subst_drive(entry_path(entry));
+    return platform::resolve_subst_drive(without_trailing_separators(entry_path(entry)));
 }
 
 std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset)

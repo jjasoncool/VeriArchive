@@ -30,6 +30,16 @@ function(run_cli expected_codes)
     set(last_errors "${errors}" PARENT_SCOPE)
 endfunction()
 
+# The root_hint in the header (line 1) of the manifest at `manifest`.
+function(read_root_hint manifest out)
+    file(TO_CMAKE_PATH "${manifest}" manifest)
+    file(READ "${manifest}" manifest_start LIMIT 65536)
+    string(FIND "${manifest_start}" "\n" header_end)
+    string(SUBSTRING "${manifest_start}" 0 ${header_end} header)
+    string(JSON root_hint GET "${header}" root_hint)
+    set(${out} "${root_hint}" PARENT_SCOPE)
+endfunction()
+
 # A tree with CJK and emoji names, an empty directory and a nested file.
 set(ROOT "${WORK}/archive")
 file(WRITE "${ROOT}/readme.txt" "hello\n")
@@ -57,6 +67,15 @@ run_cli("0;2" verify --full "${ROOT}" --json)
 string(JSON result GET "${last_output}" result)
 if(NOT result MATCHES "^PASSED")
     message(FATAL_ERROR "clean verify returned ${result}")
+endif()
+string(JSON clean_root GET "${last_output}" root)
+# A root typed with a separator at its end, as shells complete a folder name,
+# is that folder: it verifies, and the run names the folder as above.
+run_cli("0;2" verify --full "${ROOT}/" --json)
+string(JSON result GET "${last_output}" result)
+string(JSON separator_root GET "${last_output}" root)
+if(NOT result MATCHES "^PASSED" OR NOT separator_root STREQUAL clean_root)
+    message(FATAL_ERROR "verify of ${ROOT}/ returned ${result} at ${separator_root}, expected ${clean_root}")
 endif()
 run_cli("0;2" verify --full "${archive_uuid}")
 if(NOT last_output MATCHES "完整驗證")
@@ -103,10 +122,17 @@ endif()
 # A backup: a copy of the tree registered as an archive of its own. Another
 # root on the same volume is allowed while the roots do not overlap (decision
 # 0001). Comparing the two archives reads only their manifests (decision 0020).
+# Its folder is typed with a separator at its end, which the archive's
+# root_hint does not keep.
 set(COPY "${WORK}/copy")
 file(COPY "${ROOT}/" DESTINATION "${COPY}")
-run_cli("0" register "${COPY}" --json)
+run_cli("0" register "${COPY}/" --json)
 string(JSON copy_uuid GET "${last_output}" archive_uuid)
+string(JSON copy_manifest GET "${last_output}" manifest)
+read_root_hint("${copy_manifest}" copy_hint)
+if(copy_hint MATCHES "[/\\\\]$")
+    message(FATAL_ERROR "root_hint of a registration of ${COPY}/ is ${copy_hint}")
+endif()
 string(SUBSTRING "${copy_uuid}" 0 8 copy_prefix)
 run_cli("0" --lang en archive compare "${archive_uuid}" "${copy_uuid}")
 if(NOT last_output MATCHES "^COMPARE IDENTICAL  [^\n]*\\(${archive_uuid}\\) r1  vs  [^\n]*\\(${copy_uuid}\\) r1\n")
@@ -163,6 +189,11 @@ file(REMOVE "${WORK}/repo/manifests")
 file(RENAME "${WORK}/repo/manifests.away" "${WORK}/repo/manifests")
 run_cli("12" register "${BROKEN}")
 set(refusal "${last_errors}")
+# Typed with a separator at its end, the folder has the same unfinished registration.
+run_cli("12" register "${BROKEN}/")
+if(NOT last_errors STREQUAL refusal)
+    message(FATAL_ERROR "register of ${BROKEN}/ while its registration is unfinished:\n${last_errors}")
+endif()
 run_cli("0" archive list --json)
 string(JSON archive_count LENGTH "${last_output}" archives)
 math(EXPR last_archive "${archive_count} - 1")

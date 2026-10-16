@@ -179,7 +179,15 @@ public:
     std::expected<std::vector<DirEntry>, IoError> list(const std::filesystem::path& directory) override
     {
         WIN32_FIND_DATAW data{};
-        const auto pattern = long_path(directory) + L"\\*";
+        // A directory given with a separator at its end ("D:\", or a volume
+        // mounted in a folder, whose mount point ends with one) takes no
+        // second one: after \\?\ Windows keeps the path as it is, and a
+        // folder name followed by "\\" is an invalid name (Win32 error 123).
+        auto pattern = long_path(directory);
+        if (!pattern.ends_with(L'\\')) {
+            pattern += L'\\';
+        }
+        pattern += L'*';
         const HANDLE search = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data,
             FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
         if (search == INVALID_HANDLE_VALUE) {

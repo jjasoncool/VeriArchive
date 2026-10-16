@@ -68,6 +68,16 @@ std::expected<std::string, IoError> root_subpath_of(
     return archive_path->p;
 }
 
+std::filesystem::path without_trailing_separators(std::filesystem::path root)
+{
+    // A path that ends with a separator has an empty file name; one without a
+    // relative part is a root ("D:\", "/"). Each parent_path() drops one element.
+    while (!root.has_filename() && root.has_relative_path()) {
+        root = root.parent_path();
+    }
+    return root;
+}
+
 bool roots_overlap(std::string_view left, std::string_view right)
 {
     const auto a = unicode_fold(left);
