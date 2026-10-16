@@ -99,6 +99,7 @@ if(WIN32)
         src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
         src/platform/windows/process_table_win.cpp
+        src/platform/windows/subst_drive.cpp
         src/platform/windows/win_util.cpp
     )
     target_link_libraries(veriarchive_platform PRIVATE mpr)
@@ -248,6 +249,7 @@ if(BUILD_TESTING)
         tests/unit/repository_test.cpp
         tests/unit/scanner_test.cpp
         tests/unit/sha256sums_test.cpp
+        tests/unit/subst_drive_test.cpp
         tests/unit/text_test.cpp
         tests/unit/transfer_test.cpp)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
@@ -257,6 +259,10 @@ if(BUILD_TESTING)
     if(NOT (UNIX AND NOT APPLE))
         # Pure C++ parser; tested on every OS although only Linux uses it.
         target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp src/platform/linux/vpd.cpp)
+    endif()
+    if(NOT WIN32)
+        # Pure C++ path handling; tested on every OS although only Windows uses it.
+        target_sources(veriarchive_tests PRIVATE src/platform/windows/subst_drive.cpp)
     endif()
     # The GUI's choice of the media identity it shows is plain C++ without
     # GTK, so it is tested also where the GUI is not built.

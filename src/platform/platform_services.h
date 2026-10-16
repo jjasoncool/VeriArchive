@@ -14,6 +14,14 @@ bool writable_directory(const std::filesystem::path& directory);
 bool network_filesystem(const std::filesystem::path& path);
 bool process_is_elevated();
 
+// `path` through a drive letter made with subst (`subst S: D:\Data`), with
+// the letter replaced by the folder it stands for: "S:\Photos" becomes
+// "D:\Data\Photos". Windows reports no volume for such a letter, so the user
+// interfaces resolve an archive root this way before its volume is looked up,
+// and the root is recorded by its real path (decision 0027). Any other path
+// comes back unchanged, and on Linux every path.
+std::filesystem::path resolve_subst_drive(const std::filesystem::path& path);
+
 // Recorded in manifests and history rows (created_by).
 std::string os_name();   // "windows" or "linux"
 std::string host_name();

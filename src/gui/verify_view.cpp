@@ -103,7 +103,7 @@ void start_verification(GuiState& state, bool resume)
         if (selected != GTK_INVALID_LIST_POSITION && selected > 0 && selected <= view.archive_uuids.size()) {
             request.archive_uuid = view.archive_uuids[selected - 1];
         } else {
-            request.root = entry_path(view.folder);
+            request.root = entry_root(view.folder);
             if (request.root->empty()) {
                 show_report(state,
                     fixed_message("Choose the folder or volume to verify, or pick a registered archive."));

@@ -1,5 +1,6 @@
 #include "platform/platform_services.h"
 #include "common/utf8.h"
+#include "platform/windows/subst_drive.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <algorithm>
@@ -105,6 +106,24 @@ bool network_filesystem(const std::filesystem::path& path)
         return WNetGetConnectionW(drive.c_str(), remote_name, &length) == NO_ERROR;
     }
     return false;
+}
+
+std::filesystem::path resolve_subst_drive(const std::filesystem::path& path)
+{
+    // QueryDosDeviceW reads the drive letters of this logon session, which is
+    // where subst makes them; it needs no privilege (R-09).
+    const auto query = [](std::wstring_view drive) -> std::optional<std::wstring> {
+        const std::wstring name(drive);
+        std::vector<wchar_t> targets(1024);
+        while (QueryDosDeviceW(name.c_str(), targets.data(), static_cast<DWORD>(targets.size())) == 0) {
+            if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || targets.size() >= 65536) {
+                return std::nullopt; // not defined, or no answer: the letter is left as it is
+            }
+            targets.resize(targets.size() * 2);
+        }
+        return std::wstring(targets.data()); // the first target of the NUL-separated list
+    };
+    return std::filesystem::path(windows::resolve_subst(path.native(), query));
 }
 
 bool process_is_elevated()

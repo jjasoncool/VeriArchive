@@ -78,6 +78,8 @@ Options:
 
 Registering an already registered folder or volume again stops with exit code 12 and asks you to choose `--new-revision` or `--force-new-archive`.
 
+A drive letter made with `subst` (such as `S:` for the folder `D:\Data`) is not a volume. A folder reached through one is registered by its real path: registering `S:\Photos` records `D:\Data\Photos` on the volume that holds it, and the reports show that path. It can be verified through the letter or by its real path.
+
 Files that cannot be read at registration (permission, media errors) are recorded without hashes and are never reported as verified.
 
 ### Reading the progress

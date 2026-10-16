@@ -73,7 +73,7 @@ void start_registration(GuiState& state)
         return;
     }
     RegisterRequest request;
-    request.root = entry_path(view.folder);
+    request.root = entry_root(view.folder);
     const std::string label = gtk_editable_get_text(GTK_EDITABLE(view.label));
     if (!label.empty()) {
         request.label = label;

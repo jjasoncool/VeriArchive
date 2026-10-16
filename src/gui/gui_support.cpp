@@ -103,6 +103,11 @@ std::filesystem::path entry_path(GtkWidget* entry)
     return path_from_utf8(gtk_editable_get_text(GTK_EDITABLE(entry)));
 }
 
+std::filesystem::path entry_root(GtkWidget* entry)
+{
+    return platform::resolve_subst_drive(entry_path(entry));
+}
+
 std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset)
 {
     const auto selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop_down));

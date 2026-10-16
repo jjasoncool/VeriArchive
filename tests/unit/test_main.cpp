@@ -28,6 +28,7 @@ int main()
     local_time_tests();
     compare_archives_tests();
     vpd_tests();
+    subst_drive_tests();
     progress_estimate_tests();
     unfinished_operations_tests();
     abandon_registration_tests();

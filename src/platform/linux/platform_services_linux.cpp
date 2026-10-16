@@ -102,6 +102,12 @@ bool process_is_elevated()
     return geteuid() == 0;
 }
 
+// Linux has no drive letters.
+std::filesystem::path resolve_subst_drive(const std::filesystem::path& path)
+{
+    return path;
+}
+
 std::string os_name()
 {
     return "linux";

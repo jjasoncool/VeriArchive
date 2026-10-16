@@ -83,6 +83,7 @@ veriarchive_cli / veriarchive_gui / veriarchive_helper   composition roots
 ## A4. Privilege model
 
 > Amended by `docs/decisions/0021-linux-without-udev.md`: R-09 on Linux also uses `statfs` on the mount point (the kernel call behind `statvfs`) for the kernel filesystem id.
+> Amended by `docs/decisions/0027-subst-drive-letters.md`: R-09 on Windows also uses `QueryDosDeviceW`, which resolves a drive letter made with subst to the folder it stands for before the volume is looked up.
 
 - R-08 V1 runs entirely unprivileged. The GUI MUST never require Administrator/root (GTK under Wayland refuses to run as root; elevated GUIs are an anti-pattern).
 - R-09 V1 media identity uses unprivileged APIs only.
@@ -301,6 +302,8 @@ line 2..N   body   — one canonical JSON object per line: entries (sorted per R
 - R-66 Golden test: the same fixture tree registered on Windows and on Linux MUST produce byte-identical `.vam` files after a test helper blanks `created`, `created_by`, `identity`, `root_hint`. Golden fixtures use relative links only (decision 0008); the cross-OS comparison also blanks `mode` and `attrs` (decision 0015).
 
 ### B4.3 Header (line 1; shown wrapped, real header is one line)
+
+> Amended by `docs/decisions/0027-subst-drive-letters.md`: `root_hint` is the archive root by its real path; a drive letter made with subst is replaced by the folder it stands for (`S:\Photos` is recorded as `D:\Data\Photos`).
 
 ```json
 {"format":"vam","version":1,

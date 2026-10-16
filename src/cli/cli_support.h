@@ -79,6 +79,11 @@ std::optional<Failure> check_options(const Arguments& arguments,
 // working directory, as users expect.
 std::filesystem::path user_path(const std::string& word);
 
+// A root path typed by the user (register, verify --full, archive relocate):
+// a user_path, through a drive letter made with subst resolved to the folder
+// that letter stands for, whose volume can be identified (decision 0027).
+std::filesystem::path root_path(const std::string& word);
+
 // Whether `word` on the command line names the archive `uuid`: the full uuid,
 // or a prefix of at least 8 characters.
 bool names_archive(const Uuid& uuid, const std::string& word);

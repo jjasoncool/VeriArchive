@@ -2,6 +2,7 @@
 
 #include "app/session.h"
 #include "common/utf8.h"
+#include "platform/platform_services.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -133,6 +134,11 @@ std::filesystem::path user_path(const std::string& word)
     std::error_code error;
     auto path = std::filesystem::absolute(path_from_utf8(word), error);
     return error ? path_from_utf8(word) : path.lexically_normal();
+}
+
+std::filesystem::path root_path(const std::string& word)
+{
+    return platform::resolve_subst_drive(user_path(word));
 }
 
 bool names_archive(const Uuid& uuid, const std::string& word)

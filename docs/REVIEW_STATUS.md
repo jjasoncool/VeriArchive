@@ -40,10 +40,6 @@ agreed with every file of the 4.3 GB archive, and an archive given by uuid was f
 
 ## Still required before acceptance
 
-- **subst drive letters.** A folder reached through a drive letter made with `subst` cannot be
-  registered: Windows reports no volume for it (`GetVolumeNameForVolumeMountPointW`, Win32 error
-  4390), and the message does not say why. Register the folder by its real path; resolving the
-  letter to its target is still to do.
 - **Linux without udev (HANDOFF D9, decision 0021).** The Linux build compiles and passes the
   unit and end-to-end tests in GitLab CI (Ubuntu 24.04, Fedora 41, 2026-10-15), but so far only on
   a runner whose device reports a serial. Decision 0021 now takes the kernel filesystem id

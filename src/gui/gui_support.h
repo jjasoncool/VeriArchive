@@ -46,6 +46,11 @@ void clear_grid(GtkWidget* grid);
 // Path typed in (or chosen into) an entry.
 std::filesystem::path entry_path(GtkWidget* entry);
 
+// The folder or volume root to register or verify, typed in (or chosen into)
+// an entry: through a drive letter made with subst resolved to the folder
+// that letter stands for, whose volume can be identified (decision 0027).
+std::filesystem::path entry_root(GtkWidget* entry);
+
 // The archive chosen in a drop-down whose item `offset + i` is uuids[i], or
 // nothing when another item (such as "The folder or volume above") is chosen.
 std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset);

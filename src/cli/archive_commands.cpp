@@ -486,7 +486,7 @@ int relocate(const Arguments& arguments, Opened& opened)
     if (!status) {
         return report_failure(arguments, status.error());
     }
-    RelocateRequest request{status->archive.archive_uuid, user_path(arguments.words[3]), std::nullopt};
+    RelocateRequest request{status->archive.archive_uuid, root_path(arguments.words[3]), std::nullopt};
     if (const auto io = arguments.value("--io")) {
         if (*io != "hdd" && *io != "ssd") {
             return report_failure(arguments, {exit_code::usage, "--io takes hdd or ssd"});

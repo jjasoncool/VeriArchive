@@ -241,6 +241,92 @@ if(NOT finished MATCHES "^[0-9]+-[0-9]+-[0-9]+T[0-9]+:[0-9]+:[0-9]+Z$")
     message(FATAL_ERROR "--json history is not in UTC: ${finished}")
 endif()
 
+# Decision 0027 (Windows): a folder reached through a drive letter made with
+# subst is registered and verified through the letter, and recorded by its
+# real path on its real volume. The probe takes a free letter from S: to V:
+# and removes it right after the two commands, before anything is checked;
+# then `subst` must no longer list it.
+if(CMAKE_HOST_WIN32)
+    set(SUBSTITUTED "${WORK}/subst")
+    file(WRITE "${SUBSTITUTED}/photos/sample.txt" "subst sample\n")
+    file(TO_NATIVE_PATH "${SUBSTITUTED}" substituted_native)
+    # The CLI's exit code, stdout and stderr in <prefix>_code, _output and
+    # _errors; never stops the script, so the letter is always removed.
+    function(probe_cli prefix)
+        execute_process(COMMAND "${CLI}" ${GLOBAL} ${ARGN}
+            ENCODING UTF-8 TIMEOUT 120
+            RESULT_VARIABLE code OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+        set(${prefix}_code "${code}" PARENT_SCOPE)
+        set(${prefix}_output "${output}" PARENT_SCOPE)
+        set(${prefix}_errors "${errors}" PARENT_SCOPE)
+    endfunction()
+    set(letter "")
+    foreach(candidate S T U V)
+        if(NOT EXISTS "${candidate}:/")
+            execute_process(COMMAND subst "${candidate}:" "${substituted_native}"
+                RESULT_VARIABLE made OUTPUT_QUIET ERROR_QUIET)
+            if(made EQUAL 0)
+                set(letter "${candidate}")
+                break()
+            endif()
+        endif()
+    endforeach()
+    if(letter STREQUAL "")
+        message(STATUS "subst probe skipped: no letter from S: to V: could be made with subst")
+    else()
+        probe_cli(through_register register "${letter}:\\photos" --json)
+        probe_cli(through_verify verify --full "${letter}:\\photos" --json)
+        execute_process(COMMAND subst "${letter}:" /D RESULT_VARIABLE removed OUTPUT_QUIET ERROR_QUIET)
+        execute_process(COMMAND subst OUTPUT_VARIABLE substs ERROR_QUIET)
+        string(FIND "${substs}" "${letter}:\\: =>" left_behind)
+        if(NOT removed EQUAL 0 OR NOT left_behind EQUAL -1)
+            message(FATAL_ERROR "the subst probe could not remove ${letter}: (exit ${removed}):\n${substs}")
+        endif()
+
+        if(NOT through_register_code EQUAL 0)
+            message(FATAL_ERROR "register through ${letter}: exit ${through_register_code}\n"
+                "${through_register_output}\n${through_register_errors}")
+        endif()
+        string(JSON subst_uuid GET "${through_register_output}" archive_uuid)
+        string(JSON subst_manifest GET "${through_register_output}" manifest)
+        if(NOT through_verify_code MATCHES "^[02]$")
+            message(FATAL_ERROR "verify through ${letter}: exit ${through_verify_code}\n"
+                "${through_verify_output}\n${through_verify_errors}")
+        endif()
+        string(JSON verified_uuid GET "${through_verify_output}" archive_uuid)
+        string(JSON verified_root GET "${through_verify_output}" root)
+        string(TOLOWER "${verified_root}" verified_root)
+        string(TOLOWER "${substituted_native}\\photos" real_root)
+        if(NOT verified_uuid STREQUAL subst_uuid OR NOT verified_root STREQUAL real_root)
+            message(FATAL_ERROR "verify through ${letter}: found ${verified_uuid} at ${verified_root}, "
+                "expected ${subst_uuid} at ${real_root}")
+        endif()
+        # The manifest's root_hint is the real path, not the letter.
+        file(TO_CMAKE_PATH "${subst_manifest}" subst_manifest)
+        file(READ "${subst_manifest}" manifest_start LIMIT 65536)
+        string(FIND "${manifest_start}" "\n" header_end)
+        string(SUBSTRING "${manifest_start}" 0 ${header_end} header)
+        string(JSON root_hint GET "${header}" root_hint)
+        string(TOLOWER "${root_hint}" root_hint)
+        if(NOT root_hint STREQUAL real_root)
+            message(FATAL_ERROR "root_hint of a registration through ${letter}: is ${root_hint}")
+        endif()
+        # The real volume: the root's place on it, and the same archive by the real path.
+        get_filename_component(work_name "${WORK}" NAME)
+        run_cli("0" archive show "${subst_uuid}" --json)
+        string(JSON subst_subpath GET "${last_output}" root_subpath)
+        if(NOT subst_subpath MATCHES "/${work_name}/subst/photos$")
+            message(FATAL_ERROR "root_subpath of a registration through ${letter}: is ${subst_subpath}")
+        endif()
+        run_cli("0;2" verify --full "${SUBSTITUTED}/photos" --json)
+        string(JSON verified_uuid GET "${last_output}" archive_uuid)
+        if(NOT verified_uuid STREQUAL subst_uuid)
+            message(FATAL_ERROR "the real path of a folder registered through ${letter}: is another archive")
+        endif()
+        run_cli("12" register "${SUBSTITUTED}/photos")
+    endif()
+endif()
+
 # Export -> import into a second repository (R-87).
 run_cli("0" export "${archive_prefix}" --out "${WORK}/export")
 file(WRITE "${WORK}/config2.json" "{}\n")
