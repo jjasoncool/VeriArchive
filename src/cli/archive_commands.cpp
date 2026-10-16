@@ -20,6 +20,7 @@
 #include "platform/media_enumerator.h"
 #include "platform/process_table.h"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <map>
@@ -192,6 +193,31 @@ void print_unfinished(const app::Text& text, const UnfinishedByArchive& unfinish
     }
 }
 
+// The kind of a manifest that cannot be used, as --json gives it (decision 0028).
+std::string_view unusable_kind_code(UnusableManifest::Kind kind)
+{
+    switch (kind) {
+    case UnusableManifest::Kind::Missing:
+        return "missing";
+    case UnusableManifest::Kind::Unreadable:
+        return "unreadable";
+    case UnusableManifest::Kind::Changed:
+        return "changed";
+    case UnusableManifest::Kind::IndexDiffers:
+        break;
+    }
+    return "index_differs";
+}
+
+// An archive whose latest manifest cannot be used is listed with that
+// problem, in the plain message that ends with how to fix it (decision 0028).
+void print_manifest_problem(const app::Text& text, const ArchiveStatus& status, std::string_view indent)
+{
+    if (status.unusable_manifest) {
+        std::cout << indent << text.format("problem: {}", text(plain_message(*status.unusable_manifest))) << '\n';
+    }
+}
+
 nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchive& unfinished)
 {
     nlohmann::json json{
@@ -215,6 +241,11 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
         if (status.header->copy_of) {
             json["copy_of"] = *status.header->copy_of;
         }
+    }
+    if (status.unusable_manifest) {
+        const auto& unusable = *status.unusable_manifest;
+        json["manifest_problem"] = {{"kind", unusable_kind_code(unusable.kind)}, {"revision", unusable.revision},
+            {"manifest", unusable.manifest}, {"message", plain_message(unusable)}};
     }
     if (const auto found = unfinished.find(status.archive.archive_uuid); found != unfinished.end()) {
         if (!found->second.registration_json.is_null()) {
@@ -286,6 +317,16 @@ std::expected<Opened, Failure> open_statuses(
     return Opened{std::move(*session), std::move(*store), std::move(*statuses)};
 }
 
+// Decision 0028: the listing worked, but an archive's latest manifest cannot
+// be used, which the operator must fix: exit 2, as rebuild-index exits after
+// skipping a manifest.
+int listed_code(const std::vector<ArchiveStatus>& statuses)
+{
+    const bool problem = std::ranges::any_of(
+        statuses, [](const ArchiveStatus& status) { return status.unusable_manifest.has_value(); });
+    return problem ? exit_code::passed_with_warnings : exit_code::passed;
+}
+
 int list(const Arguments& arguments, Opened& opened)
 {
     const auto unfinished = unfinished_by_archive(opened.store);
@@ -298,7 +339,7 @@ int list(const Arguments& arguments, Opened& opened)
             list.push_back(status_json(status, *unfinished));
         }
         print_json({{"archives", std::move(list)}});
-        return exit_code::passed;
+        return listed_code(opened.statuses);
     }
     const auto& text = arguments.text;
     if (opened.statuses.empty()) {
@@ -313,11 +354,13 @@ int list(const Arguments& arguments, Opened& opened)
             std::cout << "  \"" << identity.volume_label << "\"  "
                       << (identity.devices.empty() ? "" : identity.devices.front().model);
         }
-        std::cout << "\n    " << last_verify_line(text, status.last_full, false, status.full_overdue)
-                  << "\n    " << last_verify_line(text, status.last_any, true, status.any_overdue) << '\n';
+        std::cout << '\n';
+        print_manifest_problem(text, status, "    ");
+        std::cout << "    " << last_verify_line(text, status.last_full, false, status.full_overdue) << "\n    "
+                  << last_verify_line(text, status.last_any, true, status.any_overdue) << '\n';
         print_unfinished(text, *unfinished, status.archive.archive_uuid, "    ");
     }
-    return exit_code::passed;
+    return listed_code(opened.statuses);
 }
 
 int show(const Arguments& arguments, Opened& opened)
@@ -349,7 +392,7 @@ int show(const Arguments& arguments, Opened& opened)
                                {"links", status->header->counts.links}, {"bytes", status->header->counts.bytes}}}};
         }
         print_json(json);
-        return exit_code::passed;
+        return listed_code({*status});
     }
     const auto& text = arguments.text;
     std::cout << display_label(*status) << "  " << status->archive.archive_uuid << "\n  "
@@ -379,6 +422,7 @@ int show(const Arguments& arguments, Opened& opened)
             std::cout << "  " << text.format("copy of: {}", *header.copy_of) << '\n';
         }
     }
+    print_manifest_problem(text, *status, "  ");
     std::cout << "  " << last_verify_line(text, status->last_full, false, status->full_overdue) << "\n  "
               << last_verify_line(text, status->last_any, true, status->any_overdue) << '\n';
     print_unfinished(text, *unfinished, status->archive.archive_uuid, "  ");
@@ -387,7 +431,7 @@ int show(const Arguments& arguments, Opened& opened)
         std::cout << "    r" << revision.revision << "  " << app::local_time(revision.created, text) << "  "
                   << revision.manifest_relpath << '\n';
     }
-    return exit_code::passed;
+    return listed_code({*status});
 }
 
 int retire(const Arguments& arguments, Opened& opened)

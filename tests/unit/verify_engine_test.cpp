@@ -564,10 +564,10 @@ std::string manifest_of(const va::Uuid& archive_uuid)
 // archive is known, and its verification FAILS with a RepositoryError whose
 // message says to rebuild the index, recorded without reading the media
 // (decision 0028); by root it stops, naming the archive and saying to verify
-// it by its uuid, then to rebuild the index; a new revision of the archive,
-// the archive list and loading the manifest stop with the plain message.
-// Rebuilt from the manifests, the index holds the manifest's header again,
-// and the archive verifies.
+// it by its uuid, then to rebuild the index; a new revision of the archive
+// and loading the manifest stop with the plain message, and the archive list
+// lists the archive with it. Rebuilt from the manifests, the index holds the
+// manifest's header again, and the archive verifies.
 void an_index_that_differs_from_its_manifest_is_never_taken()
 {
     Registered fixture;
@@ -600,8 +600,12 @@ void an_index_that_differs_from_its_manifest_is_never_taken()
     CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
           registered.error().message == message);
 
+    // Listed with the problem, not stopping the list (decision 0028).
     const auto statuses = statuses_of(fixture);
-    CHECK(!statuses && statuses.error().message == message);
+    CHECK(statuses && statuses->size() == 1 && !statuses->front().header &&
+          statuses->front().unusable_manifest &&
+          statuses->front().unusable_manifest->kind == va::UnusableManifest::Kind::IndexDiffers &&
+          va::plain_message(*statuses->front().unusable_manifest) == message);
     const auto loaded = va::load_recorded_manifest(
         fixture.store, *fixture.repository.files, fixture.repository.context.repo, fixture.archive_uuid, 1);
     CHECK(!loaded && loaded.error().failure_class == "RepositoryError" && loaded.error().message == message &&
@@ -623,9 +627,9 @@ void an_index_that_differs_from_its_manifest_is_never_taken()
 // archive's, whose carrier only that manifest records. It names the archive
 // and what is wrong, and says to verify it by its uuid to record the failure,
 // then to restore its manifest from a backup of the repository, never to
-// rebuild the index, which would take a changed manifest for the truth. The
-// archive list and a new revision stop with the plain message. Nothing is
-// recorded.
+// rebuild the index, which would take a changed manifest for the truth. A new
+// revision stops with the plain message, and the archive list lists the
+// archive with it. Nothing is recorded.
 void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
 {
     enum class Case { HeaderChanged, Gone, RecordNamesAnotherBody };
@@ -653,8 +657,11 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
         if (!verified && verified.error().message != stopped) {
             std::cerr << "  verify: " << verified.error().message << '\n';
         }
+        // Listed with the problem, not stopping the list (decision 0028).
         const auto statuses = statuses_of(fixture);
-        CHECK(!statuses && statuses.error().message == message);
+        CHECK(statuses && statuses->size() == 1 && !statuses->front().header &&
+              statuses->front().unusable_manifest &&
+              va::plain_message(*statuses->front().unusable_manifest) == message);
         va::RegisterRequest next;
         next.root = fixture.archive.root();
         next.new_revision = true;

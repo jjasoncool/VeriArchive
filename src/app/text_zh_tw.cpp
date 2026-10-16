@@ -198,6 +198,8 @@ constexpr CatalogEntry entries[] = {
         "內容：{} 個檔案、{} 個空資料夾、{} 個連結、{} 位元組"},
     {"copy of: {}", "副本來源：{}"},
     {"revisions:", "版次："},
+    // An archive whose latest manifest cannot be used (decision 0028).
+    {"problem: {}", "問題：{}", Match::Cause},
     // The archive's unfinished registration and relocation in archive list and show (decision 0026), from
     // src/app/unfinished_operations.cpp; the progress and state are the Archive List's words.
     {"Unfinished registration of revision {} from \"{}\": {}; {}", "未完成的註冊（版次 {}，根目錄「{}」）：{}；{}",
@@ -309,6 +311,7 @@ constexpr CatalogEntry entries[] = {
     {"Unexpected error: {}", "未預期的錯誤：{}"},
     // src/gui/archive_list_view.cpp
     {"never", "從未"},
+    {"Problem: {}", "問題：{}", Match::FormatOnly},  // an archive whose manifest cannot be used (decision 0028)
     {"No repository is open; see Settings.", "目前沒有開啟的儲存庫；請參閱「設定」。"},
     {"{} archive", "{} 個封存", Match::FormatOnly},
     {"{} archives", "{} 個封存", Match::FormatOnly},

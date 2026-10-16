@@ -70,6 +70,25 @@ GtkWidget* cell(const std::string& text, bool bold = false, bool warning = false
     return label;
 }
 
+// A line of the table that says what is wrong with an archive's latest
+// manifest and how to fix it (decision 0028): red, as the table's warnings
+// are, wrapping rather than widening the table, and selectable, so that the
+// manifest's path can be copied.
+GtkWidget* problem_cell(const std::string& text)
+{
+    GtkWidget* label = gtk_label_new(nullptr);
+    gchar* escaped = g_markup_escape_text(text.c_str(), -1);
+    const std::string markup = std::string("<span foreground=\"#c01c28\">") + escaped + "</span>";
+    g_free(escaped);
+    gtk_label_set_markup(GTK_LABEL(label), markup.c_str());
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_selectable(GTK_LABEL(label), TRUE);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 90);
+    return label;
+}
+
 // ---- Unfinished operations --------------------------------------------------
 
 // A cell of the operations grid. Not selectable: the grid is drawn anew with
@@ -836,6 +855,15 @@ void refresh_archive_list(GuiState& state)
         gtk_grid_attach(GTK_GRID(view.grid), cell("r" + std::to_string(status.archive.current_revision)), 8, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(text(status.archive.status)), 9, row, 1, 1);
         ++row;
+        // Decision 0028: an archive whose latest manifest cannot be used is
+        // listed like the others, with what is wrong and how to fix it under
+        // its row, from the volume on (its manifest names no volume now). It
+        // stays one to choose in Verify Archive, which then records the failure.
+        if (status.unusable_manifest) {
+            const auto problem = text.format("Problem: {}", text(plain_message(*status.unusable_manifest)));
+            gtk_grid_attach(GTK_GRID(view.grid), problem_cell(problem), 2, row, 8, 1);
+            ++row;
+        }
     }
 }
 

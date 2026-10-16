@@ -243,6 +243,8 @@ The Archive List view, or `veriarchive-cli archive list`, shows for each archive
 - **Last verify**: result and date of the last verification of any mode
 - **OVERDUE**: no FULL verify for 365 days or no verification for 180 days (adjust under `policy` in the config file)
 
+An archive whose manifest in the repository cannot be used (missing, unreadable or changed) is listed too, with a line that says what is wrong and how to fix it (in the Archive List view, in red under its row), and `archive list` then exits with code 2. Verifying that archive (by its uuid, or chosen in the Verify Archive view) records the failure in its history.
+
 Above the archives, the Archive List view also shows the registrations, verifications and relocations that have not finished, with their progress, also those started from the command line. A stopped registration that can never be finished, for example because its media failed, can be given up there with "Abandon..." (CLI: `veriarchive-cli archive abandon-registration <uuid> --confirm`): its saved progress is lost, while recorded revisions and history stay. A stopped relocation can be given up there the same way, for example when its new carrier failed (CLI: `veriarchive-cli archive abandon-relocation <uuid> --confirm`): its saved progress is lost, while the archive, its revisions and history stay.
 
 `archive list` and `archive show` print an archive's unfinished registration and its unfinished relocation as one more line each under the archive: the revision, the folder or volume it reads, what it has done so far and its state, in the words of the Archive List view (for example "stopped; it can be resumed" or "new carrier differs; abandon it").

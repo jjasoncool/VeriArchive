@@ -513,6 +513,14 @@ void translation_tests()
                   record_it + "rebuild the index with `repo rebuild-index`") ==
           may_be_chinese + "儲存庫的索引與版次 2 的清單檔（" + manifest + "）不符" + record_it_chinese +
               "以 `repo rebuild-index` 重建索引");
+    // An archive listed with the problem of its manifest (decision 0028): the
+    // CLI's line and the GUI's row, the message worded as everywhere else.
+    const auto missing = "the manifest of revision 2 (" + manifest + ") is missing" + restore;
+    const auto missing_chinese = "版次 2 的清單檔（" + manifest + "）已遺失" + restore_chinese;
+    CHECK(chinese.format("problem: {}", chinese(missing)) == "問題：" + missing_chinese);
+    CHECK(chinese("problem: " + missing) == "問題：" + missing_chinese);
+    CHECK(chinese.format("Problem: {}", chinese(missing)) == "問題：" + missing_chinese);
+    CHECK(english.format("Problem: {}", english(missing)) == "Problem: " + missing);
     // A verification that failed on its manifest read no media (decision 0028).
     CHECK(chinese("media: not read, as the manifest of this revision cannot be used") ==
           "媒體：未讀取，因為這個版次的清單檔無法使用");

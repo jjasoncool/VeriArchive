@@ -531,11 +531,13 @@ endif()
 # its history. A verification by root stops (exit 11): the root may be that
 # archive's, so it names the archive and what is wrong, and says to verify it
 # by its uuid to record the failure, then to restore the manifest. The
-# archive list stops with a repository error (exit 11) that names the
-# manifest and says how to fix it. A command about another archive reads no
-# manifest but that archive's: the copy verifies by its uuid, and shows its
-# status and history; so does the damaged archive's history, which needs no
-# manifest. Restored, all work again.
+# archive list lists every archive, the damaged one with what is wrong and
+# how to fix it, in text in either language and in --json
+# (`manifest_problem`), and exits 2: the listing worked, an archive needs
+# attention; `archive show` of it reads the same. A command about another
+# archive reads no manifest but that archive's: the copy verifies by its
+# uuid, and shows its status and history; so does the damaged archive's
+# history, which needs no manifest. Restored, all work again.
 set(GLOBAL --config "${WORK}/config.json")
 run_cli("0" archive show "${archive_prefix}" --json)
 string(JSON archive_label GET "${last_output}" label)
@@ -545,8 +547,14 @@ file(COPY_FILE "${RECORDED}" "${RECORDED}.kept")
 file(READ "${RECORDED}" recorded_bytes)
 string(REPLACE "\"revision\":2," "\"revision\": 2," changed_bytes "${recorded_bytes}")
 file(WRITE "${RECORDED}" "${changed_bytes}")
-run_cli("11" --lang en archive list)
-set(listed "${last_errors}")
+run_cli("2" --lang en archive list)
+set(listed "${last_output}")
+run_cli("2" archive list)
+set(listed_chinese "${last_output}")
+run_cli("2" archive list --json)
+set(listed_json "${last_output}")
+run_cli("2" --lang en archive show "${archive_prefix}")
+set(shown "${last_output}")
 run_cli("11" --lang en verify --full "${ROOT}")
 set(verified "${last_errors}")
 run_cli("3" --lang en verify --full "${archive_uuid}" --json)
@@ -562,7 +570,31 @@ file(RENAME "${RECORDED}.kept" "${RECORDED}")
 set(changed_manifest "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; restore it from a backup of the repository")
 set(changed_chinese "版次 2 的清單檔（manifests/${archive_uuid}/r0002.vam）已被變更：其第一行與儲存庫所記錄的不同；請從儲存庫的備份還原該清單檔")
 set(root_may_belong "this root may belong to archive ${archive_label} (${archive_uuid}), whose manifest cannot be used: the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; verify that archive by its uuid (`verify --full ${archive_uuid}`) to record the failure, then restore its manifest from a backup of the repository")
-string(FIND "${listed}" "${changed_manifest}" in_list)
+string(FIND "${listed}" "\n    problem: ${changed_manifest}\n" in_list)
+string(FIND "${listed_chinese}" "\n    問題：${changed_chinese}\n" in_list_chinese)
+string(FIND "${shown}" "\n  problem: ${changed_manifest}\n" in_show)
+string(SUBSTRING "${copy_uuid}" 0 8 copy_short)
+string(FIND "${listed}" "  ${copy_short}  " copy_listed)
+set(problem_kind "")
+set(copy_without_problem "NOTFOUND")
+set(copy_without_volume "")
+string(JSON listed_count LENGTH "${listed_json}" archives)
+math(EXPR last_listed "${listed_count} - 1")
+foreach(index RANGE ${last_listed})
+    string(JSON listed_uuid GET "${listed_json}" archives ${index} archive_uuid)
+    if(listed_uuid STREQUAL archive_uuid)
+        string(JSON problem_kind GET "${listed_json}" archives ${index} manifest_problem kind)
+        string(JSON problem_revision GET "${listed_json}" archives ${index} manifest_problem revision)
+        string(JSON problem_manifest GET "${listed_json}" archives ${index} manifest_problem manifest)
+        string(JSON problem_message GET "${listed_json}" archives ${index} manifest_problem message)
+    elseif(listed_uuid STREQUAL copy_uuid)
+        # ERROR_VARIABLE is NOTFOUND when the member is there.
+        string(JSON copy_problem ERROR_VARIABLE copy_without_problem GET "${listed_json}" archives ${index}
+            manifest_problem)
+        string(JSON copy_volume ERROR_VARIABLE copy_without_volume GET "${listed_json}" archives ${index}
+            volume_label)
+    endif()
+endforeach()
 string(FIND "${verified}" "${root_may_belong}" in_verify)
 string(FIND "${failed_chinese}" "完整驗證 失敗" failed_line)
 string(FIND "${failed_chinese}" "媒體：未讀取，因為這個版次的清單檔無法使用" unread_line)
@@ -576,8 +608,15 @@ string(JSON run_count LENGTH "${history_json}" runs)
 math(EXPR last_run "${run_count} - 1")
 string(JSON last_result GET "${history_json}" runs ${last_run} result)
 string(JSON last_classes GET "${history_json}" runs ${last_run} failure_classes)
-if(changed_bytes STREQUAL recorded_bytes OR in_list EQUAL -1 OR in_verify EQUAL -1)
-    message(FATAL_ERROR "a manifest that is not the one recorded, by root and listed:\n${listed}\n${verified}")
+if(changed_bytes STREQUAL recorded_bytes OR in_list EQUAL -1 OR in_list_chinese EQUAL -1 OR in_show EQUAL -1
+        OR copy_listed EQUAL -1 OR in_verify EQUAL -1)
+    message(FATAL_ERROR "a manifest that is not the one recorded, by root and listed:\n${listed}\n${listed_chinese}\n${shown}\n${verified}")
+endif()
+if(NOT problem_kind STREQUAL "changed" OR NOT problem_revision EQUAL 2
+        OR NOT problem_manifest STREQUAL "manifests/${archive_uuid}/r0002.vam"
+        OR NOT problem_message STREQUAL changed_manifest OR copy_without_problem STREQUAL "NOTFOUND"
+        OR NOT copy_without_volume STREQUAL "NOTFOUND")
+    message(FATAL_ERROR "archive list --json of a manifest that is not the one recorded:\n${listed_json}")
 endif()
 if(NOT failed_result STREQUAL "FAILED" OR failed_read OR NOT failed_root STREQUAL "NULL"
         OR NOT failed_class STREQUAL "ManifestHashMismatch" OR NOT failed_warning STREQUAL "manifest: ${changed_manifest}"
