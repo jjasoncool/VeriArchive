@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <map>
 #include <semaphore>
 #include <set>
@@ -39,14 +40,23 @@ std::vector<std::pair<std::string, std::string>> sample_files()
 constexpr std::uint64_t sample_bytes = 20780;
 constexpr std::uint64_t sample_photo_bytes = 10190;
 
+// More sample files, of 10 bytes each, in many/, which sorts before photos/:
+// enough for the checkpoints every 1000 entries (sample data).
+std::string many_name(int index)
+{
+    return std::format("many/m{:05}.txt", index);
+}
+constexpr std::uint64_t many_file_bytes = 10;
+
 // Volume 1 is mounted at /vol, volume 2 at /vol/new (a different disk). The
 // archive is registered at /vol/old: two small files, or with `sample` the
-// 40 sample files.
+// 40 sample files and `many` more.
 struct RelocationFixture : test::EngineFixture {
     va::Uuid archive_uuid;
     bool sample = false;
+    int many = 0;
 
-    explicit RelocationFixture(bool with_sample = false) : sample(with_sample)
+    explicit RelocationFixture(bool with_sample = false, int many_files = 0) : sample(with_sample), many(many_files)
     {
         auto second = test::fake_volume(archive.root() / "new");
         second.filesystem_uuid = "5555666677778888";
@@ -57,6 +67,9 @@ struct RelocationFixture : test::EngineFixture {
         if (sample) {
             for (const auto& [name, content] : sample_files()) {
                 archive.add_file("old/" + name, content);
+            }
+            for (int index = 0; index < many; ++index) {
+                archive.add_file("old/" + many_name(index), std::string(many_file_bytes, 'm'));
             }
         } else {
             archive.add_file("old/photos/a.jpg", "jpeg");
@@ -75,6 +88,9 @@ struct RelocationFixture : test::EngineFixture {
         if (sample) {
             for (const auto& [name, content] : sample_files()) {
                 archive.add_file(folder + "/" + name, content);
+            }
+            for (int index = 0; index < many; ++index) {
+                archive.add_file(folder + "/" + many_name(index), std::string(many_file_bytes, 'm'));
             }
             return;
         }
@@ -451,10 +467,12 @@ void an_interrupted_relocation_resumes_without_reading_again()
 }
 
 // A resume needs the volume and the folder the relocation started on: a disk
-// formatted since (another filesystem id) or another folder says nothing of
-// what matched before; the resume is refused, reads nothing and changes
-// nothing. The same disk reached through another mount point (a drive
-// letter that changed) is the same volume, and resumes.
+// formatted since (another filesystem id), the same filesystem in another
+// enclosure since (MIGRATED: the checkpoints were made through another
+// device) or another folder says nothing of what matched before; the resume
+// is refused, reads nothing and changes nothing. The same disk reached
+// through another mount point (a drive letter that changed) is the same
+// volume, and resumes.
 void a_resume_needs_the_volume_it_started_on()
 {
     RelocationFixture fixture(true);
@@ -476,6 +494,11 @@ void a_resume_needs_the_volume_it_started_on()
           formatted.error().message == refusal);
     disk.filesystem_uuid = "5555666677778888";
     disk.filesystem_uuid_short = "77778888";
+    disk.devices.front().serial = "OTHER-ENCLOSURE"; // sample data
+    const auto migrated = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!migrated && migrated.error().kind == va::RelocateFailure::Kind::Refused &&
+          migrated.error().message == refusal);
+    disk.devices.front().serial = "NEW-DISK";
     const auto folder = fixture.relocate(fixture.archive.root() / "new" / "photos", true);
     CHECK(!folder && folder.error().message == refusal);
     CHECK(fixture.archive.bytes_read == 0);
@@ -489,6 +512,43 @@ void a_resume_needs_the_volume_it_started_on()
     CHECK(fixture.archive.bytes_read == sample_bytes - sample_photo_bytes);
     const auto verified = fixture.verify(fixture.archive.root() / "moved");
     CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+}
+
+// The record names where the latest attempt reads, and the FULL verification
+// that a resumed relocation records starts when its first attempt started
+// (decision 0026). Here the first attempt started days before (a sample
+// time); the second reads the same disk at another mount point and is
+// interrupted there as well; the third records.
+void a_resumed_relocation_names_where_it_reads_and_keeps_its_start()
+{
+    RelocationFixture fixture(true);
+    const auto run_id = fixture.interrupted_relocation(fixture.processes.self, false);
+    auto record = fixture.record();
+    const std::string started = "2026-10-01T08:00:00Z"; // sample data
+    record["started"] = started;
+    CHECK(fixture.store.set_setting(fixture.key(), record.dump()));
+
+    fixture.copy_to_new_disk("moved");
+    fixture.media.extra_volumes.front().mount_point = fixture.archive.root() / "moved";
+    fixture.archive.node("moved/videos/v130.bin").open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto again = fixture.relocate(fixture.archive.root() / "moved", true);
+    fixture.archive.node("moved/videos/v130.bin").open_error.reset();
+    CHECK(!again && again.error().kind == va::RelocateFailure::Kind::Incomplete);
+    const auto moved = fixture.record();
+    CHECK(moved.is_object() && moved.value("run_id", std::string{}) == run_id);
+    CHECK(moved.value("root", std::string{}) == va::path_to_utf8(fixture.archive.root() / "moved"));
+    CHECK(moved.value("started", std::string{}) == started && moved.value("resumes", 0) == 1);
+
+    const auto resumed = fixture.relocate(fixture.archive.root() / "moved", true);
+    CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1);
+    if (runs && runs->size() == 1) {
+        CHECK(runs->front().started == started && runs->front().coverage_bytes == sample_bytes);
+        const auto counts = nlohmann::json::parse(runs->front().counts_json, nullptr, false);
+        CHECK(counts.is_object() && counts.value("resumed", 0) == 2);
+    }
 }
 
 // R-104: a relocation resumes only while its archive is at the revision it
@@ -542,6 +602,38 @@ void a_resume_needs_the_revision_it_verifies()
                                                      fixture.archive_uuid + "`)");
     CHECK(fixture.record() == ahead);
     CHECK(fixture.archive.bytes_read == 0);
+}
+
+// A record whose revision another operation recorded, leaving the record
+// behind (as an import does), is not unfinished (decision 0026, point 4): a
+// relocation without --resume removes it and its checkpoints, begins one of
+// its own, reads the whole carrier and records the revision after.
+void a_relocation_replaces_a_record_that_can_no_longer_finish()
+{
+    RelocationFixture fixture(true);
+    const auto run_id = fixture.interrupted_relocation(fixture.processes.self, false);
+    const auto record = fixture.record();
+    const std::string added = "added on the old carrier (sample data)";
+    fixture.archive.add_file("old/added.txt", added);
+    va::RegisterRequest request;
+    request.root = fixture.archive.root() / "old";
+    request.new_revision = true;
+    const auto rebaselined = fixture.register_root(request);
+    CHECK(rebaselined && rebaselined->revision == 2);
+    CHECK(fixture.store.set_setting(fixture.key(), record.dump()));
+    va::Entry photo;
+    photo.path.p = "photos/p100.bin";
+    CHECK(fixture.store.add_progress(run_id, {va::entry_key(photo)}));
+
+    fixture.archive.add_file("new/added.txt", added); // the new carrier holds revision 2 too
+    fixture.archive.bytes_read = 0;
+    const auto relocated = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(relocated && relocated->revision == 3 && !relocated->resumed && relocated->run_id != run_id);
+    CHECK(fixture.archive.bytes_read == sample_bytes + added.size());
+    CHECK(fixture.store.progress(run_id).value_or(std::set<std::string>{"x"}).empty());
+    CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 3);
 }
 
 std::string still_running_message(const va::ProcessIdentity& process)
@@ -797,6 +889,56 @@ void a_relocation_that_loses_while_hashing_records_nothing()
     CHECK(reader && reader->header().identity.filesystem_uuid == "1111222233334444");
     const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
     CHECK(runs && runs->empty());
+}
+
+// Decision 0026, point 2: a relocation that can no longer finish stops
+// reading at its next checkpoint, after at most 1000 more entries, rather than
+// reading the rest of the carrier for nothing. While the relocation of 2540
+// sample files reads its 101st, another process records the revision it
+// creates (`register --new-revision` of the old carrier), or abandons it.
+void a_relocation_that_can_no_longer_finish_stops_reading()
+{
+    constexpr int many = 2500;
+    for (const bool abandon : {false, true}) {
+        RelocationFixture fixture(true, many);
+        fixture.copy_to_new_disk();
+        std::uint64_t read_before = 0;
+        test::HookedFiles hooked(fixture.archive, "m00100.txt", [&] {
+            auto store = fixture.repository.store();
+            if (abandon) {
+                const auto stored =
+                    nlohmann::json::parse(store.setting(fixture.key()).value_or(""), nullptr, false);
+                const auto run_id = stored.is_object() ? stored.value("run_id", std::string{}) : std::string{};
+                CHECK(store.write_transaction([&] { return store.remove_relocation(fixture.archive_uuid, run_id); }));
+            } else {
+                fixture.archive.add_file("old/added.txt", "added on the old carrier (sample data)");
+                va::RegisterRequest request;
+                request.root = fixture.archive.root() / "old";
+                request.new_revision = true;
+                va::RegisterServices services{fixture.archive, *fixture.repository.files,
+                    *fixture.repository.writer, fixture.media_writer, fixture.media, store,
+                    fixture.repository.context.repo, fixture.host, fixture.processes};
+                const auto registered = va::register_archive(services, request, fixture.cancel, fixture.progress);
+                CHECK(registered && registered->revision == 2);
+            }
+            read_before = fixture.archive.bytes_read;
+        });
+        va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+            fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+            fixture.processes};
+        const auto relocated = va::relocate_archive(services,
+            {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+        CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused);
+        // From the 101st file on, the carrier holds 2400 more of them and the
+        // 40 others; it stops after about 900.
+        const auto unread = (many - 100) * many_file_bytes + sample_bytes;
+        const auto read_after = fixture.archive.bytes_read - read_before;
+        CHECK(read_after < unread / 2);
+        if (read_after >= unread / 2) {
+            std::cerr << "  read " << read_after << " of " << unread << " bytes after the relocation could no "
+                      << "longer finish (abandoned: " << abandon << ")\n";
+        }
+    }
 }
 
 // Decision 0026: the record of a relocation is written only while the key
@@ -1301,12 +1443,15 @@ void relocate_tests()
     known_unreadable_entries_are_carried();
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();
+    a_resumed_relocation_names_where_it_reads_and_keeps_its_start();
     a_resume_needs_the_revision_it_verifies();
+    a_relocation_replaces_a_record_that_can_no_longer_finish();
     a_resume_waits_while_the_attempt_before_runs();
     attempts_of_one_relocation_take_turns();
     attempts_of_one_relocation_on_two_computers_record_the_revision_once();
     a_relocation_ends_a_registration_that_saved_nothing();
     a_relocation_that_loses_while_hashing_records_nothing();
+    a_relocation_that_can_no_longer_finish_stops_reading();
     the_heartbeat_writes_only_its_own_relocation();
     a_relocation_removes_the_plan_of_its_revision();
     a_relocation_leaves_a_registration_its_saved_files();
