@@ -551,6 +551,78 @@ void a_relocation_interrupted_after_its_copy_differed_ends()
     CHECK(again && again->revision == 2 && !again->resumed && fixture.archive.bytes_read == sample_bytes);
 }
 
+// The size of photos/p119.bin, the 20th sample file (sample data).
+constexpr std::uint64_t p119_bytes = 519;
+
+// An entry that could not be read differs once the comparison has read
+// everything (decision 0026): here the read of a photo fails with a media
+// error (a bad sector, sample data), and the reading goes on to the end. The
+// relocation ends as a copy that differs does: its record and saved progress
+// go, and no run is recorded.
+void an_unreadable_entry_ends_the_relocation_once_everything_was_read()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    fixture.archive.node("new/photos/p119.bin").read_error_offset = 0;
+    const auto relocated = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Differs &&
+          relocated.error().message == differs_message() && relocated.error().items.size() == 1 &&
+          relocated.error().items.front().path.p == "photos/p119.bin" &&
+          relocated.error().items.front().status == "Unreadable(media)");
+    CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
+    CHECK(count_rows(fixture, "verify_progress") == 0);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->empty());
+}
+
+// A disk that drops off while a file is read usually fails that read with an
+// I/O error before the next file cannot be opened (its device removed). Here
+// the read of photo p119 fails with a media error, and video v120 then finds
+// the device removed (sample data). The read that failed says nothing of what
+// the disk holds: the attempt is interrupted, and the relocation does not end
+// (decision 0026). Its record stays, saying that it stopped and not that the
+// new carrier differs, so that a resume goes on, also after a process killed
+// at that point; it keeps the 19 photos that matched; and the attempt is
+// recorded INCOMPLETE with the entry that could not be read. Plugged in
+// again, the resume reads only the rest, that entry included, as it never
+// matched, and records revision 2.
+void a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    fixture.archive.node("new/photos/p119.bin").read_error_offset = 0;
+    fixture.archive.node("new/videos/v120.bin").open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
+          interrupted.error().message == "relocation was interrupted; continue it with `archive relocate " +
+                                             fixture.archive_uuid + " <root_path> --resume`");
+    const auto record = fixture.record();
+    CHECK(record.is_object() && record.contains("stopped") && !record.contains("differs"));
+    const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
+    const auto saved = fixture.saved(run_id);
+    CHECK(saved.files == 19 && saved.bytes == sample_photo_bytes - p119_bytes);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1);
+    if (runs && runs->size() == 1) {
+        const auto& attempt = runs->front();
+        const auto noted = nlohmann::json::parse(attempt.counts_json, nullptr, false);
+        CHECK(attempt.result == "INCOMPLETE" && attempt.revision == 1 && attempt.run_id != run_id &&
+              attempt.coverage_bytes == sample_photo_bytes - p119_bytes && noted.is_object() &&
+              noted.value("relocation", std::string{}) == run_id);
+        const auto items = fixture.store.verify_items(attempt.run_id);
+        CHECK(items && items->size() == 1 && items->front().path.p == "photos/p119.bin" &&
+              items->front().status == "Unreadable(media)");
+    }
+
+    fixture.archive.node("new/photos/p119.bin").read_error_offset.reset();
+    fixture.archive.node("new/videos/v120.bin").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id && resumed->result == "PASSED");
+    CHECK(fixture.archive.bytes_read == sample_bytes - (sample_photo_bytes - p119_bytes));
+}
+
 // Decision 0010: entries unreadable at registration travel unchanged.
 void known_unreadable_entries_are_carried()
 {
@@ -1810,6 +1882,8 @@ void relocate_tests()
     an_unrepresentable_name_marks_the_relocation_at_once();
     a_differs_mark_is_written_at_a_later_chance();
     a_relocation_interrupted_after_its_copy_differed_ends();
+    an_unreadable_entry_ends_the_relocation_once_everything_was_read();
+    a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable();
     known_unreadable_entries_are_carried();
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();

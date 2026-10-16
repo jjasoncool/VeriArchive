@@ -452,8 +452,10 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     };
     input.on_item = [&](const VerifyItemRecord& item, bool fails) {
         // A name that cannot exist here is a warning to a verification, but
-        // it would drop out of the new revision (below).
-        if (fails || item.status == "Unrepresentable") {
+        // it would drop out of the new revision (below). An entry that could
+        // not be read differs only once the comparison has read everything
+        // (below): it is not marked as it is found.
+        if ((fails && !item.status.starts_with("Unreadable(")) || item.status == "Unrepresentable") {
             mark_differs();
         }
     };
@@ -530,15 +532,19 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     // That ends the relocation, also when this attempt was interrupted after
     // it found such an entry: what the operator does next (copy again)
     // changes the carrier, so what matched before says nothing any more, and
-    // a new relocation reads it all (decision 0026). Its record and
-    // checkpoints go in a transaction that waits for the write lock, as its
-    // record would (decision 0023): another operation may hold the lock for
-    // longer than a statement waits, and a record left behind would let
-    // `--resume` accept a second copy without reading again what matched in
-    // this one. Where they still cannot go, the record keeps its mark, which
-    // the stop mark writes once more.
-    const bool unrepresentable = comparison.counts.contains("Unrepresentable");
-    if (comparison.content_failure || unrepresentable) {
+    // a new relocation reads it all (decision 0026). An entry that could not
+    // be read ends it only once the comparison has read everything: a disk
+    // that drops off usually fails the read in flight with an I/O error
+    // before the next open finds the device removed. Such an attempt is
+    // interrupted (below), and a resume reads the entry again, as it never
+    // matched. Its record and checkpoints go in a transaction that waits for
+    // the write lock, as its record would (decision 0023): another operation
+    // may hold the lock for longer than a statement waits, and a record left
+    // behind would let `--resume` accept a second copy without reading again
+    // what matched in this one. Where they still cannot go, the record keeps
+    // its mark, which the stop mark writes once more.
+    const bool carrier_differs = differs || (comparison.content_failure && !comparison.incomplete);
+    if (carrier_differs) {
         mark_differs();
         const auto removed = [&]() -> std::expected<void, IoError> {
             if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
