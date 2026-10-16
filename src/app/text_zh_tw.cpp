@@ -358,6 +358,8 @@ constexpr CatalogEntry entries[] = {
     {"stopped; it cannot be resumed (the archive has a newer revision)", "已停止；無法繼續（封存已有較新的版次）"},
     // A relocation whose new carrier does not hold the recorded content (decision 0026).
     {"new carrier differs; abandon it", "新載體上的內容不符；請放棄它"},
+    // A registration or relocation made for an older revision (decision 0030).
+    {"archive has a later revision; abandon it", "封存已有較新的版次；請放棄它"},
     {"not counted", "未計算"},
     {"not known", "不明"},
     {"no progress reported for {} minutes; its process is still running", "已 {} 分鐘未回報進度；其處理程序仍在執行",

@@ -225,6 +225,8 @@ UnfinishedOperation registration_operation(const PendingRegistration& registrati
     operation.recorded_stopped = !registration.stopped.empty();
     operation.done_counted = registration.done_counted;
     operation.revision = registration.revision;
+    // Made for an older revision, it never records (decision 0030).
+    operation.later_revision = registration.later_revision;
     // Otherwise the process its plan names tells whether it still runs
     // (decision 0024): one that has ended has stopped at once, not when its
     // plan has said nothing for minutes.
@@ -257,6 +259,7 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
     operation.recorded_stopped = !relocation.stopped.empty();
     operation.resumable = relocation.resumable;
     operation.differs = !relocation.differs.empty();
+    operation.later_revision = relocation.later_revision;
     operation.done_counted = relocation.done_counted;
     // Otherwise the process the record names tells whether it still runs
     // (decision 0024).
@@ -271,7 +274,8 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
 
 bool has_stopped(OperationState state)
 {
-    return state == OperationState::Stopped || state == OperationState::Differs;
+    return state == OperationState::Stopped || state == OperationState::Differs ||
+           state == OperationState::LaterRevision;
 }
 
 std::string_view state_code(OperationState state)
@@ -289,6 +293,8 @@ std::string_view state_code(OperationState state)
         return "stopped";
     case OperationState::Differs:
         return "differs";
+    case OperationState::LaterRevision:
+        return "later_revision";
     case OperationState::Unknown:
         return "unknown";
     }
@@ -437,12 +443,21 @@ void OperationWatch::follow_stop_mark(UnfinishedOperation& operation)
 OperationState OperationWatch::state(Clock::time_point now, std::chrono::sys_seconds wall_now) const
 {
     const auto judged = judged_state(now, wall_now);
+    if (judged != OperationState::Stopped) {
+        return judged;
+    }
     // A relocation whose new carrier does not hold the recorded content can
     // never finish: once its attempt no longer runs, it is not resumed, and
     // waits only to be abandoned (decision 0026). While its attempt runs (it
     // reads on to list every entry that differs, and then ends the
-    // relocation itself), it is shown as any attempt that runs.
-    return judged == OperationState::Stopped && operation_.differs ? OperationState::Differs : judged;
+    // relocation itself), it is shown as any attempt that runs. Likewise a
+    // registration or relocation made for an older revision than the archive
+    // has now, which never records (decision 0030): while its attempt runs,
+    // it stops at its next checkpoint.
+    if (operation_.differs) {
+        return OperationState::Differs;
+    }
+    return operation_.later_revision ? OperationState::LaterRevision : judged;
 }
 
 OperationState OperationWatch::judged_state(Clock::time_point now, std::chrono::sys_seconds wall_now) const
@@ -638,6 +653,9 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         break;
     case OperationState::Differs:
         row.state = text("new carrier differs; abandon it");
+        break;
+    case OperationState::LaterRevision:
+        row.state = text("archive has a later revision; abandon it");
         break;
     }
     return row;

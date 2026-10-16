@@ -1223,6 +1223,13 @@ std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_r
         }
         registration.volume_root = *found && archive->text(0).empty();
         archive->reset();
+        // Made for an older revision (decision 0030): the plan creating
+        // revision N+1 was made for N.
+        const auto later = later_revision(registration.archive_uuid, registration.revision - 1);
+        if (!later) {
+            return std::unexpected(later.error());
+        }
+        registration.later_revision = later->has_value();
 
         registration.done_counted = count;
         if (count) {
@@ -1535,6 +1542,12 @@ std::expected<std::vector<UnfinishedRelocation>, IoError> ArchiveStore::unfinish
         relocation.resumable = *found && static_cast<std::uint32_t>(archive->integer(1)) == relocation.revision &&
                                relocation.differs.empty();
         archive->reset();
+        // Made for an older revision (decision 0030).
+        const auto later = later_revision(relocation.archive_uuid, relocation.revision);
+        if (!later) {
+            return std::unexpected(later.error());
+        }
+        relocation.later_revision = later->has_value();
 
         relocation.done_counted = count;
         if (count) {

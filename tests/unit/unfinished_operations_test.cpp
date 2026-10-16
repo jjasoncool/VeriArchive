@@ -15,7 +15,9 @@
 #include <cmath>
 #include <format>
 #include <functional>
+#include <map>
 #include <tuple>
+#include <utility>
 
 namespace {
 
@@ -1374,6 +1376,151 @@ void a_relocation_whose_new_carrier_differs_waits_to_be_abandoned()
           rows[1].state_kind == OperationState::Differs);
 }
 
+// ---- Made for an older revision (decision 0030) ----------------------------
+
+// A registration or relocation made for an older revision than its archive
+// has now never records. While its attempt still runs (it stops at its next
+// checkpoint) it runs as any attempt, and is not offered for abandoning; once
+// the attempt has stopped (its stop mark, its process ended, or silent for
+// minutes) it is shown in a state of its own, to be abandoned, in both
+// languages, as --json says it and on the command line's line, ordered with
+// the stopped operations.
+void an_operation_made_for_an_older_revision_waits_to_be_abandoned()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const Clock::time_point start{};
+    for (const auto kind : {va::app::OperationKind::Registration, va::app::OperationKind::Relocation}) {
+        auto operation = registration(20, 10 * mib);
+        operation.kind = kind;
+        operation.revision = 2;
+        operation.files_total = 40;
+        operation.bytes_total = 20 * mib;
+        operation.later_revision = true;
+        operation.resumable = false;
+        operation.updated = wall_now - 20s;
+        operation.attempt = va::AttemptState::Running;
+        OperationWatch working;
+        working.update(operation, start, wall_now);
+        CHECK(working.state(start, wall_now) == OperationState::Running);
+        CHECK(!describe_operation(english, working, start, wall_now).abandonable);
+
+        for (const auto& [stopped, attempt, updated] :
+            {std::tuple{true, va::AttemptState::Running, wall_now - 20s},
+                std::tuple{false, va::AttemptState::Ended, wall_now - 20s},
+                std::tuple{false, va::AttemptState::Unknown, wall_now - 10min}}) {
+            auto ended = operation;
+            ended.recorded_stopped = stopped;
+            ended.attempt = attempt;
+            ended.updated = updated;
+            OperationWatch watch;
+            watch.update(ended, start, wall_now);
+            CHECK(watch.state(start, wall_now) == OperationState::LaterRevision);
+            const auto row = describe_operation(english, watch, start, wall_now);
+            CHECK(row.state_kind == OperationState::LaterRevision && row.abandonable &&
+                  row.state == "archive has a later revision; abandon it");
+            CHECK(describe_operation(chinese, watch, start, wall_now).state == "封存已有較新的版次；請放棄它");
+            CHECK(va::app::state_code(va::app::state_of_one_read(ended, wall_now)) == "later_revision");
+        }
+
+        // After a registration that runs, though it started later.
+        auto ended = operation;
+        ended.key = std::string(kind == va::app::OperationKind::Registration ? "registration:" : "relocation:") +
+                    "c0ffee00-0000-4000-8000-000000000030";
+        ended.recorded_stopped = true;
+        auto running = registration(1, mib);
+        running.started = "2026-10-15T02:00:00Z";
+        running.updated = wall_now;
+        std::vector<OperationWatch> watches;
+        va::app::follow(watches, {ended, running}, start, wall_now);
+        const auto rows = va::app::describe_operations(english, watches, start, wall_now);
+        CHECK(rows.size() == 2 && rows[0].state == "running" && rows[1].state_kind == OperationState::LaterRevision);
+    }
+
+    // The command line's line under the archive.
+    auto registering = registration(1200, 3 * gib);
+    registering.revision = 2;
+    registering.files_total = 3000;
+    registering.bytes_total = 8 * gib;
+    registering.recorded_stopped = true;
+    registering.later_revision = true;
+    CHECK(va::app::describe_for_archive(english, registering, wall_now) ==
+          "Unfinished registration of revision 2 from \"Z:\\\": 3.00 GiB of 8.00 GiB (37%) · 1200 of 3000 files; "
+          "archive has a later revision; abandon it");
+    CHECK(va::app::describe_for_archive(chinese, registering, wall_now) ==
+          "未完成的註冊（版次 2，根目錄「Z:\\」）：3.00 GiB / 8.00 GiB（37%）・1200 / 3000 個檔案；封存已有較新的版次；請放棄它");
+}
+
+// The repository tells which unfinished registration and relocation were
+// made for an older revision (decision 0030). An archive at revision 1 has a
+// relocation against revision 1 and a `register --new-revision` creating
+// revision 2, both interrupted (sample data). They read as stopped and
+// resumable until an import gives the archive revision 3; then both read as
+// made for an older revision, to be abandoned.
+void reads_operations_made_for_an_older_revision()
+{
+    test::EngineFixture fixture;
+    auto second = test::fake_volume(fixture.archive.root() / "new");
+    second.filesystem_uuid = "5555666677778888";
+    second.devices.front().serial = "NEW-DISK";
+    fixture.media.extra_volumes.push_back(second);
+    fixture.archive.add_file("old/a.txt", "aaaa"); // sample data
+    fixture.archive.add_file("old/b.txt", "bbbbbb");
+    const auto registered = fixture.register_root(fixture.archive.root() / "old");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    const auto& archive_uuid = registered->archive_uuid;
+    fixture.archive.add_file("new/a.txt", "aaaa");
+    fixture.archive.add_file("new/b.txt", "bbbbbb").open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto relocated = va::relocate_archive(
+        services, {archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Incomplete);
+    fixture.archive.node("old/b.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RegisterRequest request;
+    request.root = fixture.archive.root() / "old";
+    request.new_revision = true;
+    const auto interrupted = fixture.register_root(request);
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+
+    test::FakeProcessTable window;
+    window.self = {9999, "boot-1:9999", "veriarchive-gui.exe"};
+    const va::app::AttemptCheck attempts{&window, "test-host", {}};
+    const va::app::Text english;
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    // The registration's and the relocation's state, as one read gives them.
+    const auto states = [&] {
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+        CHECK(read && read->operations.size() == 2);
+        std::map<va::app::OperationKind, std::pair<bool, std::string>> found;
+        for (const auto& operation : read ? read->operations : std::vector<UnfinishedOperation>{}) {
+            OperationWatch watch;
+            watch.update(operation, Clock::time_point{}, now);
+            found[operation.kind] = {operation.later_revision,
+                describe_operation(english, watch, Clock::time_point{}, now).state};
+        }
+        return found;
+    };
+    const auto before = states();
+    CHECK(before.size() == 2);
+    for (const auto& [kind, state] : before) {
+        CHECK(!state.first && state.second == "stopped; it can be resumed");
+    }
+
+    test::import_later_revision(fixture, fixture.store, archive_uuid, 3);
+    const auto after = states();
+    CHECK(after.size() == 2);
+    for (const auto& [kind, state] : after) {
+        CHECK(state.first && state.second == "archive has a later revision; abandon it");
+    }
+}
+
 // `archive list` and `archive show` give an archive's unfinished registration
 // and relocation one line each (decision 0026): the revision it creates or
 // verifies, where it reads, what it has done, and its state judged from one
@@ -1463,5 +1610,7 @@ void unfinished_operations_tests()
     a_registration_taken_up_after_its_process_ended_runs();
     lists_an_unfinished_relocation();
     a_relocation_whose_new_carrier_differs_waits_to_be_abandoned();
+    an_operation_made_for_an_older_revision_waits_to_be_abandoned();
+    reads_operations_made_for_an_older_revision();
     words_a_line_for_the_command_line();
 }

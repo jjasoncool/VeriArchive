@@ -115,6 +115,9 @@ struct PendingRegistration {
                                                 // finishing (cancelled, failed); empty while it may run
     std::string plan;                           // the plan as stored (JSON), for judging which process
                                                 // runs its attempt (decision 0024)
+    bool later_revision = false;                // made for an older revision: the archive has a later one
+                                                // than the plan was made for, so it can never finish and
+                                                // waits to be abandoned (decision 0030)
 };
 
 // A verification that has not finished: running now (it has no history row
@@ -172,6 +175,9 @@ struct UnfinishedRelocation {
                                                 // carrier does not hold the recorded content; empty otherwise
     bool resumable = true;                      // false when the archive has another revision now, or the
                                                 // record says "differs"
+    bool later_revision = false;                // made for an older revision: the archive has a later one
+                                                // than the one it verifies, so it can never finish and
+                                                // waits to be abandoned (decision 0030)
     std::string record;                         // the record as stored (JSON), for judging which process runs
                                                 // its attempt (decision 0024)
 };

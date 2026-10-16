@@ -680,8 +680,8 @@ file(RENAME "${EARLIER}.away" "${EARLIER}")
 # records revisions 2 and 3, and the second imports revision 3. Then each
 # resume, the folder's registration and a relocation without --resume are
 # refused (exit 12), saying that the archive has a later revision and how to
-# abandon them. The archive stays at revision 3, which verifies; abandoned,
-# both are gone.
+# abandon them, and `archive show` shows each in a state of its own. The
+# archive stays at revision 3, which verifies; abandoned, both are gone.
 set(GLOBAL --config "${WORK}/config.json")
 set(LATER "${WORK}/later")
 set(LATER_COPY "${WORK}/later-copy")
@@ -719,10 +719,20 @@ foreach(refused IN ITEMS "register;${LATER};--resume" "register;${LATER};--new-r
         message(FATAL_ERROR "${refused} made for an older revision:\n${last_errors}")
     endif()
 endforeach()
+# Both show in a state of their own, to be abandoned: in --json, and as the
+# line under the archive.
 run_cli("0" archive show "${later_prefix}" --json)
 string(JSON later_revision GET "${last_output}" revision)
-if(NOT later_revision EQUAL 3)
+string(JSON registration_state GET "${last_output}" unfinished_registration state)
+string(JSON relocation_state GET "${last_output}" unfinished_relocation state)
+if(NOT later_revision EQUAL 3 OR NOT registration_state STREQUAL "later_revision"
+        OR NOT relocation_state STREQUAL "later_revision")
     message(FATAL_ERROR "an archive whose operations were made for an older revision:\n${last_output}")
+endif()
+run_cli("0" --lang en archive show "${later_prefix}")
+if(NOT last_output MATCHES "\n  Unfinished registration of revision 2 from [^\n]*; archive has a later revision; abandon it\n"
+        OR NOT last_output MATCHES "\n  Unfinished relocation of revision 1 to [^\n]*; archive has a later revision; abandon it\n")
+    message(FATAL_ERROR "archive show of operations made for an older revision:\n${last_output}")
 endif()
 run_cli("0;2" verify --full "${later_uuid}")
 run_cli("0" archive abandon-registration "${later_prefix}" --confirm)
