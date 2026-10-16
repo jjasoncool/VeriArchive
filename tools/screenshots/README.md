@@ -28,7 +28,7 @@ cmake -DCLI=build/windows-ucrt64-debug/veriarchive-cli.exe \
 `LANG` is `zh-TW` (the default) or `en`. Run once per language, each into its own `OUT`.
 
 - `WORK` holds the sample data, a config file and a repository. It is emptied on every run, so the script accepts only an empty folder or one it made itself (it leaves a `.veriarchive-screenshots` marker there).
-- The pictures show the paths under `WORK`, so a short `WORK` gives short paths. A drive letter made with `subst` does not work: a folder reached through such a letter cannot be registered, because Windows reports no volume for it.
+- The pictures show the paths under `WORK`, so a short `WORK` gives short paths. A drive letter made with `subst` does not shorten them: the program records the folder it stands for (decision 0027), so the pictures show the real path.
 - `OUT` must not be inside `WORK`.
 
 ## Sample data only
