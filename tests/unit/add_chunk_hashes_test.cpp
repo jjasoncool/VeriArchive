@@ -12,7 +12,11 @@
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
+#include "core/scan/scanner.h"
+#include "platform/file_system.h"
+#include "platform/file_writer.h"
 
 #include <nlohmann/json.hpp>
 
@@ -619,6 +623,125 @@ void what_takes_chunk_hashes()
     std::filesystem::rename(away, without.manifest(1));
 }
 
+// The header of revision 1 of the sample archive of the golden case below:
+// written without a chunk size, as V1 wrote every revision.
+va::ManifestHeader golden_first_header()
+{
+    va::ManifestHeader header;
+    header.archive_uuid = "c0ffee00-0000-4000-8000-000000000033";
+    header.label = "ARCH-0033";
+    header.revision = 1;
+    header.created = "2026-10-16T05:00:00Z";
+    header.app_version = "0.1.0";
+    header.os = "windows";
+    header.host = "SAMPLE-PC";
+    header.identity.filesystem_type = "ntfs";
+    header.identity.filesystem_uuid = "c0ffee00c0ffee33";
+    header.identity.filesystem_uuid_short = "c0ffee33";
+    header.identity.volume_label = "SAMPLE-VOLUME";
+    header.identity.capacity_bytes = 1099511627776;
+    va::PhysicalDeviceInfo device;
+    device.model = "SAMPLE-DEVICE";
+    device.serial = "SAMPLE0001";
+    device.capacity_bytes = 1099511627776;
+    device.bus = "usb";
+    header.identity.devices.push_back(device);
+    header.root_hint = "X:\\";
+    header.exclusions = va::default_exclusions();
+    return header;
+}
+
+// Writes `entries` with `chunk_size` to `destination` and gives the manifest
+// its name; its bytes.
+std::string write_golden(const std::filesystem::path& destination, std::uint64_t chunk_size,
+    const std::vector<va::Entry>& entries, const va::ManifestHeader& header, va::IFileWriter& writer,
+    va::IFileSystemAccess& files)
+{
+    std::filesystem::create_directories(destination.parent_path());
+    va::ManifestWriter manifest(writer, files, destination, chunk_size);
+    for (const auto& entry : entries) {
+        CHECK(manifest.add(entry).has_value());
+    }
+    auto written = manifest.finish(header);
+    CHECK(written && written->file->commit());
+    return read_file(destination);
+}
+
+// CLAUDE.md rule 10, decision 0033: the golden manifest of a revision with
+// chunk hashes added, byte for byte on every OS (sample data). Revision 1 of
+// a sample archive holds the entries of the golden manifest with chunk lines
+// (golden_chunks_r0003.vam: files smaller than a chunk, of exactly one and of
+// several, two that share their p, a large stream and a large unreadable
+// file, a directory and a link) without a chunk size, as V1 wrote it.
+// Revision 2 adds their chunk hashes at 64 KiB: its entry lines are revision
+// 1's byte for byte, and its body is that of the golden manifest with chunk
+// lines, which a registration at that chunk size wrote; so are its body hash,
+// counts and Merkle root.
+void golden_revision_with_chunk_hashes_added()
+{
+    const auto golden = std::filesystem::path(VERIARCHIVE_TEST_DATA_DIR);
+    const auto files = va::platform::make_file_system_access();
+    const auto writer = va::platform::make_file_writer();
+    // The entries of the golden manifest with chunk lines, each file with its
+    // chunk hashes.
+    std::vector<va::Entry> chunked;
+    auto reader = va::ManifestReader::open(*files, golden / "golden_chunks_r0003.vam");
+    CHECK(reader.has_value());
+    while (reader) {
+        auto next = reader->next();
+        CHECK(next.has_value());
+        if (!next || !*next) {
+            break;
+        }
+        chunked.push_back(std::move(**next));
+    }
+    CHECK(chunked.size() == 9);
+    std::vector<va::Entry> recorded;
+    std::map<std::string, std::vector<std::string>> read;
+    for (auto entry : chunked) {
+        if (!entry.chunks.empty()) {
+            read[va::entry_key(entry)] = entry.chunks;
+        }
+        entry.chunks.clear();
+        recorded.push_back(std::move(entry));
+    }
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      ("va-golden-added-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto first_header = golden_first_header();
+    const auto first = write_golden(
+        va::manifest_path(root, first_header.archive_uuid, 1), 0, recorded, first_header, *writer, *files);
+    const auto entries = va::entries_with_chunk_hashes(recorded, read, test_chunk_size);
+    CHECK(entries.has_value());
+    const va::HostInfo host{"windows", "SAMPLE-PC", "1.1.0"};
+    const auto second_header = va::header_with_chunk_hashes(
+        first_header, "2026-10-16T06:00:00Z", host, first_header.identity, first_header.root_subpath, "X:\\");
+    const auto second = entries ? write_golden(va::manifest_path(root, first_header.archive_uuid, 2), test_chunk_size,
+                                      *entries, second_header, *writer, *files)
+                                : std::string{};
+
+    const auto expected = read_file(golden / "golden_chunks_added_r0002.vam");
+    CHECK(second == expected);
+    if (second != expected) {
+        std::ofstream(root.parent_path() / "va-golden-chunks-added-actual.vam", std::ios::binary) << second;
+        std::cerr << "golden mismatch; actual bytes written to "
+                  << va::path_to_utf8(root.parent_path() / "va-golden-chunks-added-actual.vam") << '\n';
+    }
+    const auto before = test::split_manifest(first);
+    const auto after = test::split_manifest(second);
+    const auto registered = test::split_manifest(read_file(golden / "golden_chunks_r0003.vam"));
+    CHECK(before.header.chunk_size == 0 && before.lines.size() == 9);
+    CHECK(after.lines.size() == 17 && std::equal(before.lines.begin(), before.lines.end(), after.lines.begin()));
+    CHECK(after.lines == registered.lines);
+    CHECK(after.header.revision == 2 && after.header.supersedes == 1u && after.header.chunk_size == test_chunk_size &&
+          after.header.counts.chunks == 8 && after.header.merkle_root == registered.header.merkle_root &&
+          after.header.body_blake3 == registered.header.body_blake3 &&
+          after.header.body_length == registered.header.body_length && after.header.counts.files == 6 &&
+          after.header.counts.bytes == registered.header.counts.bytes);
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 // The entries and header of the revision that adds chunk hashes.
 void the_revision_that_adds_them()
 {
@@ -678,4 +801,5 @@ void add_chunk_hashes_tests()
     an_interrupted_run_resumes_adding();
     what_takes_chunk_hashes();
     the_revision_that_adds_them();
+    golden_revision_with_chunk_hashes_added();
 }
