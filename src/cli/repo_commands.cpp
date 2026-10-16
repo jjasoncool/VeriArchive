@@ -79,7 +79,7 @@ int rebuild(const Arguments& arguments, const Session& session)
     if (arguments.json) {
         print_json({{"archives", report->archives}, {"revisions", report->revisions},
             {"entries", report->entries}, {"skipped", report->skipped},
-            {"saved_progress_kept", report->saved_progress_kept}});
+            {"saved_progress_kept", report->saved_progress_kept}, {"revisions_kept", report->revisions_kept}});
     } else {
         const auto& text = arguments.text;
         std::cout << text.format(
@@ -93,11 +93,22 @@ int rebuild(const Arguments& arguments, const Session& session)
                              report->saved_progress_kept)
                       << '\n';
         }
+        // Decision 0028: so do the records of revisions whose manifest it
+        // could not read; `archive list` shows what is wrong with each.
+        if (report->revisions_kept > 0) {
+            std::cout << "  "
+                      << text.format("revisions whose manifest could not be read, kept as recorded: {}",
+                             report->revisions_kept)
+                      << '\n';
+        }
         for (const auto& skipped : report->skipped) {
             std::cout << "  " << text.format("skipped: {}", text(skipped)) << '\n';
         }
     }
-    return report->skipped.empty() ? exit_code::passed : exit_code::passed_with_warnings;
+    // Decision 0028: an archive needs the operator while a manifest could not
+    // be read, also one that is missing, whose record was kept.
+    return report->skipped.empty() && report->revisions_kept == 0 ? exit_code::passed
+                                                                   : exit_code::passed_with_warnings;
 }
 
 } // namespace

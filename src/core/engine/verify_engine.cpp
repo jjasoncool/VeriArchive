@@ -253,7 +253,8 @@ std::expected<VerifyOutcome, VerifyStop> failed_on_its_manifest(VerifyServices& 
 // and its root; matching without it could take the root for another
 // archive's, or for no archive's. The verification stops, saying which
 // archive, why, and how to go on: a verification of that archive by its uuid
-// records the failure, then its manifest is restored (or the index rebuilt).
+// records the failure, then its manifest is restored or the index rebuilt,
+// or, where the index has no record of the manifest, both, as the case is.
 std::string root_may_belong_to(const CandidatesFailure& failure)
 {
     const auto& unusable = *failure.unusable;
@@ -261,9 +262,17 @@ std::string root_may_belong_to(const CandidatesFailure& failure)
                       "), whose manifest cannot be used: " + what_is_wrong_with(unusable) +
                       "; verify that archive by its uuid (`verify --full " + unusable.archive_uuid +
                       "`) to record the failure, then ";
-    return what + (unusable.kind == UnusableManifest::Kind::IndexDiffers
-                          ? "rebuild the index with `repo rebuild-index`"
-                          : "restore its manifest from a backup of the repository");
+    const bool rebuild = unusable.kind == UnusableManifest::Kind::IndexDiffers ||
+                         unusable.kind == UnusableManifest::Kind::NotIndexed;
+    const bool restore = unusable.kind != UnusableManifest::Kind::IndexDiffers &&
+                         (unusable.kind != UnusableManifest::Kind::NotIndexed ||
+                             unusable.file != UnusableManifest::File::Readable);
+    if (restore && rebuild) {
+        return what + "restore its manifest from a backup of the repository and rebuild the index with "
+                      "`repo rebuild-index`";
+    }
+    return what + (rebuild ? "rebuild the index with `repo rebuild-index`"
+                           : "restore its manifest from a backup of the repository");
 }
 
 // R-89: a manifest copy on the media is compared with the repository copy. A

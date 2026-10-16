@@ -2,6 +2,7 @@
 
 #include "engine_fixture.h"
 
+#include "core/engine/archive_status.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/relocate_engine.h"
 #include "core/hash/hashers.h"
@@ -9,8 +10,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <set>
 
 namespace {
@@ -60,7 +63,8 @@ void rebuild_keeps_database_facts()
     const auto runs = fixture.store.verify_runs(first->archive_uuid);
     CHECK(runs && runs->size() == 2);
 
-    // A damaged manifest is reported, not indexed.
+    // A damaged manifest is reported, not indexed: its revision keeps the
+    // record it had (decision 0028).
     const auto path = fixture.repository.context.repo.root / (*revisions)[0].manifest_relpath;
     std::string bytes;
     {
@@ -70,11 +74,13 @@ void rebuild_keeps_database_facts()
     bytes[bytes.size() - 3] ^= 0x01;
     std::ofstream(path, std::ios::binary | std::ios::trunc) << bytes;
     const auto damaged = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
-    CHECK(damaged && damaged->skipped.size() == 1 && damaged->revisions == 1);
+    CHECK(damaged && damaged->skipped.size() == 1 && damaged->revisions == 1 && damaged->revisions_kept == 1);
     if (damaged && damaged->skipped.size() == 1) {
         CHECK(damaged->skipped.front() == "cannot read manifest " + first->archive_uuid +
             "/r0001.vam: manifest body does not match its header (ManifestHashMismatch)");
     }
+    const auto still = fixture.store.revisions(first->archive_uuid);
+    CHECK(still && still->size() == 1 && still->front().header_blake3 == (*revisions)[0].header_blake3);
 }
 
 // Each skipped line starts with its own words and ends with the cause after
@@ -122,7 +128,7 @@ void skipped_manifests_say_why()
     manifests.add_file(own + "/r0001.vam", header + body);
 
     const auto report = va::rebuild_index(fixture.store, manifests, layout);
-    CHECK(report && report->skipped.size() == 5 && report->revisions == 0);
+    CHECK(report && report->skipped.size() == 5 && report->revisions == 0 && report->revisions_kept == 1);
     if (!report) {
         return;
     }
@@ -239,6 +245,271 @@ void rebuild_keeps_saved_progress()
     CHECK(relocated && relocated->revision == 2 && fixture.archive.bytes_read == 200);
 }
 
+std::chrono::sys_seconds now()
+{
+    return std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+}
+
+// The one archive of `fixture`, as the archive list reads it.
+std::optional<va::ArchiveStatus> listed(test::EngineFixture& fixture)
+{
+    const auto statuses = va::archive_statuses(
+        fixture.store, *fixture.repository.files, fixture.repository.context.repo, va::Policy{}, now());
+    CHECK(statuses && statuses->size() == 1);
+    if (!statuses || statuses->size() != 1) {
+        return std::nullopt;
+    }
+    return statuses->front();
+}
+
+// An archive registered twice (sample data): revision 1 with a.txt, revision
+// 2 with b.txt as well. Its uuid.
+va::Uuid registered_twice(test::EngineFixture& fixture)
+{
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    const auto first = fixture.register_root(fixture.archive.root());
+    fixture.archive.add_file("b.txt", "b (sample data)");
+    va::RegisterRequest again;
+    again.root = fixture.archive.root();
+    again.new_revision = true;
+    const auto second = fixture.register_root(again);
+    CHECK(first && second && second->revision == 2);
+    return first ? first->archive_uuid : va::Uuid{};
+}
+
+// Decision 0028: a revision whose manifest `repo rebuild-index` cannot read
+// keeps its record and its index as they were, and the archive stays at that
+// revision, never taken for one at an earlier revision. An archive registered
+// twice, whose manifest of revision 1 is intact while that of revision 2 is
+// gone, has a first line that no longer parses, or has one byte of its body
+// changed (sample data). The rebuild rebuilds revision 1, keeps the record of
+// revision 2 with its rows of files, and says so; the archive stays at
+// revision 2. It is listed with what is wrong with that manifest (nothing
+// where only the body changed: the list reads line 1 alone), FAILS by its
+// uuid at revision 2 without reading the media, and stops a verification of
+// its root, naming it (where only the body changed, its root finds it and
+// fails on the body). Restored, the manifest verifies at revision 2, with no
+// other rebuild.
+void a_manifest_that_cannot_be_read_keeps_its_revision()
+{
+    enum class Case { Missing, FirstLine, Body };
+    for (const auto what : {Case::Missing, Case::FirstLine, Case::Body}) {
+        test::EngineFixture fixture;
+        const auto archive_uuid = registered_twice(fixture);
+        const auto& layout = fixture.repository.context.repo;
+        const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+        const auto kept = read_file(second);
+        const auto record_before = fixture.store.revision(archive_uuid, 2);
+        const auto rows_before = fixture.store.file_row_count(archive_uuid, 2);
+        CHECK(record_before && *record_before && rows_before && rows_before->files == 2);
+        const auto manifest = "the manifest of revision 2 (manifests/" + archive_uuid + "/r0002.vam)";
+        std::string wrong;
+        auto bytes = kept;
+        if (what == Case::Missing) {
+            std::filesystem::remove(second);
+            wrong = manifest + " is missing";
+        } else if (what == Case::FirstLine) {
+            bytes[0] = '[';
+            wrong = manifest + " has changed: its first line differs from what the repository recorded";
+        } else {
+            bytes[bytes.size() - 5] ^= 0x01;
+            wrong = manifest + " has changed: its body does not match its header";
+        }
+        if (what != Case::Missing) {
+            std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
+        }
+        const auto message = wrong + "; restore it from a backup of the repository";
+
+        // A plan of revision 2 that an older version left behind, though the
+        // revision is recorded (decision 0023): no saved progress, as the
+        // rows under revision 2 are that revision's index.
+        const nlohmann::json left_plan{{"archive_uuid", archive_uuid}, {"revision", 2}, {"label", "ARCH-0001"},
+            {"created", "2026-10-16T01:00:00Z"}, {"new_archive", false}, {"root", "Z:\\left behind"}};
+        CHECK(fixture.store.set_setting("registration:" + archive_uuid, left_plan.dump()));
+
+        const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+        CHECK(report && report->revisions == 1 && report->revisions_kept == 1 && report->saved_progress_kept == 0 &&
+              report->skipped.size() == (what == Case::Missing ? 0u : 1u));
+        CHECK(fixture.store.remove_setting("registration:" + archive_uuid));
+        const auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive && (*archive)->current_revision == 2);
+        const auto record = fixture.store.revision(archive_uuid, 2);
+        CHECK(record && *record && record_before && *record_before &&
+              (*record)->header_blake3 == (*record_before)->header_blake3 &&
+              (*record)->body_blake3 == (*record_before)->body_blake3 &&
+              (*record)->header_json == (*record_before)->header_json);
+        const auto rows = fixture.store.file_row_count(archive_uuid, 2);
+        CHECK(rows && rows_before && rows->files == rows_before->files && rows->bytes == rows_before->bytes);
+
+        const auto status = listed(fixture);
+        if (what == Case::Body) {
+            CHECK(status && status->header && status->header->revision == 2 && !status->unusable_manifest);
+        } else {
+            CHECK(status && !status->header && status->unusable_manifest &&
+                  va::plain_message(*status->unusable_manifest) == message);
+        }
+
+        const auto by_root = fixture.verify(fixture.archive.root());
+        if (what == Case::Body) {
+            CHECK(by_root && by_root->result == "FAILED" && by_root->media_read && by_root->revision == 2 &&
+                  by_root->warnings == std::vector<std::string>{"manifest: " + message});
+        } else {
+            CHECK(!by_root && by_root.error().kind == va::VerifyStop::Kind::Repository &&
+                  by_root.error().message.starts_with("this root may belong to archive ARCH-0001 (" + archive_uuid +
+                                                      "), whose manifest cannot be used: " + wrong + ";"));
+        }
+        fixture.media.error = va::IoError{va::IoErrorKind::Other, 0, "the media is not looked for (sample)"};
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = archive_uuid;
+        const auto named = fixture.verify(by_uuid);
+        CHECK(named && named->result == "FAILED" && !named->media_read && named->revision == 2 &&
+              named->warnings == std::vector<std::string>{"manifest: " + message});
+        fixture.media.error.reset();
+
+        std::ofstream(second, std::ios::binary | std::ios::trunc) << kept;
+        const auto restored = fixture.verify(by_uuid);
+        CHECK(restored && restored->result == "PASSED" && restored->revision == 2);
+        const auto clean = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+        CHECK(clean && clean->revisions == 2 && clean->revisions_kept == 0 && clean->skipped.empty());
+    }
+}
+
+// Decision 0028: each archive is at the latest revision that a manifest in
+// its folder names by its file name, whether rebuild-index could read it or
+// not. Here the index has lost the record of revision 2 (sample damage to the
+// database) when the rebuild finds its manifest with one byte of its body
+// changed: there is no record to keep, and the archive still stays at
+// revision 2, of which the index has no record. The archive list says so, and
+// that the manifest cannot be read: to restore it, then to rebuild the index.
+// Restored, it says to rebuild the index, and the rebuild records revision 2.
+// A file that only bears the name of a manifest (a stray r0003.vam, sample
+// text) takes the archive to revision 3 the same way; once it is removed,
+// the next rebuild takes the archive back to revision 2.
+void an_archive_is_at_the_latest_manifest_its_folder_names()
+{
+    test::EngineFixture fixture;
+    const auto archive_uuid = registered_twice(fixture);
+    const auto& layout = fixture.repository.context.repo;
+    const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+    const auto kept = read_file(second);
+    auto bytes = kept;
+    bytes[bytes.size() - 5] ^= 0x01;
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
+    fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; DELETE FROM files WHERE revision = 2");
+
+    const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(report && report->revisions == 1 && report->revisions_kept == 0 && report->skipped.size() == 1);
+    auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+    const auto no_record = "the repository's index has no record of the manifest of revision 2 (manifests/" +
+                           archive_uuid + "/r0002.vam)";
+    auto status = listed(fixture);
+    // The list reads line 1 alone: the manifest reads as that of revision 2.
+    CHECK(status && status->unusable_manifest &&
+          status->unusable_manifest->kind == va::UnusableManifest::Kind::NotIndexed &&
+          va::plain_message(*status->unusable_manifest) == no_record + "; rebuild the index with `repo rebuild-index`");
+    // Its verification reads it up to its body's hash.
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = archive_uuid;
+    const auto failed = fixture.verify(by_uuid);
+    CHECK(failed && failed->result == "FAILED" && !failed->media_read && failed->revision == 2 &&
+          failed->warnings ==
+              std::vector<std::string>{"manifest: " + no_record +
+                                       ", which cannot be read: manifest body does not match its header "
+                                       "(ManifestHashMismatch); restore it from a backup of the repository, then "
+                                       "rebuild the index with `repo rebuild-index`"});
+
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << kept;
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(rebuilt && rebuilt->revisions == 2 && rebuilt->skipped.empty());
+    const auto verified = fixture.verify(by_uuid);
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+
+    // A stray file under a manifest's name.
+    const auto stray = va::manifest_path(layout.manifests(), archive_uuid, 3);
+    std::ofstream(stray, std::ios::binary) << "not a manifest (sample text)\n";
+    const auto with_stray = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(with_stray && with_stray->revisions == 2 && with_stray->skipped.size() == 1);
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 3);
+    status = listed(fixture);
+    CHECK(status && status->unusable_manifest &&
+          status->unusable_manifest->kind == va::UnusableManifest::Kind::NotIndexed &&
+          status->unusable_manifest->revision == 3 &&
+          status->unusable_manifest->file == va::UnusableManifest::File::Unreadable);
+    std::filesystem::remove(stray);
+    const auto without_stray = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(without_stray && without_stray->revisions == 2 && without_stray->skipped.empty());
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+
+    // A file under the name of revision 0 names none: with both manifests
+    // moved away and the index's records of them removed by hand (sample
+    // damage), nothing is left of the archive's revisions, and its record
+    // keeps revision 2, never taken to revision 0.
+    const auto zero = va::manifest_path(layout.manifests(), archive_uuid, 0);
+    const auto first = va::manifest_path(layout.manifests(), archive_uuid, 1);
+    const auto away = layout.root.parent_path() / "away";
+    std::filesystem::create_directories(away);
+    std::filesystem::rename(first, away / "r0001.vam");
+    std::filesystem::rename(second, away / "r0002.vam");
+    fixture.repository.execute("DELETE FROM archive_revisions; DELETE FROM files");
+    std::ofstream(zero, std::ios::binary) << "not a manifest (sample text)\n";
+    const auto with_zero = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(with_zero && with_zero->revisions == 0 && with_zero->revisions_kept == 0 && with_zero->skipped.size() == 1);
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+    std::filesystem::remove(zero);
+    std::filesystem::rename(away / "r0001.vam", first);
+    std::filesystem::rename(away / "r0002.vam", second);
+    const auto without = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(without && without->revisions == 2 && without->skipped.empty() && without->revisions_kept == 0);
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2);
+    status = listed(fixture);
+    CHECK(status && status->header && status->header->revision == 2 && !status->unusable_manifest);
+}
+
+// Decision 0028: the archive's record keeps the root that the manifest of its
+// revision records where rebuild-index cannot read that manifest, never the
+// root of an earlier revision. An archive at /vol/old relocated to /vol/new
+// on the same volume (sample data), whose manifest of revision 2 is gone:
+// the rebuild reads revision 1, at "old", and the archive stays at revision 2
+// with its root "new"; restored and rebuilt, it is at "new" as before.
+void the_archive_keeps_the_root_of_its_revision()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("old/a.txt", "a (sample data)");
+    fixture.archive.add_file("new/a.txt", "a (sample data)");
+    const auto registered = fixture.register_root(fixture.archive.root() / "old");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    const auto& archive_uuid = registered->archive_uuid;
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto relocated = va::relocate_archive(
+        services, {archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(relocated && relocated->revision == 2);
+    const auto& layout = fixture.repository.context.repo;
+    const auto second = va::manifest_path(layout.manifests(), archive_uuid, 2);
+    const auto kept = read_file(second);
+    std::filesystem::remove(second);
+
+    const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(report && report->revisions == 1 && report->revisions_kept == 1);
+    auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2 && (*archive)->root_subpath == "new");
+
+    std::ofstream(second, std::ios::binary | std::ios::trunc) << kept;
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(rebuilt && rebuilt->revisions == 2 && rebuilt->revisions_kept == 0);
+    archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 2 && (*archive)->root_subpath == "new");
+}
+
 } // namespace
 
 void rebuild_index_tests()
@@ -246,4 +517,7 @@ void rebuild_index_tests()
     rebuild_keeps_database_facts();
     skipped_manifests_say_why();
     rebuild_keeps_saved_progress();
+    a_manifest_that_cannot_be_read_keeps_its_revision();
+    an_archive_is_at_the_latest_manifest_its_folder_names();
+    the_archive_keeps_the_root_of_its_revision();
 }

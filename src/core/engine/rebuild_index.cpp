@@ -2,6 +2,7 @@
 
 #include "common/utf8.h"
 #include "common/uuid.h"
+#include "core/engine/recorded_manifest.h"
 #include "core/manifest/manifest_reader.h"
 
 #include <nlohmann/json.hpp>
@@ -42,6 +43,9 @@ std::expected<RebuildReport, IoError> rebuild_index(
 {
     RebuildReport report;
     std::map<Uuid, std::vector<FoundRevision>> found;
+    // The revisions that a manifest in the archive's folder names by its file
+    // name, which this rebuild could not read (decision 0028).
+    std::map<Uuid, std::set<std::uint32_t>> unread;
 
     const auto archives = repository_files.list(layout.manifests());
     if (!archives) {
@@ -69,13 +73,20 @@ std::expected<RebuildReport, IoError> rebuild_index(
             }
             const auto path = layout.manifests() / directory.native_name / file.native_name;
             const auto cannot_read = "cannot read manifest " + archive_uuid + "/" + name + ": ";
+            const auto skip = [&](const std::string& cause) {
+                report.skipped.push_back(cannot_read + cause);
+                // Revisions start at 1 (§B4.3): "r0000.vam" names none.
+                if (*revision > 0) {
+                    unread[archive_uuid].insert(*revision);
+                }
+            };
             auto reader = ManifestReader::open(repository_files, path);
             if (!reader) {
-                report.skipped.push_back(cannot_read + reader.error().message);
+                skip(reader.error().message);
                 continue;
             }
             if (reader->header().archive_uuid != archive_uuid || reader->header().revision != *revision) {
-                report.skipped.push_back(cannot_read + "header does not match its file name");
+                skip("header does not match its file name");
                 continue;
             }
             FoundRevision item;
@@ -98,7 +109,7 @@ std::expected<RebuildReport, IoError> rebuild_index(
                 item.entries.push_back(std::move(**next));
             }
             if (entry_error) {
-                report.skipped.push_back(cannot_read + *entry_error);
+                skip(*entry_error);
                 continue;
             }
             found[archive_uuid].push_back(std::move(item));
@@ -109,12 +120,47 @@ std::expected<RebuildReport, IoError> rebuild_index(
         return std::unexpected(begun.error());
     }
     const auto rebuilt = [&]() -> std::expected<void, IoError> {
+        const auto read_here = [&](const Uuid& archive_uuid, std::uint32_t revision) {
+            const auto manifests = found.find(archive_uuid);
+            return manifests != found.end() &&
+                   std::ranges::any_of(manifests->second,
+                       [&](const FoundRevision& manifest) { return manifest.record.revision == revision; });
+        };
+        // Decision 0028: a revision whose manifest this rebuild could not
+        // read, as it is missing or was skipped, keeps its record and its
+        // index as they were. No manifest can rebuild them, and the record is
+        // what the manifest is checked against once it is restored (R-14):
+        // dropped, the index would no longer know the revision, and would
+        // take an earlier one for the archive's. Only a record that names the
+        // manifest at its revision's own place (R-63): one that names another
+        // place is the index differing, and is rebuilt from the manifests.
+        // Read in this transaction, as the plans below.
+        const auto archives = store.archives();
+        if (!archives) {
+            return std::unexpected(archives.error());
+        }
+        std::map<Uuid, ArchiveRecord> existing;
+        std::set<std::pair<Uuid, std::uint32_t>> kept;
+        for (const auto& archive : *archives) {
+            existing.emplace(archive.archive_uuid, archive);
+            const auto records = store.revisions(archive.archive_uuid);
+            if (!records) {
+                return std::unexpected(records.error());
+            }
+            for (const auto& record : *records) {
+                if (record.manifest_relpath == manifest_relpath_of(record.archive_uuid, record.revision) &&
+                    !read_here(record.archive_uuid, record.revision)) {
+                    kept.emplace(record.archive_uuid, record.revision);
+                }
+            }
+        }
+        report.revisions_kept = kept.size();
         // The saved progress of the unfinished registrations stays (decision
         // 0026): the rows under the revision each plan creates, which are no
         // index and which no manifest holds. Unless a manifest read here
-        // defines that revision: then the plan is done with (decision 0023),
-        // and its rows are that manifest's index, rebuilt below. Read in this
-        // transaction, so no plan is made or removed in between.
+        // defines that revision, or a record kept: then the plan is done with
+        // (decision 0023), and its rows are that revision's index. Read in
+        // this transaction, so no plan is made or removed in between.
         const auto plans = store.settings_with_prefix("registration:");
         if (!plans) {
             return std::unexpected(plans.error());
@@ -128,40 +174,74 @@ std::expected<RebuildReport, IoError> rebuild_index(
             }
             const auto archive_uuid = key.substr(std::string_view("registration:").size());
             const auto created = revision->get<std::uint32_t>();
-            const auto manifests = found.find(archive_uuid);
-            const bool defined = manifests != found.end() &&
-                                 std::ranges::any_of(manifests->second, [&](const FoundRevision& manifest) {
-                                     return manifest.record.revision == created;
-                                 });
-            if (!defined) {
+            if (!read_here(archive_uuid, created) && !kept.contains({archive_uuid, created})) {
                 saved_progress.emplace(archive_uuid, created);
                 ++report.saved_progress_kept;
             }
         }
-        if (auto cleared = store.clear_index(saved_progress); !cleared) {
+        if (auto cleared = store.clear_index(kept, saved_progress); !cleared) {
             return cleared;
         }
-        for (auto& [archive_uuid, revisions] : found) {
-            std::sort(revisions.begin(), revisions.end(),
-                [](const FoundRevision& a, const FoundRevision& b) { return a.record.revision < b.record.revision; });
-            const auto& latest = revisions.back();
-            auto existing = store.find_archive(archive_uuid);
-            if (!existing) {
-                return std::unexpected(existing.error());
+        // Each archive is at the latest revision that a manifest in its folder
+        // names by its file name, whether this rebuild could read it or not,
+        // or that a record kept names (decision 0028): never at an earlier
+        // revision for want of the manifest of the latest. An archive that
+        // has no record is made one only from a manifest read here; one of
+        // which nothing is left keeps its record as it is.
+        std::set<Uuid> archive_uuids;
+        for (const auto& [archive_uuid, revisions] : found) {
+            archive_uuids.insert(archive_uuid);
+        }
+        for (const auto& [archive_uuid, revision] : kept) {
+            archive_uuids.insert(archive_uuid);
+        }
+        for (const auto& [archive_uuid, revisions] : unread) {
+            archive_uuids.insert(archive_uuid);
+        }
+        for (const auto& archive_uuid : archive_uuids) {
+            auto read = found.find(archive_uuid);
+            std::vector<FoundRevision>* revisions = read == found.end() ? nullptr : &read->second;
+            std::uint32_t latest = 0;
+            if (revisions) {
+                std::sort(revisions->begin(), revisions->end(), [](const FoundRevision& a, const FoundRevision& b) {
+                    return a.record.revision < b.record.revision;
+                });
+                latest = revisions->back().record.revision;
+            }
+            for (const auto& [kept_uuid, revision] : kept) {
+                if (kept_uuid == archive_uuid) {
+                    latest = std::max(latest, revision);
+                }
+            }
+            if (const auto names = unread.find(archive_uuid); names != unread.end()) {
+                latest = std::max(latest, *names->second.rbegin());
+            }
+            const auto record = existing.find(archive_uuid);
+            if (record == existing.end() && !revisions) {
+                continue;
             }
             ArchiveRecord archive;
-            if (*existing) {
-                archive = **existing; // keeps label edits, RETIRED status and notes
+            if (record != existing.end()) {
+                archive = record->second; // keeps label edits, RETIRED status and notes
             } else {
-                archive = {archive_uuid, latest.header.label, revisions.front().header.created, 0,
-                    "REGISTERED", "", ""};
+                const auto& newest = revisions->back().header;
+                archive = {archive_uuid, newest.label, revisions->front().header.created, 0, "REGISTERED",
+                    newest.root_subpath, ""};
             }
-            archive.current_revision = latest.record.revision;
-            archive.root_subpath = latest.header.root_subpath;
-            if (auto saved = *existing ? store.update_archive(archive) : store.insert_archive(archive); !saved) {
+            archive.current_revision = latest;
+            // The root as the manifest of the archive's revision records it,
+            // where this rebuild read that manifest.
+            if (revisions && revisions->back().record.revision == latest) {
+                archive.root_subpath = revisions->back().header.root_subpath;
+            }
+            if (auto saved = record != existing.end() ? store.update_archive(archive) : store.insert_archive(archive);
+                !saved) {
                 return saved;
             }
-            for (const auto& revision : revisions) {
+            if (!revisions) {
+                continue;
+            }
+            for (const auto& revision : *revisions) {
                 if (auto inserted = store.insert_revision(revision.record); !inserted) {
                     return inserted;
                 }

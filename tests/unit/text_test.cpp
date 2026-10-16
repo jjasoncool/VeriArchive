@@ -546,6 +546,38 @@ void translation_tests()
                   record_it + "rebuild the index with `repo rebuild-index`") ==
           may_be_chinese + "儲存庫的索引與版次 2 的清單檔（" + manifest + "）不符" + record_it_chinese +
               "以 `repo rebuild-index` 重建索引");
+    // The manifest of the archive's revision of which the index has no
+    // record (decision 0028): what the file at its place is, then the fix,
+    // the index rebuilt after the manifest is restored where it cannot be read.
+    const auto no_record = "the repository's index has no record of the manifest of revision 2 (" + manifest + ")";
+    const auto no_record_chinese = "儲存庫的索引沒有版次 2 的清單檔（" + manifest + "）的紀錄";
+    const std::string then_rebuild = ", then rebuild the index with `repo rebuild-index`";
+    const std::string then_rebuild_chinese = "，再以 `repo rebuild-index` 重建索引";
+    CHECK(chinese(no_record + "; rebuild the index with `repo rebuild-index`") ==
+          no_record_chinese + "；請以 `repo rebuild-index` 重建索引");
+    CHECK(chinese("problem: " + no_record + ", which is missing" + restore + then_rebuild) ==
+          "問題：" + no_record_chinese + "，而該清單檔已遺失" + restore_chinese + then_rebuild_chinese);
+    CHECK(chinese("manifest: " + no_record + ", which cannot be read: header does not match its file name" + restore +
+                  then_rebuild) ==
+          "清單檔：" + no_record_chinese + "，而且無法讀取該清單檔：標頭與其檔名不符" + restore_chinese +
+              then_rebuild_chinese);
+    CHECK(chinese(no_record + ", which cannot be read: manifest body does not match its header (ManifestHashMismatch)" +
+                  restore + then_rebuild) ==
+          no_record_chinese + "，而且無法讀取該清單檔：清單檔主體與其標頭不符（清單檔雜湊不符）" + restore_chinese +
+              then_rebuild_chinese);
+    CHECK(chinese("error: " + may_be + no_record + record_it + "rebuild the index with `repo rebuild-index`") ==
+          "錯誤：" + may_be_chinese + no_record_chinese + record_it_chinese + "以 `repo rebuild-index` 重建索引");
+    const std::string restore_and_rebuild =
+        "restore its manifest from a backup of the repository and rebuild the index with `repo rebuild-index`";
+    const std::string restore_and_rebuild_chinese = "從儲存庫的備份還原它的清單檔，並以 `repo rebuild-index` 重建索引";
+    CHECK(chinese(may_be + no_record + ", which is missing" + record_it + restore_and_rebuild) ==
+          may_be_chinese + no_record_chinese + "，而該清單檔已遺失" + record_it_chinese + restore_and_rebuild_chinese);
+    CHECK(chinese(may_be + no_record + ", which cannot be read: CreateFileW failed (Win32 error 5)" + record_it +
+                  restore_and_rebuild) ==
+          may_be_chinese + no_record_chinese + "，而且無法讀取該清單檔：CreateFileW 失敗（Win32 錯誤 5）" +
+              record_it_chinese + restore_and_rebuild_chinese);
+    CHECK(chinese.format("revisions whose manifest could not be read, kept as recorded: {}", 1) ==
+          "因清單檔無法讀取而保留原紀錄的版次：1 個");
     // An archive listed with the problem of its manifest (decision 0028): the
     // CLI's line and the GUI's row, the message worded as everywhere else.
     const auto missing = "the manifest of revision 2 (" + manifest + ") is missing" + restore;

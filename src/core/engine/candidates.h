@@ -24,17 +24,18 @@ struct CandidatesFailure {
     std::string label;                         // the label of its archive
 };
 
-// Each archive with a recorded revision and the carrier of its latest
-// revision, or only the archive `only` when the operator names one (by its
-// uuid, or by the run of it to resume): a verification of a named archive
-// reads no other archive's manifest. The carriers of earlier revisions are
-// left out until matching looks at them (match_recorded).
+// Each archive with a revision and the carrier of its latest revision, or
+// only the archive `only` when the operator names one (by its uuid, or by the
+// run of it to resume): a verification of a named archive reads no other
+// archive's manifest. The carriers of earlier revisions are left out until
+// matching looks at them (match_recorded).
 //
 // The carriers come from the manifests' headers (load_recorded_header), never
 // from the index's copies of them (R-14). Fails with the first manifest of a
 // latest revision that cannot be used (the archives in the order of their
-// labels): matching against what is left would be matching without that
-// archive, whose carrier and root only that manifest records.
+// labels), also one of which the index has no record (manifest_not_indexed):
+// matching against what is left would be matching without that archive,
+// whose carrier and root only that manifest records.
 std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout,
     const std::optional<Uuid>& only = std::nullopt);

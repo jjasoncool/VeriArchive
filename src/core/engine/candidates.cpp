@@ -4,8 +4,6 @@
 #include "common/unicode.h"
 #include "core/engine/recorded_manifest.h"
 
-#include <algorithm>
-
 namespace va {
 
 std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(ArchiveStore& store,
@@ -20,25 +18,28 @@ std::expected<std::vector<ArchiveCandidate>, CandidatesFailure> load_candidates(
         if (only && archive.archive_uuid != *only) {
             continue;
         }
-        const auto revisions = store.revisions(archive.archive_uuid);
-        if (!revisions) {
-            return std::unexpected(CandidatesFailure{revisions.error().message, std::nullopt, {}});
-        }
-        if (revisions->empty()) {
+        if (archive.current_revision == 0) {
             continue; // registration never finished
+        }
+        const auto latest = store.revision(archive.archive_uuid, archive.current_revision);
+        if (!latest) {
+            return std::unexpected(CandidatesFailure{latest.error().message, std::nullopt, {}});
+        }
+        // The archive's revision of which the index has no record (as where
+        // `repo rebuild-index` could not read its manifest) cannot be used
+        // either: its carrier and root are unknown (decision 0028).
+        const auto header = *latest ? load_recorded_header(repository_files, layout, **latest)
+                                    : std::expected<ManifestHeader, UnusableManifest>(std::unexpect,
+                                          manifest_not_indexed(repository_files, layout, archive.archive_uuid,
+                                              archive.current_revision, false));
+        if (!header) {
+            return std::unexpected(CandidatesFailure{plain_message(header.error()), header.error(), archive.label});
         }
         ArchiveCandidate candidate;
         candidate.archive_uuid = archive.archive_uuid;
         candidate.retired = archive.status == "RETIRED";
-        const auto latest = std::ranges::find(*revisions, archive.current_revision, &RevisionRecord::revision);
-        if (latest != revisions->end()) {
-            const auto header = load_recorded_header(repository_files, layout, *latest);
-            if (!header) {
-                return std::unexpected(CandidatesFailure{plain_message(header.error()), header.error(), archive.label});
-            }
-            candidate.identity = header->identity;
-            candidate.root_subpath = header->root_subpath;
-        }
+        candidate.identity = header->identity;
+        candidate.root_subpath = header->root_subpath;
         candidates.push_back(std::move(candidate));
     }
     return candidates;

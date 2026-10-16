@@ -9,7 +9,6 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "core/engine/abandon_registration.h"
-#include "core/engine/rebuild_index.h"
 #include "core/engine/registration_attempt.h"
 #include "core/manifest/manifest_writer.h"
 
@@ -255,11 +254,13 @@ void abandoning_a_new_revision_keeps_the_archive()
 
 // R-14: the index never decides alone that an archive had no revision. A
 // registered and verified archive, whose `register --new-revision` was
-// interrupted, and whose index then lost its revision: `repo rebuild-index`
-// skips a manifest it cannot read (damaged here, sample bytes) and keeps the
-// archive's record. Abandoning the registration removes its plan, and keeps
-// the archive's record, its history and its media evidence: the record says
-// revision 1, and the plan creates revision 2 of an archive that exists.
+// interrupted, and whose index then lost its revision: the record of revision
+// 1 and its rows of files removed from the database by hand (sample damage;
+// `repo rebuild-index` keeps the record of a revision whose manifest it cannot
+// read, decision 0028), with the archive's record left. Abandoning the
+// registration removes its plan, and keeps the archive's record, its history
+// and its media evidence: the record says revision 1, and the plan creates
+// revision 2 of an archive that exists.
 void abandoning_keeps_an_archive_whose_index_lost_its_revision()
 {
     test::EngineFixture fixture;
@@ -280,13 +281,9 @@ void abandoning_keeps_an_archive_whose_index_lost_its_revision()
     request.new_revision = true;
     const auto interrupted = fixture.register_root(request);
     CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
-    {
-        std::ofstream damaged(va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 1),
-            std::ios::binary | std::ios::trunc);
-        damaged << "damaged manifest (sample data)\n";
-    }
-    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
-    CHECK(rebuilt && rebuilt->skipped.size() == 1);
+    fixture.repository.execute(("DELETE FROM archive_revisions WHERE archive_uuid = '" + archive_uuid +
+                                   "'; DELETE FROM files WHERE archive_uuid = '" + archive_uuid + "' AND revision = 1")
+                                   .c_str());
     const auto revisions = fixture.store.revisions(archive_uuid);
     CHECK(revisions && revisions->empty());
     const auto before = rows_of(fixture.repository);
@@ -300,7 +297,7 @@ void abandoning_keeps_an_archive_whose_index_lost_its_revision()
     CHECK(abandoned && abandoned->revision == 2 && !abandoned->first_registration && abandoned->files == 3);
     auto expected = before;
     expected.settings -= 1;  // its plan
-    expected.files -= 3;     // its saved progress (a, b and c), which the rebuilt index kept (decision 0026)
+    expected.files -= 3;     // its saved progress (a, b and c)
     CHECK(rows_of(fixture.repository) == expected);
     const auto archive = fixture.store.find_archive(archive_uuid);
     CHECK(archive && *archive && (*archive)->status == "REGISTERED" && (*archive)->current_revision == 1 &&

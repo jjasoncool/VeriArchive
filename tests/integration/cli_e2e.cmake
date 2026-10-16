@@ -747,6 +747,49 @@ endif()
 run_cli("0" archive list)
 run_cli("0;2" verify --full "${ROOT}")
 
+# `repo rebuild-index` keeps the record of a revision whose manifest it cannot
+# read, and the archive at that revision (decision 0028): the manifest of
+# revision 2 of the archive is moved away while that of revision 1 is intact
+# (sample data). The rebuild exits 2, saying that it kept one revision as
+# recorded, in either language. The archive stays at revision 2, never taken
+# back to revision 1, and is handled as one whose manifest cannot be used:
+# listed with the problem (exit 2), FAILED by its uuid at revision 2 without
+# reading the media (exit 3), and its root stops (exit 11), naming it.
+# Restored, the manifest verifies at revision 2 with no other rebuild.
+file(RENAME "${RECORDED}" "${RECORDED}.away")
+run_cli("2" repo rebuild-index --json)
+string(JSON rebuild_kept GET "${last_output}" revisions_kept)
+run_cli("2" repo rebuild-index)
+string(FIND "${last_output}" "因清單檔無法讀取而保留原紀錄的版次：1 個" kept_chinese)
+run_cli("2" --lang en repo rebuild-index)
+string(FIND "${last_output}" "revisions whose manifest could not be read, kept as recorded: 1" kept_english)
+run_cli("2" archive show "${archive_prefix}" --json)
+string(JSON skipped_revision GET "${last_output}" revision)
+string(JSON skipped_kind GET "${last_output}" manifest_problem kind)
+string(JSON skipped_message GET "${last_output}" manifest_problem message)
+run_cli("3" verify --full "${archive_uuid}" --json)
+string(JSON skipped_result GET "${last_output}" result)
+string(JSON skipped_read GET "${last_output}" media_read)
+string(JSON skipped_verified_revision GET "${last_output}" revision)
+run_cli("11" --lang en verify --full "${ROOT}")
+string(FIND "${last_errors}" "this root may belong to archive ${archive_label} (${archive_uuid}), whose manifest cannot be used: the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing;" skipped_by_root)
+file(RENAME "${RECORDED}.away" "${RECORDED}")
+if(NOT rebuild_kept EQUAL 1 OR kept_chinese EQUAL -1 OR kept_english EQUAL -1 OR NOT skipped_revision EQUAL 2
+        OR NOT skipped_kind STREQUAL "missing"
+        OR NOT skipped_message STREQUAL "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) is missing; restore it from a backup of the repository"
+        OR NOT skipped_result STREQUAL "FAILED" OR skipped_read OR NOT skipped_verified_revision EQUAL 2
+        OR skipped_by_root EQUAL -1)
+    message(FATAL_ERROR "an archive whose latest manifest repo rebuild-index could not read: kept ${rebuild_kept}, "
+        "revision ${skipped_revision}, kind ${skipped_kind}, ${skipped_message}; by uuid ${skipped_result} at "
+        "revision ${skipped_verified_revision}, media read ${skipped_read}; by root:\n${last_errors}")
+endif()
+run_cli("0" archive list)
+run_cli("0;2" verify --full "${ROOT}" --json)
+string(JSON restored_revision GET "${last_output}" revision)
+if(NOT restored_revision EQUAL 2)
+    message(FATAL_ERROR "the restored manifest verifies at revision ${restored_revision}")
+endif()
+
 # The manifest of an earlier revision is read only where matching looks at
 # the earlier carriers (decision 0004): with the first manifest of the
 # relocated archive moved away (sample data), the archive verifies by its

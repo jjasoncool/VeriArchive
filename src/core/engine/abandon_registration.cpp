@@ -103,8 +103,8 @@ std::expected<AbandonableRegistration, AbandonFailure> examine(
     // A first registration: its plan creates revision 1 of a new archive,
     // and the archive's record holds nothing else. Never judged from the
     // index alone (R-14): an archive whose index lost its revisions (a
-    // manifest that rebuild-index skipped) still has its record, its history
-    // and its evidence, and its registration of a new revision keeps them.
+    // damaged database) still has its record, its history and its evidence,
+    // and its registration of a new revision keeps them.
     const auto new_archive = plan.find("new_archive");
     if (registration.revision == 1 && new_archive != plan.end() && new_archive->is_boolean() &&
         new_archive->get<bool>()) {

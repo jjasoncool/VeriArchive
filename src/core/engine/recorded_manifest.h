@@ -41,26 +41,36 @@ struct UnusableManifest {
         IndexDiffers, // it is the one recorded (its line 1 has the BLAKE3 recorded for it), but the
                       // index says otherwise: its copy of the header is not that line, or the record
                       // names another archive, revision or body than that line does
+        NotIndexed,   // the manifest of the archive's revision, as the archive's record says it, of
+                      // which the index has no record (as where `repo rebuild-index` could not read
+                      // it and no record of it was left): `file` says what the file at its place is
     };
+    // NotIndexed: the file at the manifest's place (R-63), read as `repo
+    // rebuild-index` reads a manifest, as no record vouches for it: one that
+    // reads as the manifest of this revision of this archive (Readable), one
+    // that is gone (Missing), or one that cannot be read (Unreadable: `cause`).
+    enum class File { Readable, Missing, Unreadable };
     Kind kind = Kind::Unreadable;
     Uuid archive_uuid;
     std::uint32_t revision = 0;
     std::string manifest;  // where it is in the repository, '/'-separated (manifest_relpath)
     std::string cause;
+    File file = File::Readable;  // NotIndexed only
 };
 
 // The run-level failure class (§A6) of a verification whose manifest cannot
 // be used: ManifestHashMismatch for a manifest that has changed,
 // RepositoryError for one that is missing or cannot be read, or of which the
-// index says otherwise (IndexDiffers).
+// index says otherwise (IndexDiffers) or has no record (NotIndexed).
 std::string failure_class_of(const UnusableManifest& unusable);
 
 // The kind in English for --json (`manifest_problem.kind`): "missing",
-// "unreadable", "changed" or "index_differs".
+// "unreadable", "changed", "index_differs" or "not_indexed".
 std::string_view kind_code(UnusableManifest::Kind kind);
 
 // What is wrong, naming the manifest: "the manifest of revision 2
-// (manifests/<archive_uuid>/r0002.vam) is missing".
+// (manifests/<archive_uuid>/r0002.vam) is missing", or "the repository's
+// index has no record of the manifest of revision 2 (...), which is missing".
 std::string what_is_wrong_with(const UnusableManifest& unusable);
 
 // The plain message: what is wrong, then how to fix it, which is to restore
@@ -68,14 +78,33 @@ std::string what_is_wrong_with(const UnusableManifest& unusable);
 // index differs from a manifest that is the one recorded (IndexDiffers), to
 // rebuild the index (R-80). Rebuilding the index from a manifest that is
 // missing or has changed would take what the file holds now for the truth.
+// Where the index has no record of the manifest (NotIndexed), only
+// rebuilding the index records it again: after the manifest is restored,
+// where it is missing or cannot be read.
 std::string plain_message(const UnusableManifest& unusable);
+
+// The place of the manifest of `revision` of the archive in the repository
+// (R-63), '/'-separated, as a revision's record names it (manifest_relpath):
+// "manifests/<archive_uuid>/r0002.vam".
+std::string manifest_relpath_of(const Uuid& archive_uuid, std::uint32_t revision);
+
+// The manifest of `revision` of the archive, of which the index has no
+// record, though the archive's record says that revision (decision 0028):
+// it cannot be used (NotIndexed), and the file at its place is read as `repo
+// rebuild-index` reads a manifest, to say how to fix it. `whole`: up to its
+// body's hash, as before a verification; otherwise line 1 alone, as for the
+// archive lists and identity matching.
+UnusableManifest manifest_not_indexed(IFileSystemAccess& repository_files, const RepositoryLayout& layout,
+    const Uuid& archive_uuid, std::uint32_t revision, bool whole);
 
 struct ManifestLoadFailure {
     std::string failure_class;  // ManifestHashMismatch | ManifestRevisionRollback | RepositoryError
     std::string message;
     // Set when the manifest cannot be used; `message` is then its plain
-    // message, `failure_class` its class. Not set for a revision that is not
-    // recorded or is older than the highest known one (R-15).
+    // message, `failure_class` its class. Not set for a revision that is
+    // older than the highest known one (R-15), nor for one that is not
+    // recorded and is not the archive's revision either; the archive's
+    // revision that is not recorded cannot be used (NotIndexed).
     std::optional<UnusableManifest> unusable;
 };
 

@@ -167,7 +167,8 @@ void a_damaged_archive_never_stops_the_list()
 }
 
 // Decision 0028: each kind of manifest that cannot be used has its own code
-// in the --json of `archive list` and `archive show` (`manifest_problem.kind`).
+// in the --json of `archive list` and `archive show` (`manifest_problem.kind`),
+// also one of which the index has no record.
 void each_manifest_problem_has_its_code()
 {
     using Kind = va::UnusableManifest::Kind;
@@ -175,6 +176,7 @@ void each_manifest_problem_has_its_code()
     CHECK(va::kind_code(Kind::Unreadable) == "unreadable");
     CHECK(va::kind_code(Kind::Changed) == "changed");
     CHECK(va::kind_code(Kind::IndexDiffers) == "index_differs");
+    CHECK(va::kind_code(Kind::NotIndexed) == "not_indexed");
 }
 
 } // namespace

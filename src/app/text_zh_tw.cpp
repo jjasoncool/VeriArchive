@@ -128,6 +128,7 @@ constexpr CatalogEntry entries[] = {
     {"Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
         "已從清單檔重建索引：{} 個封存、{} 個版次、{} 個項目。"},
     {"unfinished registrations whose saved progress was kept: {}", "保留了已儲存進度的未完成註冊：{} 個"},
+    {"revisions whose manifest could not be read, kept as recorded: {}", "因清單檔無法讀取而保留原紀錄的版次：{} 個"},
     {"skipped: {}", "已略過：{}"},
     {"usage: repo init | info | rebuild-index | verify-history",
         "用法：repo init | info | rebuild-index | verify-history"},
@@ -883,11 +884,31 @@ constexpr CatalogEntry entries[] = {
     {"its first line differs from what the repository recorded", "其第一行與儲存庫所記錄的不同"},
     {"its body does not match its header", "其主體與標頭不符"},
     {"it gave other bytes when it was read again", "再次讀取時得到不同的內容"},
+    // The manifest of the archive's revision of which the index has no record,
+    // as where `repo rebuild-index` could not read it (decision 0028).
+    {"the repository's index has no record of the manifest of revision {} ({}), which is missing; restore it "
+        "from a backup of the repository, then rebuild the index with `repo rebuild-index`",
+        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄，而該清單檔已遺失；請從儲存庫的備份還原該清單檔，"
+        "再以 `repo rebuild-index` 重建索引"},
+    {"the repository's index has no record of the manifest of revision {} ({}), which cannot be read: {}; "
+        "restore it from a backup of the repository, then rebuild the index with `repo rebuild-index`",
+        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄，而且無法讀取該清單檔：{}；請從儲存庫的備份還原該清單檔，"
+        "再以 `repo rebuild-index` 重建索引",
+        Match::Cause},
+    {"the repository's index has no record of the manifest of revision {} ({}); rebuild the index with "
+        "`repo rebuild-index`",
+        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄；請以 `repo rebuild-index` 重建索引"},
     // What is wrong alone, inside a verification by root that stops (decision 0028).
     {"the manifest of revision {} ({}) is missing", "版次 {} 的清單檔（{}）已遺失"},
     {"the manifest of revision {} ({}) cannot be read: {}", "無法讀取版次 {} 的清單檔（{}）：{}", Match::Cause},
     {"the manifest of revision {} ({}) has changed: {}", "版次 {} 的清單檔（{}）已被變更：{}", Match::Cause},
     {"the repository's index differs from the manifest of revision {} ({})", "儲存庫的索引與版次 {} 的清單檔（{}）不符"},
+    {"the repository's index has no record of the manifest of revision {} ({}), which is missing",
+        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄，而該清單檔已遺失"},
+    {"the repository's index has no record of the manifest of revision {} ({}), which cannot be read: {}",
+        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄，而且無法讀取該清單檔：{}", Match::Cause},
+    {"the repository's index has no record of the manifest of revision {} ({})",
+        "儲存庫的索引沒有版次 {} 的清單檔（{}）的紀錄"},
     // src/core/engine/verify_engine.cpp: by root, the archive whose manifest
     // cannot be used may be the one at the root (decision 0028).
     {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
@@ -899,6 +920,12 @@ constexpr CatalogEntry entries[] = {
         "(`verify --full {}`) to record the failure, then rebuild the index with `repo rebuild-index`",
         "此根目錄可能屬於封存 {}（{}），而它的清單檔無法使用：{}；請先以 uuid 驗證該封存（`verify --full {}`）以記錄這次失敗，"
         "再以 `repo rebuild-index` 重建索引",
+        Match::Cause},
+    {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
+        "(`verify --full {}`) to record the failure, then restore its manifest from a backup of the repository and "
+        "rebuild the index with `repo rebuild-index`",
+        "此根目錄可能屬於封存 {}（{}），而它的清單檔無法使用：{}；請先以 uuid 驗證該封存（`verify --full {}`）以記錄這次失敗，"
+        "再從儲存庫的備份還原它的清單檔，並以 `repo rebuild-index` 重建索引",
         Match::Cause},
     // src/core/engine/rebuild_index.cpp
     {"cannot list the manifests of archive {}: {}", "無法列出封存 {} 的清單檔：{}", Match::Cause},

@@ -50,6 +50,12 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
                 } else {
                     status.unusable_manifest = std::move(header.error());
                 }
+            } else if (archive.current_revision > 0) {
+                // The archive's record says a revision of which the index has
+                // no record, as where `repo rebuild-index` could not read its
+                // manifest: that manifest cannot be used either (decision 0028).
+                status.unusable_manifest = manifest_not_indexed(
+                    repository_files, layout, archive.archive_uuid, archive.current_revision, false);
             }
         }
 

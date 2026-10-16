@@ -242,8 +242,8 @@ public:
     // never registered (REGISTRATION_INCOMPLETE, or RETIRED by the operator
     // since), and no revision, verification or media evidence refers to it
     // (decision 0025). Never the index alone (R-14): the record of an
-    // archive whose index lost its revisions (rebuild-index skips a manifest
-    // it cannot read) still says its revision.
+    // archive whose index lost its revisions (a damaged database) still says
+    // its revision.
     std::expected<bool, IoError> archive_without_revision(const Uuid& archive_uuid);
     // Removes the archive's record, in one statement, only while
     // archive_without_revision holds, as when its first registration is
@@ -295,9 +295,12 @@ public:
     // and saved (its checkpoints).
     std::expected<CheckpointCount, IoError> file_row_count(const Uuid& archive_uuid, std::uint32_t revision);
     // Empties the rebuildable index tables (archive_revisions, files) for
-    // rebuild-index, except the rows of `keep` (archive, revision) in files:
+    // rebuild-index, except the record of each revision in `kept` (archive,
+    // revision) with its rows in files, whose manifest rebuild-index could
+    // not read (decision 0028), and the rows in files of `saved_progress`:
     // the saved progress of unfinished registrations (decision 0026).
-    std::expected<void, IoError> clear_index(const std::set<std::pair<Uuid, std::uint32_t>>& keep = {});
+    std::expected<void, IoError> clear_index(const std::set<std::pair<Uuid, std::uint32_t>>& kept = {},
+        const std::set<std::pair<Uuid, std::uint32_t>>& saved_progress = {});
 
     std::expected<VerifyRunRecord, IoError> append_verify_run(
         VerifyRunRecord run, const std::string& repository_uuid);

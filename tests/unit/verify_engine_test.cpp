@@ -829,32 +829,182 @@ void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
     }
 }
 
-// Decision 0028 fails the verification of a known archive before its media is
-// looked for only when its manifest cannot be used. A current revision that
-// is not recorded, or one older than the highest known (R-15), is no such
-// manifest (sample data: the archive's record set to revision 2 of 1, or
-// back to revision 1 of 2), and keeps what it did before: the verification
-// by uuid of the first stops where its media is looked for (here the media
-// cannot be listed) and records nothing; the second finds its media and
-// FAILS with ManifestRevisionRollback, the media read and its evidence
-// recorded.
-void a_revision_not_recorded_or_rolled_back_looks_for_the_media()
+// Decision 0028: an archive whose record says a revision of which the index
+// has no record, as where `repo rebuild-index` could not read its manifest
+// and no record of it was left (here the record of revision 2 and its index
+// rows removed by hand, sample damage). Its manifest cannot be used, and
+// what the file at its place is says how to fix it, read as rebuild-index
+// reads a manifest: it reads as the manifest of revision 2 (rebuild the
+// index), it is gone, it is another revision's (a copy of revision 1's), or
+// it cannot be opened (restore it, then rebuild the index). Named by its uuid,
+// the archive FAILS at revision 2 with RepositoryError, without reading the
+// media (here it cannot even be listed), recorded; by root it stops naming
+// the archive and both steps; a new revision, an export and a comparison stop
+// with the plain message; the archive list lists it with its kind, never at
+// revision 1. Fixed as the message says, the archive verifies at revision 2.
+void an_archive_at_a_revision_the_index_has_no_record_of()
 {
-    {
+    enum class Case { Readable, Missing, AnotherRevision, Denied };
+    for (const auto what : {Case::Readable, Case::Missing, Case::AnotherRevision, Case::Denied}) {
         Registered fixture;
-        fixture.repository.execute("UPDATE archives SET current_revision = 2");
-        fixture.media.error = va::IoError{va::IoErrorKind::Other, 0, "the media is looked for (sample)"};
+        fixture.archive.add_file("added.txt", "added for revision 2 (sample data)");
+        va::RegisterRequest again;
+        again.root = fixture.archive.root();
+        again.new_revision = true;
+        CHECK(fixture.register_root(again).has_value());
+        const auto& layout = fixture.repository.context.repo;
+        const auto second = va::manifest_path(layout.manifests(), fixture.archive_uuid, 2);
+        const auto kept = file_bytes(second);
+        fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; "
+                                   "DELETE FROM files WHERE revision = 2");
+        const auto manifest = "manifests/" + fixture.archive_uuid + "/r0002.vam";
+        const auto no_record = "the repository's index has no record of the manifest of revision 2 (" + manifest + ")";
+        const std::string rebuild = "; rebuild the index with `repo rebuild-index`";
+        const std::string restore =
+            "; restore it from a backup of the repository, then rebuild the index with `repo rebuild-index`";
+        std::string what_is_wrong = no_record;
+        std::string message = no_record + rebuild;
+        auto file = va::UnusableManifest::File::Readable;
+        if (what == Case::Missing) {
+            std::filesystem::remove(second);
+            what_is_wrong = no_record + ", which is missing";
+            message = what_is_wrong + restore;
+            file = va::UnusableManifest::File::Missing;
+        } else if (what == Case::AnotherRevision) {
+            write_bytes(second, file_bytes(va::manifest_path(layout.manifests(), fixture.archive_uuid, 1)));
+            what_is_wrong = no_record + ", which cannot be read: header does not match its file name";
+            message = what_is_wrong + restore;
+            file = va::UnusableManifest::File::Unreadable;
+        } else if (what == Case::Denied) {
+            what_is_wrong = no_record + ", which cannot be read: access denied (sample)";
+            message = what_is_wrong + restore;
+            file = va::UnusableManifest::File::Unreadable;
+        }
+        DeniedOpen denied(*fixture.repository.files, "r0002.vam");
+        va::IFileSystemAccess& repository_files =
+            what == Case::Denied ? static_cast<va::IFileSystemAccess&>(denied) : *fixture.repository.files;
+
+        // Listed with the problem, at revision 2.
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        const auto statuses = va::archive_statuses(fixture.store, repository_files, layout, va::Policy{}, now);
+        CHECK(statuses && statuses->size() == 1 && statuses->front().archive.current_revision == 2 &&
+              !statuses->front().header && statuses->front().unusable_manifest &&
+              statuses->front().unusable_manifest->kind == va::UnusableManifest::Kind::NotIndexed &&
+              statuses->front().unusable_manifest->file == file &&
+              va::kind_code(statuses->front().unusable_manifest->kind) == "not_indexed" &&
+              va::failure_class_of(*statuses->front().unusable_manifest) == "RepositoryError" &&
+              va::plain_message(*statuses->front().unusable_manifest) == message);
+        if (statuses && statuses->size() == 1 && statuses->front().unusable_manifest &&
+            va::plain_message(*statuses->front().unusable_manifest) != message) {
+            std::cerr << "  listed: " << va::plain_message(*statuses->front().unusable_manifest) << '\n';
+        }
+
+        // By root: the root may be this archive's.
+        va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store, layout,
+            fixture.repository.context.repository_uuid, fixture.host};
+        va::VerifyRequest by_root;
+        by_root.root = fixture.archive.root();
+        const auto stopped = va::verify_full(services, by_root, fixture.cancel, fixture.progress);
+        const auto steps = what == Case::Readable
+                               ? std::string("rebuild the index with `repo rebuild-index`")
+                               : std::string("restore its manifest from a backup of the repository and rebuild the "
+                                             "index with `repo rebuild-index`");
+        const auto may_belong = "this root may belong to archive ARCH-0001 (" + fixture.archive_uuid +
+                                "), whose manifest cannot be used: " + what_is_wrong +
+                                "; verify that archive by its uuid (`verify --full " + fixture.archive_uuid +
+                                "`) to record the failure, then " + steps;
+        CHECK(!stopped && stopped.error().kind == va::VerifyStop::Kind::Repository &&
+              stopped.error().message == may_belong);
+        if (!stopped && stopped.error().message != may_belong) {
+            std::cerr << "  by root: " << stopped.error().message << '\n';
+        }
+
+        // Named by its uuid: FAILED at revision 2, the media not read.
+        fixture.media.error = va::IoError{va::IoErrorKind::Other, 0, "the media is not looked for (sample)"};
+        fixture.archive.bytes_read = 0;
+        const auto evidence_before = count_rows(fixture, "media_evidence");
         va::VerifyRequest by_uuid;
         by_uuid.archive_uuid = fixture.archive_uuid;
-        const auto stopped = fixture.verify(by_uuid);
-        CHECK(!stopped && stopped.error().kind == va::VerifyStop::Kind::NotFound &&
-              stopped.error().message == "cannot list volumes: the media is looked for (sample)");
-        if (stopped) {
-            std::cerr << "  revision not recorded: " << stopped->result << '\n';
+        const auto named = va::verify_full(services, by_uuid, fixture.cancel, fixture.progress);
+        CHECK(named && named->result == "FAILED" && !named->media_read && named->revision == 2 &&
+              named->failure_classes == std::vector<std::string>{"RepositoryError"} &&
+              named->warnings == std::vector<std::string>{"manifest: " + message});
+        if (!named) {
+            std::cerr << "  by uuid stopped: " << named.error().message << '\n';
+        } else if (named->warnings != std::vector<std::string>{"manifest: " + message} && !named->warnings.empty()) {
+            std::cerr << "  by uuid: " << named->warnings.front() << '\n';
         }
+        CHECK(fixture.archive.bytes_read == 0 && count_rows(fixture, "media_evidence") == evidence_before);
         const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
-        CHECK(runs && runs->empty());
+        CHECK(runs && runs->size() == 1 && runs->back().result == "FAILED" && runs->back().revision == 2 &&
+              runs->back().failure_classes == "RepositoryError");
+        fixture.media.error.reset();
+
+        // Every other use stops with the plain message.
+        const auto loaded = va::load_recorded_manifest(fixture.store, repository_files, layout, fixture.archive_uuid, 2);
+        CHECK(!loaded && loaded.error().failure_class == "RepositoryError" && loaded.error().message == message &&
+              loaded.error().unusable && loaded.error().unusable->kind == va::UnusableManifest::Kind::NotIndexed);
+        const auto exported = va::export_archive(fixture.store, repository_files, *fixture.repository.writer, layout,
+            fixture.archive_uuid, layout.root.parent_path() / "export");
+        CHECK(!exported && exported.error() == "RepositoryError: " + message);
+        const auto compared = va::compare_archives(fixture.store, repository_files, layout, fixture.archive_uuid,
+            fixture.archive_uuid, fixture.cancel, fixture.progress);
+        CHECK(!compared && compared.error().failure_class == "RepositoryError");
+        va::RegisterServices register_services{fixture.archive, repository_files, *fixture.repository.writer,
+            fixture.media_writer, fixture.media, fixture.store, layout, fixture.host, fixture.processes};
+        const auto registered = va::register_archive(register_services, again, fixture.cancel, fixture.progress);
+        CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
+              registered.error().message == message);
+
+        // Fixed as the message says: the manifest restored where it cannot
+        // be read, then the index rebuilt.
+        if (what != Case::Readable) {
+            write_bytes(second, kept);
+        }
+        const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+        CHECK(rebuilt && rebuilt->skipped.empty() && rebuilt->revisions == 2 && rebuilt->revisions_kept == 0);
+        const auto verified = fixture.verify(by_uuid);
+        CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
     }
+}
+
+// An archive whose first registration never finished has no revision
+// (revision 0) and no manifest, which is nothing that cannot be used
+// (decision 0028): A at /vol/a is registered, B's first registration at
+// /vol/b is interrupted (sample data). B is listed without a problem, and A
+// verifies by its root, which matching against every archive's latest carrier
+// would not let it do were B taken for one whose manifest cannot be used.
+void an_unfinished_first_registration_is_no_manifest_that_cannot_be_used()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("a/one.txt", "a (sample data)");
+    fixture.archive.add_file("b/two.txt", "b (sample data)").open_error =
+        va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged (sample)"};
+    const auto a = fixture.register_root(fixture.archive.root() / "a");
+    const auto b = fixture.register_root(fixture.archive.root() / "b");
+    CHECK(a && !b && b.error().kind == va::RegisterFailure::Kind::Incomplete);
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto statuses = va::archive_statuses(
+        fixture.store, *fixture.repository.files, fixture.repository.context.repo, va::Policy{}, now);
+    CHECK(statuses && statuses->size() == 2 &&
+          std::ranges::none_of(*statuses,
+              [](const va::ArchiveStatus& status) { return status.unusable_manifest.has_value(); }) &&
+          std::ranges::count_if(*statuses,
+              [](const va::ArchiveStatus& status) { return status.archive.current_revision == 0; }) == 1);
+    const auto verified = fixture.verify(fixture.archive.root() / "a");
+    CHECK(verified && verified->result == "PASSED" && a && verified->archive_uuid == a->archive_uuid);
+    if (!verified) {
+        std::cerr << "  A by root: " << verified.error().message << '\n';
+    }
+}
+
+// A current revision older than the highest known (R-15) is no manifest that
+// cannot be used (sample data: the archive's record set back to revision 1 of
+// 2), and keeps what it did before decision 0028: the verification by uuid
+// finds its media and FAILS with ManifestRevisionRollback, the media read and
+// its evidence recorded.
+void a_rolled_back_revision_looks_for_the_media()
+{
     {
         Registered fixture;
         va::RegisterRequest again;
@@ -1192,7 +1342,9 @@ void verify_engine_tests()
     an_index_that_differs_from_its_manifest_is_never_taken();
     a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root();
     a_known_archive_whose_manifest_cannot_be_used_fails_unread();
-    a_revision_not_recorded_or_rolled_back_looks_for_the_media();
+    an_archive_at_a_revision_the_index_has_no_record_of();
+    an_unfinished_first_registration_is_no_manifest_that_cannot_be_used();
+    a_rolled_back_revision_looks_for_the_media();
     a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run();
     a_named_archive_is_never_the_one_that_may_be_at_a_root();
     a_named_archive_reads_no_other_manifest();
