@@ -8,8 +8,9 @@
 #   share/licenses               licenses of every bundled third-party package
 #
 # Set by the including CMakeLists.txt through install(CODE):
-#   VERIARCHIVE_MINGW_PREFIX  e.g. C:/msys64/ucrt64
-#   VERIARCHIVE_OBJDUMP       objdump used to read DLL imports
+#   VERIARCHIVE_MINGW_PREFIX      e.g. C:/msys64/ucrt64
+#   VERIARCHIVE_OBJDUMP           objdump used to read DLL imports
+#   VERIARCHIVE_RUNTIME_SCAN_DIR  scratch folder in the build tree (step 1)
 cmake_minimum_required(VERSION 3.28)
 if(POLICY CMP0207)
     cmake_policy(SET CMP0207 NEW) # normalise paths before matching exclude patterns
@@ -22,10 +23,31 @@ set(mingw "${VERIARCHIVE_MINGW_PREFIX}")
 set(loader_dir "lib/gdk-pixbuf-2.0/2.10.0")
 
 # 1. Every DLL the executables and the image loaders import, from the MinGW tree.
+#
+# Like Windows, file(GET_RUNTIME_DEPENDENCIES) looks for a DLL next to the
+# binary that imports it first. A prefix that already holds an earlier install,
+# as when a portable folder is updated in place, has the DLLs in bin/ beside
+# the executables: they would be found there, while the image loaders find the
+# same DLLs in the MinGW tree, a conflict the command refuses; and everything
+# found in bin/ would come from the earlier install, never updated. So the
+# executables are scanned from a folder that holds nothing else: hard links to
+# them where the file system allows, copies elsewhere. A folder per prefix
+# keeps installs into different prefixes from the same build apart.
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "windows+pe")
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "${VERIARCHIVE_OBJDUMP}")
-file(GLOB executables "${prefix}/bin/*.exe")
+string(SHA256 scan_name "${prefix}")
+string(SUBSTRING "${scan_name}" 0 16 scan_name)
+set(scan_dir "${VERIARCHIVE_RUNTIME_SCAN_DIR}/${scan_name}")
+file(REMOVE_RECURSE "${scan_dir}")
+file(MAKE_DIRECTORY "${scan_dir}")
+file(GLOB installed_executables "${prefix}/bin/*.exe")
+set(executables "")
+foreach(executable IN LISTS installed_executables)
+    get_filename_component(name "${executable}" NAME)
+    file(CREATE_LINK "${executable}" "${scan_dir}/${name}" COPY_ON_ERROR)
+    list(APPEND executables "${scan_dir}/${name}")
+endforeach()
 file(GLOB loaders "${mingw}/${loader_dir}/loaders/*.dll")
 file(GET_RUNTIME_DEPENDENCIES
     EXECUTABLES ${executables}
@@ -35,6 +57,7 @@ file(GET_RUNTIME_DEPENDENCIES
     DIRECTORIES "${mingw}/bin"
     PRE_EXCLUDE_REGEXES "^api-ms-" "^ext-ms-"
     POST_EXCLUDE_REGEXES "^[A-Za-z]:[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\]")
+file(REMOVE_RECURSE "${scan_dir}")
 
 # Whatever is not found in the MinGW tree must be part of Windows itself. All
 # missing DLLs are reported together.

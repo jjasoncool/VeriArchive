@@ -196,7 +196,8 @@ if(WIN32)
     find_program(VERIARCHIVE_OBJDUMP objdump HINTS "${VERIARCHIVE_MINGW_PREFIX}/bin" REQUIRED)
     install(FILES packaging/windows/NOTICE.txt DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
     install(CODE "set(VERIARCHIVE_MINGW_PREFIX \"${VERIARCHIVE_MINGW_PREFIX}\")
-set(VERIARCHIVE_OBJDUMP \"${VERIARCHIVE_OBJDUMP}\")" COMPONENT VeriArchive)
+set(VERIARCHIVE_OBJDUMP \"${VERIARCHIVE_OBJDUMP}\")
+set(VERIARCHIVE_RUNTIME_SCAN_DIR \"${CMAKE_CURRENT_BINARY_DIR}/runtime-scan\")" COMPONENT VeriArchive)
     install(SCRIPT packaging/windows/install_runtime.cmake COMPONENT VeriArchive)
 endif()
 
@@ -276,12 +277,14 @@ if(BUILD_TESTING)
         endforeach()
     endif()
     if(WIN32)
-        # R-121: the installed package runs with only Windows on PATH.
+        # R-121: the installed package runs with only Windows on PATH, also
+        # after a second install over the first.
         add_test(NAME veriarchive_package
             COMMAND ${CMAKE_COMMAND}
                 -DBUILD_DIR=${CMAKE_BINARY_DIR}
                 -DPREFIX=${CMAKE_CURRENT_BINARY_DIR}/package-test
                 -DOBJDUMP=${VERIARCHIVE_OBJDUMP}
+                -DMINGW_PREFIX=${VERIARCHIVE_MINGW_PREFIX}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/check_package.cmake)
     endif()
     add_test(NAME veriarchive_cli_e2e

@@ -1,9 +1,10 @@
-# Package check for CTest (R-121): installs the build into a scratch prefix and
-# proves the result runs on a machine without MSYS2.
-#   cmake -DBUILD_DIR=<build> -DPREFIX=<scratch> -DOBJDUMP=<objdump> -P check_package.cmake
+# Package check for CTest (R-121): installs the build into a scratch prefix,
+# twice, and proves the result runs on a machine without MSYS2.
+#   cmake -DBUILD_DIR=<build> -DPREFIX=<scratch> -DOBJDUMP=<objdump>
+#         -DMINGW_PREFIX=<e.g. C:/msys64/ucrt64> -P check_package.cmake
 cmake_minimum_required(VERSION 3.28)
 
-foreach(variable BUILD_DIR PREFIX OBJDUMP)
+foreach(variable BUILD_DIR PREFIX OBJDUMP MINGW_PREFIX)
     if(NOT ${variable})
         message(FATAL_ERROR "${variable} must be set")
     endif()
@@ -11,11 +12,41 @@ endforeach()
 
 include("${CMAKE_CURRENT_LIST_DIR}/desktop_dlls.cmake")
 
+function(install_package)
+    execute_process(COMMAND "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --prefix "${PREFIX}" --component VeriArchive
+        RESULT_VARIABLE installed OUTPUT_QUIET)
+    if(NOT installed EQUAL 0)
+        message(FATAL_ERROR "cmake --install failed")
+    endif()
+endfunction()
+
 file(REMOVE_RECURSE "${PREFIX}")
-execute_process(COMMAND "${CMAKE_COMMAND}" --install "${BUILD_DIR}" --prefix "${PREFIX}" --component VeriArchive
-    RESULT_VARIABLE installed OUTPUT_QUIET)
-if(NOT installed EQUAL 0)
-    message(FATAL_ERROR "cmake --install failed")
+install_package()
+
+# A second install into the same prefix updates the first in place, as when a
+# portable folder is updated: bin/ already holds the DLLs. A DLL there that
+# differs from the MinGW tree's copy, as one from an older install would, is
+# replaced. SQLite's DLL is imported by the executables and by no image loader,
+# so only the executables' own dependencies bring it in.
+file(READ "${PREFIX}/share/licenses/THIRD-PARTY.txt" first_listing)
+file(GLOB sqlite_dlls RELATIVE "${PREFIX}/bin" "${PREFIX}/bin/libsqlite3*.dll")
+if(NOT sqlite_dlls)
+    message(FATAL_ERROR "the package has no SQLite DLL in bin/")
+endif()
+foreach(dll IN LISTS sqlite_dlls)
+    file(WRITE "${PREFIX}/bin/${dll}" "an older copy left by an earlier install")
+endforeach()
+install_package()
+foreach(dll IN LISTS sqlite_dlls)
+    file(SHA256 "${PREFIX}/bin/${dll}" installed_hash)
+    file(SHA256 "${MINGW_PREFIX}/bin/${dll}" mingw_hash)
+    if(NOT installed_hash STREQUAL mingw_hash)
+        message(FATAL_ERROR "installing again kept the earlier bin/${dll} instead of the MinGW tree's copy")
+    endif()
+endforeach()
+file(READ "${PREFIX}/share/licenses/THIRD-PARTY.txt" second_listing)
+if(NOT second_listing STREQUAL first_listing)
+    message(FATAL_ERROR "installing again changed the list of bundled files:\n${second_listing}")
 endif()
 
 # Every import of every packaged binary is in bin/ or part of Windows; nothing
