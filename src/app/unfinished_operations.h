@@ -58,7 +58,9 @@ struct UnfinishedOperation {
     bool recorded_stopped = false;     // its record says it stopped: a verification recorded INCOMPLETE,
                                        // a registration whose plan says "stopped", a relocation likewise
     bool resumable = true;             // false: a verification or relocation whose archive has a newer
-                                       // revision (R-104)
+                                       // revision (R-104), or a relocation whose new carrier differs
+    bool differs = false;              // a relocation whose record says that its new carrier does not hold
+                                       // the recorded content (decision 0026): it can never finish
     std::optional<std::chrono::sys_seconds> updated;  // when the operation last said it was working, if it does
     bool done_counted = true;          // false: files_done and bytes_done are not known, as the checkpoints
                                        // are not counted where that would hold up the operation (a database
@@ -129,15 +131,20 @@ enum class OperationState {
                // runs its attempt still runs (decision 0024): held up, not stopped
     Stopped,   // certainly stopped (its record says so, has been silent for minutes, or the process
                // that ran its attempt has ended)
+    Differs,   // a relocation stopped as Stopped says, whose record says that its new carrier does not
+               // hold the recorded content (decision 0026): it is never resumed, and waits to be abandoned
     Unknown,   // its progress is not counted and its record says nothing of its state (an older version)
 };
+
+// Whether an operation in `state` has stopped: Stopped, or Differs.
+bool has_stopped(OperationState state);
 
 // After this long without progress an operation is no longer called running,
 // and one whose record has said nothing for this long has stopped.
 inline constexpr std::chrono::minutes quiet_after{3};
 
 // The state in --json, in English: "waiting", "running", "quiet", "held_up"
-// (Silent), "stopped", "unknown".
+// (Silent), "stopped", "differs", "unknown".
 std::string_view state_code(OperationState state);
 
 // Follows one operation from poll to poll: when its numbers last moved, and
@@ -177,6 +184,9 @@ private:
     // between, or the computer slept.
     Clock::duration long_gap() const;
     bool idle(Clock::duration gap, std::uint64_t brought) const;
+    // The state as the record, the process and the counts tell it, before a
+    // relocation whose new carrier differs is told apart (state()).
+    OperationState judged_state(Clock::time_point now, std::chrono::sys_seconds wall_now) const;
     // Leaves out a plan's stop mark, or its ended process, once another
     // attempt has taken the registration up again (see operation()).
     void follow_stop_mark(UnfinishedOperation& operation);
@@ -240,14 +250,14 @@ struct OperationRow {
                                      // for a tooltip
     std::string key;                 // the operation's key (UnfinishedOperation::key)
     bool abandonable = false;        // a registration (decision 0025) or relocation (decision 0026) shown
-                                     // stopped: the operator may abandon it
+                                     // stopped (has_stopped): the operator may abandon it
 };
 
 OperationRow describe_operation(const Text& text, const OperationWatch& watch, OperationWatch::Clock::time_point now,
     std::chrono::sys_seconds wall_now);
 
 // The rows in the order shown: the operations that run, or may, first, then
-// those that stopped; the newest first within each.
+// those that stopped (has_stopped); the newest first within each.
 std::vector<OperationRow> describe_operations(const Text& text, const std::vector<OperationWatch>& watches,
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
 

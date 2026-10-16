@@ -162,7 +162,7 @@ void show_operations(GuiState& state)
         }
         gtk_grid_attach(GTK_GRID(view.operations_grid), progress, 3, row, 1, 1);
 
-        const bool stopped = shown.state_kind == app::OperationState::Stopped;
+        const bool stopped = app::has_stopped(shown.state_kind);
         const bool quiet = shown.state_kind == app::OperationState::Quiet ||
                            shown.state_kind == app::OperationState::Silent;
         GtkWidget* state_cell = operation_cell(shown.state, quiet, stopped);

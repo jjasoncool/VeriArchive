@@ -48,6 +48,7 @@ struct Unfinished {
     std::uint32_t revision = 0;  // the revision it verifies against; it creates the next one
     std::string run_id;          // its checkpoints, and the id of its FULL verification
     std::string root;            // where its latest attempt read
+    bool differs = false;        // an attempt found that the new carrier does not hold the recorded content
 };
 
 // Nothing when the setting holds no record, or a value that is no relocation's.
@@ -63,7 +64,22 @@ std::optional<Unfinished> unfinished_from(const std::string& stored)
         return std::nullopt;
     }
     auto root = text_member(record, "root");
-    return Unfinished{std::move(record), static_cast<std::uint32_t>(*revision), std::move(run_id), std::move(root)};
+    const bool differs = !text_member(record, "differs").empty();
+    return Unfinished{
+        std::move(record), static_cast<std::uint32_t>(*revision), std::move(run_id), std::move(root), differs};
+}
+
+// Why a relocation whose new carrier was found to differ is neither resumed
+// nor replaced by a new one: it can never finish, and only the operator
+// abandons it (decision 0026).
+RelocateFailure differs_refusal(const Uuid& uuid, const std::string& root)
+{
+    return RelocateFailure{RelocateFailure::Kind::Refused,
+        "the unfinished relocation of archive " + uuid + " (to \"" + root +
+            "\") found that the new carrier does not hold the recorded content and cannot be resumed; abandon it "
+            "with `archive abandon-relocation " +
+            uuid + "`, then relocate again",
+        {}};
 }
 
 // Whether `volume` and the folder `root_subpath` on it are where the
@@ -195,7 +211,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     // goes on only while the archive is at the revision the relocation
     // verifies, the process that ran the attempt before has ended, and its new
     // root is where it started. A record whose revision another operation has
-    // recorded can never finish: it goes, with its checkpoints.
+    // recorded can never finish: it goes, with its checkpoints. One whose new
+    // carrier was found to differ can never finish either, but it stays for
+    // the operator to abandon: both are refused, saying so.
     nlohmann::json record;
     std::string run_id;
     Timestamp started;
@@ -224,6 +242,11 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             }
         }
         if (!request.resume) {
+            if (unfinished && !dead && unfinished->differs) {
+                refused = differs_refusal(uuid, unfinished->root);
+                store.rollback();
+                return {};
+            }
             if (unfinished && !dead) {
                 refused = RelocateFailure{Kind::Refused,
                     "an unfinished relocation of archive " + uuid + " (to \"" + unfinished->root +
@@ -260,6 +283,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                     "saved progress was removed",
                 {}};
             return store.commit(); // the removal above
+        }
+        // Its new carrier did not hold the recorded content: what matched
+        // there says nothing of a carrier copied again (decision 0026).
+        if (unfinished->differs) {
+            refused = differs_refusal(uuid, unfinished->root);
+            store.rollback();
+            return {};
         }
         // R-104: it resumes only while the revision it verifies is unchanged.
         if (unfinished->revision != previous_revision) {
@@ -402,6 +432,28 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         }
         return !lost && !abandoned;
     };
+    // The first entry that the new carrier does not hold as recorded ends the
+    // relocation (below), however this attempt ends. Its record says so at
+    // once ("differs"), and again with every later write of this attempt (its
+    // "updated", its stop mark), each made when the database allows: a
+    // record left behind, as when the process is killed before the end or
+    // the record cannot be removed then, is never resumed (decision 0026).
+    // The comparison reads on, so that every entry that differs is listed.
+    bool differs = false;
+    const auto mark_differs = [&] {
+        if (!differs) {
+            differs = true;
+            heartbeat.set("differs", current_timestamp());
+            heartbeat.beat();
+        }
+    };
+    input.on_item = [&](const VerifyItemRecord& item, bool fails) {
+        // A name that cannot exist here is a warning to a verification, but
+        // it would drop out of the new revision (below).
+        if (fails || item.status == "Unrepresentable") {
+            mark_differs();
+        }
+    };
     auto comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
 
     // The revision was recorded by another operation, which may have left
@@ -430,24 +482,21 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     if (abandoned) {
         return abandoned_meanwhile();
     }
-    if (comparison.incomplete) {
-        return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
-    }
-    if (!comparison.scan_error.empty()) {
-        return stopped_by(Kind::Media, "cannot scan the new root: " + comparison.scan_error);
-    }
     // The new carrier must hold exactly the recorded content. Names that cannot
     // exist there would silently drop out of the baseline, so they block too.
-    // That ends the relocation: what the operator does next (copy again)
+    // That ends the relocation, also when this attempt was interrupted after
+    // it found such an entry: what the operator does next (copy again)
     // changes the carrier, so what matched before says nothing any more, and
     // a new relocation reads it all (decision 0026). Its record and
     // checkpoints go in a transaction that waits for the write lock, as its
     // record would (decision 0023): another operation may hold the lock for
     // longer than a statement waits, and a record left behind would let
     // `--resume` accept a second copy without reading again what matched in
-    // this one.
+    // this one. Where they still cannot go, the record keeps its mark, which
+    // the stop mark writes once more.
     const bool unrepresentable = comparison.counts.contains("Unrepresentable");
     if (comparison.content_failure || unrepresentable) {
+        mark_differs();
         const auto removed = [&]() -> std::expected<void, IoError> {
             if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
                 return begun;
@@ -473,6 +522,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             "the new carrier does not hold the recorded content; nothing was changed (use "
             "`register --new-revision` to re-baseline changed content)",
             comparison.items);
+    }
+    if (comparison.incomplete) {
+        return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
+    }
+    if (!comparison.scan_error.empty()) {
+        return stopped_by(Kind::Media, "cannot scan the new root: " + comparison.scan_error);
     }
     // Writing the manifest and the index of a large archive takes a while
     // without progress reports: it starts from a fresh "updated".

@@ -2,6 +2,7 @@
 
 #include "engine_fixture.h"
 
+#include "app/unfinished_operations.h"
 #include "common/time.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_relocation.h"
@@ -298,11 +299,24 @@ void a_differing_copy_ends_the_relocation_while_the_lock_is_held()
     CHECK(archive && *archive && (*archive)->current_revision == 1);
 }
 
+// How a relocation whose new carrier was found to differ is refused, whether
+// it is resumed or a new relocation is started (decision 0026).
+std::string differs_refusal(RelocationFixture& fixture, const std::filesystem::path& root)
+{
+    return "the unfinished relocation of archive " + fixture.archive_uuid + " (to \"" + va::path_to_utf8(root) +
+           "\") found that the new carrier does not hold the recorded content and cannot be resumed; abandon it "
+           "with `archive abandon-relocation " +
+           fixture.archive_uuid + "`, then relocate again";
+}
+
 // When the record and saved progress of a relocation whose copy differs still
 // cannot be removed (here a trigger makes the removal fail, standing in for a
 // lock held for longer than the record waits), the refusal says so, with the
 // cause, and how to go on: abandon the relocation before relocating again.
-// Abandoned, the next relocation reads the whole carrier.
+// The record says that the new carrier differs ("differs"), so it is never
+// resumed: a resume and a relocation without --resume are both refused,
+// saying to abandon it, and read nothing. Abandoned, the next relocation
+// reads the whole carrier.
 void a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it()
 {
     RelocationFixture fixture(true);
@@ -319,9 +333,21 @@ void a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it()
                           "abandon the relocation with `archive abandon-relocation " +
                               fixture.archive_uuid + "` before relocating again");
     // Nothing of it went: the 20 photos matched before, and the 19 videos
-    // that matched now.
-    CHECK(fixture.record().is_object());
+    // that matched now. The record says the new carrier differs.
+    const auto record = fixture.record();
+    CHECK(record.is_object() && va::parse_timestamp(record.value("differs", std::string{})).has_value() &&
+          record.contains("stopped"));
     CHECK(fixture.saved(run_id).files == 39);
+
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!resumed && resumed.error().kind == va::RelocateFailure::Kind::Refused &&
+          resumed.error().message == differs_refusal(fixture, fixture.archive.root() / "new"));
+    const auto fresh = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!fresh && fresh.error().kind == va::RelocateFailure::Kind::Refused &&
+          fresh.error().message == differs_refusal(fixture, fixture.archive.root() / "new"));
+    CHECK(fixture.archive.bytes_read == 0);
+    CHECK(fixture.record() == record);
     fixture.repository.execute("DROP TRIGGER sample_failure;");
 
     va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
@@ -332,6 +358,196 @@ void a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it()
     const auto again = fixture.relocate(fixture.archive.root() / "new");
     CHECK(again && again->revision == 2 && !again->resumed);
     CHECK(fixture.archive.bytes_read == sample_bytes);
+}
+
+// The record says that the new carrier differs as soon as the first entry
+// that differs is found, while the relocation still reads on to list every
+// such entry (decision 0026). A record that an attempt leaves behind, as when
+// its process is killed meanwhile, is then never resumed. Here a photo is
+// missing from the copy (sample data), which the comparison finds before it
+// hashes anything; another process reads the record when the first file is
+// opened. Put back as it was then, with what it had saved, the record is
+// refused by a resume, which reads nothing, and the Archive List shows it as
+// a relocation whose new carrier differs, to be abandoned, in both languages
+// and as --json says it.
+void a_differing_copy_marks_its_relocation_at_once()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    const auto missing = fixture.archive.node("new/photos/p101.bin");
+    fixture.archive.remove("new/photos/p101.bin"); // left out of the copy (sample data)
+    nlohmann::json seen;
+    test::HookedFiles hooked(fixture.archive, "p100.bin", [&] {
+        auto store = fixture.repository.store();
+        seen = nlohmann::json::parse(store.setting(fixture.key()).value_or(""), nullptr, false);
+    });
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Differs &&
+          relocated.error().items.size() == 1 && relocated.error().items.front().status == "Missing" &&
+          relocated.error().message == differs_message());
+    CHECK(seen.is_object() && va::parse_timestamp(seen.value("differs", std::string{})).has_value() &&
+          !seen.contains("stopped"));
+    // It ended: its record and saved progress went.
+    CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
+    CHECK(count_rows(fixture, "verify_progress") == 0);
+
+    // As its process killed while it read on would have left it.
+    const auto run_id = seen.value("run_id", std::string{});
+    CHECK(fixture.store.set_setting(fixture.key(), seen.dump()));
+    va::Entry photo;
+    photo.path.p = "photos/p100.bin";
+    CHECK(fixture.store.add_progress(run_id, {va::entry_key(photo)}));
+    fixture.archive.add_file("new/photos/p101.bin", missing.content); // copied again
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!resumed && resumed.error().kind == va::RelocateFailure::Kind::Refused &&
+          resumed.error().message == differs_refusal(fixture, fixture.archive.root() / "new"));
+    CHECK(fixture.archive.bytes_read == 0);
+
+    // The Archive List judges its attempt ended (its process is this one,
+    // which runs no operation now).
+    const va::app::AttemptCheck attempts{&fixture.processes, fixture.host.host, {}};
+    const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+        [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+    CHECK(read && read->operations.size() == 1);
+    if (read && read->operations.size() == 1) {
+        const auto& operation = read->operations.front();
+        CHECK(operation.differs && !operation.resumable && operation.files_done == 1);
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        CHECK(va::app::state_code(va::app::state_of_one_read(operation, now)) == "differs");
+        va::app::OperationWatch watch;
+        const va::app::OperationWatch::Clock::time_point start{};
+        watch.update(operation, start, now);
+        const auto row = va::app::describe_operation(va::app::Text{}, watch, start, now);
+        CHECK(row.state_kind == va::app::OperationState::Differs && row.abandonable &&
+              row.state == "new carrier differs; abandon it");
+        CHECK(va::app::describe_operation(va::app::Text(va::app::Language::TraditionalChinese), watch, start, now)
+                  .state == "新載體上的內容不符；請放棄它");
+    }
+
+    va::AbandonServices abandoning{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandoned = va::abandon_relocation(abandoning, {fixture.archive_uuid, run_id});
+    CHECK(abandoned && abandoned->files == 1);
+    const auto again = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(again && again->revision == 2 && fixture.archive.bytes_read == sample_bytes);
+}
+
+// A name that cannot exist where the relocation reads (here a sample name with
+// "?", which Windows refuses) is only a warning to a verification, but it
+// would drop out of the new revision: it ends the relocation as an entry that
+// differs does, and the record says so at once (decision 0026).
+void an_unrepresentable_name_marks_the_relocation_at_once()
+{
+    test::EngineFixture fixture; // the engines run as on Windows
+    auto second = test::fake_volume(fixture.archive.root() / "new");
+    second.filesystem_uuid = "5555666677778888";
+    second.devices.front().serial = "NEW-DISK";
+    fixture.media.extra_volumes.push_back(second);
+    fixture.archive.add_file("old/what?.txt", "a name from another system (sample data)");
+    fixture.archive.add_file("old/z.txt", "z");
+    const auto registered = fixture.register_root(fixture.archive.root() / "old");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    fixture.archive.add_file("new/z.txt", "z"); // the copy could not take the other name
+    const auto key = va::relocation_key(registered->archive_uuid);
+    nlohmann::json seen;
+    test::HookedFiles hooked(fixture.archive, "z.txt", [&] {
+        auto store = fixture.repository.store();
+        seen = nlohmann::json::parse(store.setting(key).value_or(""), nullptr, false);
+    });
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {registered->archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Differs &&
+          relocated.error().items.size() == 1 && relocated.error().items.front().status == "Unrepresentable");
+    CHECK(seen.is_object() && va::parse_timestamp(seen.value("differs", std::string{})).has_value());
+    CHECK(fixture.store.setting(key).value_or("x").empty());
+}
+
+// A mark that cannot be written when the first entry that differs is found
+// (another process holds the write lock then) is written at a later chance:
+// here by the attempt's stop mark, once the removal of its record has failed
+// (a trigger, standing in for a lock held for longer than the record waits).
+// Scaled down: the relocation's statements wait 100 ms for the lock, which
+// the other process holds for 1 s from when the damaged photo is opened.
+void a_differs_mark_is_written_at_a_later_chance()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    fixture.archive.node("new/photos/p101.bin").content[3] ^= 0x01; // a corrupted copy (sample data)
+    fixture.repository.execute("CREATE TRIGGER sample_failure BEFORE DELETE ON settings "
+                               "WHEN OLD.key LIKE 'relocation:%' BEGIN SELECT RAISE(ABORT, 'sample failure'); END;");
+    std::thread holder;
+    std::binary_semaphore held{0};
+    nlohmann::json while_held;
+    test::HookedFiles hooked(fixture.archive, "p101.bin", [&] {
+        holder = std::thread([&] {
+            auto store = fixture.repository.store();
+            CHECK(store.begin());
+            held.release();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            while_held = nlohmann::json::parse(store.setting(fixture.key()).value_or(""), nullptr, false);
+            CHECK(store.commit());
+        });
+        CHECK(held.try_acquire_for(std::chrono::seconds(60)));
+    });
+    auto store = fixture.repository.store(std::chrono::milliseconds(100));
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    if (holder.joinable()) {
+        holder.join();
+    }
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Differs &&
+          relocated.error().items.size() == 1 && relocated.error().message.contains("could not be removed"));
+    // Not written while the lock was held; written since.
+    CHECK(while_held.is_object() && !while_held.contains("differs"));
+    const auto record = fixture.record();
+    CHECK(record.is_object() && va::parse_timestamp(record.value("differs", std::string{})).has_value() &&
+          record.contains("stopped"));
+    fixture.repository.execute("DROP TRIGGER sample_failure;");
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!resumed && resumed.error().message == differs_refusal(fixture, fixture.archive.root() / "new"));
+}
+
+// An attempt interrupted after it found an entry that differs (here Ctrl+C
+// while it hashes, after a photo was found missing from the copy) ends the
+// relocation as a copy that differs does, with the entries found so far: it
+// is not left for --resume, which could never finish it (decision 0026). The
+// copy completed, a new relocation reads the whole carrier.
+void a_relocation_interrupted_after_its_copy_differed_ends()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    const auto missing = fixture.archive.node("new/photos/p101.bin");
+    fixture.archive.remove("new/photos/p101.bin"); // left out of the copy (sample data)
+    va::CancelToken cancel;
+    test::HookedFiles hooked(fixture.archive, "v130.bin", [&] { cancel.cancel(); });
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, cancel, fixture.progress);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Differs &&
+          relocated.error().message == differs_message() && relocated.error().items.size() == 1 &&
+          relocated.error().items.front().path.p == "photos/p101.bin");
+    CHECK(fixture.store.setting(fixture.key()).value_or("x").empty());
+    CHECK(count_rows(fixture, "verify_progress") == 0);
+
+    fixture.archive.add_file("new/photos/p101.bin", missing.content);
+    fixture.archive.bytes_read = 0;
+    const auto again = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(again && again->revision == 2 && !again->resumed && fixture.archive.bytes_read == sample_bytes);
 }
 
 // Decision 0010: entries unreadable at registration travel unchanged.
@@ -1440,6 +1656,10 @@ void relocate_tests()
     differing_copy_is_refused();
     a_differing_copy_ends_the_relocation_while_the_lock_is_held();
     a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it();
+    a_differing_copy_marks_its_relocation_at_once();
+    an_unrepresentable_name_marks_the_relocation_at_once();
+    a_differs_mark_is_written_at_a_later_chance();
+    a_relocation_interrupted_after_its_copy_differed_ends();
     known_unreadable_entries_are_carried();
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();

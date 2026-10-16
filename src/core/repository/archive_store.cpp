@@ -1486,6 +1486,7 @@ std::expected<std::vector<UnfinishedRelocation>, IoError> ArchiveStore::unfinish
         relocation.bytes_total = json_unsigned(record, "bytes_total").value_or(0);
         relocation.updated = json_text(record, "updated");
         relocation.stopped = json_text(record, "stopped");
+        relocation.differs = json_text(record, "differs");
         relocation.record = value;
 
         archive->bind(1, relocation.archive_uuid);
@@ -1496,8 +1497,10 @@ std::expected<std::vector<UnfinishedRelocation>, IoError> ArchiveStore::unfinish
         if (*found && relocation.label.empty()) {
             relocation.label = archive->text(0);
         }
-        // It resumes only while its archive is at the revision it verifies.
-        relocation.resumable = *found && static_cast<std::uint32_t>(archive->integer(1)) == relocation.revision;
+        // It resumes only while its archive is at the revision it verifies,
+        // and never once its new carrier was found to differ.
+        relocation.resumable = *found && static_cast<std::uint32_t>(archive->integer(1)) == relocation.revision &&
+                               relocation.differs.empty();
         archive->reset();
 
         relocation.done_counted = count;

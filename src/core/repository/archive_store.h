@@ -160,7 +160,10 @@ struct UnfinishedRelocation {
     std::uint64_t bytes_total = 0;              // their bytes
     Timestamp updated;                          // the record's "updated": when it last said it was working
     Timestamp stopped;                          // the record's "stopped": when an attempt ended without finishing
-    bool resumable = true;                      // false when the archive has another revision now
+    Timestamp differs;                          // the record's "differs": when an attempt found that the new
+                                                // carrier does not hold the recorded content; empty otherwise
+    bool resumable = true;                      // false when the archive has another revision now, or the
+                                                // record says "differs"
     std::string record;                         // the record as stored (JSON), for judging which process runs
                                                 // its attempt (decision 0024)
 };

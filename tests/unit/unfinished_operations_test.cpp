@@ -14,6 +14,7 @@
 #include <cmath>
 #include <format>
 #include <functional>
+#include <tuple>
 
 namespace {
 
@@ -1239,6 +1240,70 @@ void lists_an_unfinished_relocation()
     CHECK(row.state == "stopped; it cannot be resumed (the archive has a newer revision)" && row.abandonable);
 }
 
+// A relocation whose record says that its new carrier does not hold the
+// recorded content (decision 0026) can never finish. While its attempt still
+// runs (it reads on to list every entry that differs, then ends the
+// relocation itself) it runs as any attempt; once the attempt has stopped
+// (its stop mark, its process ended, or silent for minutes) it is shown as a
+// relocation whose new carrier differs, which is not resumed but abandoned,
+// in both languages and as --json says it, and is ordered with the stopped
+// operations.
+void a_relocation_whose_new_carrier_differs_waits_to_be_abandoned()
+{
+    UnfinishedOperation operation;
+    operation.kind = va::app::OperationKind::Relocation;
+    operation.key = "relocation:c0ffee00-0000-4000-8000-000000000026";
+    operation.archive_uuid = "c0ffee00-0000-4000-8000-000000000026";
+    operation.label = "ARCH-0026";
+    operation.root = "Z:\\";
+    operation.started = "2026-10-15T09:00:00Z";
+    operation.files_done = 20;
+    operation.bytes_done = 10 * mib;
+    operation.files_total = 40;
+    operation.bytes_total = 20 * mib;
+    operation.differs = true;
+    operation.resumable = false;
+    operation.updated = wall_now - 20s;
+    operation.attempt = va::AttemptState::Running;
+
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const Clock::time_point start{};
+    OperationWatch working;
+    working.update(operation, start, wall_now);
+    CHECK(working.state(start, wall_now) == OperationState::Running);
+    CHECK(!describe_operation(english, working, start, wall_now).abandonable);
+
+    for (const auto& [stopped, attempt, updated] :
+        {std::tuple{true, va::AttemptState::Running, wall_now - 20s},
+            std::tuple{false, va::AttemptState::Ended, wall_now - 20s},
+            std::tuple{false, va::AttemptState::Unknown, wall_now - 10min}}) {
+        auto ended = operation;
+        ended.recorded_stopped = stopped;
+        ended.attempt = attempt;
+        ended.updated = updated;
+        OperationWatch watch;
+        watch.update(ended, start, wall_now);
+        CHECK(watch.state(start, wall_now) == OperationState::Differs);
+        const auto row = describe_operation(english, watch, start, wall_now);
+        CHECK(row.state_kind == OperationState::Differs && row.abandonable &&
+              row.state == "new carrier differs; abandon it");
+        CHECK(describe_operation(chinese, watch, start, wall_now).state == "新載體上的內容不符；請放棄它");
+        CHECK(va::app::state_code(va::app::state_of_one_read(ended, wall_now)) == "differs");
+    }
+
+    // After a registration that runs, though it started later.
+    auto ended = operation;
+    ended.recorded_stopped = true;
+    auto running = registration(1, mib);
+    running.updated = wall_now;
+    std::vector<OperationWatch> watches;
+    va::app::follow(watches, {ended, running}, start, wall_now);
+    const auto rows = va::app::describe_operations(english, watches, start, wall_now);
+    CHECK(rows.size() == 2 && rows[0].kind == "Registration" && rows[1].kind == "Relocation" &&
+          rows[1].state_kind == OperationState::Differs);
+}
+
 } // namespace
 
 void unfinished_operations_tests()
@@ -1265,4 +1330,5 @@ void unfinished_operations_tests()
     a_registration_whose_process_runs_is_held_up_not_stopped();
     a_registration_taken_up_after_its_process_ended_runs();
     lists_an_unfinished_relocation();
+    a_relocation_whose_new_carrier_differs_waits_to_be_abandoned();
 }

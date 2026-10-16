@@ -57,6 +57,9 @@ public:
         }
         if (status != "Verified") {
             result_.items.push_back({"", entry.path, entry.stream, status, detail});
+            if (input_.on_item) {
+                input_.on_item(result_.items.back(), severity == Severity::Failure);
+            }
         }
     }
 

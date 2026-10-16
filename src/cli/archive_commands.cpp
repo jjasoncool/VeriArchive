@@ -99,6 +99,7 @@ std::expected<RelocationsJson, Failure> unfinished_relocations_json(ArchiveStore
             {"started", relocation.started},
             {"updated", optional_text(relocation.updated)},
             {"stopped", optional_text(relocation.stopped)},
+            {"differs", optional_text(relocation.differs)},
             {"state", app::state_code(app::state_of_one_read(operation, wall_now))},
             {"resumable", relocation.resumable},
             {"files_done", relocation.done_counted ? nlohmann::json(relocation.files_done) : nullptr},

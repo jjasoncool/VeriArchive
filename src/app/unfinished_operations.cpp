@@ -206,6 +206,7 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
     // registration's does in its plan.
     operation.recorded_stopped = !relocation.stopped.empty();
     operation.resumable = relocation.resumable;
+    operation.differs = !relocation.differs.empty();
     operation.done_counted = relocation.done_counted;
     // Otherwise the process the record names tells whether it still runs
     // (decision 0024).
@@ -216,6 +217,11 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
             judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
     }
     return operation;
+}
+
+bool has_stopped(OperationState state)
+{
+    return state == OperationState::Stopped || state == OperationState::Differs;
 }
 
 std::string_view state_code(OperationState state)
@@ -231,6 +237,8 @@ std::string_view state_code(OperationState state)
         return "held_up";
     case OperationState::Stopped:
         return "stopped";
+    case OperationState::Differs:
+        return "differs";
     case OperationState::Unknown:
         return "unknown";
     }
@@ -304,7 +312,7 @@ void OperationWatch::update(UnfinishedOperation operation, Clock::time_point now
     }
     operation_ = std::move(operation);
     ++polls_;
-    if (state(now, wall_now) == OperationState::Stopped) {
+    if (has_stopped(state(now, wall_now))) {
         stopped_since_step_ = true;
     }
 }
@@ -377,6 +385,17 @@ void OperationWatch::follow_stop_mark(UnfinishedOperation& operation)
 }
 
 OperationState OperationWatch::state(Clock::time_point now, std::chrono::sys_seconds wall_now) const
+{
+    const auto judged = judged_state(now, wall_now);
+    // A relocation whose new carrier does not hold the recorded content can
+    // never finish: once its attempt no longer runs, it is not resumed, and
+    // waits only to be abandoned (decision 0026). While its attempt runs (it
+    // reads on to list every entry that differs, and then ends the
+    // relocation itself), it is shown as any attempt that runs.
+    return judged == OperationState::Stopped && operation_.differs ? OperationState::Differs : judged;
+}
+
+OperationState OperationWatch::judged_state(Clock::time_point now, std::chrono::sys_seconds wall_now) const
 {
     // Its record says it stopped, or the process that ran its attempt has
     // ended (decision 0024).
@@ -481,7 +500,7 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     }
     // A stopped registration (decision 0025) or relocation (decision 0026)
     // may be given up on purpose; one that runs, or may, may not.
-    row.abandonable = operation.kind != OperationKind::Verification && row.state_kind == OperationState::Stopped;
+    row.abandonable = operation.kind != OperationKind::Verification && has_stopped(row.state_kind);
 
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;
@@ -562,6 +581,9 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         row.state = operation.resumable ? text("stopped; it can be resumed")
                                         : text("stopped; it cannot be resumed (the archive has a newer revision)");
         break;
+    case OperationState::Differs:
+        row.state = text("new carrier differs; abandon it");
+        break;
     }
     return row;
 }
@@ -579,10 +601,10 @@ std::vector<OperationRow> describe_operations(const Text& text, const std::vecto
         shown.push_back({describe_operation(text, watch, now, wall_now), &watch.operation().started});
     }
     // What runs is what the operator follows; stopped operations, which wait
-    // for a resume, come after it.
+    // for a resume or to be abandoned, come after it.
     std::ranges::stable_sort(shown, [](const Shown& left, const Shown& right) {
-        const bool left_stopped = left.row.state_kind == OperationState::Stopped;
-        const bool right_stopped = right.row.state_kind == OperationState::Stopped;
+        const bool left_stopped = has_stopped(left.row.state_kind);
+        const bool right_stopped = has_stopped(right.row.state_kind);
         if (left_stopped != right_stopped) {
             return right_stopped;
         }

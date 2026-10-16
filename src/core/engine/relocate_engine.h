@@ -13,7 +13,9 @@
 // under its run_id. `archive relocate --resume` continues it without reading
 // those entries again, while the archive is still at the revision it verifies
 // and the new root is on the volume and in the folder it started on, and never
-// while the process that runs its attempt still runs (decision 0024).
+// while the process that runs its attempt still runs (decision 0024), nor once
+// an attempt found that the new carrier does not hold the recorded content
+// (its record then says "differs", and the relocation waits to be abandoned).
 #include "core/engine/candidates.h"
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"

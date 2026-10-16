@@ -344,6 +344,8 @@ constexpr CatalogEntry entries[] = {
     {"no progress seen for {} hours; it may have stopped", "已 {} 小時未見進度，可能已停止", Match::FormatOnly},
     {"stopped; it can be resumed", "已停止；可以繼續"},
     {"stopped; it cannot be resumed (the archive has a newer revision)", "已停止；無法繼續（封存已有較新的版次）"},
+    // A relocation whose new carrier does not hold the recorded content (decision 0026).
+    {"new carrier differs; abandon it", "新載體上的內容不符；請放棄它"},
     {"not counted", "未計算"},
     {"not known", "不明"},
     {"no progress reported for {} minutes; its process is still running", "已 {} 分鐘未回報進度；其處理程序仍在執行",
@@ -733,6 +735,10 @@ constexpr CatalogEntry entries[] = {
         "(\"{}\"); resume it there, or abandon it with `archive abandon-relocation {}` and start again",
         "此根目錄所在的磁碟區或資料夾，不是封存 {} 未完成的搬移開始時的那一個（「{}」）；請在那裡繼續，"
         "或以 `archive abandon-relocation {}` 放棄後重新開始"},
+    {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
+        "content and cannot be resumed; abandon it with `archive abandon-relocation {}`, then relocate again",
+        "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，無法繼續；請以 "
+        "`archive abandon-relocation {}` 放棄它，再重新搬移"},
     {"cannot start the relocation: {}", "無法開始搬移：{}", Match::Cause},
     {"the unfinished relocation of archive {} was abandoned while this attempt ran; nothing was changed",
         "封存 {} 未完成的搬移已在這次執行期間被放棄；未做任何變更"},

@@ -359,6 +359,13 @@ void translation_tests()
           "`register --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration " + uuid +
               "` 放棄該註冊後，以 `archive relocate " + uuid + " <root_path> --resume` 繼續這次搬移）");
     CHECK(chinese.format("Abandon the unfinished relocation of {}?", "ARCH-0007") == "要放棄 ARCH-0007 未完成的搬移嗎？");
+    // A relocation whose new carrier differs is never resumed (decision 0026).
+    CHECK(chinese("error: the unfinished relocation of archive " + uuid + " (to \"Z:\\範例\") found that the new "
+                  "carrier does not hold the recorded content and cannot be resumed; abandon it with `archive "
+                  "abandon-relocation " + uuid + "`, then relocate again") ==
+          "錯誤：封存 " + uuid + " 未完成的搬移（至「Z:\\範例」）發現新載體上的內容與記錄不符，無法繼續；請以 `archive "
+          "abandon-relocation " + uuid + "` 放棄它，再重新搬移");
+    CHECK(chinese("new carrier differs; abandon it") == "新載體上的內容不符；請放棄它");
     // A cause that a hint follows is translated too, and the uuid after it is
     // carried over.
     CHECK(chinese.format("RELOCATION REFUSED: {}",

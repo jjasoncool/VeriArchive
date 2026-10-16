@@ -31,6 +31,11 @@ struct ComparisonInput {
     // finish, such as a relocation whose revision another operation recorded
     // (decision 0026).
     std::function<bool(const std::vector<std::string>&)> checkpoint;
+    // Called on the comparison's thread for each entry as it is classified
+    // with a status other than Verified, with whether that status fails the
+    // run (content_failure): a relocation marks its record as soon as the new
+    // carrier is known not to hold the recorded content (decision 0026).
+    std::function<void(const VerifyItemRecord& item, bool fails)> on_item;
 };
 
 struct ComparisonResult {
