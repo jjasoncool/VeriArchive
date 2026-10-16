@@ -323,7 +323,7 @@ void malformed_manifests_say_why()
 }
 
 // Passes everything to `inner`, except that each file it opens fails its
-// second read at the end of the file (sample data: a CRC error), as a disk
+// second read at the end of the file (sample data: a CRC error), as a device
 // that fails while the rest of a manifest is read again; the first is the
 // read with which open() finds the end of the body it validates.
 class SecondEndFails final : public va::IFileSystemAccess {
