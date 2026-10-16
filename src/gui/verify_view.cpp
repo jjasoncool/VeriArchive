@@ -176,7 +176,9 @@ void refresh_archive_choices(GuiState& state)
     if (state.session) {
         if (auto store = ArchiveStore::open(state.session->context.repo)) {
             const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-            if (const auto statuses = archive_statuses(*store, state.session->context.config.policy, now)) {
+            const auto repository_files = platform::make_file_system_access();
+            if (const auto statuses = archive_statuses(*store, *repository_files, state.session->context.repo,
+                    state.session->context.config.policy, now)) {
                 for (const auto& status : *statuses) {
                     labels.push_back(display_label(status) + "  " + status.archive.archive_uuid.substr(0, 8));
                     uuids.push_back(status.archive.archive_uuid);

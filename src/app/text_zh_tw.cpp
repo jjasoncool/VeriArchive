@@ -664,8 +664,6 @@ constexpr CatalogEntry entries[] = {
         "驗證結果為未完成，但無法記錄：{}",
         Match::Cause},
     // src/core/engine/candidates.cpp
-    {"invalid recorded manifest header for {}: {}", "封存 {} 記錄的清單檔標頭無效：{}",
-        Match::Cause},
     {"the root is not on the reported volume", "根目錄不在回報的磁碟區上"},
     // src/core/engine/comparison.cpp
     {"Unreadable(permission)", "無法讀取（權限不足）"},
@@ -828,6 +826,12 @@ constexpr CatalogEntry entries[] = {
     {"revision {} is not recorded", "版次 {} 沒有紀錄"},
     {"the manifest differs from the repository record", "清單檔與儲存庫的紀錄不符"},
     {"revision {} is older than the known revision {}", "版次 {} 比已知的版次 {} 舊"},
+    // The index's copy of a header is never taken for the manifest's (R-14).
+    {"cannot use the manifest of revision {} of archive {}: {}", "無法使用封存 {1} 版次 {0} 的清單檔：{2}",
+        Match::Cause},
+    {"the repository's index differs from the manifest of revision {} of archive {}; rebuild the index with "
+        "`repo rebuild-index`",
+        "儲存庫的索引與封存 {1} 版次 {0} 的清單檔不符；請以 `repo rebuild-index` 重建索引"},
     // src/core/engine/rebuild_index.cpp
     {"cannot list the manifests of archive {}: {}", "無法列出封存 {} 的清單檔：{}", Match::Cause},
     {"cannot read manifest {}/{}: {}", "無法讀取清單檔 {}/{}：{}", Match::Cause},

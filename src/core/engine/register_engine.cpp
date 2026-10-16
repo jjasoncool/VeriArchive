@@ -6,6 +6,7 @@
 #include "common/uuid.h"
 #include "core/hash/hash_pipeline.h"
 #include "core/engine/heartbeat.h"
+#include "core/engine/recorded_manifest.h"
 #include "core/engine/registration_attempt.h"
 #include "core/engine/transfer.h"
 #include "core/identity/volume_json.h"
@@ -465,7 +466,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                                            "`archive abandon-registration " +
                                            (*pending)->archive_uuid + "`");
         }
-        const auto candidates = load_candidates(store);
+        const auto candidates = load_candidates(store, services.repository_files, services.layout);
         if (!candidates) {
             return fail(Kind::Repository, candidates.error().message);
         }
@@ -487,11 +488,19 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             plan.revision = existing->current_revision + 1;
             plan.label = existing->label;
             if (!plan.copy_of) {
+                // A copy stays a copy (decision 0005): as the latest
+                // revision's manifest says, never the index's copy of it.
                 const auto previous = store.revision(existing->archive_uuid, existing->current_revision);
-                if (previous && *previous) {
-                    if (const auto header = recorded_header(**previous)) {
-                        plan.copy_of = header->copy_of;
+                if (!previous) {
+                    return fail(Kind::Repository, previous.error().message);
+                }
+                if (*previous) {
+                    const auto header =
+                        load_recorded_header(services.repository_files, services.layout, **previous);
+                    if (!header) {
+                        return fail(Kind::Repository, header.error().message);
                     }
+                    plan.copy_of = header->copy_of;
                 }
             }
         } else {

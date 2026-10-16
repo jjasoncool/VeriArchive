@@ -174,19 +174,24 @@ endif()
 # Two archives are needed.
 run_cli("10" archive compare "${archive_uuid}")
 
-# An unfinished registration given up on purpose (decision 0025). The first
-# registration of a folder fails before it is recorded: its manifest cannot be
-# written while a file stands where the manifests folder belongs (sample
-# data). Its plan and saved progress stay, so the folder takes no other
-# registration until the registration is resumed or abandoned.
+# An unfinished registration given up on purpose (decision 0025), in a
+# repository of its own that has recorded no revision yet: a registration
+# reads the manifest of every recorded revision before it begins (R-14). The
+# first registration of a folder fails before it is recorded: its manifest
+# cannot be written while a file stands where the manifests folder belongs
+# (sample data). Its plan and saved progress stay, so the folder takes no
+# other registration until the registration is resumed or abandoned.
+file(WRITE "${WORK}/config3.json" "{\"language\": \"zh-TW\"}\n")
+set(GLOBAL --config "${WORK}/config3.json")
+run_cli("0" --repository "${WORK}/repo3" repo init)
 set(BROKEN "${WORK}/abandoned")
 file(WRITE "${BROKEN}/a.txt" "abandoned sample a\n")
 file(WRITE "${BROKEN}/b.txt" "abandoned sample b\n")
-file(RENAME "${WORK}/repo/manifests" "${WORK}/repo/manifests.away")
-file(WRITE "${WORK}/repo/manifests" "not a folder (sample data)\n")
+file(RENAME "${WORK}/repo3/manifests" "${WORK}/repo3/manifests.away")
+file(WRITE "${WORK}/repo3/manifests" "not a folder (sample data)\n")
 run_cli("11" register "${BROKEN}")
-file(REMOVE "${WORK}/repo/manifests")
-file(RENAME "${WORK}/repo/manifests.away" "${WORK}/repo/manifests")
+file(REMOVE "${WORK}/repo3/manifests")
+file(RENAME "${WORK}/repo3/manifests.away" "${WORK}/repo3/manifests")
 run_cli("12" register "${BROKEN}")
 set(refusal "${last_errors}")
 # Typed with a separator at its end, the folder has the same unfinished registration.
@@ -262,6 +267,7 @@ if(NOT last_errors MATCHES "沒有未完成的註冊")
     message(FATAL_ERROR "abandon-registration of a registered archive:\n${last_errors}")
 endif()
 run_cli("10" archive abandon-registration "${broken_prefix}")
+set(GLOBAL --config "${WORK}/config.json")
 
 # A relocation resumes (decision 0026). The archive of a folder is moved to a
 # copy in another folder (sample data). The relocation reads the copy, but its
@@ -515,5 +521,30 @@ string(JSON imported_before GET "${last_output}" already_present)
 if(NOT imported_revision EQUAL 2 OR imported_before)
     message(FATAL_ERROR "import after the registration was abandoned:\n${last_output}")
 endif()
+
+# R-14: what is known of a recorded revision comes from its manifest, never
+# from the index's copy of its header. A manifest whose header line is not
+# the one recorded (its revision written otherwise, sample data) stops the
+# archive list and a verification with a repository error (exit 11) that
+# names the archive and the revision; restored, both work again.
+set(GLOBAL --config "${WORK}/config.json")
+set(RECORDED "${WORK}/repo/manifests/${archive_uuid}/r0002.vam")
+# Kept byte for byte: file(WRITE) may write other line ends.
+file(COPY_FILE "${RECORDED}" "${RECORDED}.kept")
+file(READ "${RECORDED}" recorded_bytes)
+string(REPLACE "\"revision\":2," "\"revision\": 2," changed_bytes "${recorded_bytes}")
+file(WRITE "${RECORDED}" "${changed_bytes}")
+run_cli("11" --lang en archive list)
+set(listed "${last_errors}")
+run_cli("11" --lang en verify --full "${ROOT}")
+set(verified "${last_errors}")
+file(RENAME "${RECORDED}.kept" "${RECORDED}")
+set(changed_manifest "cannot use the manifest of revision 2 of archive ${archive_uuid}: the manifest differs from the repository record")
+if(changed_bytes STREQUAL recorded_bytes OR NOT listed MATCHES "${changed_manifest}"
+        OR NOT verified MATCHES "${changed_manifest}")
+    message(FATAL_ERROR "a manifest that is not the one recorded:\n${listed}\n${verified}")
+endif()
+run_cli("0" archive list)
+run_cli("0;2" verify --full "${ROOT}")
 
 message(STATUS "veriarchive-cli end-to-end test passed")

@@ -147,7 +147,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     const MediaEvidence evidence{current_timestamp(), *volume, std::nullopt};
 
     // Decision 0001: the new root may not overlap another archive on its volume.
-    const auto candidates = load_candidates(store);
+    const auto candidates = load_candidates(store, services.repository_files, services.layout);
     if (!candidates) {
         return fail(Kind::Repository, candidates.error().message);
     }

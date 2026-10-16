@@ -14,6 +14,12 @@ class ManifestReader {
 public:
     static std::expected<ManifestReader, ManifestFailure> open(
         IFileSystemAccess& files, const std::filesystem::path& path);
+    // Line 1 of the manifest at `path` without its '\n', reading no further:
+    // its header as the manifest holds it (what V1.1 signs, R-60). Nothing of
+    // it is checked here; for a check of a recorded revision that needs no
+    // entries (load_recorded_header).
+    static std::expected<std::string, ManifestFailure> read_header_line(
+        IFileSystemAccess& files, const std::filesystem::path& path);
 
     const ManifestHeader& header() const { return header_; }
     const std::string& header_line() const { return header_line_; }

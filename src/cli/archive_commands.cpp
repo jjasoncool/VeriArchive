@@ -264,7 +264,9 @@ std::expected<Opened, Failure> open_statuses(const Arguments& arguments)
         return std::unexpected(Failure{exit_code::repository, store.error().message});
     }
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    auto statuses = archive_statuses(*store, session->context.config.policy, now);
+    const auto repository_files = platform::make_file_system_access();
+    auto statuses =
+        archive_statuses(*store, *repository_files, session->context.repo, session->context.config.policy, now);
     if (!statuses) {
         return std::unexpected(Failure{exit_code::repository, statuses.error().message});
     }

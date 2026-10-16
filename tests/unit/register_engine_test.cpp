@@ -128,6 +128,91 @@ void registered_root_needs_a_flag()
     CHECK(separate && first && separate->archive_uuid != first->archive_uuid);
 }
 
+// Decision 0005: a copy stays a copy. A new revision of an archive registered
+// with --copy-of names the same original, as the latest revision's manifest
+// names it (R-14), also when the new registration does not say so again.
+void a_new_revision_of_a_copy_stays_a_copy()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    const va::Uuid original = "c0ffee00-0000-4000-8000-000000000005"; // sample data
+    auto request = at("/vol");
+    request.copy_of = original;
+    CHECK(fixture.run(request).has_value());
+    fixture.archive.add_file("b.txt", "b (sample data)");
+    auto next = at("/vol");
+    next.new_revision = true;
+    const auto second = fixture.run(next);
+    CHECK(second && second->revision == 2);
+    if (second) {
+        auto reader = va::ManifestReader::open(*fixture.repository.files, second->manifest);
+        CHECK(reader && reader->header().copy_of == std::optional<va::Uuid>(original));
+    }
+}
+
+// Passes everything to `inner`, except the `nth` opening of a file named
+// `name`, which fails as a file that cannot be read.
+class FailingOpen final : public va::IFileSystemAccess {
+public:
+    FailingOpen(va::IFileSystemAccess& inner, std::string name, int nth)
+        : inner_(inner), name_(std::move(name)), nth_(nth)
+    {
+    }
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        if (va::path_to_utf8(file.filename()) == name_ && ++opened_ == nth_) {
+            return std::unexpected(va::IoError{va::IoErrorKind::PermissionDenied, 5, "denied (sample)"});
+        }
+        return inner_.open(file, options);
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    va::IFileSystemAccess& inner_;
+    std::string name_;
+    int nth_;
+    int opened_ = 0;
+};
+
+// A new revision takes the original it is a copy of from the latest
+// revision's manifest. When that manifest cannot be read then (here at its
+// second opening, after the candidates were read from it), the registration
+// stops rather than drop the original, or take it from the index (R-14).
+void a_new_revision_reads_the_latest_header_from_its_manifest()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    const auto first = fixture.run(at("/vol"));
+    CHECK(first.has_value());
+    if (!first) {
+        return;
+    }
+    FailingOpen repository_files(*fixture.repository.files, "r0001.vam", 2);
+    va::RegisterServices services{fixture.archive, repository_files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, fixture.repository.context.repo, fixture.host,
+        fixture.processes};
+    auto next = at("/vol");
+    next.new_revision = true;
+    const auto registered = va::register_archive(services, next, fixture.cancel, fixture.progress);
+    CHECK(!registered && registered.error().kind == va::RegisterFailure::Kind::Repository &&
+          registered.error().message == "cannot use the manifest of revision 1 of archive " + first->archive_uuid +
+                                            ": denied (sample)");
+    const auto plans = fixture.store.settings_with_prefix("registration:");
+    CHECK(plans && plans->empty());
+}
+
 // Decision 0001: roots on one volume may not contain each other.
 void overlapping_roots_are_refused()
 {
@@ -1595,6 +1680,8 @@ void register_engine_tests()
     malformed_values_are_invalid();
     registered_root_needs_a_flag();
     registered_root_without_filesystem_id_needs_a_flag();
+    a_new_revision_of_a_copy_stays_a_copy();
+    a_new_revision_reads_the_latest_header_from_its_manifest();
     overlapping_roots_are_refused();
     unreadable_files_are_recorded();
     retired_archive_takes_no_revision();

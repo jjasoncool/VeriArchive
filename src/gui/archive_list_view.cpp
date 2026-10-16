@@ -12,6 +12,7 @@
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_relocation.h"
 #include "core/engine/archive_status.h"
+#include "platform/file_system.h"
 #include "platform/process_table.h"
 
 #include <chrono>
@@ -781,7 +782,9 @@ void refresh_archive_list(GuiState& state)
     // round.
     const auto mark = store->archive_list_mark();
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    const auto statuses = archive_statuses(*store, state.session->context.config.policy, now);
+    const auto repository_files = platform::make_file_system_access();
+    const auto statuses = archive_statuses(
+        *store, *repository_files, state.session->context.repo, state.session->context.config.policy, now);
     if (!statuses) {
         gtk_label_set_text(GTK_LABEL(view.status), text(statuses.error().message).c_str());
         return;

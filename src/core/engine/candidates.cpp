@@ -1,22 +1,13 @@
 #include "core/engine/candidates.h"
 
 #include "common/archive_path.h"
-#include "common/json_error.h"
 #include "common/unicode.h"
+#include "core/engine/recorded_manifest.h"
 
 namespace va {
 
-std::expected<ManifestHeader, IoError> recorded_header(const RevisionRecord& revision)
-{
-    try {
-        return header_from_json(nlohmann::json::parse(revision.header_json));
-    } catch (const std::exception& error) {
-        return std::unexpected(IoError{IoErrorKind::Other, 0,
-            "invalid recorded manifest header for " + revision.archive_uuid + ": " + json_error_text(error)});
-    }
-}
-
-std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveStore& store)
+std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(
+    ArchiveStore& store, IFileSystemAccess& repository_files, const RepositoryLayout& layout)
 {
     const auto archives = store.archives();
     if (!archives) {
@@ -35,7 +26,7 @@ std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveSto
         candidate.archive_uuid = archive.archive_uuid;
         candidate.retired = archive.status == "RETIRED";
         for (const auto& revision : *revisions) {
-            const auto header = recorded_header(revision);
+            const auto header = load_recorded_header(repository_files, layout, revision);
             if (!header) {
                 return std::unexpected(header.error());
             }

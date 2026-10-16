@@ -107,6 +107,28 @@ std::expected<ManifestReader, ManifestFailure> ManifestReader::open(
     return reader;
 }
 
+std::expected<std::string, ManifestFailure> ManifestReader::read_header_line(
+    IFileSystemAccess& files, const std::filesystem::path& path)
+{
+    ManifestReader reader;
+    // A header is a few KiB: the first read usually holds all of it.
+    reader.buffer_.resize(8 << 10);
+    auto source = files.open(path, ReadOptions{false, true});
+    if (!source) {
+        return std::unexpected(io_failure(source.error()));
+    }
+    reader.source_ = std::move(*source);
+    std::string line;
+    const auto has_line = reader.read_line(line);
+    if (!has_line) {
+        return std::unexpected(has_line.error());
+    }
+    if (!*has_line) {
+        return std::unexpected(malformed("empty manifest"));
+    }
+    return line;
+}
+
 std::expected<std::optional<Entry>, ManifestFailure> ManifestReader::next()
 {
     std::string line;

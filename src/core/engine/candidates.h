@@ -11,10 +11,13 @@
 
 namespace va {
 
-std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(ArchiveStore& store);
-
-// The header recorded for a revision (archive_revisions.header_json).
-std::expected<ManifestHeader, IoError> recorded_header(const RevisionRecord& revision);
+// The carriers come from the manifests' headers (load_recorded_header), never
+// from the index's copies of them (R-14). Fails, naming the archive and the
+// revision, when a recorded revision's manifest cannot be read, is not the one
+// recorded, or differs from the index: matching against what is left would be
+// matching against the index.
+std::expected<std::vector<ArchiveCandidate>, IoError> load_candidates(
+    ArchiveStore& store, IFileSystemAccess& repository_files, const RepositoryLayout& layout);
 
 // Path of the archive root relative to its volume's mount point, as an
 // ArchivePath string ("" for the volume root).

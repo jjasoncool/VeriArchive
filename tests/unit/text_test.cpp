@@ -454,6 +454,21 @@ void translation_tests()
           "未能比較：無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 沒有紀錄");
     CHECK(english("cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded") ==
           "cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded");
+    // The index's copy of a header, never taken for the manifest's (R-14):
+    // the revision keeps its place in the Chinese word order, and the cause is
+    // translated, also inside a comparison's failure.
+    const auto index_differs = "the repository's index differs from the manifest of revision 2 of archive " + uuid +
+                               "; rebuild the index with `repo rebuild-index`";
+    const auto index_differs_chinese = "儲存庫的索引與封存 " + uuid + " 版次 2 的清單檔不符；請以 `repo rebuild-index` 重建索引";
+    CHECK(chinese("error: " + index_differs) == "錯誤：" + index_differs_chinese);
+    CHECK(chinese("cannot read the manifest of ARCH-0002 revision 2: " + index_differs) ==
+          "無法讀取 ARCH-0002 版次 2 的清單檔：" + index_differs_chinese);
+    CHECK(chinese("cannot use the manifest of revision 2 of archive " + uuid +
+                  ": the manifest differs from the repository record") ==
+          "無法使用封存 " + uuid + " 版次 2 的清單檔：清單檔與儲存庫的紀錄不符");
+    CHECK(chinese("cannot use the manifest of revision 2 of archive " + uuid +
+                  ": CreateFileW failed (Win32 error 2)") ==
+          "無法使用封存 " + uuid + " 版次 2 的清單檔：CreateFileW 失敗（Win32 錯誤 2）");
     // Wording fixes (findings 27, 29, 30, 31, 32).
     CHECK(chinese("warning: identity: retired") == "警告：媒體身分：封存已停用");
     CHECK(chinese("RETIRED") == "已停用");

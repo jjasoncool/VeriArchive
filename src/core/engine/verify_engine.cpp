@@ -224,7 +224,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         resume = *point;
     }
 
-    auto candidates = load_candidates(store);
+    auto candidates = load_candidates(store, services.repository_files, services.layout);
     if (!candidates) {
         return stop(VerifyStop::Kind::Repository, candidates.error().message);
     }

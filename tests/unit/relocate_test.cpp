@@ -568,7 +568,8 @@ void a_relocation_interrupted_after_its_copy_differed_ends()
     }
     CHECK(count_rows(fixture, "media_evidence") == evidence_before + 1);
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    const auto statuses = va::archive_statuses(fixture.store, va::Policy{}, now);
+    const auto statuses = va::archive_statuses(
+        fixture.store, *fixture.repository.files, fixture.repository.context.repo, va::Policy{}, now);
     CHECK(statuses && statuses->size() == 1 && !statuses->front().last_any && !statuses->front().last_full);
     const auto chain = fixture.store.check_history(fixture.repository.context.repository_uuid);
     CHECK(chain && chain->runs == 1 && !chain->first_broken_run);
@@ -989,7 +990,8 @@ void an_interrupted_attempt_is_recorded_incomplete()
                                          fixture.archive_uuid + "; continue it with `archive relocate " +
                                          fixture.archive_uuid + " <root_path> --resume`");
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    const auto statuses = va::archive_statuses(fixture.store, va::Policy{}, now);
+    const auto statuses = va::archive_statuses(
+        fixture.store, *fixture.repository.files, fixture.repository.context.repo, va::Policy{}, now);
     CHECK(statuses && statuses->size() == 1 && !statuses->front().last_any && !statuses->front().last_full);
     CHECK(listed() == std::vector<va::app::OperationKind>{va::app::OperationKind::Relocation});
 

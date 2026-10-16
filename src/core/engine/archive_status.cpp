@@ -1,7 +1,7 @@
 #include "core/engine/archive_status.h"
 
 #include "common/time.h"
-#include "core/engine/candidates.h"
+#include "core/engine/recorded_manifest.h"
 
 #include <map>
 
@@ -16,8 +16,9 @@ bool older_than(const std::string& timestamp, int days, std::chrono::sys_seconds
 
 } // namespace
 
-std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(
-    ArchiveStore& store, const Policy& policy, std::chrono::sys_seconds now)
+std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Policy& policy,
+    std::chrono::sys_seconds now)
 {
     const auto archives = store.archives();
     if (!archives) {
@@ -39,9 +40,11 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(
             return std::unexpected(revision.error());
         }
         if (*revision) {
-            if (auto header = recorded_header(**revision)) {
-                status.header = std::move(*header);
+            auto header = load_recorded_header(repository_files, layout, **revision);
+            if (!header) {
+                return std::unexpected(header.error());
             }
+            status.header = std::move(*header);
         }
 
         const auto runs = store.verify_runs(archive.archive_uuid);
