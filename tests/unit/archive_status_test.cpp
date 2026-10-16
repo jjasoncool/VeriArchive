@@ -4,6 +4,7 @@
 
 #include "common/time.h"
 #include "core/engine/archive_status.h"
+#include "core/engine/recorded_manifest.h"
 #include "core/manifest/manifest_writer.h"
 
 #include <algorithm>
@@ -165,6 +166,17 @@ void a_damaged_archive_never_stops_the_list()
     }));
 }
 
+// Decision 0028: each kind of manifest that cannot be used has its own code
+// in the --json of `archive list` and `archive show` (`manifest_problem.kind`).
+void each_manifest_problem_has_its_code()
+{
+    using Kind = va::UnusableManifest::Kind;
+    CHECK(va::kind_code(Kind::Missing) == "missing");
+    CHECK(va::kind_code(Kind::Unreadable) == "unreadable");
+    CHECK(va::kind_code(Kind::Changed) == "changed");
+    CHECK(va::kind_code(Kind::IndexDiffers) == "index_differs");
+}
+
 } // namespace
 
 void archive_status_tests()
@@ -173,4 +185,5 @@ void archive_status_tests()
     overdue_follows_policy();
     shared_labels_are_disambiguated();
     a_damaged_archive_never_stops_the_list();
+    each_manifest_problem_has_its_code();
 }

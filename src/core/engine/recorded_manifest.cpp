@@ -117,6 +117,21 @@ std::string failure_class_of(const UnusableManifest& unusable)
     return unusable.kind == UnusableManifest::Kind::Changed ? "ManifestHashMismatch" : "RepositoryError";
 }
 
+std::string_view kind_code(UnusableManifest::Kind kind)
+{
+    switch (kind) {
+    case UnusableManifest::Kind::Missing:
+        return "missing";
+    case UnusableManifest::Kind::Unreadable:
+        return "unreadable";
+    case UnusableManifest::Kind::Changed:
+        return "changed";
+    case UnusableManifest::Kind::IndexDiffers:
+        break;
+    }
+    return "index_differs";
+}
+
 std::string what_is_wrong_with(const UnusableManifest& unusable)
 {
     const auto revision = std::to_string(unusable.revision);

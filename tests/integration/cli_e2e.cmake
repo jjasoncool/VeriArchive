@@ -602,6 +602,7 @@ string(FIND "${failed_chinese}" "${changed_chinese}" in_chinese)
 string(JSON failed_result GET "${failed_json}" result)
 string(JSON failed_read GET "${failed_json}" media_read)
 string(JSON failed_root TYPE "${failed_json}" root)
+string(JSON failed_identity TYPE "${failed_json}" identity)
 string(JSON failed_class GET "${failed_json}" failure_classes 0)
 string(JSON failed_warning GET "${failed_json}" warnings 0)
 string(JSON run_count LENGTH "${history_json}" runs)
@@ -619,10 +620,43 @@ if(NOT problem_kind STREQUAL "changed" OR NOT problem_revision EQUAL 2
     message(FATAL_ERROR "archive list --json of a manifest that is not the one recorded:\n${listed_json}")
 endif()
 if(NOT failed_result STREQUAL "FAILED" OR failed_read OR NOT failed_root STREQUAL "NULL"
+        OR NOT failed_identity STREQUAL "NULL"
         OR NOT failed_class STREQUAL "ManifestHashMismatch" OR NOT failed_warning STREQUAL "manifest: ${changed_manifest}"
         OR failed_line EQUAL -1 OR unread_line EQUAL -1 OR in_chinese EQUAL -1
         OR NOT last_result STREQUAL "FAILED" OR NOT last_classes STREQUAL "ManifestHashMismatch")
     message(FATAL_ERROR "a manifest that is not the one recorded, by uuid:\n${failed_json}\n${failed_chinese}\n${history_json}")
+endif()
+
+# The kind of each manifest problem in --json (decision 0028): the manifest
+# gone, and one that cannot be read, a folder standing in its place (sample
+# data); the copy, whose manifest is intact, has none.
+function(manifest_problem_kind listed uuid out)
+    set(kind "")
+    string(JSON count LENGTH "${listed}" archives)
+    math(EXPR last "${count} - 1")
+    foreach(index RANGE ${last})
+        string(JSON listed_uuid GET "${listed}" archives ${index} archive_uuid)
+        if(listed_uuid STREQUAL uuid)
+            string(JSON kind ERROR_VARIABLE no_problem GET "${listed}" archives ${index} manifest_problem kind)
+            if(no_problem)
+                set(kind "none")
+            endif()
+        endif()
+    endforeach()
+    set(${out} "${kind}" PARENT_SCOPE)
+endfunction()
+file(RENAME "${RECORDED}" "${RECORDED}.away")
+run_cli("2" archive list --json)
+manifest_problem_kind("${last_output}" "${archive_uuid}" missing_kind)
+manifest_problem_kind("${last_output}" "${copy_uuid}" copy_kind)
+file(MAKE_DIRECTORY "${RECORDED}")
+run_cli("2" archive list --json)
+manifest_problem_kind("${last_output}" "${archive_uuid}" unreadable_kind)
+file(REMOVE_RECURSE "${RECORDED}")
+file(RENAME "${RECORDED}.away" "${RECORDED}")
+if(NOT missing_kind STREQUAL "missing" OR NOT unreadable_kind STREQUAL "unreadable" OR NOT copy_kind STREQUAL "none")
+    message(FATAL_ERROR "manifest_problem kind of a manifest gone: ${missing_kind}, of a folder in its place: "
+        "${unreadable_kind}, of the copy: ${copy_kind}")
 endif()
 run_cli("0" archive list)
 run_cli("0;2" verify --full "${ROOT}")

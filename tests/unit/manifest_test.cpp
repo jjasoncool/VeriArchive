@@ -505,9 +505,10 @@ void entries_are_read_from_the_body_validated()
 // reader compares line 1 with it before it parses it. The line recorded
 // opens; a line 1 that differs fails with HeaderMismatch, also one that no
 // longer parses, one cut off, the line recorded without its newline (the
-// body gone with it), and an empty file; a file that cannot be opened stays
-// an I/O failure. Without the hash (an import's source, rebuild-index), a
-// line 1 that does not parse is a malformed manifest, as before.
+// body gone with it), and an empty file; a file that cannot be opened, or
+// read once opened, stays an I/O failure. Without the hash (an import's
+// source, rebuild-index), a line 1 that does not parse is a malformed
+// manifest, as before.
 void line_one_is_compared_before_it_is_parsed()
 {
     using Kind = va::ManifestFailure::Kind;
@@ -549,6 +550,16 @@ void line_one_is_compared_before_it_is_parsed()
     CHECK(!kind(relabelled, std::nullopt));
     const auto gone = va::ManifestReader::open(*files, root / "r0002.vam", recorded);
     CHECK(!gone && gone.error().kind == Kind::Io);
+    // A file that opens and then cannot be read (sample data: a CRC error from
+    // its first byte on, as a bad sector gives) is no answer either way: it
+    // stays an I/O failure, also given the BLAKE3 recorded.
+    test::FakeFileSystem bad_sector(root);
+    bad_sector.add_file("r0003.vam", bytes).read_error_offset = 0;
+    for (const auto hash : {std::optional<std::string_view>(recorded), std::optional<std::string_view>()}) {
+        const auto unreadable = va::ManifestReader::open(bad_sector, root / "r0003.vam", hash);
+        CHECK(!unreadable && unreadable.error().kind == Kind::Io &&
+              unreadable.error().io_kind == va::IoErrorKind::MediaError);
+    }
 
     std::error_code error;
     std::filesystem::remove_all(root, error);

@@ -21,6 +21,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace va {
@@ -53,6 +54,10 @@ struct UnusableManifest {
 // RepositoryError for one that is missing or cannot be read, or whose header
 // the index holds otherwise.
 std::string failure_class_of(const UnusableManifest& unusable);
+
+// The kind in English for --json (`manifest_problem.kind`): "missing",
+// "unreadable", "changed" or "index_differs".
+std::string_view kind_code(UnusableManifest::Kind kind);
 
 // What is wrong, naming the manifest: "the manifest of revision 2
 // (manifests/<archive_uuid>/r0002.vam) is missing".

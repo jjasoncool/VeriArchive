@@ -523,6 +523,52 @@ private:
     int opened_ = 0;
 };
 
+// The repository's files, except that the file named `name` opens and then
+// cannot be read (sample: a CRC error), as a manifest on a bad sector.
+class FailedRead final : public va::IFileSystemAccess {
+public:
+    FailedRead(va::IFileSystemAccess& inner, std::string name) : inner_(inner), name_(std::move(name)) {}
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        auto source = inner_.open(file, options);
+        if (!source || va::path_to_utf8(file.filename()) != name_) {
+            return source;
+        }
+        return std::make_unique<Source>(std::move(*source));
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    class Source final : public va::IByteSource {
+    public:
+        explicit Source(std::unique_ptr<va::IByteSource> inner) : inner_(std::move(inner)) {}
+        std::expected<std::size_t, va::IoError> read(std::uint64_t, std::span<std::byte>) override
+        {
+            return std::unexpected(va::IoError{va::IoErrorKind::MediaError, 23, "CRC error (sample)"});
+        }
+        std::uint64_t size() const override { return inner_->size(); }
+        std::size_t alignment() const override { return inner_->alignment(); }
+
+    private:
+        std::unique_ptr<va::IByteSource> inner_;
+    };
+
+    va::IFileSystemAccess& inner_;
+    std::string name_;
+};
+
 // Decision 0028: the plain message of the manifest of revision 1 of
 // `archive_uuid` that cannot be used: what is wrong with it, naming it by its
 // place in the repository, then how to fix it.
@@ -701,7 +747,8 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
 // When that manifest cannot be used, the verification FAILS at once, without
 // reading the media (here the fake media cannot even be listed, and no byte
 // of the archive is read) and without media evidence: a manifest missing or
-// unreadable fails with RepositoryError, one whose header line or body has
+// unreadable (it cannot be opened, or opens and then cannot be read, as on a
+// bad sector) fails with RepositoryError, one whose header line or body has
 // changed with ManifestHashMismatch (sample data: one byte each). The failure
 // names the manifest and says to restore it from a backup of the repository.
 // The run is recorded as FULL FAILED of the archive's revision, with nothing
@@ -709,8 +756,9 @@ void a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root()
 // restored, the archive verifies.
 void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
 {
-    enum class Case { Missing, Unreadable, HeaderChanged, BodyChanged };
-    for (const auto what : {Case::Missing, Case::Unreadable, Case::HeaderChanged, Case::BodyChanged}) {
+    enum class Case { Missing, Unreadable, ReadFails, HeaderChanged, BodyChanged };
+    for (const auto what :
+        {Case::Missing, Case::Unreadable, Case::ReadFails, Case::HeaderChanged, Case::BodyChanged}) {
         Registered fixture;
         const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
         const auto kept = file_bytes(path);
@@ -722,6 +770,8 @@ void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
             message = restore_message(fixture.archive_uuid, "is missing");
         } else if (what == Case::Unreadable) {
             message = restore_message(fixture.archive_uuid, "cannot be read: access denied (sample)");
+        } else if (what == Case::ReadFails) {
+            message = restore_message(fixture.archive_uuid, "cannot be read: CRC error (sample)");
         } else if (what == Case::HeaderChanged) {
             changed[changed.find("\"volume_label\":\"ARCHIVE\"") + 16] ^= 0x01; // "ARCHIVE" -> "@RCHIVE"
             failure_class = "ManifestHashMismatch";
@@ -739,8 +789,10 @@ void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
         const auto evidence_before = count_rows(fixture, "media_evidence");
 
         DeniedOpen denied(*fixture.repository.files, "r0001.vam");
-        va::IFileSystemAccess& repository_files =
-            what == Case::Unreadable ? static_cast<va::IFileSystemAccess&>(denied) : *fixture.repository.files;
+        FailedRead bad_sector(*fixture.repository.files, "r0001.vam");
+        va::IFileSystemAccess& repository_files = what == Case::Unreadable ? static_cast<va::IFileSystemAccess&>(denied)
+                                                  : what == Case::ReadFails ? static_cast<va::IFileSystemAccess&>(bad_sector)
+                                                                            : *fixture.repository.files;
         va::VerifyServices services{fixture.archive, repository_files, fixture.media, fixture.store,
             fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host};
         va::VerifyRequest by_uuid;
@@ -774,6 +826,52 @@ void a_known_archive_whose_manifest_cannot_be_used_fails_unread()
         fixture.media.error.reset();
         const auto restored = fixture.verify(by_uuid);
         CHECK(restored && restored->result == "PASSED" && restored->media_read);
+    }
+}
+
+// Decision 0028 fails the verification of a known archive before its media is
+// looked for only when its manifest cannot be used. A current revision that
+// is not recorded, or one older than the highest known (R-15), is no such
+// manifest (sample data: the archive's record set to revision 2 of 1, or
+// back to revision 1 of 2), and keeps what it did before: the verification
+// by uuid of the first stops where its media is looked for (here the media
+// cannot be listed) and records nothing; the second finds its media and
+// FAILS with ManifestRevisionRollback, the media read and its evidence
+// recorded.
+void a_revision_not_recorded_or_rolled_back_looks_for_the_media()
+{
+    {
+        Registered fixture;
+        fixture.repository.execute("UPDATE archives SET current_revision = 2");
+        fixture.media.error = va::IoError{va::IoErrorKind::Other, 0, "the media is looked for (sample)"};
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = fixture.archive_uuid;
+        const auto stopped = fixture.verify(by_uuid);
+        CHECK(!stopped && stopped.error().kind == va::VerifyStop::Kind::NotFound &&
+              stopped.error().message == "cannot list volumes: the media is looked for (sample)");
+        if (stopped) {
+            std::cerr << "  revision not recorded: " << stopped->result << '\n';
+        }
+        const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+        CHECK(runs && runs->empty());
+    }
+    {
+        Registered fixture;
+        va::RegisterRequest again;
+        again.root = fixture.archive.root();
+        again.new_revision = true;
+        CHECK(fixture.register_root(again).has_value());
+        fixture.repository.execute("UPDATE archives SET current_revision = 1");
+        const auto evidence_before = count_rows(fixture, "media_evidence");
+        va::VerifyRequest by_uuid;
+        by_uuid.archive_uuid = fixture.archive_uuid;
+        const auto rolled_back = fixture.verify(by_uuid);
+        CHECK(rolled_back && rolled_back->result == "FAILED" && rolled_back->media_read &&
+              rolled_back->revision == 1 &&
+              rolled_back->failure_classes == std::vector<std::string>{"ManifestRevisionRollback"} &&
+              rolled_back->warnings ==
+                  std::vector<std::string>{"manifest: revision 1 is older than the known revision 2"});
+        CHECK(count_rows(fixture, "media_evidence") == evidence_before + 1);
     }
 }
 
@@ -1094,6 +1192,7 @@ void verify_engine_tests()
     an_index_that_differs_from_its_manifest_is_never_taken();
     a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root();
     a_known_archive_whose_manifest_cannot_be_used_fails_unread();
+    a_revision_not_recorded_or_rolled_back_looks_for_the_media();
     a_resume_whose_manifest_cannot_be_used_fails_and_keeps_the_run();
     a_named_archive_is_never_the_one_that_may_be_at_a_root();
     a_named_archive_reads_no_other_manifest();

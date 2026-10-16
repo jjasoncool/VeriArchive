@@ -14,6 +14,7 @@
 #include "core/engine/abandon_relocation.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
+#include "core/engine/recorded_manifest.h"
 #include "core/engine/relocate_engine.h"
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
@@ -193,22 +194,6 @@ void print_unfinished(const app::Text& text, const UnfinishedByArchive& unfinish
     }
 }
 
-// The kind of a manifest that cannot be used, as --json gives it (decision 0028).
-std::string_view unusable_kind_code(UnusableManifest::Kind kind)
-{
-    switch (kind) {
-    case UnusableManifest::Kind::Missing:
-        return "missing";
-    case UnusableManifest::Kind::Unreadable:
-        return "unreadable";
-    case UnusableManifest::Kind::Changed:
-        return "changed";
-    case UnusableManifest::Kind::IndexDiffers:
-        break;
-    }
-    return "index_differs";
-}
-
 // An archive whose latest manifest cannot be used is listed with that
 // problem, in the plain message that ends with how to fix it (decision 0028).
 void print_manifest_problem(const app::Text& text, const ArchiveStatus& status, std::string_view indent)
@@ -244,7 +229,7 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
     }
     if (status.unusable_manifest) {
         const auto& unusable = *status.unusable_manifest;
-        json["manifest_problem"] = {{"kind", unusable_kind_code(unusable.kind)}, {"revision", unusable.revision},
+        json["manifest_problem"] = {{"kind", kind_code(unusable.kind)}, {"revision", unusable.revision},
             {"manifest", unusable.manifest}, {"message", plain_message(unusable)}};
     }
     if (const auto found = unfinished.find(status.archive.archive_uuid); found != unfinished.end()) {
