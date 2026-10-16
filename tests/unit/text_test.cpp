@@ -368,6 +368,21 @@ void translation_tests()
                       "` before relocating again")) ==
           "拒絕搬移：新載體上的內容與記錄不符；未做任何變更，但無法刪除搬移已儲存的進度：無法執行 SQL：資料庫已被鎖定；"
           "請先以 `archive abandon-relocation " + uuid + "` 放棄這次搬移，再重新搬移");
+    // A failure that stops a relocation says how to go on (decision 0026).
+    const auto kept = "; the relocation keeps its saved progress: continue it with `archive relocate " + uuid +
+                      " <root_path> --resume`";
+    const auto kept_chinese = "；搬移保留其已儲存的進度：請以 `archive relocate " + uuid + " <root_path> --resume` 繼續";
+    CHECK(chinese("error: cannot record the relocation: MoveFileExW failed (Win32 error 5)" + kept) ==
+          "錯誤：無法記錄搬移：MoveFileExW 失敗（Win32 錯誤 5）" + kept_chinese);
+    CHECK(chinese("cannot record the relocation: cannot execute SQL: database is locked" + kept) ==
+          "無法記錄搬移：無法執行 SQL：資料庫已被鎖定" + kept_chinese);
+    CHECK(chinese("cannot scan the new root: FindFirstFileExW failed (Win32 error 5)" + kept) ==
+          "無法掃描新根目錄：FindFirstFileExW 失敗（Win32 錯誤 5）" + kept_chinese);
+    CHECK(chinese("cannot write the manifest: open failed: Permission denied" + kept) ==
+          "無法寫入清單檔：open 失敗：權限不足" + kept_chinese);
+    CHECK(chinese("cannot write the manifest: open failed: Permission denied") == "無法寫入清單檔：open 失敗：權限不足");
+    CHECK(english("cannot record the relocation: MoveFileExW failed (Win32 error 5)" + kept) ==
+          "cannot record the relocation: MoveFileExW failed (Win32 error 5)" + kept);
     CHECK(english("the new carrier does not hold the recorded content; nothing was changed, but the relocation's "
                   "saved progress could not be removed: CreateFileW failed (Win32 error 5); abandon the relocation "
                   "with `archive abandon-relocation " + uuid + "` before relocating again") ==

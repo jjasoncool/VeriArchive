@@ -924,6 +924,93 @@ void a_relocation_leaves_a_registration_its_saved_files()
     CHECK(relocated && relocated->revision == 3);
 }
 
+// Writes the repository through `inner`, except the files of a manifest,
+// which cannot be created (a sample failure, as a full disk would be).
+class ManifestFailingWriter final : public va::IFileWriter {
+public:
+    explicit ManifestFailingWriter(va::IFileWriter& inner) : inner_(inner) {}
+
+    std::expected<std::unique_ptr<va::IOutputFile>, va::IoError> create(
+        const std::filesystem::path& destination) override
+    {
+        if (va::path_to_utf8(destination.filename()).contains(".vam")) {
+            return std::unexpected(va::IoError{va::IoErrorKind::Other, 0, "disk full (sample)"});
+        }
+        return inner_.create(destination);
+    }
+    std::expected<void, va::IoError> remove(const std::filesystem::path& file) override
+    {
+        return inner_.remove(file);
+    }
+    std::expected<void, va::IoError> create_directories(const std::filesystem::path& directory) override
+    {
+        return inner_.create_directories(directory);
+    }
+
+private:
+    va::IFileWriter& inner_;
+};
+
+// Decision 0026: a failure that stops a relocation (its scan, its manifest,
+// its record) keeps its record, marked stopped, and its saved progress, as an
+// interruption does. It keeps its cause and its kind (exit 11), and says how
+// to go on once the cause is dealt with. Here the new root cannot be listed
+// first; the resume then matches every entry, but its manifest cannot be
+// written; the next one reads nothing again, but its record cannot be written
+// (a trigger fails it); the last one records the revision, reading nothing.
+void a_relocation_stopped_by_a_failure_says_how_to_go_on()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    const auto kept = "; the relocation keeps its saved progress: continue it with `archive relocate " +
+                      fixture.archive_uuid + " <root_path> --resume`";
+    const auto stopped_with = [&](std::uint64_t matched) {
+        const auto record = fixture.record();
+        return record.is_object() && record.contains("stopped") &&
+               fixture.saved(record.value("run_id", std::string{})).files == matched;
+    };
+
+    fixture.archive.node("new").list_error = va::IoError{va::IoErrorKind::Other, 5, "access denied (sample)"};
+    const auto unlisted = fixture.relocate(fixture.archive.root() / "new");
+    fixture.archive.node("new").list_error.reset();
+    CHECK(!unlisted && unlisted.error().kind == va::RelocateFailure::Kind::Media &&
+          unlisted.error().message == "cannot scan the new root: access denied (sample)" + kept);
+    CHECK(stopped_with(0));
+
+    ManifestFailingWriter failing(*fixture.repository.writer);
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, failing, fixture.media, fixture.store,
+        fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    fixture.archive.bytes_read = 0;
+    const auto unwritten = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt, true}, fixture.cancel, fixture.progress);
+    CHECK(!unwritten && unwritten.error().kind == va::RelocateFailure::Kind::Repository &&
+          unwritten.error().message == "cannot write the manifest: disk full (sample)" + kept);
+    CHECK(fixture.archive.bytes_read == sample_bytes);
+    CHECK(stopped_with(40));
+
+    fixture.repository.execute("CREATE TRIGGER sample_failure BEFORE INSERT ON archive_revisions "
+                               "BEGIN SELECT RAISE(ABORT, 'sample failure'); END;");
+    fixture.archive.bytes_read = 0;
+    const auto unrecorded = fixture.relocate(fixture.archive.root() / "new", true);
+    fixture.repository.execute("DROP TRIGGER sample_failure;");
+    CHECK(!unrecorded && unrecorded.error().kind == va::RelocateFailure::Kind::Repository &&
+          unrecorded.error().message == "cannot record the relocation: cannot run SQL: sample failure" + kept);
+    CHECK(fixture.archive.bytes_read == 0);
+    CHECK(stopped_with(40));
+    CHECK(manifest_names(fixture) == std::set<std::string>{"r0001.vam"});
+    const auto archive = fixture.store.find_archive(fixture.archive_uuid);
+    CHECK(archive && *archive && (*archive)->current_revision == 1);
+
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(resumed && resumed->revision == 2 && resumed->resumed && fixture.archive.bytes_read == 0);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->front().coverage_bytes == sample_bytes &&
+          nlohmann::json::parse(runs->front().counts_json, nullptr, false).value("resumed", 0) == 3);
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+}
+
 // What happens while a relocation waits for the write lock.
 enum class WhileWaiting {
     OtherCommits,         // another operation commits something else
@@ -1224,6 +1311,7 @@ void relocate_tests()
     a_relocation_removes_the_plan_of_its_revision();
     a_relocation_leaves_a_registration_its_saved_files();
     an_abandoned_registration_lets_the_relocation_record();
+    a_relocation_stopped_by_a_failure_says_how_to_go_on();
     a_relocation_waits_for_the_write_lock(WhileWaiting::OtherCommits);
     a_relocation_waits_for_the_write_lock(WhileWaiting::OtherRecordsIt);
     a_relocation_waits_for_the_write_lock(WhileWaiting::RelocationCancelled);

@@ -255,9 +255,10 @@ run_cli("10" archive abandon-registration "${broken_prefix}")
 # A relocation resumes (decision 0026). The archive of a folder is moved to a
 # copy in another folder (sample data). The relocation reads the copy, but its
 # manifest cannot take its name while a folder stands there (sample data): it
-# stops (exit 11), keeping what it matched. Started again without --resume it
-# is refused, naming both ways out; `archive show --json` shows it stopped with
-# every file matched; --resume records it. A second one is abandoned.
+# stops (exit 11), keeping what it matched, and says so with the way on, in
+# either language. Started again without --resume it is refused, naming both
+# ways out; `archive show --json` shows it stopped with every file matched;
+# --resume records it. A second one is abandoned.
 set(MOVE_FROM "${WORK}/move-from")
 set(MOVE_TO "${WORK}/move-to")
 file(WRITE "${MOVE_FROM}/a.txt" "relocation sample a\n")
@@ -269,6 +270,9 @@ file(COPY "${MOVE_FROM}/" DESTINATION "${MOVE_TO}")
 set(BLOCKER "${WORK}/repo/manifests/${moving_uuid}/r0002.vam")
 file(MAKE_DIRECTORY "${BLOCKER}")
 run_cli("11" archive relocate "${moving_prefix}" "${MOVE_TO}")
+if(NOT last_errors MATCHES "無法記錄搬移：.+；搬移保留其已儲存的進度：請以 `archive relocate ${moving_uuid} <root_path> --resume` 繼續")
+    message(FATAL_ERROR "relocate whose record cannot be written:\n${last_errors}")
+endif()
 file(REMOVE_RECURSE "${BLOCKER}")
 run_cli("12" --lang en archive relocate "${moving_prefix}" "${MOVE_TO}")
 if(NOT last_errors MATCHES "--resume" OR NOT last_errors MATCHES "archive abandon-relocation ${moving_uuid}")
@@ -299,7 +303,10 @@ run_cli("12" archive relocate "${moving_prefix}" "${MOVE_TO}" --resume)
 # Abandoned on purpose: a relocation back to the first folder, stopped the same way.
 set(BLOCKER "${WORK}/repo/manifests/${moving_uuid}/r0003.vam")
 file(MAKE_DIRECTORY "${BLOCKER}")
-run_cli("11" archive relocate "${moving_prefix}" "${MOVE_FROM}")
+run_cli("11" --lang en archive relocate "${moving_prefix}" "${MOVE_FROM}")
+if(NOT last_errors MATCHES "error: cannot record the relocation: .+; the relocation keeps its saved progress: continue it with `archive relocate ${moving_uuid} <root_path> --resume`\n$")
+    message(FATAL_ERROR "relocate whose record cannot be written:\n${last_errors}")
+endif()
 file(REMOVE_RECURSE "${BLOCKER}")
 run_cli("12" --lang en archive abandon-relocation "${moving_prefix}")
 if(NOT last_output MATCHES "Unfinished relocation of ARCH-[0-9]+ \\(${moving_uuid}\\), revision 2\n"

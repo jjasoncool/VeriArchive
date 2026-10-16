@@ -180,6 +180,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         this_attempt = AttemptProcess{*self, services.host.host};
     }
     const auto resume_hint = "continue it with `archive relocate " + uuid + " <root_path> --resume`";
+    // An attempt that a failure stops (its scan, its manifest, its record)
+    // keeps the relocation's record and checkpoints as an interrupted one
+    // does, and its failure says how to go on once the cause is dealt with
+    // (decision 0026); it keeps its kind (exit 11), as registration's does.
+    const auto stopped_by = [&](Kind kind, const std::string& failure) {
+        return fail(kind, failure + "; the relocation keeps its saved progress: " + resume_hint);
+    };
 
     // The relocation begins, or takes over the archive's unfinished one, in
     // one write transaction before anything of the media is read (decision
@@ -427,7 +434,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
     }
     if (!comparison.scan_error.empty()) {
-        return fail(Kind::Media, "cannot scan the new root: " + comparison.scan_error);
+        return stopped_by(Kind::Media, "cannot scan the new root: " + comparison.scan_error);
     }
     // The new carrier must hold exactly the recorded content. Names that cannot
     // exist there would silently drop out of the baseline, so they block too.
@@ -502,13 +509,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     ManifestWriter writer(services.writer, services.repository_files, outcome.manifest);
     for (const auto& entry : comparison.current_entries) {
         if (auto added = writer.add(entry); !added) {
-            return fail(Kind::Repository, "cannot write the manifest: " + added.error().message);
+            return stopped_by(Kind::Repository, "cannot write the manifest: " + added.error().message);
         }
     }
     // Written and flushed without a lock; not at its name yet.
     auto written = writer.finish(header);
     if (!written) {
-        return fail(Kind::Repository, "cannot write the manifest: " + written.error().message);
+        return stopped_by(Kind::Repository, "cannot write the manifest: " + written.error().message);
     }
 
     // As in registration (decision 0023): another operation, such as a
@@ -650,7 +657,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         if (cancelled_waiting) {
             return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
         }
-        return fail(Kind::Repository, "cannot record the relocation: " + recorded.error().message);
+        return stopped_by(Kind::Repository, "cannot record the relocation: " + recorded.error().message);
     }
     stop_mark.ended = true;
     return outcome;

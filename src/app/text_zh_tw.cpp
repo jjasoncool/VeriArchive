@@ -757,6 +757,19 @@ constexpr CatalogEntry entries[] = {
     {"cannot read the unfinished relocation: {}", "無法讀取未完成的搬移：{}", Match::Cause},
     {"cannot abandon the relocation: {}", "無法放棄搬移：{}", Match::Cause},
     {"cannot scan the new root: {}", "無法掃描新根目錄：{}", Match::Cause},
+    // A failure that stops a relocation keeps its saved progress (decision 0026).
+    {"cannot scan the new root: {}; the relocation keeps its saved progress: continue it with `archive relocate {} "
+        "<root_path> --resume`",
+        "無法掃描新根目錄：{}；搬移保留其已儲存的進度：請以 `archive relocate {} <root_path> --resume` 繼續",
+        Match::Cause},
+    {"cannot write the manifest: {}; the relocation keeps its saved progress: continue it with `archive relocate {} "
+        "<root_path> --resume`",
+        "無法寫入清單檔：{}；搬移保留其已儲存的進度：請以 `archive relocate {} <root_path> --resume` 繼續",
+        Match::Cause},
+    {"cannot record the relocation: {}; the relocation keeps its saved progress: continue it with `archive "
+        "relocate {} <root_path> --resume`",
+        "無法記錄搬移：{}；搬移保留其已儲存的進度：請以 `archive relocate {} <root_path> --resume` 繼續",
+        Match::Cause},
     {"the new carrier does not hold the recorded content; "
         "nothing was changed (use `register --new-revision` to re-baseline changed content)",
         "新載體上的內容與記錄不符；未做任何變更（若內容已變更，"
