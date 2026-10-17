@@ -1999,6 +1999,17 @@ void an_abandoned_attempt_leaves_the_next_registration_alone()
     CHECK(archive && *archive && (*archive)->current_revision == 1);
 }
 
+// The ways on that the row of a stopped registration offers in the Archive
+// List, which Register Archive names first when the registration refuses it
+// (decision 0033): Resume (decision 0022, point 7) and Abandon....
+const std::string on_its_row = "with Resume, or abandon it with Abandon..., on its row in the Archive List";
+
+// Register Archive's ways on for the registration of the very root entered:
+// the list's, then its checkbox, ticked, and Register again.
+const std::string finish_by_ticking = "finish it " + on_its_row +
+                                      "; or finish it by ticking Resume an interrupted registration of this folder or "
+                                      "volume and pressing Register again";
+
 // Decision 0025: an archive has one unfinished registration at a time. Its
 // volume is also reached through a second path, a second mount point (sample
 // data): a `register --new-revision` through that path does not find the
@@ -2009,10 +2020,11 @@ void an_abandoned_attempt_leaves_the_next_registration_alone()
 // registration through either path is refused too: through its own root as
 // before, now also naming the abandon; and once it is abandoned, the other
 // path takes the archive's next revision. Register Archive words each refusal
-// in its own terms (decision 0033): its checkbox "Resume an interrupted
-// registration of this folder or volume" and the Archive List's Abandon...,
-// or, while the registration that refuses runs, that it runs and to wait for
-// it, judged as the Archive List judges its row.
+// in its own terms (decision 0033): Resume and Abandon... on the
+// registration's row in the Archive List first, then its checkbox "Resume an
+// interrupted registration of this folder or volume", or, while the
+// registration that refuses runs, that it runs and to wait for it, judged as
+// the Archive List judges its row.
 void a_registration_never_replaces_another_unfinished_one_of_its_archive()
 {
     Fixture fixture;
@@ -2047,13 +2059,12 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     const auto another_in_window = [&](std::uint32_t revision, bool runs) {
         const auto creating = "an unfinished registration of archive " + archive_uuid + " (root \"" +
                               va::path_to_utf8(data) + "\") is creating revision " + std::to_string(revision);
-        const std::string resume = "by entering its root above, ticking Resume an interrupted registration of this "
-                                   "folder or volume and pressing Register";
+        const auto ways = on_its_row + "; or finish it by entering its root above, ticking Resume an interrupted "
+                                       "registration of this folder or volume and pressing Register)";
         return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                                  "finish it " +
-                          resume + ", or abandon it with Abandon... in the Archive List)"
-                    : creating + "; nothing was changed (finish it first " + resume +
-                          ", or abandon it with Abandon... in the Archive List)";
+                          ways
+                    : creating + "; nothing was changed (finish it first " + ways;
     };
     const auto now = [] { return std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()); };
 
@@ -2130,18 +2141,14 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     CHECK(!refused && refused.error().refusing && !refused.error().refusing->this_root &&
           refused.error().refusing->revision == 3 && judged_stopped(refused.error()) &&
           va::app::register_message_in_window(refused.error(), false) == another_in_window(3, false));
-    const auto finish_by_ticking = "finish it by ticking Resume an interrupted registration of this folder or "
-                                   "volume and pressing Register again, or abandon it with Abandon... in the Archive "
-                                   "List";
     CHECK(!same_root && same_root.error().refusing && same_root.error().refusing->this_root &&
           same_root.error().refusing->revision == 3 && same_root.error().refusing->archive_uuid == archive_uuid &&
           judged_stopped(same_root.error()) &&
           va::app::register_message_in_window(same_root.error(), false) ==
-              "an interrupted registration of this root exists (archive " + archive_uuid + "); " +
-                  std::string(finish_by_ticking) &&
+              "an interrupted registration of this root exists (archive " + archive_uuid + "); " + finish_by_ticking &&
           va::app::register_message_in_window(same_root.error(), true) ==
               "a registration of this root (archive " + archive_uuid +
-                  ") is still running; wait for it to finish; if it stops, " + std::string(finish_by_ticking));
+                  ") is still running; wait for it to finish; if it stops, " + finish_by_ticking);
 
     va::AbandonServices abandoning{fixture.store, fixture.processes, fixture.host.host};
     const auto abandoned = va::abandon_registration(abandoning, {archive_uuid, std::nullopt, std::nullopt});
@@ -2190,9 +2197,8 @@ void the_window_takes_its_own_registration_without_a_stop_mark_for_stopped()
     }
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     CHECK(va::app::register_message_in_window(refused.error(), fixture.store, fixture.processes, fixture.host.host,
-              now) == "an interrupted registration of this root exists (archive " + archive_uuid +
-                          "); finish it by ticking Resume an interrupted registration of this folder or volume and "
-                          "pressing Register again, or abandon it with Abandon... in the Archive List");
+              now) == "an interrupted registration of this root exists (archive " + archive_uuid + "); " +
+                          finish_by_ticking);
     test::FakeProcessTable another;
     another.self = {7000, "boot-1:7000", "veriarchive-cli.exe"};
     another.others = {fixture.processes.self};
@@ -2265,18 +2271,16 @@ void the_window_names_its_ways_on_for_a_plan_that_says_nothing_of_its_state()
             fixture.store, *same_root.error().refusing, {&fixture.processes, fixture.host.host, {}}, now);
         CHECK(runs && !*runs);
         CHECK(in_window(same_root.error()) ==
-              "an interrupted registration of this root exists (archive " + archive_uuid +
-                  "); finish it by ticking Resume an interrupted registration of this folder or volume and pressing "
-                  "Register again, or abandon it with Abandon... in the Archive List");
+              "an interrupted registration of this root exists (archive " + archive_uuid + "); " + finish_by_ticking);
     }
     const auto other_root = fixture.run(through_alias);
     CHECK(!other_root && other_root.error().refusing && !other_root.error().refusing->this_root);
     if (!other_root && other_root.error().refusing) {
         CHECK(in_window(other_root.error()) ==
               "an unfinished registration of archive " + archive_uuid + " (root \"" + va::path_to_utf8(data) +
-                  "\") is creating revision 2; nothing was changed (finish it first by entering its root above, "
-                  "ticking Resume an interrupted registration of this folder or volume and pressing Register, or "
-                  "abandon it with Abandon... in the Archive List)");
+                  "\") is creating revision 2; nothing was changed (finish it first " + on_its_row +
+                  "; or finish it by entering its root above, ticking Resume an interrupted registration of this "
+                  "folder or volume and pressing Register)");
     }
     auto resume = at(data);
     resume.resume = true;

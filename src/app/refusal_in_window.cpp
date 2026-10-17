@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <string>
+#include <string_view>
 
 namespace va::app {
 namespace {
@@ -22,10 +23,18 @@ std::string text_member(const nlohmann::json& record, const char* name)
     return found != record.end() && found->is_string() ? found->get<std::string>() : std::string{};
 }
 
-// A registration of the archive (decision 0025). Register Archive's own way to
-// finish it is its checkbox "Resume an interrupted registration of this folder
-// or volume", with the registration's root entered; made for an older
-// revision (decision 0030), it can only be abandoned.
+// The ways on that the operation's row in the Archive List offers once it has
+// stopped: Resume, which continues a stopped registration or verification
+// exactly as its command-line resume does, from whichever view (decision
+// 0022, point 7), and Abandon... (decisions 0025, 0033). The windows name them
+// first, then the refused view's own way to finish it.
+constexpr std::string_view on_its_row = "with Resume, or abandon it with Abandon..., on its row in the Archive List";
+
+// A registration of the archive (decision 0025): finished with Resume on its
+// row in the Archive List, or with Register Archive's checkbox "Resume an
+// interrupted registration of this folder or volume", the registration's root
+// entered; made for an older revision (decision 0030), it can only be
+// abandoned.
 std::string registration_refusal(const RefusingOperation& refusing, RefusedIn view, bool runs)
 {
     const auto& uuid = refusing.archive_uuid;
@@ -40,8 +49,9 @@ std::string registration_refusal(const RefusingOperation& refusing, RefusedIn vi
     }
     // The registration of the very root entered: its plan is that root's.
     if (refusing.this_root) {
-        const std::string ways = "finish it by ticking Resume an interrupted registration of this folder or volume "
-                                 "and pressing Register again, or abandon it with Abandon... in the Archive List";
+        const auto ways = "finish it " + std::string(on_its_row) +
+                          "; or finish it by ticking Resume an interrupted registration of this folder or volume and "
+                          "pressing Register again";
         return runs ? "a registration of this root (archive " + uuid +
                           ") is still running; wait for it to finish; if it stops, " + ways
                     : "an interrupted registration of this root exists (archive " + uuid + "); " + ways;
@@ -55,11 +65,11 @@ std::string registration_refusal(const RefusingOperation& refusing, RefusedIn vi
               "pressing Register"
             : "in Register Archive by entering its root, ticking Resume an interrupted registration of this folder or "
               "volume and pressing Register";
+    const auto ways = std::string(on_its_row) + "; or finish it " + resume + ")";
     return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                              "finish it " +
-                      resume + ", or abandon it with Abandon... in the Archive List)"
-                : creating + "; nothing was changed (finish it first " + resume +
-                      ", or abandon it with Abandon... in the Archive List)";
+                      ways
+                : creating + "; nothing was changed (finish it first " + ways;
 }
 
 // A relocation of the archive (decision 0026), which has no window: it is
@@ -85,9 +95,10 @@ std::string relocation_refusal(const RefusingOperation& refusing, bool runs)
                 : "an unfinished relocation of archive " + uuid + to + " exists; " + ways;
 }
 
-// A FULL verify that adds chunk hashes to the archive (decision 0033): Verify
-// Archive's Resume interrupted run continues it once its archive is chosen in
-// the view's list.
+// A FULL verify that adds chunk hashes to the archive (decision 0033):
+// finished with Resume on its row in the Archive List, or with Verify
+// Archive's Resume interrupted run once its archive is chosen in the view's
+// list.
 std::string verification_refusal(const RefusingOperation& refusing, RefusedIn view, bool runs)
 {
     const auto refusal = "an unfinished verification of archive " + refusing.archive_uuid +
@@ -96,11 +107,11 @@ std::string verification_refusal(const RefusingOperation& refusing, RefusedIn vi
     const std::string resume = view == RefusedIn::VerifyArchive
                                    ? "with Resume interrupted run once the archive is chosen above"
                                    : "with Resume interrupted run in Verify Archive once the archive is chosen there";
+    const auto ways = std::string(on_its_row) + "; or finish it " + resume + ")";
     return runs ? refusal + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                             "finish it " +
-                      resume + ", or abandon it with Abandon... in the Archive List)"
-                : refusal + "; nothing was changed (finish it first " + resume +
-                      ", or abandon it with Abandon... in the Archive List)";
+                      ways
+                : refusal + "; nothing was changed (finish it first " + ways;
 }
 
 } // namespace

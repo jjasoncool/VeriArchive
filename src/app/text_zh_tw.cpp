@@ -1016,68 +1016,78 @@ constexpr CatalogEntry entries[] = {
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先以 "
         "`verify --full {3} --resume {4}` 完成它，或以 `archive abandon-verification {5}` 放棄它）"},
     // The same refusal in Verify Archive, which names the window's own ways
-    // on in place of the command lines.
+    // on in place of the command lines: Resume and Abandon... on its row in
+    // the Archive List first, then the view's Resume interrupted run.
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
-        "was changed (finish it first with Resume interrupted run once the archive is chosen above, or abandon it "
-        "with Abandon... in the Archive List)",
-        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在上方選擇該封存，"
-        "再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
-    // ... while that verification still runs, when neither is offered yet.
+        "was changed (finish it first with Resume, or abandon it with Abandon..., on its row in the Archive List; "
+        "or finish it with Resume interrupted run once the archive is chosen above)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存列表」按它那一列"
+        "的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方選擇該封存，再按「繼續中斷的執行」完成它）"},
+    // ... while that verification still runs, when none of them is offered yet.
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {} and is still "
-        "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume interrupted run once "
-        "the archive is chosen above, or abandon it with Abandon... in the Archive List)",
+        "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with "
+        "Abandon..., on its row in the Archive List; or finish it with Resume interrupted run once the archive is "
+        "chosen above)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在上方選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
+        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方選擇該封存，"
+        "再按「繼續中斷的執行」完成它）"},
     // The same refusal of a registration in Register Archive (decision 0033).
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
-        "was changed (finish it first with Resume interrupted run in Verify Archive once the archive is chosen there, "
-        "or abandon it with Abandon... in the Archive List)",
-        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「驗證封存」選擇該封存，"
-        "再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
+        "was changed (finish it first with Resume, or abandon it with Abandon..., on its row in the Archive List; "
+        "or finish it with Resume interrupted run in Verify Archive once the archive is chosen there)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存列表」按它那一列"
+        "的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它）"},
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {} and is still "
-        "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume interrupted run in "
-        "Verify Archive once the archive is chosen there, or abandon it with Abandon... in the Archive List)",
+        "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with "
+        "Abandon..., on its row in the Archive List; or finish it with Resume interrupted run in Verify Archive once "
+        "the archive is chosen there)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
+        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「驗證封存」"
+        "選擇該封存，再按「繼續中斷的執行」完成它）"},
     // The refusal of Register Archive and Verify Archive while a registration
     // of the archive is unfinished, in the windows' own words (decisions
-    // 0025, 0030, 0033): the one of the root entered, of another root of the
-    // archive, or one made for an older revision; once it has stopped, and
-    // while it runs.
-    {"an interrupted registration of this root exists (archive {}); finish it by ticking Resume an interrupted "
-        "registration of this folder or volume and pressing Register again, or abandon it with Abandon... in the "
-        "Archive List",
-        "此根目錄有一個中斷的註冊（封存 {}）；請勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」完成它，"
-        "或在「封存列表」按「放棄…」放棄它"},
-    {"a registration of this root (archive {}) is still running; wait for it to finish; if it stops, finish it by "
-        "ticking Resume an interrupted registration of this folder or volume and pressing Register again, or abandon "
-        "it with Abandon... in the Archive List",
-        "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請勾選「繼續此資料夾或磁碟區中斷的註冊」，"
-        "再按一次「註冊」完成它，或在「封存列表」按「放棄…」放棄它"},
+    // 0025, 0030, 0033): Resume and Abandon... on its row in the Archive List
+    // first, then Register Archive's checkbox; of the root entered, of another
+    // root of the archive, or one made for an older revision, which can only
+    // be abandoned; once it has stopped, and while it runs.
+    {"an interrupted registration of this root exists (archive {}); finish it with Resume, or abandon it with "
+        "Abandon..., on its row in the Archive List; or finish it by ticking Resume an interrupted registration of "
+        "this folder or volume and pressing Register again",
+        "此根目錄有一個中斷的註冊（封存 {}）；請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "也可以勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」完成它"},
+    {"a registration of this root (archive {}) is still running; wait for it to finish; if it stops, finish it with "
+        "Resume, or abandon it with Abandon..., on its row in the Archive List; or finish it by ticking Resume an "
+        "interrupted registration of this folder or volume and pressing Register again",
+        "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請在「封存列表」按它那一列的「繼續」完成它，"
+        "或按該列的「放棄…」放棄它；也可以勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」完成它"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
-        "it first by entering its root above, ticking Resume an interrupted registration of this folder or volume "
-        "and pressing Register, or abandon it with Abandon... in the Archive List)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在上方輸入它的根目錄，"
-        "勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，或在「封存列表」按「放棄…」放棄它）"},
+        "it first with Resume, or abandon it with Abandon..., on its row in the Archive List; or finish it by "
+        "entering its root above, ticking Resume an interrupted registration of this folder or volume and pressing "
+        "Register)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存列表」按它那一列的"
+        "「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，"
+        "再按「註冊」完成它）"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
-        "was changed (wait for it to finish; if it stops, finish it by entering its root above, ticking Resume an "
-        "interrupted registration of this folder or volume and pressing Register, or abandon it with Abandon... in "
-        "the Archive List)",
+        "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
+        "its row in the Archive List; or finish it by entering its root above, ticking Resume an interrupted "
+        "registration of this folder or volume and pressing Register)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在上方輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，"
-        "或在「封存列表」按「放棄…」放棄它）"},
+        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方輸入它的"
+        "根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
-        "it first in Register Archive by entering its root, ticking Resume an interrupted registration of this "
-        "folder or volume and pressing Register, or abandon it with Abandon... in the Archive List)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「註冊封存」輸入它的根目錄，"
-        "勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，或在「封存列表」按「放棄…」放棄它）"},
+        "it first with Resume, or abandon it with Abandon..., on its row in the Archive List; or finish it in "
+        "Register Archive by entering its root, ticking Resume an interrupted registration of this folder or volume "
+        "and pressing Register)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存列表」按它那一列的"
+        "「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」輸入它的根目錄，勾選「繼續此資料夾或磁碟區"
+        "中斷的註冊」，再按「註冊」完成它）"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
-        "was changed (wait for it to finish; if it stops, finish it in Register Archive by entering its root, "
-        "ticking Resume an interrupted registration of this folder or volume and pressing Register, or abandon it "
-        "with Abandon... in the Archive List)",
+        "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
+        "its row in the Archive List; or finish it in Register Archive by entering its root, ticking Resume an "
+        "interrupted registration of this folder or volume and pressing Register)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「註冊封存」輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，"
-        "或在「封存列表」按「放棄…」放棄它）"},
+        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」"
+        "輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
     {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
         "later revision ({}); the registration can no longer finish: abandon it with Abandon... in the Archive List",
         "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成："

@@ -463,78 +463,86 @@ void translation_tests()
     // records them, why none does, and a run that keeps its saved progress.
     const std::string sample = "c0ffee00-0000-4000-8000-000000000001";
     // Verify Archive's refusal while such a verification is unfinished names
-    // the window's own ways on; the command line's names its commands.
+    // the window's own ways on: Resume and Abandon... on its row in the
+    // Archive List first, then the view's Resume interrupted run; the command
+    // line's names its commands.
     const std::string adding_run = "c0ffee00-0000-4000-8000-0000000000aa";
+    const std::string on_its_row = "with Resume, or abandon it with Abandon..., on its row in the Archive List";
+    const std::string on_its_row_chinese = "在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以";
     CHECK(chinese.format("Not verified: {}",
               chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
-                      ") is creating revision 2; nothing was changed (finish it first with Resume interrupted run "
-                      "once the archive is chosen above, or abandon it with Abandon... in the Archive List)")) ==
+                      ") is creating revision 2; nothing was changed (finish it first " + on_its_row +
+                      "; or finish it with Resume interrupted run once the archive is chosen above)")) ==
           "未能驗證：封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
-              "）正在建立版次 2；未做任何變更（請先在上方選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」按"
-              "「放棄…」放棄它）");
+              "）正在建立版次 2；未做任何變更（請先" + on_its_row_chinese + "在上方選擇該封存，再按「繼續中斷的執行」完成它）");
     // ... and while that verification still runs, to wait for it.
     CHECK(chinese.format("Not verified: {}",
               chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                       ") is creating revision 2 and is still running; nothing was changed (wait for it to finish; if it "
-                      "stops, finish it with Resume interrupted run once the archive is chosen above, or abandon it "
-                      "with Abandon... in the Archive List)")) ==
+                      "stops, finish it " + on_its_row +
+                      "; or finish it with Resume interrupted run once the archive is chosen above)")) ==
           "未能驗證：封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
-              "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請在上方選擇該封存，再按"
-              "「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）");
-    // Register Archive's words for the same refusal, which name Verify
-    // Archive's Resume interrupted run, once it has stopped and while it runs.
+              "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
+              "在上方選擇該封存，再按「繼續中斷的執行」完成它）");
+    // Register Archive's words for the same refusal, which name the list's
+    // Resume and Verify Archive's Resume interrupted run, once it has stopped
+    // and while it runs.
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
-                  ") is creating revision 2; nothing was changed (finish it first with Resume interrupted run in "
-                  "Verify Archive once the archive is chosen there, or abandon it with Abandon... in the Archive List)") ==
-          "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
-              "）正在建立版次 2；未做任何變更（請先在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」"
-              "按「放棄…」放棄它）");
+                  ") is creating revision 2; nothing was changed (finish it first " + on_its_row +
+                  "; or finish it with Resume interrupted run in Verify Archive once the archive is chosen there)") ==
+          "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run + "）正在建立版次 2；未做任何變更（請先" +
+              on_its_row_chinese + "在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它）");
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2 and is still running; nothing was changed (wait for it to finish; if it "
-                  "stops, finish it with Resume interrupted run in Verify Archive once the archive is chosen there, or "
-                  "abandon it with Abandon... in the Archive List)") ==
+                  "stops, finish it " + on_its_row +
+                  "; or finish it with Resume interrupted run in Verify Archive once the archive is chosen there)") ==
           "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
-              "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請在「驗證封存」選擇該封存，再按"
-              "「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）");
+              "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
+              "在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它）");
     // The windows' words while a registration of the archive is unfinished
-    // (decision 0033): of the root entered, of another root, in Register
-    // Archive and in Verify Archive, made for an older revision; once it has
-    // stopped and while it runs.
+    // (decision 0033): Resume and Abandon... on its row in the Archive List
+    // first, then Register Archive's checkbox; of the root entered, of another
+    // root, in Register Archive and in Verify Archive, made for an older
+    // revision; once it has stopped and while it runs.
     const std::string tick = "勾選「繼續此資料夾或磁碟區中斷的註冊」";
     const std::string in_list = "或在「封存列表」按「放棄…」放棄它";
     CHECK(chinese.format("Not registered: {}",
-              chinese("an interrupted registration of this root exists (archive " + sample +
-                      "); finish it by ticking Resume an interrupted registration of this folder or volume and "
-                      "pressing Register again, or abandon it with Abandon... in the Archive List")) ==
-          "未能註冊：此根目錄有一個中斷的註冊（封存 " + sample + "）；請" + tick + "，再按一次「註冊」完成它，" + in_list);
+              chinese("an interrupted registration of this root exists (archive " + sample + "); finish it " +
+                      on_its_row +
+                      "; or finish it by ticking Resume an interrupted registration of this folder or volume and "
+                      "pressing Register again")) ==
+          "未能註冊：此根目錄有一個中斷的註冊（封存 " + sample + "）；請" + on_its_row_chinese + tick +
+              "，再按一次「註冊」完成它");
     CHECK(chinese("a registration of this root (archive " + sample +
-                  ") is still running; wait for it to finish; if it stops, finish it by ticking Resume an interrupted "
-                  "registration of this folder or volume and pressing Register again, or abandon it with Abandon... in "
-                  "the Archive List") ==
-          "此根目錄的註冊（封存 " + sample + "）仍在執行；請等它完成；若它停止了，請" + tick + "，再按一次「註冊」完成它，" +
-              in_list);
+                  ") is still running; wait for it to finish; if it stops, finish it " + on_its_row +
+                  "; or finish it by ticking Resume an interrupted registration of this folder or volume and pressing "
+                  "Register again") ==
+          "此根目錄的註冊（封存 " + sample + "）仍在執行；請等它完成；若它停止了，請" + on_its_row_chinese + tick +
+              "，再按一次「註冊」完成它");
     const std::string creating = "an unfinished registration of archive " + sample + " (root \"Z:\\範例\") is creating revision 2";
     const std::string creating_chinese = "封存 " + sample + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2";
-    CHECK(chinese(creating + "; nothing was changed (finish it first by entering its root above, ticking Resume an "
-                             "interrupted registration of this folder or volume and pressing Register, or abandon it "
-                             "with Abandon... in the Archive List)") ==
-          creating_chinese + "；未做任何變更（請先在上方輸入它的根目錄，" + tick + "，再按「註冊」完成它，" + in_list + "）");
-    CHECK(chinese(creating + " and is still running; nothing was changed (wait for it to finish; if it stops, finish it "
-                             "by entering its root above, ticking Resume an interrupted registration of this folder or "
-                             "volume and pressing Register, or abandon it with Abandon... in the Archive List)") ==
-          creating_chinese + "，而且仍在執行；未做任何變更（請等它完成；若它停止了，請在上方輸入它的根目錄，" + tick +
-              "，再按「註冊」完成它，" + in_list + "）");
-    CHECK(chinese(creating + "; nothing was changed (finish it first in Register Archive by entering its root, ticking "
-                             "Resume an interrupted registration of this folder or volume and pressing Register, or "
-                             "abandon it with Abandon... in the Archive List)") ==
-          creating_chinese + "；未做任何變更（請先在「註冊封存」輸入它的根目錄，" + tick + "，再按「註冊」完成它，" + in_list +
-              "）");
-    CHECK(chinese(creating + " and is still running; nothing was changed (wait for it to finish; if it stops, finish it "
-                             "in Register Archive by entering its root, ticking Resume an interrupted registration of "
-                             "this folder or volume and pressing Register, or abandon it with Abandon... in the "
-                             "Archive List)") ==
-          creating_chinese + "，而且仍在執行；未做任何變更（請等它完成；若它停止了，請在「註冊封存」輸入它的根目錄，" + tick +
-              "，再按「註冊」完成它，" + in_list + "）");
+    CHECK(chinese(creating + "; nothing was changed (finish it first " + on_its_row +
+                  "; or finish it by entering its root above, ticking Resume an interrupted registration of this "
+                  "folder or volume and pressing Register)") ==
+          creating_chinese + "；未做任何變更（請先" + on_its_row_chinese + "在上方輸入它的根目錄，" + tick +
+              "，再按「註冊」完成它）");
+    CHECK(chinese(creating + " and is still running; nothing was changed (wait for it to finish; if it stops, finish it " +
+                  on_its_row +
+                  "; or finish it by entering its root above, ticking Resume an interrupted registration of this "
+                  "folder or volume and pressing Register)") ==
+          creating_chinese + "，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
+              "在上方輸入它的根目錄，" + tick + "，再按「註冊」完成它）");
+    CHECK(chinese(creating + "; nothing was changed (finish it first " + on_its_row +
+                  "; or finish it in Register Archive by entering its root, ticking Resume an interrupted registration "
+                  "of this folder or volume and pressing Register)") ==
+          creating_chinese + "；未做任何變更（請先" + on_its_row_chinese + "在「註冊封存」輸入它的根目錄，" + tick +
+              "，再按「註冊」完成它）");
+    CHECK(chinese(creating + " and is still running; nothing was changed (wait for it to finish; if it stops, finish it " +
+                  on_its_row +
+                  "; or finish it in Register Archive by entering its root, ticking Resume an interrupted registration "
+                  "of this folder or volume and pressing Register)") ==
+          creating_chinese + "，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
+              "在「註冊封存」輸入它的根目錄，" + tick + "，再按「註冊」完成它）");
     const std::string older = "the unfinished registration of archive " + sample +
                               " (root \"Z:\\範例\") would create revision 2, but the archive now has a later revision "
                               "(3); the registration can no longer finish";

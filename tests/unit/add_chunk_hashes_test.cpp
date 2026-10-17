@@ -950,24 +950,30 @@ std::string waits_for(const va::Uuid& uuid, const std::string& run, std::uint32_
            "` first, or abandon it with `archive abandon-verification " + uuid + "`)";
 }
 
+// The ways on that the row of the operation that refuses offers in the
+// Archive List once it has stopped, which the windows name first (decision
+// 0033): Resume (decision 0022, point 7) and Abandon....
+const std::string on_its_row = "with Resume, or abandon it with Abandon..., on its row in the Archive List";
+
 // The same refusal of a verification in Verify Archive, which names the
 // window's own ways on rather than command lines (decision 0033), once the
-// verification that refuses has stopped.
+// verification that refuses has stopped: the list's, then the view's Resume
+// interrupted run.
 std::string waits_for_in_window(const va::Uuid& uuid, const std::string& run)
 {
     return "an unfinished verification of archive " + uuid + " that adds chunk hashes (run " + run +
-           ") is creating revision 2; nothing was changed (finish it first with Resume interrupted run once the "
-           "archive is chosen above, or abandon it with Abandon... in the Archive List)";
+           ") is creating revision 2; nothing was changed (finish it first " + on_its_row +
+           "; or finish it with Resume interrupted run once the archive is chosen above)";
 }
 
 // The same while the verification that refuses still runs, or is held up,
-// when the window offers neither Resume interrupted run nor Abandon... for it.
+// when the window offers neither Resume nor Abandon... for it.
 std::string runs_in_window(const va::Uuid& uuid, const std::string& run)
 {
     return "an unfinished verification of archive " + uuid + " that adds chunk hashes (run " + run +
            ") is creating revision 2 and is still running; nothing was changed (wait for it to finish; if it stops, "
-           "finish it with Resume interrupted run once the archive is chosen above, or abandon it with Abandon... in "
-           "the Archive List)";
+           "finish it " +
+           on_its_row + "; or finish it with Resume interrupted run once the archive is chosen above)";
 }
 
 // The same refusal of a registration in Register Archive (decision 0033),
@@ -976,11 +982,12 @@ std::string waits_for_in_register_archive(const va::Uuid& uuid, const std::strin
 {
     const auto refusal = "an unfinished verification of archive " + uuid + " that adds chunk hashes (run " + run +
                          ") is creating revision 2";
+    const auto ways = on_its_row + "; or finish it with Resume interrupted run in Verify Archive once the archive is "
+                                   "chosen there)";
     return runs ? refusal + " and is still running; nothing was changed (wait for it to finish; if it stops, finish "
-                            "it with Resume interrupted run in Verify Archive once the archive is chosen there, or "
-                            "abandon it with Abandon... in the Archive List)"
-                : refusal + "; nothing was changed (finish it first with Resume interrupted run in Verify Archive "
-                            "once the archive is chosen there, or abandon it with Abandon... in the Archive List)";
+                            "it " +
+                      ways
+                : refusal + "; nothing was changed (finish it first " + ways;
 }
 
 // A verification refused while the verification that adds chunk hashes `run`
@@ -1133,13 +1140,14 @@ void a_registration_waits_for_a_verification_that_adds_chunk_hashes()
 // unfinished, stopped with saved files or still hashing, and a verification
 // that adds chunk hashes is refused at once in the words of a registration
 // through another root (decision 0025), changing nothing and reading
-// nothing; Verify Archive names Register Archive's way to finish it and the
-// Archive List's to abandon it, or, while it hashes, says so and to wait. Its
-// plan as a version before decision 0022 wrote it, which says nothing of its
-// state (sample data), cannot be judged from one read, and Verify Archive
-// names its ways on. Once the stopped registration is abandoned, the
-// verification adds them; once the running one records revision 2, which has
-// chunk hashes, the verification has none to add.
+// nothing; Verify Archive names Resume and Abandon... on its row in the
+// Archive List, then Register Archive's way to finish it, or, while it
+// hashes, says so and to wait. Its plan as a version before decision 0022
+// wrote it, which says nothing of its state (sample data), cannot be judged
+// from one read, and Verify Archive names its ways on. Once the stopped
+// registration is abandoned, the verification adds them; once the running
+// one records revision 2, which has chunk hashes, the verification has none
+// to add.
 void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
 {
     const auto registration_refusal = [](const RegisteredWithout& fixture) {
@@ -1152,13 +1160,12 @@ void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
     const auto registration_in_window = [](const RegisteredWithout& fixture, bool runs) {
         const auto creating = "an unfinished registration of archive " + fixture.archive_uuid + " (root \"" +
                               va::path_to_utf8(fixture.archive.root()) + "\") is creating revision 2";
-        const std::string resume = "in Register Archive by entering its root, ticking Resume an interrupted "
-                                   "registration of this folder or volume and pressing Register";
+        const auto ways = on_its_row + "; or finish it in Register Archive by entering its root, ticking Resume an "
+                                       "interrupted registration of this folder or volume and pressing Register)";
         return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                                  "finish it " +
-                          resume + ", or abandon it with Abandon... in the Archive List)"
-                    : creating + "; nothing was changed (finish it first " + resume +
-                          ", or abandon it with Abandon... in the Archive List)";
+                          ways
+                    : creating + "; nothing was changed (finish it first " + ways;
     };
     const auto now = [] { return std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()); };
     {
@@ -1934,11 +1941,7 @@ void the_window_judges_the_operation_that_refuses_it()
     CHECK(verify_archive_says(stopped_by_verification) == runs_in_window(uuid, verification.run_id));
     CHECK(register_archive_says(refused_by_verification) ==
           waits_for_in_register_archive(uuid, verification.run_id, true));
-    const auto ways_on_in_verify_archive = "an unfinished verification of archive " + uuid +
-                                           " that adds chunk hashes (run " + verification.run_id +
-                                           ") is creating revision 2; nothing was changed (finish it first with "
-                                           "Resume interrupted run once the archive is chosen above, or abandon it "
-                                           "with Abandon... in the Archive List)";
+    const auto ways_on_in_verify_archive = waits_for_in_window(uuid, verification.run_id);
     fixture.repository.execute("ALTER TABLE verify_runs RENAME TO verify_runs_away");
     CHECK(!fixture.store.verify_run(verification.run_id).has_value());
     CHECK(verify_archive_says(stopped_by_verification) == ways_on_in_verify_archive);
@@ -1962,13 +1965,14 @@ void the_window_judges_the_operation_that_refuses_it()
     const va::RegisterFailure refused_by_registration{
         va::RegisterFailure::Kind::Refused, "refused (sample)", std::nullopt, registration};
     const auto creating = "an unfinished registration of archive " + uuid +
-                          " (root \"K:/SAMPLE\") is creating revision 2; nothing was changed (finish it first ";
+                          " (root \"K:/SAMPLE\") is creating revision 2; nothing was changed (finish it first " +
+                          on_its_row + "; or finish it ";
     const auto ways_on_for_registration_in_verify_archive =
         creating + "in Register Archive by entering its root, ticking Resume an interrupted registration of this "
-                   "folder or volume and pressing Register, or abandon it with Abandon... in the Archive List)";
+                   "folder or volume and pressing Register)";
     const auto ways_on_for_registration_in_register_archive =
         creating + "by entering its root above, ticking Resume an interrupted registration of this folder or "
-                   "volume and pressing Register, or abandon it with Abandon... in the Archive List)";
+                   "volume and pressing Register)";
     CHECK(verify_archive_says(stopped_by_registration) == ways_on_for_registration_in_verify_archive);
     CHECK(register_archive_says(refused_by_registration) == ways_on_for_registration_in_register_archive);
     test::FakeProcessTable outside;

@@ -2432,10 +2432,11 @@ void leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost()
 // stopped, whatever the process its record names does (decision 0033): the
 // GUI's window goes on after it cancelled its run. Read by another process
 // (another window) that sees that process still running, it is stopped, can
-// be resumed and is offered for abandoning, in the Archive List and from one
-// read, as --json judges it. Its process is not judged, as a record that says
-// that it stopped needs no judging (UnfinishedOperation::attempt). Sample
-// data.
+// be resumed and is offered for resuming and abandoning, in the Archive List
+// and from one read, as --json judges it; Resume on its row then records the
+// revision with chunk hashes. Its process is not judged, as a record that
+// says that it stopped needs no judging (UnfinishedOperation::attempt).
+// Sample data.
 void a_verification_that_adds_chunk_hashes_recorded_incomplete_has_stopped()
 {
     test::EngineFixture fixture;
@@ -2479,8 +2480,19 @@ void a_verification_that_adds_chunk_hashes_recorded_incomplete_has_stopped()
     OperationWatch watch;
     watch.update(operation, start, now);
     const auto row = describe_operation(english, watch, start, now);
-    CHECK(row.state == "stopped; it can be resumed" && row.abandonable &&
+    CHECK(row.state == "stopped; it can be resumed" && row.abandonable && row.offers_resume &&
           row.process == "Process: 4242 (veriarchive-cli.exe)");
+
+    // Resume on its row, which Register Archive and Verify Archive name first
+    // when such a verification refuses them (decision 0033, point 7),
+    // finishes it as `verify --full <uuid> --resume <run_id>` does: it goes on
+    // adding chunk hashes, at the chunk size of the run it continues, and
+    // records revision 2 with them.
+    fixture.archive.node("b.txt").open_error.reset();
+    const auto resumed = fixture.verify(va::app::verification_resume(operation, va::Config{}));
+    CHECK(resumed && resumed->resumed_from == interrupted->run_id && resumed->adding_chunk_size == 64 * 1024 &&
+          resumed->added_revision == 2 && resumed->not_added.empty());
+    CHECK(read_operations(fixture).empty());
 }
 
 } // namespace

@@ -3,14 +3,17 @@
 // because another operation that creates the archive's next revision is
 // unfinished (decisions 0025, 0026, 0033): a registration, a relocation, or a
 // FULL verify that adds chunk hashes. The command line names its commands;
-// the windows name their own ways on in their place (decision 0033): Register
-// Archive's "Resume an interrupted registration of this folder or volume",
-// Verify Archive's "Resume interrupted run", and "Abandon..." in the Archive
-// List; a relocation, which has no window, keeps its command line for
-// continuing. While the operation that refuses still runs or is held up, as
-// the Archive List judges its row from one read, they say so, and to wait for
-// it: the window offers neither way on for it then. Where one read cannot
-// tell, as for a record that says nothing of its state, they name the ways on.
+// the windows name their own ways on in their place (decision 0033): first
+// "Resume" and "Abandon..." on the operation's row in the Archive List
+// (decision 0022, point 7), then Register Archive's "Resume an interrupted
+// registration of this folder or volume" or Verify Archive's "Resume
+// interrupted run"; a relocation, which has no window and no Resume in the
+// list, keeps its command line for continuing, and a registration made for an
+// older revision can only be abandoned. While the operation that refuses still
+// runs or is held up, as the Archive List judges its row from one read, they
+// say so, and to wait for it: the window offers no way on for it then. Where
+// one read cannot tell, as for a record that says nothing of its state, they
+// name the ways on.
 #include "app/unfinished_operations.h"
 #include "common/error.h"
 #include "core/engine/add_chunk_hashes.h"
