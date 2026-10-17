@@ -62,19 +62,26 @@ void refresh_settings(GuiState& state)
         info += text.format("RepositoryRoot: {}", path_to_utf8(context.repo.root)) + "\n" +
                text.format("Selected by: {}", text(context.repo_selected_by)) + "\n" +
                text.format("repository_uuid: {}", context.repository_uuid) + "\n" +
-               text.format("Config file: {}", path_to_utf8(context.config_file)) + "\n\n" +
-               text.format("Overdue after: FULL verify {}, any verify {}", days(policy.full_verify_max_age_days),
-                   days(policy.any_verify_max_age_days)) +
-               "\n" +
-               text(policy.strict_metadata ? "Strict metadata: on" : "Strict metadata: off") + "\n\n" +
-               text("Trusted signing keys: signed manifests are not part of this version.") + "\n\n" +
-               text("Back up RepositoryRoot. Losing it loses all verification history; manifests "
-                    "can be recovered only from media copies, if they were written.");
+               text.format("Config file: {}", path_to_utf8(context.config_file));
+        // Where each copy of the database kept before an upgrade is, for as
+        // long as it is in RepositoryRoot (decision 0032), not only in the
+        // window whose open made it: the files themselves say it, read again
+        // whenever Settings is shown.
+        for (const auto& line : app::copy_before_upgrade_lines(text, context.repo)) {
+            info += "\n" + line;
+        }
+        info += "\n\n" +
+                text.format("Overdue after: FULL verify {}, any verify {}", days(policy.full_verify_max_age_days),
+                    days(policy.any_verify_max_age_days)) +
+                "\n" + text(policy.strict_metadata ? "Strict metadata: on" : "Strict metadata: off") + "\n\n" +
+                text("Trusted signing keys: signed manifests are not part of this version.") + "\n\n" +
+                text("Back up RepositoryRoot. Losing it loses all verification history; manifests "
+                     "can be recovered only from media copies, if they were written.");
         for (const auto& warning : state.session->warnings) {
             info += "\n\n" + text.format("Warning: {}", text(warning));
         }
-        // Where the copy of the database from before its upgrade is (decision
-        // 0032), for as long as the window that upgraded it runs.
+        // What the open of this window's session did, said in this window:
+        // the upgrade of the database, and where its copy is (decision 0032).
         for (const auto& note : state.session->notes) {
             info += "\n\n" + text.format("Note: {}", text(note));
         }

@@ -135,6 +135,15 @@ std::string schema_upgrade_note(const SchemaUpgrade& upgrade)
            path_to_utf8(upgrade.copy);
 }
 
+std::vector<std::string> copy_before_upgrade_lines(const Text& text, const RepositoryLayout& layout)
+{
+    std::vector<std::string> lines;
+    for (const auto& copy : copies_before_upgrade(layout)) {
+        lines.push_back(text.format("Copy of the database from before an upgrade: {}", path_to_utf8(copy)));
+    }
+    return lines;
+}
+
 HostInfo host_info(std::string app_version)
 {
     return {platform::os_name(), platform::host_name(), std::move(app_version)};

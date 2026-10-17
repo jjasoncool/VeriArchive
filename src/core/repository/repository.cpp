@@ -11,13 +11,17 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <format>
 #include <fstream>
 #include <iterator>
 #include <optional>
 #include <sqlite3.h>
+#include <string_view>
 #include <system_error>
 #include <thread>
+#include <tuple>
+#include <utility>
 
 namespace va {
 namespace {
@@ -285,6 +289,78 @@ bool upgradable(int version)
     return version < schema_version;
 }
 
+// How a copy of the database kept before an upgrade is named (decision
+// 0032): the prefix, its schema version, the infix, the local date
+// (YYYY-MM-DD) and the extension, with -2, -3, ... before the extension
+// where that name is taken: veriarchive-schema-1-before-upgrade-2026-10-17.db.
+constexpr std::string_view copy_prefix = "veriarchive-schema-";
+constexpr std::string_view copy_infix = "-before-upgrade-";
+constexpr std::string_view copy_extension = ".db";
+
+// The parts of a copy's name that tell when it was made: its day, the schema
+// version it is at, and its number, 1 for a name without one.
+struct CopyName {
+    std::string day;  // YYYY-MM-DD
+    unsigned long long version = 0;
+    unsigned long long number = 1;
+};
+
+// The decimal number, without a leading zero, that `text` starts with, and
+// how many characters it takes; 0 where it starts with none.
+std::size_t number_at(std::string_view text, unsigned long long& value)
+{
+    std::size_t length = 0;
+    while (length < text.size() && text[length] >= '0' && text[length] <= '9') {
+        ++length;
+    }
+    if (length == 0 || text.front() == '0') {
+        return 0;
+    }
+    const auto parsed = std::from_chars(text.data(), text.data() + length, value);
+    return parsed.ec == std::errc{} ? length : 0;
+}
+
+// The parts of `name` where it is a copy's name as keep_copy_before_upgrade
+// gives it; nothing otherwise, as for what a copy cut short left
+// (".db.partial") or the -wal and -shm files of a copy that was opened.
+std::optional<CopyName> copy_name(std::string_view name)
+{
+    if (!name.starts_with(copy_prefix) || !name.ends_with(copy_extension)) {
+        return std::nullopt;
+    }
+    name.remove_prefix(copy_prefix.size());
+    name.remove_suffix(copy_extension.size());
+    CopyName parts;
+    const auto version_length = number_at(name, parts.version);
+    if (version_length == 0 || !name.substr(version_length).starts_with(copy_infix)) {
+        return std::nullopt;
+    }
+    name.remove_prefix(version_length + copy_infix.size());
+    constexpr std::size_t day_length = 10;  // YYYY-MM-DD
+    if (name.size() < day_length) {
+        return std::nullopt;
+    }
+    for (std::size_t index = 0; index < day_length; ++index) {
+        const bool digit = name[index] >= '0' && name[index] <= '9';
+        if (index == 4 || index == 7 ? name[index] != '-' : !digit) {
+            return std::nullopt;
+        }
+    }
+    parts.day = std::string(name.substr(0, day_length));
+    name.remove_prefix(day_length);
+    if (name.empty()) {
+        return parts;
+    }
+    if (!name.starts_with('-')) {
+        return std::nullopt;
+    }
+    name.remove_prefix(1);
+    if (name.empty() || number_at(name, parts.number) != name.size()) {
+        return std::nullopt;
+    }
+    return parts;
+}
+
 // Keeps a copy of the database of schema version `from`, beside it in
 // RepositoryRoot, before it is upgraded (decision 0032): the verification
 // history lives only in the database, and a program of an earlier version
@@ -304,10 +380,10 @@ bool upgradable(int version)
 std::expected<std::filesystem::path, IoError> keep_copy_before_upgrade(
     const RepositoryLayout& layout, int from, std::chrono::year_month_day today)
 {
-    const auto stem = std::format("veriarchive-schema-{}-before-upgrade-{:%F}", from, today);
-    auto copy = layout.root / (stem + ".db");
+    const auto stem = std::format("{}{}{}{:%F}", copy_prefix, from, copy_infix, today);
+    auto copy = layout.root / (stem + std::string(copy_extension));
     for (int number = 2; path_exists(copy); ++number) {
-        copy = layout.root / std::format("{}-{}.db", stem, number);
+        copy = layout.root / std::format("{}-{}{}", stem, number, copy_extension);
     }
     const auto failed = [&](const std::string& cause) {
         return std::unexpected(repository_error(
@@ -727,6 +803,32 @@ std::optional<int> schema_version_to_upgrade(const RepositoryLayout& layout)
     }
     const auto version = read_schema_version(*database);
     return version && upgradable(*version) ? version : std::nullopt;
+}
+
+std::vector<std::filesystem::path> copies_before_upgrade(const RepositoryLayout& layout)
+{
+    std::vector<std::pair<CopyName, std::filesystem::path>> found;
+    std::error_code error;
+    std::filesystem::directory_iterator entries(layout.root, error);
+    for (const std::filesystem::directory_iterator end; !error && entries != end; entries.increment(error)) {
+        std::error_code kind_error;
+        if (!entries->is_regular_file(kind_error) || kind_error) {
+            continue;
+        }
+        const auto name = entries->path().filename();
+        if (auto parts = copy_name(path_to_utf8(name))) {
+            found.emplace_back(std::move(*parts), layout.root / name);
+        }
+    }
+    std::ranges::sort(found, [](const auto& left, const auto& right) {
+        return std::tie(left.first.day, left.first.version, left.first.number) <
+               std::tie(right.first.day, right.first.version, right.first.number);
+    });
+    std::vector<std::filesystem::path> copies;
+    for (auto& [parts, copy] : found) {
+        copies.push_back(std::move(copy));
+    }
+    return copies;
 }
 
 namespace {

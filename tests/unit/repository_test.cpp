@@ -21,6 +21,7 @@
 #include <sqlite3.h>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -1463,6 +1464,98 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     }
 }
 
+// The names of the copies before upgrades that copies_before_upgrade finds in
+// `folder`, in its order.
+std::vector<std::string> copies_found(const va::RepositoryLayout& layout)
+{
+    std::vector<std::string> names;
+    for (const auto& copy : va::copies_before_upgrade(layout)) {
+        CHECK(copy.parent_path() == layout.root);
+        names.push_back(va::path_to_utf8(copy.filename()));
+    }
+    return names;
+}
+
+// Settings and `repo info` say where each copy of the database kept before an
+// upgrade is for as long as it is in RepositoryRoot (decision 0032): the
+// files themselves are the source, read again each time, as nothing records
+// them. The copies that upgrades made are found, also once the open that made
+// one is over; so are copies of the same names put there by hand (sample
+// files), in the order their names tell they were made: by day, then schema
+// version, then number, which is neither the order of their names nor that by
+// version first. What is not a copy is left out: what a copy cut short left,
+// the -wal and -shm files of a copy that was opened, a folder with a copy's
+// name, and names that no upgrade gives (another day's form, a number with a
+// leading zero, another prefix or extension). A copy removed is no longer
+// found, and one put back is found again.
+void the_copies_before_upgrades_are_read_from_the_folder()
+{
+    TemporaryDirectory temporary("schema-copies-found");
+    auto context = repository_of_version_1(temporary);
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    CHECK(va::copies_before_upgrade(layout).empty());
+    CHECK(va::open_repository(*context, test::today).has_value() && context->schema_upgrade);
+    const std::vector<std::string> first{"veriarchive-schema-1-before-upgrade-2026-10-17.db"};
+    CHECK(copies_found(layout) == first);
+    // Opened again: nothing is upgraded or said, and the copy is still found.
+    CHECK(va::open_repository(*context, test::today).has_value() && !context->schema_upgrade);
+    CHECK(copies_found(layout) == first);
+
+    // Two more upgrades on the same day: from version 2, and from version 1
+    // again, whose name is taken.
+    lower_schema(layout, 2);
+    CHECK(va::open_repository(*context, test::today).has_value());
+    lower_schema(layout, 1);
+    CHECK(va::open_repository(*context, test::today).has_value());
+    // Copies of the same names, by hand (sample files).
+    for (const char* name : {"veriarchive-schema-1-before-upgrade-2026-10-17-10.db",
+             "veriarchive-schema-1-before-upgrade-2026-09-30.db",
+             "veriarchive-schema-2-before-upgrade-2026-09-29.db"}) {
+        std::ofstream(layout.root / name, std::ios::binary) << "SAMPLE: a copy by its name (sample data)\n";
+    }
+    // What is no copy (sample files and a sample folder).
+    for (const char* name : {"veriarchive-schema-1-before-upgrade-2026-10-17-3.db.partial",
+             "veriarchive-schema-1-before-upgrade-2026-10-17.db-wal",
+             "veriarchive-schema-1-before-upgrade-2026-10-17.db-shm",
+             "veriarchive-schema-1-before-upgrade-SAMPLE-day.db",
+             "veriarchive-schema-01-before-upgrade-2026-10-17.db",
+             "veriarchive-schema-1-before-upgrade-2026-10-17-02.db",
+             "veriarchive-schema-1-before-upgrade-2026-10-17-.db",
+             "veriarchive-schema-1-before-upgrade-2026-10-17.db.SAMPLE",
+             "SAMPLE-veriarchive-schema-1-before-upgrade-2026-10-17.db",
+             "veriarchive-schema--before-upgrade-2026-10-17.db"}) {
+        std::ofstream(layout.root / name, std::ios::binary) << "SAMPLE: no copy (sample data)\n";
+    }
+    std::filesystem::create_directories(layout.root / "veriarchive-schema-1-before-upgrade-2026-10-16.db");
+    const std::vector<std::string> all{"veriarchive-schema-2-before-upgrade-2026-09-29.db",
+        "veriarchive-schema-1-before-upgrade-2026-09-30.db", "veriarchive-schema-1-before-upgrade-2026-10-17.db",
+        "veriarchive-schema-1-before-upgrade-2026-10-17-2.db", "veriarchive-schema-1-before-upgrade-2026-10-17-10.db",
+        "veriarchive-schema-2-before-upgrade-2026-10-17.db"};
+    CHECK(copies_found(layout) == all);
+    if (copies_found(layout) != all) {
+        for (const auto& name : copies_found(layout)) {
+            std::cerr << "  found: " << name << '\n';
+        }
+    }
+
+    // Removed by the operator, and put back.
+    const auto removed = layout.root / "veriarchive-schema-1-before-upgrade-2026-10-17.db";
+    const auto put_away = temporary.path() / "SAMPLE-put-away.db";
+    std::filesystem::rename(removed, put_away);
+    auto without = all;
+    std::erase(without, "veriarchive-schema-1-before-upgrade-2026-10-17.db");
+    CHECK(copies_found(layout) == without);
+    std::filesystem::rename(put_away, removed);
+    CHECK(copies_found(layout) == all);
+
+    // A RepositoryRoot that cannot be listed has none.
+    const va::RepositoryLayout missing{temporary.path() / "SAMPLE-no-repository"};
+    CHECK(va::copies_before_upgrade(missing).empty());
+}
+
 // Whether the next open will upgrade the repository's database, keeping a
 // copy of it first, is known ahead, at once and without the write lock
 // (schema_version_to_upgrade, decision 0032): the GUI shows its window with a
@@ -1570,6 +1663,7 @@ void repository_tests()
     an_older_repository_is_raised_to_schema_version_3();
     an_older_schema_is_upgraded_only_where_it_can_be_used();
     a_copy_before_an_upgrade_never_replaces_a_file();
+    the_copies_before_upgrades_are_read_from_the_folder();
     an_upgrade_without_its_copy_is_refused();
     an_upgrade_that_fails_keeps_no_copy();
     an_upgrade_waits_for_the_write_lock();

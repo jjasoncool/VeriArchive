@@ -2074,10 +2074,27 @@ if(SQLITE3)
     if(NOT older_copy_count EQUAL 1 OR NOT copy_version STREQUAL "1")
         message(FATAL_ERROR "the copy before the upgrade: ${older_copies} at version ${copy_version}")
     endif()
-    # Said once: the next open has nothing to upgrade.
+    # `repo info` says where the copy is for as long as it is there, also
+    # in the open that made it, beside the note.
+    set(copy_line "Copy of the database from before an upgrade: [^\n]*veriarchive-schema-1-before-upgrade-")
+    if(NOT last_output MATCHES "\n${copy_line}(${before_open}|${after_open})\\.db\nBack up RepositoryRoot")
+        message(FATAL_ERROR "repo info in the open that upgraded the repository:\n${last_output}")
+    endif()
+    # Said once: the next open has nothing to upgrade. `repo info` still
+    # says where the copy is, in text and in --json, as the copy is there.
     run_cli("0" --repository "${OLDER}" --lang en repo info)
     if(last_errors MATCHES "note:")
         message(FATAL_ERROR "an upgraded repository opened again:\n${last_errors}")
+    endif()
+    if(NOT last_output MATCHES "\n${copy_line}(${before_open}|${after_open})\\.db\n")
+        message(FATAL_ERROR "repo info once the open that upgraded is over:\n${last_output}")
+    endif()
+    run_cli("0" --repository "${OLDER}" repo info --json)
+    string(JSON listed_copies LENGTH "${last_output}" database_copies_before_upgrade)
+    string(JSON listed_copy GET "${last_output}" database_copies_before_upgrade 0)
+    file(TO_CMAKE_PATH "${listed_copy}" listed_copy)
+    if(NOT listed_copies EQUAL 1 OR NOT listed_copy STREQUAL older_copies)
+        message(FATAL_ERROR "repo info --json: ${listed_copy}, not ${older_copies}\n${last_output}")
     endif()
     # In Chinese, beside --json output, which stays one document.
     lower_schema(2)
@@ -2089,6 +2106,24 @@ if(SQLITE3)
     if(said EQUAL -1 OR NOT last_errors MATCHES "veriarchive-schema-2-before-upgrade-(${before_open}|${after_open})\\.db\n"
             OR NOT listed_archives EQUAL 0)
         message(FATAL_ERROR "the first open of a repository of schema version 2, with --json:\n${last_output}\n${last_errors}")
+    endif()
+    # `repo info` in Chinese names both copies, the older first; once they
+    # are removed, it names none.
+    run_cli("0" --repository "${OLDER}" repo info)
+    set(copy_line_chinese "升級前的資料庫副本：[^\n]*veriarchive-schema-")
+    if(NOT last_output MATCHES "\n${copy_line_chinese}1-before-upgrade-[0-9-]+\\.db\n${copy_line_chinese}2-before-upgrade-[0-9-]+\\.db\n")
+        message(FATAL_ERROR "repo info in Chinese with two copies:\n${last_output}")
+    endif()
+    file(GLOB all_older_copies "${OLDER}/veriarchive-schema-*-before-upgrade-*.db")
+    file(REMOVE ${all_older_copies})
+    run_cli("0" --repository "${OLDER}" --lang en repo info)
+    if(last_output MATCHES "Copy of the database")
+        message(FATAL_ERROR "repo info once the copies are removed:\n${last_output}")
+    endif()
+    run_cli("0" --repository "${OLDER}" repo info --json)
+    string(JSON listed_copies LENGTH "${last_output}" database_copies_before_upgrade)
+    if(NOT listed_copies EQUAL 0)
+        message(FATAL_ERROR "repo info --json once the copies are removed:\n${last_output}")
     endif()
     # A version 1 database without one of its tables (a table that V1 created
     # dropped from a sample repository) is damaged: the open names the rebuild,

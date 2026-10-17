@@ -1,13 +1,16 @@
 // `repo init | info | rebuild-index | verify-history`.
 // info shows the active RepositoryRoot, its uuid and how it was selected (R-85),
-// and this program's version (decision 0037).
+// this program's version (decision 0037), and where each copy of its database
+// kept before an upgrade is (decision 0032).
 #include "cli/commands.h"
 
 #include "app/history.h"
 #include "app/plain_words.h"
+#include "app/session.h"
 #include "common/utf8.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/repository/repository.h"
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
 
@@ -19,13 +22,21 @@ namespace {
 int info(const Arguments& arguments, const Session& session)
 {
     const auto& context = session.context;
+    // Where each copy of the database kept before an upgrade is, for as long
+    // as it is in RepositoryRoot (decision 0032), not only at the open that
+    // made it: the files themselves say it.
     if (arguments.json) {
+        auto copies = nlohmann::json::array();
+        for (const auto& copy : copies_before_upgrade(context.repo)) {
+            copies.push_back(path_to_utf8(copy));
+        }
         print_json({
             {"repository_root", path_to_utf8(context.repo.root)},
             {"repository_uuid", context.repository_uuid},
             {"repo_selected_by", context.repo_selected_by},
             {"config_file", path_to_utf8(context.config_file)},
             {"app_version", program_version()},
+            {"database_copies_before_upgrade", copies},
         });
     } else {
         const auto& text = arguments.text;
@@ -33,9 +44,11 @@ int info(const Arguments& arguments, const Session& session)
                   << text.format("repository_uuid: {}", context.repository_uuid) << '\n'
                   << text.format("repo_selected_by: {}", text(context.repo_selected_by)) << '\n'
                   << text.format("config_file: {}", path_to_utf8(context.config_file)) << '\n'
-                  << text.format("program version: {}", program_version()) << '\n'
-                  << text("Back up RepositoryRoot: losing it loses all verification history.")
-                  << '\n';
+                  << text.format("program version: {}", program_version()) << '\n';
+        for (const auto& line : app::copy_before_upgrade_lines(text, context.repo)) {
+            std::cout << line << '\n';
+        }
+        std::cout << text("Back up RepositoryRoot: losing it loses all verification history.") << '\n';
     }
     return exit_code::passed;
 }

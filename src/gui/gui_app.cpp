@@ -104,6 +104,24 @@ void build_window(GuiState& state)
                 });
         }),
         &state);
+    // Switching to Settings reads again which copies of the database kept
+    // before an upgrade are in RepositoryRoot (decision 0032): one removed
+    // since is no longer named.
+    g_signal_connect(stack, "notify::visible-child",
+        G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            guarded(
+                [&] {
+                    const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
+                    if (name && std::string_view(name) == "settings") {
+                        refresh_settings(state);
+                    }
+                },
+                [&](const Report& report) {
+                    gtk_label_set_text(GTK_LABEL(state.settings_view.info), report(state.text).c_str());
+                });
+        }),
+        &state);
 
     GtkWidget* sidebar = gtk_stack_sidebar_new();
     gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), GTK_STACK(stack));

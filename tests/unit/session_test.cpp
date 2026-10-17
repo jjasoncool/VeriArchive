@@ -167,6 +167,41 @@ void a_failed_open_still_says_where_the_copy_is()
     writable_again();
 }
 
+// Settings and `repo info` say where the copy from before an upgrade is for as
+// long as it is in RepositoryRoot (decision 0032), not only once, at the open
+// that made it, whose note says so too: in English and in Traditional
+// Chinese, after that open and after the next one, which says nothing of an
+// upgrade; and nothing once the copy is removed.
+void settings_and_repo_info_say_where_the_copy_is()
+{
+    SampleFolder folder("copy-lines");
+    const auto moment = moment_of_another_date();
+    const auto options = repository_of_version_1(folder, moment);
+    if (!options) {
+        return;
+    }
+    const auto opened = va::app::open_session(*options);
+    CHECK(opened && opened->notes.size() == 1);
+    if (!opened) {
+        return;
+    }
+    const auto& layout = opened->context.repo;
+    const auto copy = layout.root / std::format("veriarchive-schema-1-before-upgrade-{:%F}.db",
+                                        va::app::local_date(moment, va::platform::utc_offset(moment)));
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const std::vector<std::string> in_english{
+        "Copy of the database from before an upgrade: " + va::path_to_utf8(copy)};
+    CHECK(va::app::copy_before_upgrade_lines(english, layout) == in_english);
+    CHECK(va::app::copy_before_upgrade_lines(chinese, layout) ==
+          std::vector<std::string>{"升級前的資料庫副本：" + va::path_to_utf8(copy)});
+    const auto again = va::app::open_session(*options);
+    CHECK(again && again->notes.empty());
+    CHECK(again && va::app::copy_before_upgrade_lines(english, again->context.repo) == in_english);
+    std::filesystem::remove(copy);
+    CHECK(va::app::copy_before_upgrade_lines(english, layout).empty());
+}
+
 // Whether a session's open will upgrade the database of the repository it
 // opens is known ahead, for the repository that open resolves (decision
 // 0032): the GUI shows its window with a notice before such an open. The
@@ -195,5 +230,6 @@ void session_tests()
 {
     the_copy_before_an_upgrade_is_named_for_the_local_date();
     a_failed_open_still_says_where_the_copy_is();
+    settings_and_repo_info_say_where_the_copy_is();
     an_upgrade_is_known_ahead_of_the_open();
 }

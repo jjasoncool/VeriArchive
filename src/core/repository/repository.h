@@ -8,6 +8,7 @@
 #include <expected>
 #include <functional>
 #include <optional>
+#include <vector>
 
 namespace va {
 
@@ -87,6 +88,18 @@ std::expected<void, IoError> open_repository(
 // (database_state, decision 0036), and one that cannot be read, which the
 // open itself judges.
 std::optional<int> schema_version_to_upgrade(const RepositoryLayout& layout);
+// The copies of the repository's database kept before upgrades of its schema
+// (open_repository, decision 0032) that are in RepositoryRoot now: each
+// regular file named as an upgrade names its copy,
+// veriarchive-schema-1-before-upgrade-2026-10-17.db, or with -2, -3, ...
+// before .db, in the order their names tell they were made (by day, then
+// schema version, then number). The files themselves are the source, as
+// nothing records the copies: one that the operator removed or moved away is
+// no longer named, and one put back is named again. What a copy cut short
+// left (".partial"), and the -wal and -shm files of a copy that was opened,
+// are no copies. Nothing where there is none, or where RepositoryRoot cannot
+// be listed.
+std::vector<std::filesystem::path> copies_before_upgrade(const RepositoryLayout& layout);
 // R-83 step 5, for the pinned repository only (decision 0037): when
 // repository.json's uuid differs from the one recorded in the config, sets
 // context.previous_repository_uuid (the caller warns) and records the new uuid
