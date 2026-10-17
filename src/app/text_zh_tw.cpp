@@ -1026,29 +1026,36 @@ constexpr CatalogEntry entries[] = {
     // index's copy of a header is never taken for the manifest's (R-14). One
     // that is missing, cannot be read or has changed is put back with `import`
     // of its file (point 7); for the archive's latest revision the message
-    // ends with the last resort, a registration over its lost manifest (point 8).
+    // ends with the last resort, a registration over its lost manifest (point
+    // 8), and, where the device is gone as well, retiring the archive (point 9).
     {"the manifest of revision {} ({}) is missing; put it back with `import <folder>/{}` from a backup of the "
         "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
         "registration wrote one; if none of these holds it, register revision {} from what the archive's root holds "
-        "now with `register <root_path> --lost-manifest {}`",
+        "now with `register <root_path> --lost-manifest {}`; if the device that held the archive is gone as well, "
+        "retire the archive with `archive retire {} --confirm`",
         "版次 {0} 的清單檔（{1}）已遺失；請以 `import <folder>/{2}` 從儲存庫的備份、版次 {3} 的匯出檔，或封存 "
         ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
-        "--lost-manifest {5}` 用封存根目錄目前的內容註冊版次 {4}"},
+        "--lost-manifest {5}` 用封存根目錄目前的內容註冊版次 {4}；若存放此封存的裝置也已不在，請以 "
+        "`archive retire {6} --confirm` 停用此封存"},
     {"the manifest of revision {} ({}) cannot be read: {}; put it back with `import <folder>/{}` from a backup of "
         "the repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
         "registration wrote one; if none of these holds it, register revision {} from what the archive's root holds "
-        "now with `register <root_path> --lost-manifest {}`",
+        "now with `register <root_path> --lost-manifest {}`; if the device that held the archive is gone as well, "
+        "retire the archive with `archive retire {} --confirm`",
         "無法讀取版次 {0} 的清單檔（{1}）：{2}；請以 `import <folder>/{3}` 從儲存庫的備份、版次 {4} 的匯出檔，"
         "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
-        "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
+        "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}；若存放此封存的裝置也已不在，請以 "
+        "`archive retire {7} --confirm` 停用此封存",
         Match::Cause},
     {"the manifest of revision {} ({}) has changed: {}; put it back with `import <folder>/{}` from a backup of the "
         "repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, where "
         "registration wrote one; if none of these holds it, register revision {} from what the archive's root holds "
-        "now with `register <root_path> --lost-manifest {}`",
+        "now with `register <root_path> --lost-manifest {}`; if the device that held the archive is gone as well, "
+        "retire the archive with `archive retire {} --confirm`",
         "版次 {0} 的清單檔（{1}）已被變更：{2}；請以 `import <folder>/{3}` 從儲存庫的備份、版次 {4} 的匯出檔，"
         "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> "
-        "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
+        "--lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}；若存放此封存的裝置也已不在，請以 "
+        "`archive retire {7} --confirm` 停用此封存",
         Match::Cause},
     // The same of the latest revision of a retired archive, which takes no new
     // revision: the message ends with the import (point 9).
@@ -1118,17 +1125,21 @@ constexpr CatalogEntry entries[] = {
     {"the repository's index has no record of the manifest of revision {} ({}), which is missing; put it back with "
         "`import <folder>/{}` from a backup of the repository, an export of revision {}, or the media copy in the "
         "archive's .veriarchive folder, where registration wrote one; if none of these holds it, register revision "
-        "{} from what the archive's root holds now with `register <root_path> --lost-manifest {}`",
+        "{} from what the archive's root holds now with `register <root_path> --lost-manifest {}`; if the device that "
+        "held the archive is gone as well, retire the archive with `archive retire {} --confirm`",
         "儲存庫的索引沒有版次 {0} 的清單檔（{1}）的紀錄，而該清單檔已遺失；請以 `import <folder>/{2}` 從儲存庫的"
         "備份、版次 {3} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，"
-        "請以 `register <root_path> --lost-manifest {5}` 用封存根目錄目前的內容註冊版次 {4}"},
+        "請以 `register <root_path> --lost-manifest {5}` 用封存根目錄目前的內容註冊版次 {4}；若存放此封存的裝置"
+        "也已不在，請以 `archive retire {6} --confirm` 停用此封存"},
     {"the repository's index has no record of the manifest of revision {} ({}), which cannot be read: {}; put it "
         "back with `import <folder>/{}` from a backup of the repository, an export of revision {}, or the media copy "
         "in the archive's .veriarchive folder, where registration wrote one; if none of these holds it, register "
-        "revision {} from what the archive's root holds now with `register <root_path> --lost-manifest {}`",
+        "revision {} from what the archive's root holds now with `register <root_path> --lost-manifest {}`; if the "
+        "device that held the archive is gone as well, retire the archive with `archive retire {} --confirm`",
         "儲存庫的索引沒有版次 {0} 的清單檔（{1}）的紀錄，而且無法讀取該清單檔：{2}；請以 `import <folder>/{3}` "
         "從儲存庫的備份、版次 {4} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；"
-        "若這些都沒有，請以 `register <root_path> --lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}",
+        "若這些都沒有，請以 `register <root_path> --lost-manifest {6}` 用封存根目錄目前的內容註冊版次 {5}；"
+        "若存放此封存的裝置也已不在，請以 `archive retire {7} --confirm` 停用此封存",
         Match::Cause},
     {"the repository's index has no record of the manifest of revision {} ({}); rebuild the index with "
         "`repo rebuild-index`",
@@ -1147,16 +1158,19 @@ constexpr CatalogEntry entries[] = {
     // src/core/engine/verify_engine.cpp: by root, the archive whose manifest
     // cannot be used may be the one at the root (decision 0028): verify it by
     // its uuid, then the steps of the plain message, the manifest put back
-    // (which records it where the index has no record of it) and the last
-    // resort, or the index rebuilt where only it is wrong.
+    // (which records it where the index has no record of it), the last resort
+    // and the retirement where the device is gone as well, or the index
+    // rebuilt where only it is wrong.
     {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
         "(`verify --full {}`) to record the failure, then put its manifest back with `import <folder>/{}` from a "
         "backup of the repository, an export of revision {}, or the media copy in the archive's .veriarchive folder, "
         "where registration wrote one; if none of these holds it, register revision {} from what the archive's root "
-        "holds now with `register <root_path> --lost-manifest {}`",
+        "holds now with `register <root_path> --lost-manifest {}`; if the device that held the archive is gone as "
+        "well, retire the archive with `archive retire {} --confirm`",
         "此根目錄可能屬於封存 {0}（{1}），而它的清單檔無法使用：{2}；請先以 uuid 驗證該封存（`verify --full {3}`）以記錄這次"
         "失敗，再以 `import <folder>/{4}` 從儲存庫的備份、版次 {5} 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體"
-        "副本放回它的清單檔；若這些都沒有，請以 `register <root_path> --lost-manifest {7}` 用封存根目錄目前的內容註冊版次 {6}",
+        "副本放回它的清單檔；若這些都沒有，請以 `register <root_path> --lost-manifest {7}` 用封存根目錄目前的內容註冊版次 {6}"
+        "；若存放此封存的裝置也已不在，請以 `archive retire {8} --confirm` 停用此封存",
         Match::Cause},
     {"this root may belong to archive {} ({}), whose manifest cannot be used: {}; verify that archive by its uuid "
         "(`verify --full {}`) to record the failure, then rebuild the index with `repo rebuild-index`",

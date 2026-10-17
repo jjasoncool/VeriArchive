@@ -137,19 +137,22 @@ std::string what_is_wrong_with(const UnusableManifest& unusable);
 // 0028, point 7). For the latest revision (`latest`) the message ends with
 // the last resort where none of these holds it: the archive's next revision,
 // registered from what its root holds now with `register <root_path>
-// --lost-manifest <archive_uuid>` (decision 0028, point 8), but for a retired
+// --lost-manifest <archive_uuid>` (decision 0028, point 8), and, where the
+// device that held the archive is gone as well, the archive retired with
+// `archive retire <archive_uuid> --confirm` (point 9); but for a retired
 // archive (`retired`), which takes no new revision: its message ends with the
-// import (point 9). For an earlier revision it ends with `repo
-// rebuild-index`, which leaves that revision out of the index (point 6).
+// import. For an earlier revision it ends with `repo rebuild-index`, which
+// leaves that revision out of the index (point 6).
 std::string plain_message(const UnusableManifest& unusable);
 
 // How to fix it, as the plain message ends after what is wrong: "rebuild the
 // index with `repo rebuild-index`", or "put `it` back with `import
-// <folder>/r0002.vam` from a backup of the repository, ..." and the last
-// resort for the latest revision of an archive that is not retired, or the
-// rebuild that leaves an earlier revision out of the index. `it` names the manifest: "it" in the plain
-// message, "its manifest" where the sentence before names the archive, as a
-// verification by root that stops on it (decision 0028, point 4).
+// <folder>/r0002.vam` from a backup of the repository, ..." and, for the
+// latest revision of an archive that is not retired, the last resort and the
+// retirement where the device is gone as well, or the rebuild that leaves an
+// earlier revision out of the index. `it` names the manifest: "it" in the
+// plain message, "its manifest" where the sentence before names the archive,
+// as a verification by root that stops on it (decision 0028, point 4).
 std::string how_to_fix(const UnusableManifest& unusable, std::string_view it);
 
 // The place of the manifest of `revision` of the archive in the repository

@@ -41,7 +41,7 @@ struct Retirement {
     // archive leaves matching. Its plain message is the one of an archive as
     // it is when this is read: before the archive is retired, it names the
     // last resort, a registration over the lost manifest, which is the other
-    // way where the device is not gone.
+    // way where the device is not gone, and this retirement.
     std::optional<UnusableManifest> lost_manifest;
     bool already_retired = false;  // nothing changed: the archive was retired before
 };

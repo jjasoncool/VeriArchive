@@ -13,17 +13,20 @@ using va::app::Language;
 using va::app::Match;
 using va::app::Text;
 
-// Formats `pattern` with the values "<v0>" ... "<v7>"; empty when the pattern is
+// The most values a catalog entry takes, as format_with_markers fills them.
+constexpr std::size_t marker_count = 10;
+
+// Formats `pattern` with the values "<v0>" ... "<v9>"; empty when the pattern is
 // not a valid format string.
 std::string format_with_markers(std::string_view pattern)
 {
-    std::array<std::string, 8> values;
+    std::array<std::string, marker_count> values;
     for (std::size_t index = 0; index < values.size(); ++index) {
         values[index] = "<v" + std::to_string(index) + ">";
     }
     try {
         return std::vformat(pattern, std::make_format_args(values[0], values[1], values[2], values[3],
-            values[4], values[5], values[6], values[7]));
+            values[4], values[5], values[6], values[7], values[8], values[9]));
     } catch (const std::format_error&) {
         return {};
     }
@@ -109,7 +112,7 @@ void catalog_tests()
             std::cerr << "  entry: " << entry.english << '\n';
             continue;
         }
-        for (std::size_t index = 0; index <= values && index < 8; ++index) {
+        for (std::size_t index = 0; index <= values && index < marker_count; ++index) {
             const auto marker = "<v" + std::to_string(index) + ">";
             const auto expected = index < values ? 1u : 0u;
             const bool same_values = occurrences(english, marker) == expected &&
@@ -549,8 +552,9 @@ void translation_tests()
     // copy of a header is never taken for the manifest's (R-14); a manifest
     // missing, unreadable or changed is put back with `import` of its file,
     // and where nothing holds it, the archive's next revision is registered
-    // over its lost manifest. The cause is translated, also inside a
-    // comparison's failure and a verification's warning.
+    // over its lost manifest, or, where the device is gone as well, the
+    // archive is retired. The cause is translated, also inside a comparison's
+    // failure and a verification's warning.
     const auto manifest = "manifests/" + uuid + "/r0002.vam";
     const auto index_differs = "the repository's index differs from the manifest of revision 2 (" + manifest +
                                "); rebuild the index with `repo rebuild-index`";
@@ -559,15 +563,18 @@ void translation_tests()
     CHECK(chinese("error: " + index_differs) == "錯誤：" + index_differs_chinese);
     CHECK(chinese("cannot read the manifest of ARCH-0002 revision 2: " + index_differs) ==
           "無法讀取 ARCH-0002 版次 2 的清單檔：" + index_differs_chinese);
+    const auto retire = "; if the device that held the archive is gone as well, retire the archive with `archive "
+                        "retire " + uuid + " --confirm`";
+    const auto retire_chinese = "；若存放此封存的裝置也已不在，請以 `archive retire " + uuid + " --confirm` 停用此封存";
     const auto restore = "; put it back with `import <folder>/r0002.vam` from a backup of the repository, an export "
                          "of revision 2, or the media copy in the archive's .veriarchive folder, where registration "
                          "wrote one; if none of these holds it, register revision 3 from what the archive's root holds "
                          "now with `register <root_path> --lost-manifest " +
-                         uuid + "`";
+                         uuid + "`" + retire;
     const auto restore_chinese = "；請以 `import <folder>/r0002.vam` 從儲存庫的備份、版次 2 的匯出檔，或封存 "
                                  ".veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 "
                                  "`register <root_path> --lost-manifest " +
-                                 uuid + "` 用封存根目錄目前的內容註冊版次 3";
+                                 uuid + "` 用封存根目錄目前的內容註冊版次 3" + retire_chinese;
     CHECK(chinese("the manifest of revision 2 (" + manifest + ") is missing" + restore) ==
           "版次 2 的清單檔（" + manifest + "）已遺失" + restore_chinese);
     CHECK(chinese("error: the manifest of revision 2 (" + manifest + ") cannot be read: CreateFileW failed (Win32 "
@@ -586,7 +593,8 @@ void translation_tests()
     // A verification by root stops naming the archive that may be at the root
     // (decision 0028): what is wrong with its manifest, then to verify it by
     // its uuid to record the failure, then to fix the manifest as the plain
-    // message says: put it back with `import`, or the last resort.
+    // message says: put it back with `import`, or the last resort, or retire
+    // the archive where its device is gone as well.
     const auto may_be = "this root may belong to archive ARCH-0002 (" + uuid + "), whose manifest cannot be used: ";
     const auto may_be_chinese = "此根目錄可能屬於封存 ARCH-0002（" + uuid + "），而它的清單檔無法使用：";
     const auto record_it = "; verify that archive by its uuid (`verify --full " + uuid + "`) to record the failure, then ";
@@ -595,11 +603,11 @@ void translation_tests()
                                    "repository, an export of revision 2, or the media copy in the archive's "
                                    ".veriarchive folder, where registration wrote one; if none of these holds it, "
                                    "register revision 3 from what the archive's root holds now with `register "
-                                   "<root_path> --lost-manifest " + uuid + "`";
+                                   "<root_path> --lost-manifest " + uuid + "`" + retire;
     const std::string restore_it_chinese = "以 `import <folder>/r0002.vam` 從儲存庫的備份、版次 2 的匯出檔，或封存 "
                                            ".veriarchive 資料夾中註冊時寫入的媒體副本放回它的清單檔；若這些都沒有，請以 "
                                            "`register <root_path> --lost-manifest " + uuid +
-                                           "` 用封存根目錄目前的內容註冊版次 3";
+                                           "` 用封存根目錄目前的內容註冊版次 3" + retire_chinese;
     CHECK(chinese("error: " + may_be + "the manifest of revision 2 (" + manifest + ") is missing" + record_it +
                   restore_it) ==
           "錯誤：" + may_be_chinese + "版次 2 的清單檔（" + manifest + "）已遺失" + record_it_chinese + restore_it_chinese);

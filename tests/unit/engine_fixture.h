@@ -29,10 +29,11 @@ inline std::string already_recorded_message(const va::Uuid& archive_uuid, std::u
 // How a manifest that is missing, cannot be read or has changed is fixed
 // (decision 0028): put `it` back with `import` of its file (point 7), and
 // where nothing holds it, for the archive's latest revision (`latest`)
-// register the next revision over the lost manifest (point 8), for an
-// earlier one leave it out of the index with `repo rebuild-index` (point 6).
-// `it` names the manifest: "it" in the plain message, "its manifest" in a
-// verification by root that stops on it (point 4).
+// register the next revision over the lost manifest (point 8), or, where the
+// device is gone as well, retire the archive (point 9), for an earlier one
+// leave it out of the index with `repo rebuild-index` (point 6). `it` names
+// the manifest: "it" in the plain message, "its manifest" in a verification
+// by root that stops on it (point 4).
 inline std::string put_back_steps(const va::Uuid& archive_uuid, std::uint32_t revision, bool latest = true,
     const std::string& it = "it")
 {
@@ -42,7 +43,8 @@ inline std::string put_back_steps(const va::Uuid& archive_uuid, std::uint32_t re
     if (latest) {
         text += "; if none of these holds it, register revision " + std::to_string(revision + 1) +
                 " from what the archive's root holds now with `register <root_path> --lost-manifest " + archive_uuid +
-                "`";
+                "`; if the device that held the archive is gone as well, retire the archive with `archive retire " +
+                archive_uuid + " --confirm`";
     } else {
         text += "; if none of these holds it, leave revision " + std::to_string(revision) +
                 " out of the index with `repo rebuild-index`";
