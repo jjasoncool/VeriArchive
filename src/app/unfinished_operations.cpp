@@ -581,18 +581,32 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         row.process = text.format(
             "Process: {} ({})", operation.process->process.id, program.empty() ? std::string("?") : program);
     }
+    // A registration whose plan never says when it last worked (one of an
+    // older version, or taken up by an older version's resume), whose
+    // checkpoints this window has seen still for minutes: it may have stopped,
+    // and nothing tells more. `archive abandon-registration` refuses only an
+    // attempt whose process runs on this computer, or whose plan said it
+    // worked less than 3 minutes ago (decision 0025), which such a plan never
+    // does; the list waits as long for its counts.
+    const bool quiet_registration =
+        operation.kind == OperationKind::Registration && row.state_kind == OperationState::Quiet;
     // A stopped registration (decision 0025) or relocation (decision 0026)
-    // may be given up on purpose; one that runs, or may, may not.
-    row.abandonable = operation.kind != OperationKind::Verification && has_stopped(row.state_kind);
+    // may be given up on purpose, and so may a quiet registration as above;
+    // not one that runs, waits for its first progress, is held up or whose
+    // state is not known.
+    row.abandonable =
+        (operation.kind != OperationKind::Verification && has_stopped(row.state_kind)) || quiet_registration;
     // Decision 0022, point 7: a verification that has stopped and can be
-    // resumed (R-104), and a registration that has stopped, may be resumed
-    // from the list, as their command-line resumes continue them. Not one
-    // that runs, or may, nor one that can no longer finish (a later revision,
-    // decision 0030; an archive retired since, decision 0028, point 9). Nor a
-    // relocation: the GUI does not relocate, and its resume stays `archive
-    // relocate --resume`.
-    row.offers_resume = operation.kind != OperationKind::Relocation && row.state_kind == OperationState::Stopped &&
-                        operation.resumable;
+    // resumed (R-104), and a registration that has stopped or is quiet as
+    // above, may be resumed from the list, as their command-line resumes
+    // continue them. Not one that runs, waits for its first progress, is held
+    // up or whose state is not known, nor one that can no longer finish (a
+    // later revision, decision 0030; an archive retired since, decision 0028,
+    // point 9). Nor a relocation: the GUI does not relocate, and its resume
+    // stays `archive relocate --resume`.
+    row.offers_resume = (operation.kind != OperationKind::Relocation && row.state_kind == OperationState::Stopped &&
+                            operation.resumable) ||
+                        (quiet_registration && !operation.later_revision && !operation.archive_retired);
 
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;

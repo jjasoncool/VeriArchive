@@ -4,6 +4,7 @@
 #include "app/unfinished_operations.h"
 #include "common/time.h"
 #include "common/utf8.h"
+#include "core/engine/abandon_registration.h"
 #include "core/engine/relocate_engine.h"
 #include "core/engine/retire_archive.h"
 #include "core/manifest/manifest_reader.h"
@@ -383,8 +384,11 @@ void a_registration_resumed_by_an_older_version_runs()
     CHECK(describe_operation(english, watches.front(), start + 65s, now + 65s).state == "running");
     CHECK(!watches.front().operation().recorded_stopped && !watches.front().operation().updated);
     // Then quiet minutes say only that it may have stopped, as for any
-    // operation of an older version.
+    // operation of an older version, and its row offers Resume and Abandon...
+    // as an older version's registration's (decision 0022, point 7).
     CHECK(poll(65s + 3min) == OperationState::Quiet);
+    const auto quiet_row = describe_operation(english, watches.front(), start + 65s + 3min, now + 65s + 3min);
+    CHECK(quiet_row.offers_resume && quiet_row.abandonable);
 
     // This version stops it again: a new mark, with its own "updated".
     auto stopped = watches.front().operation();
@@ -1765,10 +1769,14 @@ va::app::OperationRow row_of(const UnfinishedOperation& operation)
 }
 
 // The list offers Resume for a verification that has stopped and can be
-// resumed (R-104), and for a registration that has stopped: not for one that
-// runs, or may (waiting, quiet, not known, held up), not for one that can no
-// longer finish (an archive with a newer or later revision), and never for a
-// relocation, which the GUI does not run.
+// resumed (R-104), and for a registration that has stopped, or whose plan
+// never says when it worked and that has been quiet for minutes: not for one
+// that runs, or may still say so (waiting, quiet with a plan that says when
+// it worked or of a verification, not known, held up), not for one that can
+// no longer finish (an archive with a newer or later revision, or retired),
+// and never for a relocation, which the GUI does not run. Abandon... goes
+// with a registration's and a relocation's Resume, also where it alone is
+// offered (decision 0025).
 void offers_resume_only_where_it_continues()
 {
     auto verification = registration(3, 300);
@@ -1798,7 +1806,8 @@ void offers_resume_only_where_it_continues()
     quiet.update(verification, Clock::time_point{}, wall_now);
     quiet.update(verification, Clock::time_point{} + 5min, wall_now);
     CHECK(quiet.state(Clock::time_point{} + 5min, wall_now) == OperationState::Quiet);
-    CHECK(!describe_operation(va::app::Text{}, quiet, Clock::time_point{} + 5min, wall_now).offers_resume);
+    row = describe_operation(va::app::Text{}, quiet, Clock::time_point{} + 5min, wall_now);
+    CHECK(!row.offers_resume && !row.abandonable);
     verification.done_counted = false;
     CHECK(row_of(verification).state_kind == OperationState::Unknown && !row_of(verification).offers_resume);
 
@@ -1822,6 +1831,48 @@ void offers_resume_only_where_it_continues()
     registering.later_revision = true;
     row = row_of(registering);
     CHECK(row.state_kind == OperationState::LaterRevision && !row.offers_resume && row.abandonable);
+
+    // A registration whose plan never says when it worked (an older
+    // version's): waiting at first, running while its checkpoints move, and
+    // once they have stood still for 3 minutes, quiet: it may have stopped,
+    // and nothing tells more, so it is offered as a stopped registration
+    // (decision 0022, point 7; decision 0025), but where it can no longer
+    // finish, where it is only abandoned.
+    const auto offered = [](const UnfinishedOperation& older, OperationState state, bool resume, bool abandon) {
+        const Clock::time_point start{};
+        OperationWatch watch;
+        watch.update(older, start, wall_now);
+        auto moved = older;
+        moved.files_done += 10;
+        moved.bytes_done += 10 * mib;
+        watch.update(moved, start + 1min, wall_now);
+        const auto running = describe_operation(va::app::Text{}, watch, start + 1min, wall_now);
+        watch.update(moved, start + 1min + 2min, wall_now);
+        const auto later = describe_operation(va::app::Text{}, watch, start + 1min + 2min, wall_now);
+        watch.update(moved, start + 1min + 3min, wall_now);
+        const auto quiet_row = describe_operation(va::app::Text{}, watch, start + 1min + 3min, wall_now);
+        return running.state_kind == OperationState::Running && !running.offers_resume && !running.abandonable &&
+               later.state_kind == OperationState::Running && !later.offers_resume && !later.abandonable &&
+               quiet_row.state_kind == state && quiet_row.offers_resume == resume && quiet_row.abandonable == abandon;
+    };
+    auto older = registration(10, 10 * mib);
+    row = row_of(older);
+    CHECK(row.state_kind == OperationState::Waiting && !row.offers_resume && !row.abandonable);
+    CHECK(offered(older, OperationState::Quiet, true, true));
+    auto older_made_for_older = older;
+    older_made_for_older.later_revision = true;
+    CHECK(offered(older_made_for_older, OperationState::Quiet, false, true));
+    auto older_retired = older;
+    older_retired.archive_retired = true;
+    CHECK(offered(older_retired, OperationState::Quiet, false, true));
+    // Its checkpoints not counted (the rollback-journal mode): not known.
+    older.done_counted = false;
+    row = row_of(older);
+    CHECK(row.state_kind == OperationState::Unknown && !row.offers_resume && !row.abandonable);
+    // A plan that says when it worked is judged by that: running, not quiet.
+    auto beating = registration(10, 10 * mib);
+    beating.updated = wall_now - 20s;
+    CHECK(offered(beating, OperationState::Running, false, false));
 
     // A relocation: abandoned in the list, resumed on the command line.
     auto relocating = registration(20, 10 * mib);
@@ -1955,6 +2006,76 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
     CHECK(read_operations(fixture).empty());
 }
 
+// A registration interrupted as the device of a file went away (sample data),
+// whose plan a version before decision 0022 wrote: no "updated", no stop mark,
+// no process, no totals (sample damage of the plan). The list shows it
+// waiting, and once its checkpoints have stood still for 3 minutes, as one
+// that may have stopped, with Resume and Abandon... (decision 0022, point 7;
+// decision 0025). The check that Abandon... runs first, the command line's,
+// would abandon it; the request that Resume makes continues it as `register
+// <root> --resume` does, reading only the rest, and then nothing is left.
+void an_older_versions_quiet_registration_is_resumed_or_abandoned()
+{
+    test::EngineFixture fixture(sample_root());
+    for (int index = 1; index <= 6; ++index) {
+        fixture.archive.add_file("f" + std::to_string(index), std::string(1000, static_cast<char>('a' + index)));
+    }
+    fixture.archive.node("f4").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.register_root(fixture.archive.root());
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("f4").open_error.reset();
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->size() == 1);
+    if (!archives || archives->size() != 1) {
+        return;
+    }
+    const auto archive_uuid = archives->front().archive_uuid;
+    const auto key = "registration:" + archive_uuid;
+    auto plan = nlohmann::json::parse(fixture.store.setting(key).value_or(""), nullptr, false);
+    CHECK(plan.is_object() && plan.contains("updated") && plan.contains("stopped") && plan.contains("process"));
+    for (const auto* member : {"updated", "stopped", "process", "files_total", "bytes_total", "media_copy"}) {
+        plan.erase(member);
+    }
+    CHECK(fixture.store.set_setting(key, plan.dump()));
+
+    // Two reads 3 minutes apart, the checkpoints still.
+    const Clock::time_point start{};
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    OperationWatch watch;
+    for (const auto after : {0min, 3min}) {
+        const auto operations = read_operations(fixture);
+        CHECK(operations.size() == 1);
+        if (operations.size() != 1) {
+            return;
+        }
+        watch.update(operations.front(), start + after, now + after);
+        const auto row = describe_operation(va::app::Text{}, watch, start + after, now + after);
+        if (after == 0min) {
+            CHECK(row.state == "waiting for progress..." && !row.offers_resume && !row.abandonable);
+        } else {
+            CHECK(row.state == "no progress seen for 3 minutes; it may have stopped" && row.offers_resume &&
+                  row.abandonable);
+        }
+    }
+
+    // Abandon... reads first what abandoning removes, with the command line's
+    // check, which takes it: nothing in its plan says that it works.
+    va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
+    const auto& operation = watch.operation();
+    const auto abandonable =
+        va::abandonable_registration(services, {archive_uuid, operation.revision, operation.started});
+    CHECK(abandonable && abandonable->files >= 3 && abandonable->first_registration);
+
+    // Resume continues it, as `register <root> --resume`.
+    const auto request = va::app::registration_resume(operation);
+    CHECK(request.resume && request.root == sample_root() && !request.write_media_copy);
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.register_root(request);
+    CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 && resumed->counts.files == 6);
+    CHECK(abandonable && fixture.archive.bytes_read == 6000 - 1000 * abandonable->files);
+    CHECK(read_operations(fixture).empty());
+}
+
 // ---- A retired archive (decision 0022, point 5) ----------------------------
 
 // A retired archive is no longer expected to be verified (decision 0003), so
@@ -2054,6 +2175,7 @@ void unfinished_operations_tests()
     offers_resume_only_where_it_continues();
     a_stopped_verification_resumes_from_the_list_as_on_the_command_line();
     a_stopped_registration_resumes_from_the_list_as_on_the_command_line();
+    an_older_versions_quiet_registration_is_resumed_or_abandoned();
     leaves_out_the_verifications_of_a_retired_archive();
     follows_operations_between_polls();
     words_one_row();

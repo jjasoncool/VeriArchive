@@ -7,7 +7,9 @@
 // registration there that has stopped can be resumed (decision 0022, point
 // 7), wherever it was started. A registration that has stopped can be
 // abandoned (decision 0025), as when its media failed, and so can a stopped
-// relocation (decision 0026).
+// relocation (decision 0026). An older version's registration, whose plan
+// never says when it worked, can be resumed and abandoned once it reads as
+// one that may have stopped.
 #include "gui/gui_app.h"
 
 #include "app/local_time.h"
@@ -248,7 +250,8 @@ void show_operations(GuiState& state)
         // A stopped verification or registration can be resumed here, as on
         // the command line (decision 0022, point 7); a stopped registration
         // (decision 0025) or relocation (decision 0026) can be given up on
-        // purpose.
+        // purpose; and so can an older version's registration that may have
+        // stopped (describe_operation).
         if (shown.offers_resume || shown.abandonable) {
             GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
             gtk_widget_set_valign(actions, GTK_ALIGN_START);
@@ -785,8 +788,9 @@ void ask_to_abandon(GuiState& state, const std::string& key)
 
 // ---- Resuming a verification or registration (decision 0022, point 7) -------
 
-// The operator chose to resume the stopped verification or registration
-// `key` of the latest read. It continues exactly as its command-line resume
+// The operator chose to resume the stopped verification or registration, or
+// the older version's registration that may have stopped, `key` of the
+// latest read. It continues exactly as its command-line resume
 // does, as the window's one operation, its progress and report where an
 // operation of its kind started in this window shows them; what is wrong with
 // it by now (its media not attached, its archive at another revision) the

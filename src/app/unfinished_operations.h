@@ -284,9 +284,12 @@ struct OperationRow {
                                      // for a tooltip
     std::string key;                 // the operation's key (UnfinishedOperation::key)
     bool abandonable = false;        // a registration (decision 0025) or relocation (decision 0026) shown
-                                     // stopped (has_stopped): the operator may abandon it
+                                     // stopped (has_stopped), or a registration whose plan never says when it
+                                     // worked (an older version's) shown quiet (OperationState::Quiet): the
+                                     // operator may abandon it
     bool offers_resume = false;      // a verification shown "stopped; it can be resumed", or a registration
-                                     // shown stopped (OperationState::Stopped): the list offers Resume, which
+                                     // shown stopped (OperationState::Stopped) or, never saying when it worked,
+                                     // quiet, unless it can no longer finish: the list offers Resume, which
                                      // continues it as its command-line resume does (decision 0022, point 7;
                                      // verification_resume, registration_resume)
 };
