@@ -35,6 +35,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace va::app {
@@ -294,6 +295,12 @@ struct OperationRow {
                                      // quiet, unless it can no longer finish: the list offers Resume, which
                                      // continues it as its command-line resume does (decision 0022, point 7;
                                      // verification_resume, registration_resume)
+    bool resume_asks_first = false;  // Resume is offered on a registration shown quiet, whose plan never says
+                                     // when it worked (an older version's, or one an older version took up):
+                                     // that version may still run it, so Resume asks first, saying
+                                     // older_version_resume_warning, and resumes only once the operator chose
+                                     // Resume there (decision 0022, point 7); not on one shown stopped, whose
+                                     // attempt has ended
 };
 
 OperationRow describe_operation(const Text& text, const OperationWatch& watch, OperationWatch::Clock::time_point now,
@@ -321,6 +328,26 @@ VerifyRequest verification_resume(const UnfinishedOperation& verification, const
 // root is read, it is checked as that command checks it (root_not_taken, with
 // the plan's root as typed).
 RegisterRequest registration_resume(const UnfinishedOperation& registration);
+
+// What Resume on a registration that an older version of VeriArchive left,
+// and that may have stopped, asks the operator to make sure of first
+// (OperationRow::resume_asks_first; decision 0022, point 7, operator,
+// 2026-10-20). That version never records when it last worked, so nothing
+// tells whether it still runs the registration: it may be reading a large
+// file, or scanning, for minutes without a checkpoint. And it names its
+// manifest before it records it (decision 0023, consequences): still running,
+// it puts its own manifest in place of the one that the resume records as it
+// finishes, after which that manifest has changed (decision 0028): every
+// verification of the archive fails on it, and the registration of a new
+// folder or volume and every relocation stop on it (point 4) until the
+// archive takes a new revision over it (point 8).
+inline constexpr std::string_view older_version_resume_warning =
+    "An older version of VeriArchive left this registration unfinished. That version does not record when it "
+    "last worked, so VeriArchive cannot tell whether it has stopped or is still reading a large file or scanning "
+    "the folder or volume. If it is still running, it will later record its own manifest over the one that this "
+    "resume records: from then on every verification of the archive fails, and other registrations and "
+    "relocations stop until the archive gets a new revision. Make sure that the older version's window or "
+    "command has been closed before you resume.";
 
 // One line about an archive's unfinished registration or relocation, for the
 // command line's `archive list` and `archive show` (decision 0026): the

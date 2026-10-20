@@ -445,6 +445,21 @@ constexpr CatalogEntry entries[] = {
     // Resuming a stopped verification or registration from the list (decision 0022, point 7).
     {"Resume", "繼續"},
     {"This verification is no longer listed as unfinished.", "此驗證已不在未完成的作業中。"},
+    // Resume asks first on a registration that an older version left and that
+    // may have stopped (decision 0022, point 7; operator, 2026-10-20); the
+    // warning is src/app/unfinished_operations.h's, and "Root: {}", "Cancel"
+    // and "Resume" are the views' own.
+    {"Resume the unfinished registration of {}?", "要繼續 {} 未完成的註冊嗎？"},
+    {"An older version of VeriArchive left this registration unfinished. That version does not record when it "
+        "last worked, so VeriArchive cannot tell whether it has stopped or is still reading a large file or "
+        "scanning the folder or volume. If it is still running, it will later record its own manifest over the one "
+        "that this resume records: from then on every verification of the archive fails, and other registrations "
+        "and relocations stop until the archive gets a new revision. Make sure that the older version's window or "
+        "command has been closed before you resume.",
+        "舊版 VeriArchive 留下了這個未完成的註冊。舊版不會記錄它最後一次運作的時間，所以程式無法判斷它已經停止，"
+        "還是仍在讀取一個大檔案、或掃描資料夾或磁碟區。如果它仍在執行，之後會用自己的清單檔蓋掉這次繼續所記錄的"
+        "清單檔：從此這個封存的每次驗證都會失敗，其他的註冊與搬移也都會停下來，直到這個封存有了新的版次為止。"
+        "繼續之前，請先確認舊版的視窗或命令都已關閉。"},
     {"Abandon...", "放棄…"},
     {"Abandon", "放棄"},
     {"Abandon the unfinished registration of {}?", "要放棄 {} 未完成的註冊嗎？"},

@@ -9,7 +9,8 @@
 // abandoned (decision 0025), as when its media failed, and so can a stopped
 // relocation (decision 0026). An older version's registration, whose plan
 // never says when it worked, can be resumed and abandoned once it reads as
-// one that may have stopped.
+// one that may have stopped; its Resume asks first, as that version may
+// still run it.
 #include "gui/gui_app.h"
 
 #include "app/local_time.h"
@@ -110,6 +111,7 @@ GtkWidget* operation_cell(const std::string& text, bool bold = false, bool warni
 
 void ask_to_abandon(GuiState& state, const std::string& key);
 void resume_from_list(GuiState& state, const std::string& key);
+void ask_to_resume(GuiState& state, const std::string& key);
 
 // What a button of a row of the operations grid does when clicked: `act` on
 // the row's operation, named by its key.
@@ -251,12 +253,13 @@ void show_operations(GuiState& state)
         // the command line (decision 0022, point 7); a stopped registration
         // (decision 0025) or relocation (decision 0026) can be given up on
         // purpose; and so can an older version's registration that may have
-        // stopped (describe_operation).
+        // stopped (describe_operation), whose Resume asks first.
         if (shown.offers_resume || shown.abandonable) {
             GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
             gtk_widget_set_valign(actions, GTK_ALIGN_START);
             if (shown.offers_resume) {
-                gtk_box_append(GTK_BOX(actions), operation_button(state, text("Resume"), shown.key, resume_from_list));
+                gtk_box_append(GTK_BOX(actions), operation_button(state, text("Resume"), shown.key,
+                                                     shown.resume_asks_first ? ask_to_resume : resume_from_list));
             }
             if (shown.abandonable) {
                 gtk_box_append(
@@ -788,20 +791,23 @@ void ask_to_abandon(GuiState& state, const std::string& key)
 
 // ---- Resuming a verification or registration (decision 0022, point 7) -------
 
-// The operator chose to resume the stopped verification or registration, or
-// the older version's registration that may have stopped, `key` of the
-// latest read. It continues exactly as its command-line resume
-// does, as the window's one operation, its progress and report where an
-// operation of its kind started in this window shows them; what is wrong with
-// it by now (its media not attached, its archive at another revision) the
-// resume itself says there, in the command line's words.
-void resume_from_list(GuiState& state, const std::string& key)
+// Whether the window can resume an operation now, as its one operation;
+// otherwise says why not.
+bool can_resume(GuiState& state)
 {
-    if (!state.session || state.job.running()) {
-        show_message(state, fixed_message(state.session ? "Another operation is running."
-                                                        : "Open a repository first (Settings)."));
-        return;
+    if (state.session && !state.job.running()) {
+        return true;
     }
+    show_message(state, fixed_message(state.session ? "Another operation is running."
+                                                    : "Open a repository first (Settings)."));
+    return false;
+}
+
+// The verification or registration `key` of the latest read, as a copy (the
+// view a resume brings into view may have the list read again), or nothing,
+// saying so, where it is no longer listed as one Resume continues.
+std::optional<app::UnfinishedOperation> listed_for_resume(GuiState& state, const std::string& key)
+{
     const auto& watches = state.operations.watches;
     const auto found = std::ranges::find(watches, key,
         [](const app::OperationWatch& watch) -> const std::string& { return watch.operation().key; });
@@ -809,15 +815,102 @@ void resume_from_list(GuiState& state, const std::string& key)
         show_message(state, fixed_message(key.starts_with("run:")
                                               ? "This verification is no longer listed as unfinished."
                                               : "This registration is no longer listed as unfinished."));
-        return;
+        return std::nullopt;
     }
-    // A copy: the view it brings into view may have the list read again.
-    const auto operation = found->operation();
+    return found->operation();
+}
+
+// Continues `operation` exactly as its command-line resume does, as the
+// window's one operation, its progress and report where an operation of its
+// kind started in this window shows them; what is wrong with it by now (its
+// media not attached, its archive at another revision) the resume itself says
+// there, in the command line's words.
+void resume_operation(GuiState& state, const app::UnfinishedOperation& operation)
+{
     if (operation.kind == app::OperationKind::Verification) {
         resume_verification(state, operation);
     } else {
         resume_registration(state, operation);
     }
+}
+
+// The operator chose to resume the stopped verification or registration `key`
+// of the latest read.
+void resume_from_list(GuiState& state, const std::string& key)
+{
+    if (!can_resume(state)) {
+        return;
+    }
+    if (const auto operation = listed_for_resume(state, key)) {
+        resume_operation(state, *operation);
+    }
+}
+
+// What the operator is asked about, carried into the question's answer.
+struct ResumeChoice {
+    GuiState* state;
+    std::function<void(GuiState&)> resume;
+};
+
+// Asks, with Cancel as the default, before a registration that an older
+// version of VeriArchive left is resumed (decision 0022, point 7; operator,
+// 2026-10-20): that version may still run it, and nothing tells whether it
+// has stopped, so the question says what happens where it still runs, and
+// asks the operator to make sure that its window or command has been closed.
+// `resume` runs only once the operator chose Resume; Cancel changes nothing.
+void ask_before_resuming(GuiState& state, const std::string& label, const std::string& root,
+    std::function<void(GuiState&)> resume)
+{
+    const auto& text = state.text;
+    const auto detail = text.format("Root: {}", root) + "\n\n" + text(app::older_version_resume_warning);
+    GtkAlertDialog* dialog =
+        gtk_alert_dialog_new("%s", text.format("Resume the unfinished registration of {}?", label).c_str());
+    gtk_alert_dialog_set_detail(dialog, detail.c_str());
+    const auto cancel = text("Cancel");
+    const auto go_on = text("Resume");
+    const char* buttons[] = {cancel.c_str(), go_on.c_str(), nullptr};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    auto* choice = new ResumeChoice{&state, std::move(resume)};
+    gtk_alert_dialog_choose(dialog, state.window, nullptr,
+        +[](GObject* source, GAsyncResult* result, gpointer data) {
+            std::unique_ptr<ResumeChoice> choice(static_cast<ResumeChoice*>(data));
+            GError* error = nullptr;
+            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
+            if (error) {
+                g_error_free(error); // dismissed, as when the window closed
+            }
+            g_object_unref(source);
+            auto& state = *choice->state;
+            if (button != 1 || !state.window) {
+                return;
+            }
+            guarded([&] { choice->resume(state); }, [&](const Report& report) { show_message(state, report); });
+        },
+        choice);
+}
+
+// The operator chose Resume on the registration `key` of the latest read,
+// whose row says that an older version left it and that it may have stopped
+// (OperationRow::resume_asks_first): it asks first, and only once the
+// operator chose Resume there does it resume as resume_from_list does.
+void ask_to_resume(GuiState& state, const std::string& key)
+{
+    if (!can_resume(state)) {
+        return;
+    }
+    const auto operation = listed_for_resume(state, key);
+    if (!operation) {
+        return;
+    }
+    const auto label = operation->label.empty() ? operation->archive_uuid.substr(0, 8) : operation->label;
+    ask_before_resuming(state, label, operation->root, [asked = *operation](GuiState& state) {
+        // Another operation may have started while the question was shown.
+        if (can_resume(state)) {
+            resume_operation(state, asked);
+        }
+    });
 }
 
 GtkWidget* build_operations_section(GuiState& state)

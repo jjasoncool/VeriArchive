@@ -640,6 +640,12 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     row.offers_resume = (operation.kind != OperationKind::Relocation && row.state_kind == OperationState::Stopped &&
                             operation.resumable) ||
                         (quiet_registration && !operation.later_revision && !operation.archive_retired);
+    // Resume on a quiet registration as above asks first (operator,
+    // 2026-10-20): the older version may still run it, and would then put its
+    // own manifest in place of the one that the resume records. On one shown
+    // stopped it resumes at once: its stop mark or its ended process says
+    // that its attempt has ended.
+    row.resume_asks_first = row.offers_resume && quiet_registration;
 
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;

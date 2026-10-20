@@ -1,6 +1,7 @@
 #include "test_support.h"
 #include "app/history.h"
 #include "app/text.h"
+#include "app/unfinished_operations.h"
 
 #include <array>
 #include <format>
@@ -373,6 +374,16 @@ void translation_tests()
           "`register --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration " + uuid +
               "` 放棄該註冊後，以 `archive relocate " + uuid + " <root_path> --resume` 繼續這次搬移）");
     CHECK(chinese.format("Abandon the unfinished relocation of {}?", "ARCH-0007") == "要放棄 ARCH-0007 未完成的搬移嗎？");
+    // Resume on a registration that an older version left and that may have
+    // stopped asks first (decision 0022, point 7; operator, 2026-10-20): the
+    // question, and what it says (src/app/unfinished_operations.h).
+    CHECK(chinese.format("Resume the unfinished registration of {}?", "ARCH-0007") ==
+          "要繼續 ARCH-0007 未完成的註冊嗎？");
+    CHECK(chinese(va::app::older_version_resume_warning) ==
+          "舊版 VeriArchive 留下了這個未完成的註冊。舊版不會記錄它最後一次運作的時間，所以程式無法判斷它已經停止，"
+          "還是仍在讀取一個大檔案、或掃描資料夾或磁碟區。如果它仍在執行，之後會用自己的清單檔蓋掉這次繼續所記錄的"
+          "清單檔：從此這個封存的每次驗證都會失敗，其他的註冊與搬移也都會停下來，直到這個封存有了新的版次為止。"
+          "繼續之前，請先確認舊版的視窗或命令都已關閉。");
     // A relocation whose new carrier differs is never resumed (decision 0026).
     CHECK(chinese("error: the unfinished relocation of archive " + uuid + " (to \"Z:\\範例\") found that the new "
                   "carrier does not hold the recorded content and cannot be resumed; abandon it with `archive "

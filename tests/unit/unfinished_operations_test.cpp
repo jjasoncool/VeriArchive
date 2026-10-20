@@ -381,6 +381,9 @@ void a_registration_resumed_by_an_older_version_runs()
     };
     CHECK(poll(0s) == OperationState::Stopped);
     CHECK(poll(5s) == OperationState::Stopped);
+    // Stopped by its mark: Resume resumes at once.
+    const auto stopped_row = describe_operation(english, watches.front(), start + 5s, now + 5s);
+    CHECK(stopped_row.offers_resume && !stopped_row.resume_asks_first);
 
     // The older version's checkpoint, the plan untouched.
     const auto plans = fixture.store.settings_with_prefix("registration:");
@@ -400,10 +403,11 @@ void a_registration_resumed_by_an_older_version_runs()
     CHECK(!watches.front().operation().recorded_stopped && !watches.front().operation().updated);
     // Then quiet minutes say only that it may have stopped, as for any
     // operation of an older version, and its row offers Resume and Abandon...
-    // as an older version's registration's (decision 0022, point 7).
+    // as an older version's registration's, its Resume asking first, as the
+    // older version may still run it (decision 0022, point 7).
     CHECK(poll(65s + 3min) == OperationState::Quiet);
     const auto quiet_row = describe_operation(english, watches.front(), start + 65s + 3min, now + 65s + 3min);
-    CHECK(quiet_row.offers_resume && quiet_row.abandonable);
+    CHECK(quiet_row.offers_resume && quiet_row.abandonable && quiet_row.resume_asks_first);
 
     // This version stops it again: a new mark, with its own "updated".
     auto stopped = watches.front().operation();
@@ -1791,7 +1795,8 @@ va::app::OperationRow row_of(const UnfinishedOperation& operation)
 // no longer finish (an archive with a newer or later revision, or retired),
 // and never for a relocation, which the GUI does not run. Abandon... goes
 // with a registration's and a relocation's Resume, also where it alone is
-// offered (decision 0025).
+// offered (decision 0025). Resume asks first only on the quiet registration,
+// which the older version may still run (operator, 2026-10-20).
 void offers_resume_only_where_it_continues()
 {
     auto verification = registration(3, 300);
@@ -1800,7 +1805,8 @@ void offers_resume_only_where_it_continues()
     verification.run_id = "c0ffee00-0000-4000-8000-0000000000aa";
     verification.recorded_stopped = true;  // recorded INCOMPLETE
     auto row = row_of(verification);
-    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && !row.abandonable);
+    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && !row.abandonable &&
+          !row.resume_asks_first);
     // Killed, its record silent for minutes: stopped as well.
     verification.recorded_stopped = false;
     verification.updated = wall_now - 10min;
@@ -1826,15 +1832,17 @@ void offers_resume_only_where_it_continues()
     verification.done_counted = false;
     CHECK(row_of(verification).state_kind == OperationState::Unknown && !row_of(verification).offers_resume);
 
-    // A registration that stopped: its stop mark, or its process ended.
+    // A registration that stopped: its stop mark, or its process ended. Its
+    // attempt has ended, so Resume resumes at once.
     auto registering = registration(10, 10 * mib);
     registering.recorded_stopped = true;
     row = row_of(registering);
-    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && row.abandonable);
+    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && row.abandonable &&
+          !row.resume_asks_first);
     registering.recorded_stopped = false;
     registering.attempt = va::AttemptState::Ended;
     registering.updated = wall_now - 20s;
-    CHECK(row_of(registering).offers_resume);
+    CHECK(row_of(registering).offers_resume && !row_of(registering).resume_asks_first);
     // Running, or held up while its process runs.
     registering.attempt = va::AttemptState::Running;
     CHECK(row_of(registering).state == "running" && !row_of(registering).offers_resume);
@@ -1851,9 +1859,11 @@ void offers_resume_only_where_it_continues()
     // version's): waiting at first, running while its checkpoints move, and
     // once they have stood still for 3 minutes, quiet: it may have stopped,
     // and nothing tells more, so it is offered as a stopped registration
-    // (decision 0022, point 7; decision 0025), but where it can no longer
-    // finish, where it is only abandoned.
-    const auto offered = [](const UnfinishedOperation& older, OperationState state, bool resume, bool abandon) {
+    // (decision 0022, point 7; decision 0025), its Resume asking first, as
+    // the older version may still run it, but where it can no longer finish,
+    // where it is only abandoned.
+    const auto offered = [](const UnfinishedOperation& older, OperationState state, bool resume, bool abandon,
+                             bool asks) {
         const Clock::time_point start{};
         OperationWatch watch;
         watch.update(older, start, wall_now);
@@ -1867,19 +1877,22 @@ void offers_resume_only_where_it_continues()
         watch.update(moved, start + 1min + 3min, wall_now);
         const auto quiet_row = describe_operation(va::app::Text{}, watch, start + 1min + 3min, wall_now);
         return running.state_kind == OperationState::Running && !running.offers_resume && !running.abandonable &&
-               later.state_kind == OperationState::Running && !later.offers_resume && !later.abandonable &&
-               quiet_row.state_kind == state && quiet_row.offers_resume == resume && quiet_row.abandonable == abandon;
+               !running.resume_asks_first && later.state_kind == OperationState::Running && !later.offers_resume &&
+               !later.abandonable && !later.resume_asks_first && quiet_row.state_kind == state &&
+               quiet_row.offers_resume == resume && quiet_row.abandonable == abandon &&
+               quiet_row.resume_asks_first == asks;
     };
     auto older = registration(10, 10 * mib);
     row = row_of(older);
-    CHECK(row.state_kind == OperationState::Waiting && !row.offers_resume && !row.abandonable);
-    CHECK(offered(older, OperationState::Quiet, true, true));
+    CHECK(row.state_kind == OperationState::Waiting && !row.offers_resume && !row.abandonable &&
+          !row.resume_asks_first);
+    CHECK(offered(older, OperationState::Quiet, true, true, true));
     auto older_made_for_older = older;
     older_made_for_older.later_revision = true;
-    CHECK(offered(older_made_for_older, OperationState::Quiet, false, true));
+    CHECK(offered(older_made_for_older, OperationState::Quiet, false, true, false));
     auto older_retired = older;
     older_retired.archive_retired = true;
-    CHECK(offered(older_retired, OperationState::Quiet, false, true));
+    CHECK(offered(older_retired, OperationState::Quiet, false, true, false));
     // Its checkpoints not counted (the rollback-journal mode): not known.
     older.done_counted = false;
     row = row_of(older);
@@ -1887,7 +1900,7 @@ void offers_resume_only_where_it_continues()
     // A plan that says when it worked is judged by that: running, not quiet.
     auto beating = registration(10, 10 * mib);
     beating.updated = wall_now - 20s;
-    CHECK(offered(beating, OperationState::Running, false, false));
+    CHECK(offered(beating, OperationState::Running, false, false, false));
 
     // A relocation: abandoned in the list, resumed on the command line.
     auto relocating = registration(20, 10 * mib);
@@ -2008,7 +2021,8 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
     }
     const auto& operation = operations.front();
     const auto row = row_of(operation);
-    CHECK(row.kind == "Registration" && row.state == "stopped; it can be resumed" && row.offers_resume);
+    CHECK(row.kind == "Registration" && row.state == "stopped; it can be resumed" && row.offers_resume &&
+          !row.resume_asks_first);
 
     const auto request = va::app::registration_resume(operation);
     CHECK(request.resume && request.root == sample_root() && request.root == va::app::typed_root(operation.root));
@@ -2025,10 +2039,11 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
 // whose plan a version before decision 0022 wrote: no "updated", no stop mark,
 // no process, no totals (sample damage of the plan). The list shows it
 // waiting, and once its checkpoints have stood still for 3 minutes, as one
-// that may have stopped, with Resume and Abandon... (decision 0022, point 7;
-// decision 0025). The check that Abandon... runs first, the command line's,
-// would abandon it; the request that Resume makes continues it as `register
-// <root> --resume` does, reading only the rest, and then nothing is left.
+// that may have stopped, with Resume, which asks first (operator,
+// 2026-10-20), and Abandon... (decision 0022, point 7; decision 0025). The
+// check that Abandon... runs first, the command line's, would abandon it; the
+// request that Resume makes continues it as `register <root> --resume` does,
+// reading only the rest, and then nothing is left.
 void an_older_versions_quiet_registration_is_resumed_or_abandoned()
 {
     test::EngineFixture fixture(sample_root());
@@ -2066,10 +2081,11 @@ void an_older_versions_quiet_registration_is_resumed_or_abandoned()
         watch.update(operations.front(), start + after, now + after);
         const auto row = describe_operation(va::app::Text{}, watch, start + after, now + after);
         if (after == 0min) {
-            CHECK(row.state == "waiting for progress..." && !row.offers_resume && !row.abandonable);
+            CHECK(row.state == "waiting for progress..." && !row.offers_resume && !row.abandonable &&
+                  !row.resume_asks_first);
         } else {
             CHECK(row.state == "no progress seen for 3 minutes; it may have stopped" && row.offers_resume &&
-                  row.abandonable);
+                  row.abandonable && row.resume_asks_first);
         }
     }
 
