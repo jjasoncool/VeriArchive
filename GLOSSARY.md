@@ -1,6 +1,6 @@
 # VeriArchive
 
-VeriArchive records integrity evidence for archived file trees and later proves whether they were modified, corrupted, deleted, or added to. Contracts live in `docs/HANDOFF.md`; this file only fixes the words.
+VeriArchive records integrity evidence for archived file trees and later proves whether they were modified, corrupted, deleted, or added to. Contracts live in `design/HANDOFF.md`; this file only fixes the words.
 
 ## Language
 

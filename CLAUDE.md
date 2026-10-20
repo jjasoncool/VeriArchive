@@ -1,6 +1,6 @@
 # VeriArchive agent rules
 
-1. Read `docs/HANDOFF.md` §A3, §A6, §B4, §B7.4, §B9 before writing code. Part B is frozen; contract changes require a decision record in `docs/decisions/`. Accepted records override the HANDOFF text they amend; each amended section names its records.
+1. Read `design/HANDOFF.md` §A3, §A6, §B4, §B7.4, §B9 before writing code. Part B is frozen; contract changes require a decision record in `design/decisions/`. Accepted records override the HANDOFF text they amend; each amended section names its records.
 2. `core` / `common` never include OS headers and never link `veriarchive_platform`. OS selection lives in CMake only.
 3. Validated manifest bytes are the truth; SQLite is an index.
 4. Use `std::filesystem::path`, `operator/`, and `u8string()` persistence. `path::string()` and `current_path()` are banned in `src/`.

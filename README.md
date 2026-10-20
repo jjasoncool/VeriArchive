@@ -22,10 +22,10 @@ in V1.1.
   how to use VeriArchive (English / 繁體中文).
 - [圖解使用說明](docs/gui-guide.zh-TW.md) (Traditional Chinese): the graphical interface step by
   step, with screenshots.
-- [`docs/HANDOFF.md`](docs/HANDOFF.md): the specification (principles, contracts, milestones).
-- [`docs/decisions/`](docs/decisions/): decisions that amend the specification.
+- [`design/HANDOFF.md`](design/HANDOFF.md): the specification (principles, contracts, milestones).
+- [`design/decisions/`](design/decisions/): decisions that amend the specification.
 - [`GLOSSARY.md`](GLOSSARY.md): the words used in code, documents and output.
-- [`docs/REVIEW_STATUS.md`](docs/REVIEW_STATUS.md): what is implemented and what still needs
+- [`design/REVIEW_STATUS.md`](design/REVIEW_STATUS.md): what is implemented and what still needs
   verification on real hardware and CI.
 
 ## Build
