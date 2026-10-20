@@ -1669,8 +1669,11 @@ constexpr CatalogEntry entries[] = {
         "儲存庫資料庫已從結構描述版本 {} 升級到 {}，較早版本的 VeriArchive 無法再開啟它；"
         "升級前的資料庫副本保存在 {}"},
     // Where each copy of the database kept before an upgrade is, as Settings
-    // and `repo info` show it for as long as the copy is in RepositoryRoot.
-    {"Copy of the database from before an upgrade: {}", "升級前的資料庫副本：{}"},
+    // and `repo info` show it for as long as the copy is in RepositoryRoot,
+    // and what it is for.
+    {"Copy of the database from before an upgrade: {} (an earlier version of VeriArchive can open only this copy; "
+        "you can delete it once you no longer need that version)",
+        "升級前的資料庫副本：{}（較早版本的 VeriArchive 只能開啟這份副本；不再需要那個版本時，就可以刪除它）"},
     // src/core/repository/sqlite_raii.cpp
     {"unknown SQLite error", "未知的 SQLite 錯誤"},
     {"cannot open repository database: {}", "無法開啟儲存庫資料庫：{}", Match::Cause},

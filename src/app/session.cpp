@@ -144,7 +144,10 @@ std::vector<std::string> copy_before_upgrade_lines(const Text& text, const Repos
 {
     std::vector<std::string> lines;
     for (const auto& copy : copies_before_upgrade(layout)) {
-        lines.push_back(text.format("Copy of the database from before an upgrade: {}", path_to_utf8(copy)));
+        lines.push_back(text.format("Copy of the database from before an upgrade: {} (an earlier version of "
+                                    "VeriArchive can open only this copy; you can delete it once you no longer "
+                                    "need that version)",
+            path_to_utf8(copy)));
     }
     return lines;
 }

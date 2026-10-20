@@ -163,18 +163,29 @@ void a_failed_open_still_says_where_the_copy_is()
     CHECK(std::filesystem::exists(copy));
     CHECK(va::app::session_failure_in_window(va::app::Text{}, failed.error()) ==
           failed.error().message + "\n\nNote: " + va::app::schema_upgrade_note({1, 3, copy}) +
-              "\n\nCopy of the database from before an upgrade: " + va::path_to_utf8(copy));
+              "\n\nCopy of the database from before an upgrade: " + va::path_to_utf8(copy) +
+              " (an earlier version of VeriArchive can open only this copy; you can delete it once you no longer "
+              "need that version)");
     const auto again = va::app::open_session(*options);
     CHECK(!again && again.error().message.starts_with("cannot record repository_uuid in config: ") &&
           again.error().notes.empty());
     writable_again();
 }
 
+// What the line of a copy of the database kept before an upgrade says the copy
+// is for, after its path (decision 0032), in English and in Traditional
+// Chinese.
+const std::string copy_purpose = " (an earlier version of VeriArchive can open only this copy; you can delete it "
+                                 "once you no longer need that version)";
+const std::string copy_purpose_chinese = "（較早版本的 VeriArchive 只能開啟這份副本；不再需要那個版本時，就可以刪除它）";
+
 // Settings and `repo info` say where the copy from before an upgrade is for as
 // long as it is in RepositoryRoot (decision 0032), not only once, at the open
-// that made it, whose note says so too: in English and in Traditional
-// Chinese, after that open and after the next one, which says nothing of an
-// upgrade; and nothing once the copy is removed.
+// that made it, whose note says so too, and what the copy is for: an earlier
+// version can open only it, and it can go once that version is no longer
+// needed. In English and in Traditional Chinese, after that open and after
+// the next one, which says nothing of an upgrade; and nothing once the copy
+// is removed.
 void settings_and_repo_info_say_where_the_copy_is()
 {
     SampleFolder folder("copy-lines");
@@ -194,10 +205,10 @@ void settings_and_repo_info_say_where_the_copy_is()
     const va::app::Text english;
     const va::app::Text chinese(va::app::Language::TraditionalChinese);
     const std::vector<std::string> in_english{
-        "Copy of the database from before an upgrade: " + va::path_to_utf8(copy)};
+        "Copy of the database from before an upgrade: " + va::path_to_utf8(copy) + copy_purpose};
     CHECK(va::app::copy_before_upgrade_lines(english, layout) == in_english);
     CHECK(va::app::copy_before_upgrade_lines(chinese, layout) ==
-          std::vector<std::string>{"升級前的資料庫副本：" + va::path_to_utf8(copy)});
+          std::vector<std::string>{"升級前的資料庫副本：" + va::path_to_utf8(copy) + copy_purpose_chinese});
     const auto again = va::app::open_session(*options);
     CHECK(again && again->notes.empty());
     CHECK(again && va::app::copy_before_upgrade_lines(english, again->context.repo) == in_english);
@@ -228,7 +239,7 @@ void a_failed_open_names_the_copies_where_the_repository_is()
     const auto root = options->repository->lexically_normal();
     const auto copy = root / std::format("veriarchive-schema-1-before-upgrade-{:%F}.db",
                                  va::app::local_date(moment, va::platform::utc_offset(moment)));
-    const auto copy_line = "Copy of the database from before an upgrade: " + va::path_to_utf8(copy);
+    const auto copy_line = "Copy of the database from before an upgrade: " + va::path_to_utf8(copy) + copy_purpose;
     const va::app::Text english;
     const va::app::Text chinese(va::app::Language::TraditionalChinese);
 
@@ -250,7 +261,8 @@ void a_failed_open_names_the_copies_where_the_repository_is()
     }
     CHECK(va::app::session_failure_in_window(chinese, again.error()) ==
           "儲存庫的資料庫 " + va::path_to_utf8(root / "veriarchive.db") +
-              " 已損毀；請以 `repo rebuild-index` 從清單檔重新建立\n\n升級前的資料庫副本：" + va::path_to_utf8(copy));
+              " 已損毀；請以 `repo rebuild-index` 從清單檔重新建立\n\n升級前的資料庫副本：" + va::path_to_utf8(copy) +
+              copy_purpose_chinese);
     std::filesystem::remove(copy);
     CHECK(va::app::session_failure_in_window(english, again.error()) == damaged);
 
@@ -267,7 +279,7 @@ void a_failed_open_names_the_copies_where_the_repository_is()
           refused.error().repository && refused.error().repository->root == later.lexically_normal());
     CHECK(!refused && va::app::session_failure_in_window(english, refused.error()) ==
                           "unsupported repository schema\n\nCopy of the database from before an upgrade: " +
-                              va::path_to_utf8(later_copy));
+                              va::path_to_utf8(later_copy) + copy_purpose);
 
     auto elsewhere = *options;
     elsewhere.repository = folder.path() / "SAMPLE-no-repository";

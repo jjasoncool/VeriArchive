@@ -94,8 +94,10 @@ std::string schema_upgrade_note(const SchemaUpgrade& upgrade);
 // Where each copy of the repository database kept before an upgrade is
 // (decision 0032), as Settings and `repo info` show it for as long as the
 // copy is in RepositoryRoot (copies_before_upgrade), and not only once, at
-// the open that made it: "Copy of the database from before an upgrade: P",
-// one line per copy, in `text`'s language. Nothing where there is none.
+// the open that made it, with what the copy is for: "Copy of the database
+// from before an upgrade: P (an earlier version of VeriArchive can open only
+// this copy; you can delete it once you no longer need that version)", one
+// line per copy, in `text`'s language. Nothing where there is none.
 std::vector<std::string> copy_before_upgrade_lines(const Text& text, const RepositoryLayout& layout);
 
 // Why no repository is open, as a window says it (decision 0032): Settings
