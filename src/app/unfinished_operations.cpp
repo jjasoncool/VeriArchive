@@ -3,6 +3,7 @@
 #include "app/typed_path.h"
 #include "common/time.h"
 #include "common/utf8.h"
+#include "core/engine/archive_status.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/repository/archive_store.h"
 #include "platform/file_system.h"
@@ -149,9 +150,38 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         operations.push_back(std::move(operation));
     }
     // The manifests of older runs are read here, after the read transaction,
-    // so that it stays short.
+    // so that it stays short; so are the latest manifests of the retired
+    // archives whose verifications the read found. A retired archive can
+    // still be verified, and its interrupted runs resumed, as any archive's
+    // (decision 0003); but where its latest manifest is lost (decision 0028,
+    // point 9), they can never be resumed, and are left out (decision 0022,
+    // point 5), judged as the archive lists judge that manifest, so that the
+    // archive shown with its manifest lost has none listed. Their records and
+    // checkpoints stay as they are.
     const auto repository_files = platform::make_file_system_access();
+    std::map<Uuid, bool> manifest_lost;
     for (const auto& verification : verifications) {
+        if (!verification.archive_retired || manifest_lost.contains(verification.archive_uuid)) {
+            continue;
+        }
+        const auto archive = store->find_archive(verification.archive_uuid);
+        if (!archive) {
+            return std::unexpected(archive.error());
+        }
+        bool lost = false;
+        if (*archive) {
+            const auto judged = retired_with_manifest_lost(*store, *repository_files, layout, **archive);
+            if (!judged) {
+                return std::unexpected(judged.error());
+            }
+            lost = *judged;
+        }
+        manifest_lost[verification.archive_uuid] = lost;
+    }
+    for (const auto& verification : verifications) {
+        if (verification.archive_retired && manifest_lost[verification.archive_uuid]) {
+            continue;
+        }
         UnfinishedOperation operation;
         operation.kind = OperationKind::Verification;
         operation.key = "run:" + verification.run_id;
@@ -176,9 +206,12 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
                     header = std::move(*loaded);
                 } else {
                     // The run's revision is the archive's latest exactly where
-                    // the run can be resumed (R-104). Its archive is not
-                    // retired: a retired archive's runs are not listed
-                    // (ArchiveStore::unfinished_verifications).
+                    // the run can be resumed (R-104). Its archive may be
+                    // retired, which takes no new revision over a lost
+                    // manifest: but a retired archive's runs are listed only
+                    // where its latest manifest is not lost (above), and where
+                    // line 1 of that manifest cannot be used, it is lost, so
+                    // this message never names the last resort.
                     auto unusable = loaded.error();
                     unusable.latest = verification.resumable;
                     header = std::unexpected(plain_message(unusable));

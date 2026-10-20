@@ -5,6 +5,7 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "core/engine/abandon_registration.h"
+#include "core/engine/rebuild_index.h"
 #include "core/engine/relocate_engine.h"
 #include "core/engine/retire_archive.h"
 #include "core/manifest/manifest_reader.h"
@@ -17,7 +18,9 @@
 #include <chrono>
 #include <cmath>
 #include <format>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <tuple>
 #include <utility>
@@ -106,8 +109,10 @@ void reads_operations_with_approximate_totals()
 // counts and root_hint), never the index's copy of that header (R-14). When
 // the manifest cannot be used (the index's copy differs, or the manifest is
 // gone; sample data), the totals stay unknown and the row says why, last in
-// its details, in either language. Once its archive is retired, the run is
-// not listed at all (decision 0022, point 5).
+// its details, in either language. Once its archive is retired, its manifest
+// being gone, its latest manifest is lost, and the run is not listed at all
+// (decision 0022, point 5); put back, the run is listed again, and where only
+// the index's copy differs, the row says to rebuild the index, as before.
 void an_older_verification_takes_its_totals_from_the_manifest()
 {
     test::EngineFixture fixture;
@@ -164,6 +169,8 @@ void an_older_verification_takes_its_totals_from_the_manifest()
     fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
                                "'\"volume_label\":\"OTHER\"', '\"volume_label\":\"ARCHIVE\"')");
 
+    const auto saved = fixture.repository.context.repo.root.parent_path() / "SAMPLE-r0001.vam";
+    std::filesystem::copy_file(registered->manifest, saved);
     std::filesystem::remove(registered->manifest);
     const auto gone = read_older();
     CHECK(gone && gone->files_total == 0 && gone->root.empty() &&
@@ -173,6 +180,14 @@ void an_older_verification_takes_its_totals_from_the_manifest()
     const auto retired = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
         [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; });
     CHECK(retired && retired->operations.empty());
+
+    std::filesystem::copy_file(saved, registered->manifest);
+    const auto put_back = read_older();
+    CHECK(put_back && put_back->files_total == 2 && put_back->totals_failure.empty());
+    fixture.repository.execute("UPDATE archive_revisions SET header_json = replace(header_json, "
+                               "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"')");
+    const auto retired_index_differs = read_older();
+    CHECK(retired_index_differs && retired_index_differs->totals_failure == differs);
 }
 
 // Watching reads a database, never creates one: a repository folder whose
@@ -2078,14 +2093,24 @@ void an_older_versions_quiet_registration_is_resumed_or_abandoned()
 
 // ---- A retired archive (decision 0022, point 5) ----------------------------
 
-// A retired archive is no longer expected to be verified (decision 0003), so
-// it has no unfinished verification to show. Archives A and B at /vol/a and
-// /vol/b (sample data), each verification interrupted as the device of its
-// last file went away: both listed, stopped and resumable. A retired as any
-// archive: only B's run is listed. B's manifest gone and its device taken for
-// gone as well, B retired with the confirmation (decision 0028, point 9):
-// neither is listed. Each run's record and checkpoints stay as they were.
-void leaves_out_the_verifications_of_a_retired_archive()
+// A retired archive can still be verified, and its interrupted verifications
+// resumed (decision 0003), so they are listed as any archive's; only where its
+// latest manifest is lost (decision 0028, point 9) can they never be resumed,
+// and they are left out, judged as the archive lists judge that manifest.
+// Archives A and B at /vol/a and /vol/b (sample data), each verification
+// interrupted as the device of its last file went away: both listed, stopped
+// and resumable. A retired as any archive: both listed. B's manifest gone:
+// both listed, as for any archive whose manifest cannot be used (decision
+// 0028, point 3), also once retiring B asks for the confirmation; B retired
+// with it, its device taken for gone as well: only A's run is listed. B's
+// manifest put back: both again. One byte of the body of B's manifest changed
+// (sample damage): both, as line 1, all that the lists read of it, is intact;
+// once a rebuild has skipped that manifest, which the lists then read whole,
+// only A's. Put back, with the index's copy of its header changed (sample
+// damage): both, as a rebuild of the index gives that manifest back. Each
+// run's record and checkpoints stay as they were. A's run, resumed from the
+// list, reads only the rest of A and passes, warning that A is retired.
+void leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost()
 {
     test::EngineFixture fixture;
     for (int index = 1; index <= 5; ++index) {
@@ -2139,17 +2164,64 @@ void leaves_out_the_verifications_of_a_retired_archive()
     };
     const auto a_retired = retire(a->archive_uuid, false);
     CHECK(a_retired && !a_retired->lost_manifest);
-    CHECK(listed() == std::vector<va::Uuid>{b->archive_uuid});
+    CHECK(listed() == both);
     CHECK(kept(a_run->run_id) == a_kept);
 
+    const auto& layout = fixture.repository.context.repo;
+    const auto saved = layout.root.parent_path() / "SAMPLE-b-r0001.vam";
+    std::filesystem::copy_file(b->manifest, saved);
     std::filesystem::remove(b->manifest);
+    CHECK(listed() == both);
     const auto asked = retire(b->archive_uuid, false);
     CHECK(!asked && asked.error().kind == va::RetireFailure::Kind::Unconfirmed);
-    CHECK(listed() == std::vector<va::Uuid>{b->archive_uuid});
+    CHECK(listed() == both);
     const auto b_retired = retire(b->archive_uuid, true);
     CHECK(b_retired && b_retired->lost_manifest);
-    CHECK(listed().empty());
+    CHECK(listed() == std::vector<va::Uuid>{a->archive_uuid});
     CHECK(kept(a_run->run_id) == a_kept && kept(b_run->run_id) == b_kept);
+
+    std::filesystem::copy_file(saved, b->manifest);
+    CHECK(listed() == both);
+
+    std::string bytes;
+    {
+        std::ifstream input(saved, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+    CHECK(bytes.size() > 5);
+    if (bytes.size() > 5) {
+        bytes[bytes.size() - 5] ^= 0x01;
+    }
+    std::ofstream(b->manifest, std::ios::binary | std::ios::trunc) << bytes;
+    CHECK(listed() == both);
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    CHECK(rebuilt && rebuilt->revisions_kept.size() == 1);
+    CHECK(listed() == std::vector<va::Uuid>{a->archive_uuid});
+
+    std::filesystem::copy_file(saved, b->manifest, std::filesystem::copy_options::overwrite_existing);
+    fixture.repository.execute(("UPDATE archive_revisions SET header_json = replace(header_json, "
+                                "'\"volume_label\":\"ARCHIVE\"', '\"volume_label\":\"OTHER\"') WHERE archive_uuid = " +
+                                test::sql_text(b->archive_uuid))
+                                   .c_str());
+    CHECK(listed() == both);
+    CHECK(kept(a_run->run_id) == a_kept && kept(b_run->run_id) == b_kept);
+
+    // A retired archive is verified as any: its run resumed from the list.
+    fixture.archive.node("a/SAMPLE-5.txt").open_error.reset();
+    const auto operations = read_operations(fixture);
+    const auto a_operation = std::ranges::find(operations, a_run->run_id, &UnfinishedOperation::run_id);
+    CHECK(a_operation != operations.end());
+    if (a_operation == operations.end()) {
+        return;
+    }
+    CHECK(row_of(*a_operation).offers_resume);
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.verify(va::app::verification_resume(*a_operation, va::Policy{}));
+    CHECK(resumed && resumed->archive_uuid == a->archive_uuid && resumed->resumed_from == a_run->run_id &&
+          resumed->result == "PASSED_WITH_WARNINGS" &&
+          std::ranges::find(resumed->warnings, "identity: retired") != resumed->warnings.end());
+    CHECK(a_run->coverage_bytes >= 4000 && fixture.archive.bytes_read == 5000 - a_run->coverage_bytes);
+    CHECK(listed() == std::vector<va::Uuid>{b->archive_uuid});
 }
 
 } // namespace
@@ -2176,7 +2248,7 @@ void unfinished_operations_tests()
     a_stopped_verification_resumes_from_the_list_as_on_the_command_line();
     a_stopped_registration_resumes_from_the_list_as_on_the_command_line();
     an_older_versions_quiet_registration_is_resumed_or_abandoned();
-    leaves_out_the_verifications_of_a_retired_archive();
+    leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost();
     follows_operations_between_polls();
     words_one_row();
     orders_the_rows();

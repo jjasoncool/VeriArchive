@@ -1376,16 +1376,13 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         run.label = *has_archive ? archive->text(0) : std::string{};
         // R-104: a run resumes only while its archive is at the revision it verifies.
         run.resumable = *has_archive && static_cast<std::uint32_t>(archive->integer(1)) == run.revision;
-        // A retired archive is no longer expected to be verified (decision
-        // 0003): it has no unfinished verification to show, whether its run
-        // stopped before or after it was retired, and whatever became of its
-        // manifest (decision 0022, point 5). The run's record and checkpoints
-        // stay as they are.
-        const bool retired = *has_archive && archive->text(2) == "RETIRED";
+        // A retired archive can still be verified, and its interrupted runs
+        // resumed (decision 0003). Where its latest manifest is lost (decision
+        // 0028, point 9), they can never be resumed and are not listed
+        // (decision 0022, point 5): that manifest is read by the caller, as
+        // this layer reads no files.
+        run.archive_retired = *has_archive && archive->text(2) == "RETIRED";
         archive->reset();
-        if (retired) {
-            continue;
-        }
         // Stopped, and cannot be resumed: nothing will ever finish it. A run
         // never recorded has stopped once its record has said nothing for
         // minutes (its process was killed); until then it may still work and

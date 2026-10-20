@@ -67,6 +67,19 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Policy& policy,
     std::chrono::sys_seconds now, const StatusSelection& selection = {});
 
+// Whether `archive` is retired and its latest manifest is lost (decision
+// 0028, point 9), judged as archive_statuses judges it for the lists
+// (ArchiveStatus::manifest_lost), so that what the Archive List shows of the
+// archive and of its unfinished verifications agrees: line 1 alone, or the
+// whole manifest where the last `repo rebuild-index` skipped it, and the whole
+// manifest behind an index that seems to be all that is wrong
+// (lost_by_a_retired_archive). Such an archive's interrupted verifications
+// can never be resumed (decision 0022, point 5). False for an archive that is
+// not retired, without reading its manifest. Fails only where the database
+// cannot be read.
+std::expected<bool, IoError> retired_with_manifest_lost(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const ArchiveRecord& archive);
+
 // "ARCH-0007", or "ARCH-0007 (28ff645e)" when the label is shared (R-88).
 std::string display_label(const ArchiveStatus& status);
 

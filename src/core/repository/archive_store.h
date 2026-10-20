@@ -148,6 +148,10 @@ struct UnfinishedVerification {
     std::uint64_t files_total = 0;              // the files (and streams) with content to read
     std::uint64_t bytes_total = 0;              // the bytes their hashes cover: the bytes to read
     Timestamp updated;                          // the setting's "updated": when it last said it was working
+    bool archive_retired = false;               // its archive is retired (decision 0003): where that archive's
+                                                // latest manifest is lost, which this layer, reading no files,
+                                                // leaves to read_unfinished_operations, the run can never be
+                                                // resumed and is not listed (decision 0022, point 5)
 };
 
 // The setting that holds the record of an unfinished relocation of an archive
@@ -365,12 +369,13 @@ public:
     // worked or finished when it had been silent for minutes, or, once it has
     // been silent for minutes at `now`, one started after it last said
     // anything that PASSED (with warnings or not). A verification that read
-    // no media (read_no_media) supersedes none (decision 0028). Every
-    // verification of a retired archive is left out too: the archive is no
-    // longer expected to be verified (decision 0003); its runs' records and
-    // checkpoints are left as they are. `counted`: the checkpoints of runs
-    // recorded INCOMPLETE, counted by an earlier read; such a run never
-    // changes, so it is not counted again.
+    // no media (read_no_media) supersedes none (decision 0028). A verification
+    // of a retired archive is kept as any, and marked (archive_retired): a
+    // retired archive can still be verified and its runs resumed (decision
+    // 0003), but not where its latest manifest is lost (decision 0028, point
+    // 9), which read_unfinished_operations judges from the manifest. `counted`:
+    // the checkpoints of runs recorded INCOMPLETE, counted by an earlier read;
+    // such a run never changes, so it is not counted again.
     std::expected<std::vector<UnfinishedVerification>, IoError> unfinished_verifications(
         std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted = {});
     // Every relocation whose record exists (decision 0026), its checkpoints

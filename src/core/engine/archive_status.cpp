@@ -15,6 +15,56 @@ bool older_than(const std::string& timestamp, int days, std::chrono::sys_seconds
     return when && now - *when > std::chrono::days(days);
 }
 
+// The latest manifest of `archive` as the archive lists read it: its header,
+// or why it cannot be used; an archive whose first registration never
+// finished (revision 0) has neither.
+struct LatestManifest {
+    std::optional<ManifestHeader> header;
+    std::optional<UnusableManifest> unusable;
+    bool lost = false;  // the archive is retired and that manifest is lost (decision 0028, point 9)
+};
+
+// Reads it from the manifest (R-14), never from the index's copy of its
+// header: line 1 alone, or, where the last `repo rebuild-index` skipped it
+// (`whole`, its mark), as the rebuild reads it, whole.
+std::expected<LatestManifest, IoError> latest_manifest(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const ArchiveRecord& archive, bool whole)
+{
+    LatestManifest latest;
+    const auto revision = store.revision(archive.archive_uuid, archive.current_revision);
+    if (!revision) {
+        return std::unexpected(revision.error());
+    }
+    if (*revision) {
+        auto header = load_recorded_header(repository_files, layout, **revision, whole);
+        if (header) {
+            latest.header = std::move(*header);
+        } else {
+            latest.unusable = std::move(header.error());
+        }
+    } else if (archive.current_revision > 0) {
+        // The archive's record says a revision of which the index has no
+        // record, as where `repo rebuild-index` could not read its manifest:
+        // that manifest cannot be used either (decision 0028).
+        latest.unusable =
+            manifest_not_indexed(repository_files, layout, archive.archive_uuid, archive.current_revision, whole);
+    }
+    // A retired archive takes no new revision, not even over its lost
+    // manifest, and where that manifest is lost, the archive is retired with
+    // its manifest lost (decision 0028, point 9), judged as matching judges
+    // it: behind an index that seems to be all that is wrong, the whole
+    // manifest, and `unusable` says what that read found.
+    if (latest.unusable) {
+        latest.unusable->retired = archive.status == "RETIRED";
+        const auto lost = lost_by_a_retired_archive(store, repository_files, layout, *latest.unusable);
+        if (!lost) {
+            return std::unexpected(lost.error());
+        }
+        latest.lost = *lost;
+    }
+    return latest;
+}
+
 } // namespace
 
 std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore& store,
@@ -54,40 +104,14 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
         status.label_shared = label_uses[archive.label] > 1;
 
         if (selection.headers) {
-            const auto revision = store.revision(archive.archive_uuid, archive.current_revision);
-            if (!revision) {
-                return std::unexpected(revision.error());
+            auto latest =
+                latest_manifest(store, repository_files, layout, archive, skipped.contains(archive.archive_uuid));
+            if (!latest) {
+                return std::unexpected(latest.error());
             }
-            const bool whole = skipped.contains(archive.archive_uuid);
-            if (*revision) {
-                auto header = load_recorded_header(repository_files, layout, **revision, whole);
-                if (header) {
-                    status.header = std::move(*header);
-                } else {
-                    status.unusable_manifest = std::move(header.error());
-                }
-            } else if (archive.current_revision > 0) {
-                // The archive's record says a revision of which the index has
-                // no record, as where `repo rebuild-index` could not read its
-                // manifest: that manifest cannot be used either (decision 0028).
-                status.unusable_manifest = manifest_not_indexed(
-                    repository_files, layout, archive.archive_uuid, archive.current_revision, whole);
-            }
-            // A retired archive takes no new revision, not even over its
-            // lost manifest, and where that manifest is lost, the archive is
-            // retired with its manifest lost (decision 0028, point 9), judged
-            // as matching judges it: behind an index that seems to be all
-            // that is wrong, the whole manifest, and the list says what that
-            // read found.
-            if (status.unusable_manifest) {
-                status.unusable_manifest->retired = archive.status == "RETIRED";
-                const auto lost =
-                    lost_by_a_retired_archive(store, repository_files, layout, *status.unusable_manifest);
-                if (!lost) {
-                    return std::unexpected(lost.error());
-                }
-                status.manifest_lost = *lost;
-            }
+            status.header = std::move(latest->header);
+            status.unusable_manifest = std::move(latest->unusable);
+            status.manifest_lost = latest->lost;
         }
         if (selection.earlier_revisions) {
             // The other revisions' manifests, which matching reads where the
@@ -135,6 +159,25 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
         statuses.push_back(std::move(status));
     }
     return statuses;
+}
+
+std::expected<bool, IoError> retired_with_manifest_lost(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const ArchiveRecord& archive)
+{
+    if (archive.status != "RETIRED") {
+        return false;
+    }
+    // As the lists read it: whole where the last rebuild skipped it, as they
+    // show "Manifest lost: " for it then.
+    const auto mark = store.setting(skipped_manifest_key(archive.archive_uuid));
+    if (!mark) {
+        return std::unexpected(mark.error());
+    }
+    const auto latest = latest_manifest(store, repository_files, layout, archive, !mark->empty());
+    if (!latest) {
+        return std::unexpected(latest.error());
+    }
+    return latest->lost;
 }
 
 std::string display_label(const ArchiveStatus& status)

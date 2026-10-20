@@ -510,17 +510,32 @@ void superseded_verifications_are_left_out()
     }
 }
 
-// A retired archive is no longer expected to be verified (decision 0003), so
-// it has no unfinished verification to show (decision 0022, point 5): each
-// kind of unfinished run of the sample archive, alone, is left out once the
-// archive is retired: recorded INCOMPLETE, killed (its record silent for
-// minutes), working (its record said so a minute ago), and of an older version
-// (no "updated"). Its record and checkpoints stay as they were, and another
-// archive's run is listed as before. Sample data only.
-void a_retired_archives_verifications_are_left_out()
+// A retired archive can still be verified, and its interrupted verifications
+// resumed (decision 0003); only where its latest manifest is lost can they
+// never be resumed, which read_unfinished_operations judges from that manifest
+// (decision 0022, point 5). So each kind of unfinished run of the sample
+// archive, alone, is kept once the archive is retired, marked as a retired
+// archive's: recorded INCOMPLETE, killed (its record silent for minutes),
+// working (its record said so a minute ago), and of an older version (no
+// "updated"). Its record and checkpoints stay as they were, and another
+// archive's run is kept as before, unmarked. Sample data only.
+void a_retired_archives_verifications_are_kept_and_marked()
 {
     const auto now = at("2026-10-10T02:01:00Z");
     const std::string other = "c0ffee00-0000-4000-8000-000000000003";
+    // The runs kept, each with whether its archive is retired.
+    using Kept = std::vector<std::pair<std::string, bool>>;
+    const auto kept = [&](va::ArchiveStore& store) {
+        Kept runs;
+        if (const auto unfinished = store.unfinished_verifications(now)) {
+            for (const auto& run : *unfinished) {
+                runs.emplace_back(run.run_id, run.archive_retired);
+            }
+        } else {
+            CHECK(false);
+        }
+        return runs;
+    };
     using AddRun = void (*)(va::ArchiveStore&, const TestRepository&);
     const AddRun kinds[] = {
         [](va::ArchiveStore& store, const TestRepository& repository) {
@@ -546,7 +561,7 @@ void a_retired_archives_verifications_are_left_out()
         CHECK(store.insert_archive({other, "ARCH-0003", "2026-10-08T00:00:00Z", 1, "REGISTERED", "", ""}));
         CHECK(store.set_setting("run:other-1",
             R"({"archive_uuid":")" + other + R"(","revision":1,"started":"2026-10-10T00:30:00Z"})"));
-        CHECK(unfinished_run_ids(store, now) == (std::vector<std::string>{"run-1", "other-1"}));
+        CHECK(kept(store) == (Kept{{"run-1", false}, {"other-1", false}}));
         const auto record = store.setting("run:run-1");
         const auto checkpoints = store.progress("run-1");
         CHECK(record && !record->empty() && checkpoints && checkpoints->size() == 1);
@@ -558,7 +573,7 @@ void a_retired_archives_verifications_are_left_out()
         }
         (*archive)->status = "RETIRED";
         CHECK(store.update_archive(**archive));
-        CHECK(unfinished_run_ids(store, now) == std::vector<std::string>{"other-1"});
+        CHECK(kept(store) == (Kept{{"run-1", true}, {"other-1", false}}));
         CHECK(record && store.setting("run:run-1").value_or("") == *record);
         CHECK(checkpoints && store.progress("run-1").value_or(std::set<std::string>{}) == *checkpoints);
     }
@@ -798,7 +813,7 @@ void archive_store_tests()
     unfinished_verifications_with_checkpoints();
     unfinished_verification_totals_from_its_record();
     superseded_verifications_are_left_out();
-    a_retired_archives_verifications_are_left_out();
+    a_retired_archives_verifications_are_kept_and_marked();
     archive_list_mark_follows_the_archives();
     reads_in_one_transaction();
     read_only_open_creates_nothing();
