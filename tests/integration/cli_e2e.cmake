@@ -1692,8 +1692,7 @@ if(behind_not_indexed EQUAL -1 OR behind_stop_line EQUAL -1 OR behind_asked_line
         "${behind_lost_line}, relocated r${behind_relocated}\n${behind_rebuilt}\n${behind_stopped}\n${behind_asked}\n"
         "${behind_listed}")
 endif()
-find_program(SQLITE3_PROGRAM sqlite3)
-if(SQLITE3_PROGRAM)
+if(SQLITE3)
     set(DIFFERS "${WORK}/behind-differs-sample")
     set(DIFFERS_OTHER "${WORK}/behind-differs-other-sample")
     file(WRITE "${DIFFERS}/a.txt" "behind the index sample a, the index differs\n")
@@ -1705,7 +1704,7 @@ if(SQLITE3_PROGRAM)
     file(READ "${differs_file}" differs_bytes)
     string(REPLACE "\"p\":\"a.txt\"" "\"p\":\"q.txt\"" differs_bytes "${differs_bytes}")
     file(CONFIGURE OUTPUT "${differs_file}" CONTENT "${differs_bytes}" @ONLY NEWLINE_STYLE UNIX)
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo4/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo4/veriarchive.db"
         "UPDATE archive_revisions SET header_json = header_json || ' ' WHERE archive_uuid = '${differs_uuid}'"
         RESULT_VARIABLE differs_damaged)
     run_cli("11" --lang en register "${DIFFERS_OTHER}")
@@ -1726,7 +1725,7 @@ if(SQLITE3_PROGRAM)
             "stopped ${differs_stop_line}, asked ${differs_asked_line}, listed ${differs_lost_line}\n"
             "${differs_stopped}\n${differs_asked}\n${differs_listed}")
     endif()
-    message(STATUS "a retired archive whose lost manifest the index differs from: checked with ${SQLITE3_PROGRAM}")
+    message(STATUS "a retired archive whose lost manifest the index differs from: checked with ${SQLITE3}")
 else()
     message(STATUS "a retired archive whose lost manifest the index differs from: skipped, as the sqlite3 command that "
         "changes the index (sample damage) is not installed")
@@ -1768,7 +1767,7 @@ endif()
 # registrations (sample damage of its record). `archive show` gives the
 # registration the state archive_retired in --json and its line in text, its
 # resume is refused (exit 12), and it is abandoned.
-if(SQLITE3_PROGRAM)
+if(SQLITE3)
     set(OLDER "${WORK}/older-registration-sample")
     file(WRITE "${OLDER}/a.txt" "older registration sample a\n")
     run_cli("0" register "${OLDER}" --json)
@@ -1779,7 +1778,7 @@ if(SQLITE3_PROGRAM)
     file(MAKE_DIRECTORY "${OLDER_BLOCKER}")
     run_cli("11" register "${OLDER}" --lost-manifest "${older_prefix}" --confirm)
     file(REMOVE_RECURSE "${OLDER_BLOCKER}")
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo4/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo4/veriarchive.db"
         "UPDATE archives SET status = 'RETIRED' WHERE archive_uuid = '${older_uuid}'"
         RESULT_VARIABLE older_retired)
     run_cli("0" archive show "${older_prefix}" --json)
@@ -1920,7 +1919,7 @@ set(GLOBAL --config "${WORK}/config.json")
 # either language and in --json, its plan unchanged, and then resumed with
 # --confirm. --confirm with neither --resume nor --lost-manifest is a usage
 # error (exit 10).
-if(SQLITE3_PROGRAM)
+if(SQLITE3)
     file(WRITE "${WORK}/config6.json" "{\"language\": \"zh-TW\"}\n")
     set(GLOBAL --config "${WORK}/config6.json")
     run_cli("0" --repository "${WORK}/repo6" repo init)
@@ -1942,33 +1941,33 @@ if(SQLITE3_PROGRAM)
     file(REMOVE "${WORK}/repo6/manifests")
     file(RENAME "${WORK}/repo6/manifests.away" "${WORK}/repo6/manifests")
     set(older_plan_key "registration:${older_resume_uuid}")
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "SELECT value FROM settings WHERE key = '${older_plan_key}'"
         OUTPUT_VARIABLE older_plan OUTPUT_STRIP_TRAILING_WHITESPACE)
     foreach(member IN ITEMS updated stopped process)
         string(JSON older_plan REMOVE "${older_plan}" ${member})
     endforeach()
     string(REPLACE "'" "''" older_plan_sql "${older_plan}")
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "UPDATE settings SET value = '${older_plan_sql}' WHERE key = '${older_plan_key}'"
         RESULT_VARIABLE older_resume_damaged)
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "SELECT value FROM settings WHERE key = '${older_plan_key}'"
         OUTPUT_VARIABLE older_plan_written OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "SELECT key FROM settings WHERE key LIKE 'registration:%' AND value LIKE '%named-resume-sample%'"
         OUTPUT_VARIABLE named_plan_key OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "SELECT value FROM settings WHERE key = '${named_plan_key}'"
         OUTPUT_VARIABLE named_plan OUTPUT_STRIP_TRAILING_WHITESPACE)
     foreach(member IN ITEMS updated stopped)
         string(JSON named_plan REMOVE "${named_plan}" ${member})
     endforeach()
     string(REPLACE "'" "''" named_plan_sql "${named_plan}")
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "UPDATE settings SET value = '${named_plan_sql}' WHERE key = '${named_plan_key}'"
         RESULT_VARIABLE named_resume_damaged)
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "SELECT value FROM settings WHERE key = '${named_plan_key}'"
         OUTPUT_VARIABLE named_plan_written OUTPUT_STRIP_TRAILING_WHITESPACE)
     # This version's plan: resumed at once, as before.
@@ -1993,7 +1992,7 @@ if(SQLITE3_PROGRAM)
     string(JSON older_json_label GET "${last_output}" registration label)
     string(JSON older_json_revision GET "${last_output}" registration revision)
     string(JSON older_json_root GET "${last_output}" registration root)
-    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+    execute_process(COMMAND "${SQLITE3}" "${WORK}/repo6/veriarchive.db"
         "SELECT value FROM settings WHERE key = '${older_plan_key}'"
         OUTPUT_VARIABLE older_plan_asked OUTPUT_STRIP_TRAILING_WHITESPACE)
     # Confirmed, it is resumed and recorded.
@@ -2032,7 +2031,7 @@ if(SQLITE3_PROGRAM)
             "${older_asked}\n${older_asked_errors}\n${older_asked_chinese}\n${older_asked_chinese_errors}\n"
             "${confirm_alone}")
     endif()
-    message(STATUS "a resume of an older version's registration: checked with ${SQLITE3_PROGRAM}")
+    message(STATUS "a resume of an older version's registration: checked with ${SQLITE3}")
 else()
     message(STATUS "a resume of an older version's registration: skipped, as the sqlite3 command that rewrites "
         "the plan (sample damage) is not installed")

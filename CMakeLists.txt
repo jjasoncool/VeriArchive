@@ -374,7 +374,9 @@ if(BUILD_TESTING)
     endif()
     # The sqlite3 program, where there is one (MSYS2's sqlite3 package has it),
     # makes a repository of an older schema version for the end-to-end test
-    # of the upgrade (decision 0032); without it, that part is left out.
+    # of the upgrade (decision 0032) and damages the index of a sample
+    # repository for that of a lost manifest (decision 0028); without it,
+    # those parts are left out.
     find_program(VERIARCHIVE_SQLITE3 sqlite3)
     add_test(NAME veriarchive_cli_e2e
         COMMAND ${CMAKE_COMMAND}
