@@ -26,6 +26,12 @@ function(run_cli expected_codes)
     if(found EQUAL -1)
         message(FATAL_ERROR "veriarchive-cli ${ARGN}\nexit ${code}, expected one of ${expected_codes}\n${output}\n${errors}")
     endif()
+    # GitLab's runners run as root or as an administrator: every command that
+    # opens the repository then first warns that VeriArchive runs elevated
+    # (R-12). The checks compare what a command says about its own work, so
+    # that line is left out of the errors they see, in either language.
+    string(REGEX REPLACE "(^|\n)(warning: VeriArchive is running elevated|警告：VeriArchive 正以系統管理員權限執行)[^\n]*\n"
+        "\\1" errors "${errors}")
     set(last_output "${output}" PARENT_SCOPE)
     set(last_errors "${errors}" PARENT_SCOPE)
 endfunction()
