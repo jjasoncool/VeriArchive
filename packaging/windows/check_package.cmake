@@ -80,10 +80,29 @@ foreach(required
         "share/licenses/glib2"
         "share/locale/zh_TW/LC_MESSAGES/gtk40.mo"
         "share/doc/VeriArchive/NOTICE.txt"
+        "share/doc/VeriArchive/user-guide.md"
         "share/doc/VeriArchive/user-guide.zh-TW.md")
     if(NOT EXISTS "${PREFIX}/${required}")
         message(FATAL_ERROR "missing from the package: ${required}")
     endif()
+endforeach()
+
+# The installed guides show their screenshots: every picture they link to
+# (images/<language>/...) is installed beside them.
+foreach(guide user-guide.md user-guide.zh-TW.md)
+    file(READ "${PREFIX}/share/doc/VeriArchive/${guide}" guide_text)
+    # "(images/...)" without the "](" before it: a "]" in a list item would
+    # keep CMake from splitting the list.
+    string(REGEX MATCHALL "[(]images/[^)]+[)]" picture_links "${guide_text}")
+    if(NOT picture_links)
+        message(FATAL_ERROR "the installed ${guide} links to no pictures")
+    endif()
+    foreach(link IN LISTS picture_links)
+        string(REGEX REPLACE "^[(](.+)[)]$" "\\1" picture "${link}")
+        if(NOT EXISTS "${PREFIX}/share/doc/VeriArchive/${picture}")
+            message(FATAL_ERROR "the installed ${guide} shows ${picture}, which is missing from the package")
+        endif()
+    endforeach()
 endforeach()
 
 # Run the packaged programs with only Windows on PATH.

@@ -214,6 +214,8 @@ if(VERIARCHIVE_BUILD_GUI)
 endif()
 install(FILES README.md docs/user-guide.md docs/user-guide.zh-TW.md
     DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
+# The guides show their screenshots from images/ beside them.
+install(DIRECTORY docs/images DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
 if(WIN32)
     get_filename_component(VERIARCHIVE_MINGW_PREFIX "${CMAKE_CXX_COMPILER}" DIRECTORY)
     get_filename_component(VERIARCHIVE_MINGW_PREFIX "${VERIARCHIVE_MINGW_PREFIX}" DIRECTORY)
