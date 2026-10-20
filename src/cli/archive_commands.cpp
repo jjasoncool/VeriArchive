@@ -65,15 +65,18 @@ nlohmann::json run_json(const std::optional<VerifyRunRecord>& run)
         {"finished", run->finished}};
 }
 
-// An archive's unfinished registration and relocation (decisions 0022, 0026),
-// each as the Archive List judges it from one read, its attempt judged
-// through this computer's process table (decision 0024), and as --json gives
-// it: where it reads, its progress from its checkpoints, and its state.
+// An archive's unfinished registration, relocation and verification that adds
+// chunk hashes (decisions 0022, 0026, 0033), each as the Archive List judges
+// it from one read, its attempt judged through this computer's process table
+// (decision 0024), and as --json gives it: where it reads, its progress from
+// its checkpoints, and its state.
 struct UnfinishedOfArchive {
     std::optional<app::UnfinishedOperation> registration;
     std::optional<app::UnfinishedOperation> relocation;
+    std::optional<app::UnfinishedOperation> verification;
     nlohmann::json registration_json;  // null when there is none
     nlohmann::json relocation_json;    // null when there is none
+    nlohmann::json verification_json;  // null when there is none
 };
 using UnfinishedByArchive = std::map<Uuid, UnfinishedOfArchive>;
 
@@ -88,12 +91,14 @@ nlohmann::json process_json(const app::UnfinishedOperation& operation)
         {"host", operation.process->host}};
 }
 
-// The unfinished registrations and relocations of the repository, by
-// archive, read in one read transaction. Read only.
+// The unfinished registrations, relocations and verifications that add chunk
+// hashes of the repository, by archive, read in one read transaction. Read
+// only.
 std::expected<UnfinishedByArchive, Failure> unfinished_by_archive(ArchiveStore& store)
 {
     std::vector<PendingRegistration> registrations;
     std::vector<UnfinishedRelocation> relocations;
+    std::vector<UnfinishedVerification> verifications;
     const auto read = store.read_transaction([&]() -> std::expected<void, IoError> {
         auto pending = store.pending_registrations();
         if (!pending) {
@@ -105,6 +110,15 @@ std::expected<UnfinishedByArchive, Failure> unfinished_by_archive(ArchiveStore& 
             return std::unexpected(moving.error());
         }
         relocations = std::move(*moving);
+        // Only those that add chunk hashes: one keeps every other operation
+        // from creating the archive's next revision until it finishes or is
+        // abandoned (decision 0033); a later verification supersedes any other.
+        auto verifying = store.unfinished_verifications(
+            std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()), {}, true);
+        if (!verifying) {
+            return std::unexpected(verifying.error());
+        }
+        verifications = std::move(*verifying);
         return {};
     });
     if (!read) {
@@ -162,20 +176,48 @@ std::expected<UnfinishedByArchive, Failure> unfinished_by_archive(ArchiveStore& 
         unfinished.relocation = std::move(operation);
         unfinished.relocation_json = std::move(json);
     }
+    for (const auto& verification : verifications) {
+        auto operation = app::verification_operation(verification, attempts);
+        nlohmann::json json{
+            {"root", verification.root},
+            {"revision", verification.revision},
+            {"run_id", verification.run_id},
+            {"chunk_size", verification.adds_chunk_hashes},
+            {"started", verification.started},
+            {"updated", optional_text(verification.updated)},
+            {"state", app::state_code(app::state_of_one_read(operation, wall_now))},
+            {"resumable", verification.resumable},
+            {"files_done", verification.done_counted ? nlohmann::json(verification.files_done) : nullptr},
+            {"bytes_done", verification.done_counted ? nlohmann::json(verification.bytes_done) : nullptr},
+            {"files_total", verification.files_total},
+            {"bytes_total", verification.bytes_total},
+        };
+        if (operation.process) {
+            json["process"] = process_json(operation);
+        }
+        auto& unfinished = result[verification.archive_uuid];
+        unfinished.verification = std::move(operation);
+        unfinished.verification_json = std::move(json);
+    }
     return result;
 }
 
-// The lines of an archive's unfinished registration and relocation, as
-// `archive list` and `archive show` print them under the archive.
-void print_unfinished(const app::Text& text, const UnfinishedByArchive& unfinished, const Uuid& archive_uuid,
+// The lines of an archive's unfinished registration, relocation and
+// verification that adds chunk hashes, as `archive list` and `archive show`
+// print them under the archive. Not the verification of a retired archive
+// whose latest manifest is lost (decision 0028, point 9), which can never be
+// resumed, as the Archive List leaves it out (decision 0022, point 5).
+void print_unfinished(const app::Text& text, const UnfinishedByArchive& unfinished, const ArchiveStatus& status,
     std::string_view indent)
 {
-    const auto found = unfinished.find(archive_uuid);
+    const auto found = unfinished.find(status.archive.archive_uuid);
     if (found == unfinished.end()) {
         return;
     }
     const auto wall_now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    for (const auto* operation : {&found->second.registration, &found->second.relocation}) {
+    const std::optional<app::UnfinishedOperation> none;
+    const auto& verification = status.manifest_lost ? none : found->second.verification;
+    for (const auto* operation : {&found->second.registration, &found->second.relocation, &verification}) {
         if (*operation) {
             std::cout << indent << app::describe_for_archive(text, **operation, wall_now) << '\n';
         }
@@ -253,6 +295,11 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
         }
         if (!found->second.relocation_json.is_null()) {
             json["unfinished_relocation"] = found->second.relocation_json;
+        }
+        // As print_unfinished: not that of a retired archive whose latest
+        // manifest is lost.
+        if (!found->second.verification_json.is_null() && !status.manifest_lost) {
+            json["unfinished_verification"] = found->second.verification_json;
         }
     }
     return json;
@@ -377,7 +424,7 @@ int list(const Arguments& arguments, Opened& opened)
         print_manifest_problem(text, status, "    ");
         std::cout << "    " << last_verify_line(text, status.last_full, false, status.full_overdue) << "\n    "
                   << last_verify_line(text, status.last_any, true, status.any_overdue) << '\n';
-        print_unfinished(text, *unfinished, status.archive.archive_uuid, "    ");
+        print_unfinished(text, *unfinished, status, "    ");
     }
     return listed_code(opened.statuses);
 }
@@ -469,7 +516,7 @@ int show(const Arguments& arguments, Opened& opened)
     print_manifest_problem(text, *status, "  ");
     std::cout << "  " << last_verify_line(text, status->last_full, false, status->full_overdue) << "\n  "
               << last_verify_line(text, status->last_any, true, status->any_overdue) << '\n';
-    print_unfinished(text, *unfinished, status->archive.archive_uuid, "  ");
+    print_unfinished(text, *unfinished, *status, "  ");
     std::cout << "  " << text("revisions:") << '\n';
     for (std::size_t index = 0; index < revisions->size(); ++index) {
         const auto& revision = (*revisions)[index];

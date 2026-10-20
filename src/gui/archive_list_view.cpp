@@ -17,6 +17,7 @@
 #include "app/plain_words.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_relocation.h"
+#include "core/engine/abandon_verification.h"
 #include "core/engine/archive_status.h"
 #include "platform/file_system.h"
 #include "platform/process_table.h"
@@ -243,18 +244,23 @@ void show_operations(GuiState& state)
         gtk_label_set_wrap(GTK_LABEL(state_cell), TRUE);
         gtk_label_set_width_chars(GTK_LABEL(state_cell), 32);
         gtk_label_set_max_width_chars(GTK_LABEL(state_cell), 32);
-        if (!shown.run_id.empty()) {
-            gtk_widget_set_tooltip_text(state_cell, text.format("Run: {}", shown.run_id).c_str());
-        } else if (!shown.process.empty()) {
-            gtk_widget_set_tooltip_text(state_cell, shown.process.c_str());
+        // A verification's run, and the process the record names; a
+        // verification that adds chunk hashes has both (decision 0033).
+        std::string tooltip = shown.run_id.empty() ? std::string{} : text.format("Run: {}", shown.run_id);
+        if (!shown.process.empty()) {
+            tooltip += (tooltip.empty() ? "" : "\n") + shown.process;
+        }
+        if (!tooltip.empty()) {
+            gtk_widget_set_tooltip_text(state_cell, tooltip.c_str());
         }
         gtk_grid_attach(GTK_GRID(view.operations_grid), state_cell, 4, row, 1, 1);
 
         // A stopped verification or registration can be resumed here, as on
         // the command line (decision 0022, point 7); a stopped registration
-        // (decision 0025) or relocation (decision 0026) can be given up on
-        // purpose; and so can an older version's registration that may have
-        // stopped (describe_operation), whose Resume asks first.
+        // (decision 0025), relocation (decision 0026) or verification that
+        // adds chunk hashes (decision 0033) can be given up on purpose; and so
+        // can an older version's registration that may have stopped
+        // (describe_operation), whose Resume asks first.
         if (shown.offers_resume || shown.abandonable) {
             GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
             gtk_widget_set_valign(actions, GTK_ALIGN_START);
@@ -735,13 +741,136 @@ void ask_to_abandon_relocation(GuiState& state, const app::UnfinishedOperation& 
         });
 }
 
-// The operator chose to abandon the registration or relocation `key` of the
-// latest read. What abandoning it removes is read first, by the check that
-// abandons it (abandonable_registration, abandonable_relocation, as the CLI
-// shows it), not taken from the read the row came from: whether the archive
-// goes, and the saved progress, which is nothing once its revision is
-// recorded. A refusal shows at once (an attempt that runs, another
-// registration by now); otherwise the question.
+// ---- Abandoning a verification that adds chunk hashes (decision 0033) -------
+
+struct VerificationAbandonChoice {
+    GuiState* state;
+    VerificationAbandonRequest request;
+    std::string label;
+};
+
+Report verification_abandon_report(const AbandonableVerification& abandoned)
+{
+    return [abandoned](const app::Text& text) {
+        return text.format("Abandoned the unfinished verification of {} ({}) that adds chunk hashes.",
+            abandoned.label, abandoned.archive_uuid);
+    };
+}
+
+// Abandons the verification the operator confirmed, after the same checks
+// again, in its own transaction (abandon_verification); reports what it did.
+void start_verification_abandon(
+    GuiState& state, const VerificationAbandonRequest& request, const std::string& label)
+{
+    if (!can_abandon(state)) {
+        return;
+    }
+    run_abandon_step(state, state.text.format("Abandoning the verification of {} ...", label),
+        [layout = state.session->context.repo, host = state.host.host, request](
+            CancelToken&, IProgressSink&) -> Report {
+            auto store = ArchiveStore::open(layout);
+            if (!store) {
+                return cannot_open(store.error());
+            }
+            const auto processes = platform::make_process_table();
+            AbandonServices services{*store, *processes, host};
+            const auto abandoned = abandon_verification(services, request);
+            return abandoned ? verification_abandon_report(*abandoned) : not_abandoned(abandoned.error());
+        },
+        [&state](const Report& result) {
+            refresh_archive_list(state);
+            start_poll(state);
+            show_message(state, result);
+        });
+}
+
+// Asks the operator, with Cancel as the default, saying what abandoning the
+// verification removes, as abandonable_verification read it.
+void confirm_verification_abandon(GuiState& state, const AbandonableVerification& verification)
+{
+    const auto& text = state.text;
+    const auto label = verification.label.empty() ? verification.archive_uuid.substr(0, 8) : verification.label;
+    const std::string detail = text.format("Root: {}", verification.root) + "\n\n" +
+                               text.format("Its saved progress will be lost: {} ({}) matched so far.",
+                                   app::count_of(text, verification.files, app::Counted::File),
+                                   format_bytes(verification.bytes)) +
+                               " " +
+                               text("It cannot be resumed afterwards. The archive, its revisions, manifests and the "
+                                    "verification history are not changed.");
+    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s",
+        text.format("Abandon the unfinished verification of {} that adds chunk hashes?", label).c_str());
+    gtk_alert_dialog_set_detail(dialog, detail.c_str());
+    const auto cancel = text("Cancel");
+    const auto abandon = text("Abandon");
+    const char* buttons[] = {cancel.c_str(), abandon.c_str(), nullptr};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    // The request names the run shown: one resumed meanwhile, under a run of
+    // its own, is not abandoned in its place.
+    auto* choice = new VerificationAbandonChoice{&state, {verification.archive_uuid, verification.run_id}, label};
+    gtk_alert_dialog_choose(dialog, state.window, nullptr,
+        +[](GObject* source, GAsyncResult* result, gpointer data) {
+            std::unique_ptr<VerificationAbandonChoice> choice(static_cast<VerificationAbandonChoice*>(data));
+            GError* error = nullptr;
+            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
+            if (error) {
+                g_error_free(error); // dismissed, as when the window closed
+            }
+            g_object_unref(source);
+            auto& state = *choice->state;
+            if (button != 1 || !state.window) {
+                return;
+            }
+            guarded([&] { start_verification_abandon(state, choice->request, choice->label); },
+                [&](const Report& report) { show_message(state, report); });
+        },
+        choice);
+}
+
+// The operator chose to abandon the verification that adds chunk hashes of a
+// row: what abandoning it removes is read first, by the check that abandons
+// it, as for a registration.
+void ask_to_abandon_verification(GuiState& state, const app::UnfinishedOperation& operation)
+{
+    const auto label = operation.label.empty() ? operation.archive_uuid.substr(0, 8) : operation.label;
+    // The run shown: one that changed since is refused, not read in its place.
+    const VerificationAbandonRequest request{operation.archive_uuid, operation.run_id};
+    auto examined = std::make_shared<std::optional<AbandonableVerification>>();
+    run_abandon_step(state, state.text.format("Reading the verification of {} ...", label),
+        [layout = state.session->context.repo, host = state.host.host, request, examined](
+            CancelToken&, IProgressSink&) -> Report {
+            // Reads only, as the Archive List does (decision 0022).
+            auto store = ArchiveStore::open_read_only(layout);
+            if (!store) {
+                return cannot_open(store.error());
+            }
+            const auto processes = platform::make_process_table();
+            AbandonServices services{*store, *processes, host};
+            auto verification = abandonable_verification(services, request);
+            if (!verification) {
+                return not_abandoned(verification.error());
+            }
+            *examined = std::move(*verification);
+            return {};
+        },
+        [&state, examined](const Report& refused) {
+            if (refused) {
+                show_message(state, refused);
+            } else if (*examined) {
+                confirm_verification_abandon(state, **examined);
+            }
+        });
+}
+
+// The operator chose to abandon the registration, relocation or verification
+// that adds chunk hashes `key` of the latest read. What abandoning it removes
+// is read first, by the check that abandons it (abandonable_registration,
+// abandonable_relocation, abandonable_verification, as the CLI shows it), not
+// taken from the read the row came from: whether the archive goes, and the
+// saved progress, which is nothing once its revision is recorded. A refusal
+// shows at once (an attempt that runs, another registration by now);
+// otherwise the question.
 void ask_to_abandon(GuiState& state, const std::string& key)
 {
     if (!can_abandon(state)) {
@@ -754,10 +883,16 @@ void ask_to_abandon(GuiState& state, const std::string& key)
         ask_to_abandon_relocation(state, found->operation());
         return;
     }
+    if (!key.empty() && found != watches.end() && found->operation().kind == app::OperationKind::Verification &&
+        found->operation().adds_chunk_hashes) {
+        ask_to_abandon_verification(state, found->operation());
+        return;
+    }
     if (key.empty() || found == watches.end() || found->operation().kind != app::OperationKind::Registration) {
-        show_message(state, fixed_message(key.starts_with("relocation:")
-                                              ? "This relocation is no longer listed as unfinished."
-                                              : "This registration is no longer listed as unfinished."));
+        const char* gone = key.starts_with("relocation:") ? "This relocation is no longer listed as unfinished."
+                           : key.starts_with("run:")      ? "This verification is no longer listed as unfinished."
+                                                          : "This registration is no longer listed as unfinished.";
+        show_message(state, fixed_message(gone));
         return;
     }
     const auto& operation = found->operation();

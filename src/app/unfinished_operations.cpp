@@ -183,19 +183,7 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         if (verification.archive_retired && manifest_lost[verification.archive_uuid]) {
             continue;
         }
-        UnfinishedOperation operation;
-        operation.kind = OperationKind::Verification;
-        operation.key = "run:" + verification.run_id;
-        operation.archive_uuid = verification.archive_uuid;
-        operation.label = verification.label;
-        operation.root = verification.root;
-        operation.run_id = verification.run_id;
-        operation.revision = verification.revision;
-        operation.started = verification.started;
-        operation.files_done = verification.files_done;
-        operation.bytes_done = verification.bytes_done;
-        operation.files_total = verification.files_total;
-        operation.bytes_total = verification.bytes_total;
+        auto operation = verification_operation(verification, attempts);
         if (const auto older = older_runs.find(verification.run_id); older != older_runs.end()) {
             // A run of a version before decision 0022: its revision's counts
             // (which include the entries unreadable at registration) and
@@ -232,10 +220,6 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
                 }
             }
         }
-        operation.recorded_stopped = verification.recorded_incomplete;
-        operation.resumable = verification.resumable;
-        operation.updated = parse_timestamp(verification.updated);
-        operation.done_counted = verification.done_counted;
         operations.push_back(std::move(operation));
     }
     for (const auto& relocation : relocations) {
@@ -312,6 +296,40 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
     if (attempts.processes && !operation.recorded_stopped) {
         operation.attempt =
             judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+    }
+    return operation;
+}
+
+UnfinishedOperation verification_operation(const UnfinishedVerification& verification, const AttemptCheck& attempts)
+{
+    UnfinishedOperation operation;
+    operation.kind = OperationKind::Verification;
+    operation.key = "run:" + verification.run_id;
+    operation.archive_uuid = verification.archive_uuid;
+    operation.label = verification.label;
+    operation.root = verification.root;
+    operation.run_id = verification.run_id;
+    operation.revision = verification.revision;
+    operation.started = verification.started;
+    operation.files_done = verification.files_done;
+    operation.bytes_done = verification.bytes_done;
+    operation.files_total = verification.files_total;
+    operation.bytes_total = verification.bytes_total;
+    operation.adds_chunk_hashes = verification.adds_chunk_hashes > 0;
+    operation.recorded_stopped = verification.recorded_incomplete;
+    operation.resumable = verification.resumable;
+    operation.updated = parse_timestamp(verification.updated);
+    operation.done_counted = verification.done_counted;
+    // One that adds chunk hashes names its process (decision 0033): whether
+    // that process still runs tells at once whether it does, as for a
+    // registration (decision 0024). One recorded INCOMPLETE has stopped.
+    if (operation.adds_chunk_hashes) {
+        const auto record = nlohmann::json::parse(verification.record, nullptr, false);
+        operation.process = recorded_attempt(record);
+        if (attempts.processes && !operation.recorded_stopped) {
+            operation.attempt =
+                judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+        }
     }
     return operation;
 }
@@ -597,7 +615,7 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         row.kind = text("Registration");
         break;
     case OperationKind::Verification:
-        row.kind = text("Verification");
+        row.kind = operation.adds_chunk_hashes ? text("Verification adding chunk hashes") : text("Verification");
         break;
     case OperationKind::Relocation:
         row.kind = text("Relocation");
@@ -610,7 +628,9 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         row.run_id = operation.run_id;
     }
     row.key = operation.key;
-    if (operation.kind != OperationKind::Verification && operation.process) {
+    // The process its record names: a registration's, a relocation's, or a
+    // verification's that adds chunk hashes (decision 0033).
+    if (operation.process) {
         const auto& program = operation.process->process.program;
         row.process = text.format(
             "Process: {} ({})", operation.process->process.id, program.empty() ? std::string("?") : program);
@@ -624,12 +644,15 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     // does; the list waits as long for its counts.
     const bool quiet_registration =
         operation.kind == OperationKind::Registration && row.state_kind == OperationState::Quiet;
-    // A stopped registration (decision 0025) or relocation (decision 0026)
-    // may be given up on purpose, and so may a quiet registration as above;
-    // not one that runs, waits for its first progress, is held up or whose
-    // state is not known.
-    row.abandonable =
-        (operation.kind != OperationKind::Verification && has_stopped(row.state_kind)) || quiet_registration;
+    // A stopped registration (decision 0025), relocation (decision 0026) or
+    // verification that adds chunk hashes (decision 0033) may be given up on
+    // purpose, and so may a quiet registration as above; not one that runs,
+    // waits for its first progress, is held up or whose state is not known. A
+    // stopped verification that adds none is superseded by the next
+    // verification.
+    row.abandonable = ((operation.kind != OperationKind::Verification || operation.adds_chunk_hashes) &&
+                          has_stopped(row.state_kind)) ||
+                      quiet_registration;
     // Decision 0022, point 7: a verification that has stopped and can be
     // resumed (R-104), and a registration that has stopped or is quiet as
     // above, may be resumed from the list, as their command-line resumes
@@ -823,12 +846,20 @@ std::string describe_for_archive(const Text& text, const UnfinishedOperation& op
     watch.update(operation, now, wall_now);
     const auto row = describe_operation(text, watch, now, wall_now);
     const auto done = row.files.empty() ? row.progress : text.format("{} · {}", row.progress, row.files);
-    // Two calls: the compiler checks each literal template against its values.
-    return operation.kind == OperationKind::Relocation
-               ? text.format("Unfinished relocation of revision {} to \"{}\": {}; {}", operation.revision,
-                     operation.root, done, row.state)
-               : text.format("Unfinished registration of revision {} from \"{}\": {}; {}", operation.revision,
-                     operation.root, done, row.state);
+    // One call each: the compiler checks each literal template against its
+    // values.
+    switch (operation.kind) {
+    case OperationKind::Relocation:
+        return text.format("Unfinished relocation of revision {} to \"{}\": {}; {}", operation.revision,
+            operation.root, done, row.state);
+    case OperationKind::Verification:
+        return text.format("Unfinished verification of revision {} adding chunk hashes, from \"{}\": {}; {}",
+            operation.revision, operation.root, done, row.state);
+    case OperationKind::Registration:
+        break;
+    }
+    return text.format("Unfinished registration of revision {} from \"{}\": {}; {}", operation.revision,
+        operation.root, done, row.state);
 }
 
 } // namespace va::app

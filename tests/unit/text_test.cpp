@@ -457,6 +457,9 @@ void translation_tests()
           "未加入區塊雜湊：這次驗證在執行期間被放棄");
     CHECK(chinese("cannot start the verification: cannot execute SQL: database is locked") ==
           "無法開始驗證：無法執行 SQL：資料庫已被鎖定");
+    CHECK(chinese.format("Abandon the unfinished verification of {} that adds chunk hashes?", "ARCH-0007") ==
+          "要放棄 ARCH-0007 加入區塊雜湊的未完成驗證嗎？");
+    CHECK(chinese("Verification adding chunk hashes") == "驗證（加入區塊雜湊）");
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==

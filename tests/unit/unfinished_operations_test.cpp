@@ -1716,11 +1716,11 @@ void reads_operations_made_for_an_older_revision()
     }
 }
 
-// `archive list` and `archive show` give an archive's unfinished registration
-// and relocation one line each (decision 0026): the revision it creates or
-// verifies, where it reads, what it has done, and its state judged from one
-// read, as --json judges it, in the Archive List's words and in both
-// languages; no speed or time left.
+// `archive list` and `archive show` give an archive's unfinished registration,
+// relocation and verification that adds chunk hashes one line each (decisions
+// 0026, 0033): the revision it creates or verifies, where it reads, what it
+// has done, and its state judged from one read, as --json judges it, in the
+// Archive List's words and in both languages; no speed or time left.
 void words_a_line_for_the_command_line()
 {
     const va::app::Text english;
@@ -1775,6 +1775,165 @@ void words_a_line_for_the_command_line()
     relocating.differs = true;
     CHECK(va::app::describe_for_archive(english, relocating, wall_now) ==
           "Unfinished relocation of revision 1 to \"Y:\\範例\": not counted; new carrier differs; abandon it");
+
+    // A verification that adds chunk hashes, stopped (sample data).
+    UnfinishedOperation adding;
+    adding.kind = va::app::OperationKind::Verification;
+    adding.key = "run:c0ffee00-0000-4000-8000-0000000000a1";
+    adding.archive_uuid = "c0ffee00-0000-4000-8000-000000000033";
+    adding.label = "ARCH-0033";
+    adding.root = "X:\\範例";
+    adding.run_id = "c0ffee00-0000-4000-8000-0000000000a1";
+    adding.revision = 1;
+    adding.started = "2026-10-15T03:00:00Z";
+    adding.files_done = 20;
+    adding.bytes_done = 10 * mib;
+    adding.files_total = 40;
+    adding.bytes_total = 20 * mib;
+    adding.adds_chunk_hashes = true;
+    adding.recorded_stopped = true;
+    CHECK(va::app::describe_for_archive(english, adding, wall_now) ==
+          "Unfinished verification of revision 1 adding chunk hashes, from \"X:\\範例\": 10.0 MiB of 20.0 MiB "
+          "(50%) · 20 of 40 files; stopped; it can be resumed");
+    CHECK(va::app::describe_for_archive(chinese, adding, wall_now) ==
+          "未完成的驗證（加入區塊雜湊，版次 1，根目錄「X:\\範例」）：10.0 MiB / 20.0 MiB（50%）・20 / 40 個檔案；"
+          "已停止；可以繼續");
+}
+
+// ---- A verification that adds chunk hashes (decision 0033) -----------------
+
+// A stopped verification that adds chunk hashes is listed until it finishes or
+// is abandoned: a later verification of the archive, which supersedes a
+// stopped one that adds none, does not supersede it, as no other operation
+// creates the archive's next revision while it is unfinished. Its row says
+// what it does, and offers Abandon once stopped, in both languages; a stopped
+// verification that adds none is not offered.
+void a_verification_that_adds_chunk_hashes_is_listed_until_abandoned()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("a.bin", std::string(200000, 'a')); // sample data
+    fixture.archive.add_file("b.txt", "b (sample data)");
+    va::RegisterRequest request;
+    request.root = fixture.archive.root();
+    request.chunk_size = 0; // as V1 registered it
+    const auto registered = fixture.register_root(request);
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    fixture.archive.node("b.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::VerifyRequest adding;
+    adding.archive_uuid = registered->archive_uuid;
+    adding.add_chunk_hashes = true;
+    adding.chunk_size = 64 * 1024;
+    const auto interrupted = fixture.verify(adding);
+    CHECK(interrupted && interrupted->result == "INCOMPLETE");
+    fixture.archive.node("b.txt").open_error.reset();
+    // A later verification of the archive, which adds none, passes.
+    const auto later = fixture.verify(fixture.archive.root());
+    CHECK(later && later->result == "PASSED");
+
+    const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+        [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; });
+    CHECK(read && read->operations.size() == 1);
+    if (!read || read->operations.size() != 1 || !interrupted) {
+        return;
+    }
+    const auto& operation = read->operations.front();
+    CHECK(operation.kind == va::app::OperationKind::Verification && operation.adds_chunk_hashes &&
+          operation.run_id == interrupted->run_id && operation.recorded_stopped && operation.resumable);
+
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    const Clock::time_point start{};
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    OperationWatch watch;
+    watch.update(operation, start, now);
+    const auto row = describe_operation(english, watch, start, now);
+    CHECK(row.kind == "Verification adding chunk hashes" && row.state == "stopped; it can be resumed" &&
+          row.abandonable && row.run_id == interrupted->run_id);
+    CHECK(describe_operation(chinese, watch, start, now).kind == "驗證（加入區塊雜湊）");
+
+    auto plain = operation;
+    plain.adds_chunk_hashes = false;
+    OperationWatch other;
+    other.update(plain, start, now);
+    const auto plain_row = describe_operation(english, other, start, now);
+    CHECK(plain_row.kind == "Verification" && !plain_row.abandonable);
+}
+
+// The process that the record of a verification that adds chunk hashes names
+// tells whether it still runs (decisions 0024, 0033), as a registration's
+// plan does: while that process runs, one that has said nothing for minutes
+// is held up, not stopped, and is not offered for abandoning; once that
+// process has ended, it has stopped at once, and is. Its row names the
+// process. The command line's `archive list` reads only the verifications
+// that add chunk hashes. The records are written by hand, as the engine
+// writes them (sample data).
+void a_verification_that_adds_chunk_hashes_is_judged_by_its_process()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("b.txt", "b (sample data)");
+    va::RegisterRequest request;
+    request.root = fixture.archive.root();
+    request.chunk_size = 0; // as V1 registered it
+    const auto registered = fixture.register_root(request);
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    nlohmann::json record{{"archive_uuid", registered->archive_uuid}, {"revision", 1},
+        {"root", va::path_to_utf8(fixture.archive.root())}, {"started", timestamp(now - 1h)},
+        {"updated", timestamp(now - 10min)}, {"files_total", 1}, {"bytes_total", 15}, {"add_chunk_hashes", 65536}};
+    va::record_attempt(record, {{1000, "boot-1:1000", "veriarchive-cli.exe"}, "test-host"});
+    const std::string run_id = "c0ffee00-0000-4000-8000-0000000000a2";
+    CHECK(fixture.store.set_setting("run:" + run_id, record.dump()));
+
+    test::FakeProcessTable processes;
+    processes.self = {4242, "boot-1:4242", "veriarchive-gui.exe"};
+    processes.others = {{1000, "boot-1:1000", "veriarchive-cli.exe"}};
+    const va::app::AttemptCheck attempts{&processes, "test-host", {}};
+    const auto read_one = [&] {
+        const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+            [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+        CHECK(read && read->operations.size() == 1);
+        return read && read->operations.size() == 1 ? read->operations.front() : UnfinishedOperation{};
+    };
+    const va::app::Text english;
+    const Clock::time_point start{};
+
+    const auto running = read_one();
+    CHECK(running.kind == va::app::OperationKind::Verification && running.adds_chunk_hashes &&
+          running.run_id == run_id && !running.recorded_stopped);
+    CHECK(running.attempt == va::AttemptState::Running && running.process &&
+          running.process->process.id == 1000);
+    OperationWatch held;
+    held.update(running, start, now);
+    auto row = describe_operation(english, held, start, now);
+    CHECK(row.kind == "Verification adding chunk hashes" &&
+          row.state == "no progress reported for 10 minutes; its process is still running" && !row.abandonable);
+    CHECK(row.process == "Process: 1000 (veriarchive-cli.exe)");
+    CHECK(va::app::state_code(va::app::state_of_one_read(running, now)) == "held_up");
+
+    processes.others.clear();
+    const auto ended = read_one();
+    CHECK(ended.attempt == va::AttemptState::Ended);
+    OperationWatch stopped;
+    stopped.update(ended, start, now);
+    row = describe_operation(english, stopped, start, now);
+    CHECK(row.state == "stopped; it can be resumed" && row.abandonable);
+
+    // A verification that adds none, which works now: listed, but not read
+    // for the command line.
+    const nlohmann::json plain{{"archive_uuid", registered->archive_uuid}, {"revision", 1},
+        {"root", va::path_to_utf8(fixture.archive.root())}, {"started", timestamp(now)}, {"updated", timestamp(now)},
+        {"files_total", 1}, {"bytes_total", 15}};
+    CHECK(fixture.store.set_setting("run:c0ffee00-0000-4000-8000-0000000000a3", plain.dump()));
+    const auto every = fixture.store.unfinished_verifications(now);
+    CHECK(every && every->size() == 2);
+    const auto adding = fixture.store.unfinished_verifications(now, {}, true);
+    CHECK(adding && adding->size() == 1 && adding->front().run_id == run_id);
 }
 
 // ---- Resume from the list (decision 0022, point 7) -------------------------
@@ -2307,4 +2466,6 @@ void unfinished_operations_tests()
     reads_a_registration_of_an_archive_retired_since();
     reads_operations_made_for_an_older_revision();
     words_a_line_for_the_command_line();
+    a_verification_that_adds_chunk_hashes_is_listed_until_abandoned();
+    a_verification_that_adds_chunk_hashes_is_judged_by_its_process();
 }

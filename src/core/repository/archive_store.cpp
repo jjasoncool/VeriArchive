@@ -1489,7 +1489,8 @@ std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_r
 }
 
 std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfinished_verifications(
-    std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted)
+    std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted,
+    bool only_adding_chunk_hashes)
 {
     const ReadSnapshot snapshot(database_);
     // Counting is the one long statement of a read (write_ahead_log).
@@ -1550,6 +1551,11 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
         run.totals_recorded = files_total && bytes_total;
         run.files_total = files_total.value_or(0);
         run.bytes_total = bytes_total.value_or(0);
+        run.adds_chunk_hashes = json_unsigned(setting, "add_chunk_hashes").value_or(0);
+        if (only_adding_chunk_hashes && run.adds_chunk_hashes == 0) {
+            continue;
+        }
+        run.record = value;
 
         // A run is recorded when it ends. An INCOMPLETE one keeps its setting
         // for --resume; any other result removes it in the same transaction.
@@ -1637,6 +1643,12 @@ std::expected<std::vector<UnfinishedVerification>, IoError> ArchiveStore::unfini
     // listed for good.
     const auto superseded = [&](const Candidate& candidate) {
         const auto& run = candidate.run;
+        // One that adds chunk hashes keeps every other operation that would
+        // create its archive's next revision from beginning (decision 0033):
+        // it is listed until it finishes or is abandoned.
+        if (run.adds_chunk_hashes > 0) {
+            return false;
+        }
         const auto& rows = histories.at(run.archive_uuid);
         const auto same_archive = [&](const Candidate& other) {
             return &other != &candidate && other.run.archive_uuid == run.archive_uuid;

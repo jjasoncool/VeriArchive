@@ -12,8 +12,9 @@
 // operation also writes the time into its record ("updated", decision 0022),
 // which tells a working operation from a stopped one. For an operation that
 // does not (one started by an older version), a few quiet minutes only say
-// that it *may* have stopped. A registration's plan, and a relocation's record
-// (decision 0026), also name the process that runs its attempt (decision
+// that it *may* have stopped. A registration's plan, a relocation's record
+// (decision 0026) and the record of a verification that adds chunk hashes
+// (decision 0033) also name the process that runs its attempt (decision
 // 0024): on this computer, whether that process still runs tells at once
 // whether the attempt does.
 #include "app/progress_estimate.h"
@@ -73,14 +74,17 @@ struct UnfinishedOperation {
     bool archive_retired = false;      // a registration over a lost manifest of an archive retired since: a
                                        // retired archive takes no new revision, so it can never finish
                                        // (decision 0028, point 9)
+    bool adds_chunk_hashes = false;    // a verification that adds chunk hashes (decision 0033): no other
+                                       // operation creates the archive's next revision while it is unfinished
     std::optional<std::chrono::sys_seconds> updated;  // when the operation last said it was working, if it does
     bool done_counted = true;          // false: files_done and bytes_done are not known, as the checkpoints
                                        // are not counted where that would hold up the operation (a database
                                        // not in WAL mode, decision 0022); only the record's state is shown
-    // A registration or relocation whose record does not say it stopped:
-    // whether the process that runs its attempt runs (decision 0024). Unknown
-    // for a record that names no process, or one on another computer, and when
-    // no process table was read; and for verifications.
+    // A registration, relocation or verification that adds chunk hashes whose
+    // record does not say it stopped: whether the process that runs its
+    // attempt runs (decision 0024). Unknown for a record that names no
+    // process, or one on another computer, and when no process table was
+    // read; and for verifications that add none.
     AttemptState attempt = AttemptState::Unknown;
     std::optional<AttemptProcess> process;  // the process the record names, if it names one
 };
@@ -131,7 +135,8 @@ std::optional<std::uint64_t> volume_used_bytes(const std::filesystem::path& root
 // INCOMPLETE never changes, so its counts are taken from there. Opens the
 // database read only, so watching never creates or changes it; meant to run
 // on a thread of its own, as a read can take a moment on large repositories.
-// `attempts`: how each registration's attempt is judged (decision 0024).
+// `attempts`: how the attempt of each registration, relocation and
+// verification that adds chunk hashes is judged (decision 0024).
 std::expected<OperationsRead, IoError> read_unfinished_operations(const RepositoryLayout& layout,
     const std::vector<UnfinishedOperation>& previous = {},
     const std::function<std::optional<std::uint64_t>(const std::filesystem::path&)>& used_bytes =
@@ -149,6 +154,14 @@ UnfinishedOperation registration_operation(const PendingRegistration& registrati
 // attempt judged as `attempts` says. read_unfinished_operations uses it, and
 // so does the command line for `archive list|show`.
 UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation, const AttemptCheck& attempts);
+
+// An unfinished verification (decision 0022) as an operation of the list. One
+// that adds chunk hashes names its process (decision 0033), its attempt judged
+// as `attempts` says, as a registration's; other verifications name none.
+// read_unfinished_operations uses it, and adds the totals of a run of a
+// version before decision 0022; so does the command line for
+// `archive list|show`, for one that adds chunk hashes.
+UnfinishedOperation verification_operation(const UnfinishedVerification& verification, const AttemptCheck& attempts);
 
 enum class OperationState {
     Waiting,   // first seen, and not yet seen to move
@@ -288,13 +301,14 @@ struct OperationRow {
     std::optional<double> fraction;  // for a progress bar
     Uuid archive_uuid;               // for a tooltip
     std::string run_id;              // verifications only, for a tooltip
-    std::string process;             // a registration's or relocation's: "Process: 4242 (veriarchive-cli.exe)",
-                                     // for a tooltip
+    std::string process;             // the process its record names (decision 0024): "Process: 4242
+                                     // (veriarchive-cli.exe)", for a tooltip
     std::string key;                 // the operation's key (UnfinishedOperation::key)
-    bool abandonable = false;        // a registration (decision 0025) or relocation (decision 0026) shown
-                                     // stopped (has_stopped), or a registration whose plan never says when it
-                                     // worked (an older version's) shown quiet (OperationState::Quiet): the
-                                     // operator may abandon it
+    bool abandonable = false;        // a registration (decision 0025), relocation (decision 0026) or
+                                     // verification that adds chunk hashes (decision 0033) shown stopped
+                                     // (has_stopped), or a registration whose plan never says when it worked
+                                     // (an older version's) shown quiet (OperationState::Quiet): the operator
+                                     // may abandon it
     bool offers_resume = false;      // a verification shown "stopped; it can be resumed", or a registration
                                      // shown stopped (OperationState::Stopped) or, never saying when it worked,
                                      // quiet, unless it can no longer finish: the list offers Resume, which
@@ -367,12 +381,13 @@ inline constexpr std::string_view older_version_resume_warning =
     "relocations stop until the archive gets a new revision. Make sure that the older version's window or "
     "command has been closed before you resume.";
 
-// One line about an archive's unfinished registration or relocation, for the
-// command line's `archive list` and `archive show` (decision 0026): the
-// revision it creates or verifies, where it reads, what it has done and its
-// state, judged from one read as --json judges it (state_of_one_read), and
-// worded in `text`'s language as the Archive List words its row; no speed or
-// time left, which one read cannot tell.
+// One line about an archive's unfinished registration, relocation (decision
+// 0026) or verification that adds chunk hashes (decision 0033, the one
+// verification the command line shows there), for `archive list` and
+// `archive show`: the revision it creates or verifies, where it reads, what
+// it has done and its state, judged from one read as --json judges it
+// (state_of_one_read), and worded in `text`'s language as the Archive List
+// words its row; no speed or time left, which one read cannot tell.
 std::string describe_for_archive(const Text& text, const UnfinishedOperation& operation,
     std::chrono::sys_seconds wall_now);
 

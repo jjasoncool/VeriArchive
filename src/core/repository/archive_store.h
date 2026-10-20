@@ -162,6 +162,10 @@ struct UnfinishedVerification {
                                                 // latest manifest is lost, which this layer, reading no files,
                                                 // leaves to read_unfinished_operations, the run can never be
                                                 // resumed and is not listed (decision 0022, point 5)
+    std::uint64_t adds_chunk_hashes = 0;        // the chunk size at which it adds chunk hashes (decision 0033),
+                                                // the setting's "add_chunk_hashes"; 0: it adds none
+    std::string record;                         // the setting as stored (JSON); that of one that adds chunk
+                                                // hashes names its process (decisions 0024, 0033)
 };
 
 // The setting that holds the record of an unfinished relocation of an archive
@@ -411,15 +415,21 @@ public:
     // worked or finished when it had been silent for minutes, or, once it has
     // been silent for minutes at `now`, one started after it last said
     // anything that PASSED (with warnings or not). A verification that read
-    // no media (read_no_media) supersedes none (decision 0028). A verification
-    // of a retired archive is kept as any, and marked (archive_retired): a
-    // retired archive can still be verified and its runs resumed (decision
-    // 0003), but not where its latest manifest is lost (decision 0028, point
-    // 9), which read_unfinished_operations judges from the manifest. `counted`:
-    // the checkpoints of runs recorded INCOMPLETE, counted by an earlier read;
-    // such a run never changes, so it is not counted again.
+    // no media (read_no_media) supersedes none (decision 0028). A run that
+    // adds chunk hashes is superseded by none: until it finishes or is
+    // abandoned, no other operation creates its archive's next revision
+    // (decision 0033). A verification of a retired archive is kept as any,
+    // and marked (archive_retired): a retired archive can still be verified
+    // and its runs resumed (decision 0003), but not where its latest manifest
+    // is lost (decision 0028, point 9), which read_unfinished_operations
+    // judges from the manifest. `counted`: the checkpoints of runs recorded
+    // INCOMPLETE, counted by an earlier read; such a run never changes, so it
+    // is not counted again. `only_adding_chunk_hashes`: only the runs that add
+    // chunk hashes, which no other run supersedes, so that the others are not
+    // counted (the command line's `archive list`).
     std::expected<std::vector<UnfinishedVerification>, IoError> unfinished_verifications(
-        std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted = {});
+        std::chrono::sys_seconds now, const std::map<std::string, CheckpointCount>& counted = {},
+        bool only_adding_chunk_hashes = false);
     // Every relocation whose record exists (decision 0026), its checkpoints
     // counted as a verification's are (each entry's size from the index of
     // the revision it verifies against), and only in WAL mode.

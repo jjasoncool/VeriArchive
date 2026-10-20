@@ -333,6 +333,8 @@ constexpr CatalogEntry entries[] = {
         Match::FormatOnly},
     {"Unfinished relocation of revision {} to \"{}\": {}; {}", "未完成的搬移（版次 {}，至「{}」）：{}；{}",
         Match::FormatOnly},
+    {"Unfinished verification of revision {} adding chunk hashes, from \"{}\": {}; {}",
+        "未完成的驗證（加入區塊雜湊，版次 {}，根目錄「{}」）：{}；{}", Match::FormatOnly},
     {"Retired {} ({}). It is no longer expected to be verified, "
         "is still recognised when attached, and keeps its history.",
         "已停用 {}（{}）。此封存不再需要定期驗證，接上時仍會被辨識，並保留其歷程。"},
@@ -512,6 +514,7 @@ constexpr CatalogEntry entries[] = {
     {"Progress", "進度"},
     {"Registration", "註冊"},
     {"Verification", "驗證"},
+    {"Verification adding chunk hashes", "驗證（加入區塊雜湊）"},
     {"Relocation", "搬移"},
     {"{} of about {} ({}%)", "{} / 約 {}（{}%）", Match::FormatOnly},
     {"{} done", "已完成 {}", Match::FormatOnly},
@@ -586,6 +589,13 @@ constexpr CatalogEntry entries[] = {
     {"Abandoning the relocation of {} ...", "正在放棄 {} 的搬移……"},
     {"Abandoned the unfinished relocation of {} ({}).", "已放棄 {}（{}）未完成的搬移。"},
     {"This relocation is no longer listed as unfinished.", "此搬移已不在未完成的作業中。"},
+    // Abandoning a verification that adds chunk hashes (decision 0033); the
+    // detail's last sentences are a relocation's.
+    {"Abandon the unfinished verification of {} that adds chunk hashes?", "要放棄 {} 加入區塊雜湊的未完成驗證嗎？"},
+    {"Reading the verification of {} ...", "正在讀取 {} 的驗證……"},
+    {"Abandoning the verification of {} ...", "正在放棄 {} 的驗證……"},
+    {"Abandoned the unfinished verification of {} ({}) that adds chunk hashes.",
+        "已放棄 {}（{}）加入區塊雜湊的未完成驗證。"},
     {"Cannot read the unfinished operations: {}", "無法讀取未完成的作業：{}", Match::FormatOnly},
     // src/gui/history_view.cpp
     {"Finished", "完成時間"},
