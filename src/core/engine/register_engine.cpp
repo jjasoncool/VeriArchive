@@ -104,10 +104,11 @@ std::unexpected<RegisterFailure> still_running(const AttemptProcess& attempt)
 }
 
 // Whether a registration's plan says when its attempt last worked ("updated",
-// decision 0022), which every attempt since that decision writes with its
-// plan and while it works. A plan without it was written by a version before
-// that decision, as the Archive List and abandoning take it too (decision
-// 0025).
+// decision 0022), which every attempt since that decision writes while it
+// works, and this version also with the plan it makes or takes over. A plan
+// without it was written by a version before that decision, as the Archive
+// List and abandoning take it too (decision 0025), or by a later version whose
+// writes of it all failed (they are best effort).
 bool said_when_it_worked(const nlohmann::json& plan)
 {
     const auto updated = plan.find("updated");
@@ -733,20 +734,28 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 return {};
             }
             // Decision 0022, point 7 (operator, 2026-10-20): a plan that never
-            // says when its attempt last worked was written by a version
-            // before decision 0022, which may still run it: nothing tells
-            // whether it has stopped. That version names its manifest before
-            // it records it (decision 0023, consequences): still running, it
-            // would put its own manifest in place of the one that this resume
-            // records. So the resume takes the registration over only once
-            // the operator has confirmed that no program of that version runs
-            // it; until then it says so and changes nothing. A plan that says
-            // when it worked needs no confirmation, also where nothing tells
-            // whether its attempt still runs (another computer, a version
-            // before decision 0024): every version that writes it names its
-            // manifest in the transaction that records it, and the first to
-            // record the revision wins (decision 0023).
-            if (!said_when_it_worked(record) && !request.confirmed) {
+            // says when its attempt last worked and names no process was
+            // written by a version before decision 0022, which may still run
+            // it: nothing tells whether it has stopped. That version names its
+            // manifest before it records it (decision 0023, consequences):
+            // still running, it would put its own manifest in place of the one
+            // that this resume records. So the resume takes the registration
+            // over only once the operator has confirmed that no program of that
+            // version runs it; until then it says so and changes nothing,
+            // asked last, after every refusal above. A plan that says when it
+            // worked, or names a process (decision 0024), needs no
+            // confirmation, also where nothing tells whether its attempt still
+            // runs (another computer, a version before decision 0024): the
+            // versions since decision 0023 name their manifest in the
+            // transaction that records it, so that the first to record the
+            // revision wins and nothing is replaced (decision 0023). A plan
+            // that names a process is of a version since decision 0024, also
+            // where its writes of "updated" all failed, as while another
+            // connection held the write lock. The exception: the development
+            // builds of the evening of 2026-10-15, between decisions 0022 and
+            // 0023, say when they worked but name their manifest first, and a
+            // resume beside one of them goes unasked (decision 0022, point 7).
+            if (!said_when_it_worked(record) && !recorded_attempt(record) && !request.confirmed) {
                 refused = RegisterFailure{Kind::Unconfirmed, "run the command again with --confirm to resume it",
                     std::nullopt,
                     OlderVersionRegistration{plan.archive_uuid, plan.label, plan.revision, plan.root, plan.created}};
@@ -992,6 +1001,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     return inserted;
                 }
             }
+            // The plan says when its attempt worked from the moment it is
+            // made (decision 0022, point 6), as a resume's plan does from the
+            // transaction that takes it over: the heartbeat's writes are best
+            // effort, and a plan left without "updated" would be taken for an
+            // older version's (decision 0022, point 7).
+            plan_record["updated"] = current_timestamp();
             if (auto saved = store.set_setting(pending_key(plan.archive_uuid), plan_record.dump()); !saved) {
                 return saved;
             }

@@ -1795,8 +1795,9 @@ va::app::OperationRow row_of(const UnfinishedOperation& operation)
 // no longer finish (an archive with a newer or later revision, or retired),
 // and never for a relocation, which the GUI does not run. Abandon... goes
 // with a registration's and a relocation's Resume, also where it alone is
-// offered (decision 0025). Resume asks first only on the quiet registration,
-// which the older version may still run (operator, 2026-10-20).
+// offered (decision 0025). Resume asks first only on the quiet registration
+// whose plan names no process, which the older version may still run
+// (operator, 2026-10-20).
 void offers_resume_only_where_it_continues()
 {
     auto verification = registration(3, 300);
@@ -1893,6 +1894,14 @@ void offers_resume_only_where_it_continues()
     auto older_retired = older;
     older_retired.archive_retired = true;
     CHECK(offered(older_retired, OperationState::Quiet, false, true, false));
+    // A plan that names its process but never says when it worked, as a
+    // version since decision 0024 leaves one whose writes of "updated" all
+    // failed, here of another computer: quiet as well, with both, but its
+    // Resume resumes at once, as the resume itself asks nothing of it (its
+    // version names its manifest in the transaction that records it).
+    auto named = older;
+    named.process = va::AttemptProcess{{1000, "boot-1:1000", "veriarchive-cli.exe"}, "another-computer"};
+    CHECK(offered(named, OperationState::Quiet, true, true, false));
     // Its checkpoints not counted (the rollback-journal mode): not known.
     older.done_counted = false;
     row = row_of(older);

@@ -201,10 +201,14 @@ public:
     // it stopped, or names a process that has ended, but whose checkpoints
     // moved since a poll first saw that, has been taken up again by an
     // attempt that does not write the plan (an older version's `register
-    // --resume`): its plan's "stopped", "updated" and process belong to the
-    // attempt before, so they are left out here, and it is judged by its
-    // counts.
+    // --resume`): its plan's "stopped" and "updated", and what its process
+    // tells, belong to the attempt before, so they are left out here, and it
+    // is judged by its counts (the process its plan names stays named).
     const UnfinishedOperation& operation() const { return operation_; }
+    // Whether a poll saw such a registration taken up again (see operation()):
+    // an attempt that does not write the plan, an older version's, runs it,
+    // whatever process its plan names.
+    bool taken_up() const { return stop_mark_ && stop_mark_->taken_up; }
     OperationState state(Clock::time_point now, std::chrono::sys_seconds wall_now) const;
     // How long no progress was seen: since the last step, or since the first
     // poll. This window cannot know what happened before it first looked.
@@ -296,11 +300,13 @@ struct OperationRow {
                                      // continues it as its command-line resume does (decision 0022, point 7;
                                      // verification_resume, registration_resume)
     bool resume_asks_first = false;  // Resume is offered on a registration shown quiet, whose plan never says
-                                     // when it worked (an older version's, or one an older version took up):
-                                     // that version may still run it, so Resume asks first, saying
-                                     // older_version_resume_warning, and resumes only once the operator chose
-                                     // Resume there (decision 0022, point 7); not on one shown stopped, whose
-                                     // attempt has ended
+                                     // when it worked and names no process (an older version's), or that an
+                                     // older version took up (OperationWatch::taken_up): that version may still
+                                     // run it, so Resume asks first, saying older_version_resume_warning, and
+                                     // resumes only once the operator chose Resume there (decision 0022, point
+                                     // 7), as the resume itself asks for such a plan. Not on one shown stopped,
+                                     // nor on a quiet one whose plan names a process: their versions name their
+                                     // manifest in the transaction that records it (decision 0023)
 };
 
 OperationRow describe_operation(const Text& text, const OperationWatch& watch, OperationWatch::Clock::time_point now,

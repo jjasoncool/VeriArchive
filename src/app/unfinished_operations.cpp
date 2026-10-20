@@ -641,11 +641,17 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
                             operation.resumable) ||
                         (quiet_registration && !operation.later_revision && !operation.archive_retired);
     // Resume on a quiet registration as above asks first (operator,
-    // 2026-10-20): the older version may still run it, and would then put its
-    // own manifest in place of the one that the resume records. On one shown
-    // stopped it resumes at once: its stop mark or its ended process says
-    // that its attempt has ended.
-    row.resume_asks_first = row.offers_resume && quiet_registration;
+    // 2026-10-20) where its plan names no process, as an older version's
+    // does, or an older version took it up: that version may still run it,
+    // and would then put its own manifest in place of the one that the resume
+    // records. The resume itself asks for such a plan, and for no other. A
+    // plan that names a process is of a version since decision 0024, also
+    // where its writes of "updated" all failed, and a stopped registration's
+    // says that it stopped, names a process that has ended or says when it
+    // worked: their versions name their manifest in the transaction that
+    // records it (decision 0023), so their Resume resumes at once.
+    row.resume_asks_first =
+        row.offers_resume && quiet_registration && (!operation.process || watch.taken_up());
 
     // What is done, against the total when it is known.
     const bool by_bytes = usable_bytes_total(operation) > 0;

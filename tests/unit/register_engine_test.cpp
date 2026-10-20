@@ -1426,7 +1426,10 @@ std::uint64_t bytes_of(const std::vector<va::Entry>& rows)
 // a plan whose revision is recorded goes as before, without a question
 // (decision 0023). A plan of this version, which says when it worked, resumes
 // without confirmation (the tests above), and takes one too: a script may
-// always pass --confirm.
+// always pass --confirm. So does a plan that names its process but never says
+// when it worked, as a version since decision 0024 leaves one whose writes of
+// "updated" all failed: that version names its manifest in the transaction
+// that records it.
 void a_resume_of_an_older_versions_plan_asks_for_confirmation()
 {
     const auto as_an_older_version_wrote_it = [](Fixture& fixture, const va::Uuid& archive_uuid) {
@@ -1500,6 +1503,56 @@ void a_resume_of_an_older_versions_plan_asks_for_confirmation()
         request.confirmed = true;
         const auto resumed = fixture.run(request);
         CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+    }
+    {
+        // A plan that names the process of its attempt, which has ended, and
+        // never says when it worked (sample damage: no "updated", no stop
+        // mark): unconfirmed, it resumes as before.
+        Fixture fixture;
+        const va::ProcessIdentity first{1000, "boot-1:1000", "veriarchive-cli.exe"};
+        const auto archive_uuid = interrupted_in(fixture, first, true);
+        auto plan = plan_of(fixture.store, archive_uuid);
+        plan.erase("updated");
+        CHECK(plan.contains("process") && !plan.contains("stopped"));
+        CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+        fixture.processes.self = {2000, "boot-1:2000", "veriarchive-cli.exe"};
+        auto request = at("/vol");
+        request.resume = true;
+        const auto resumed = fixture.run(request);
+        CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+        if (!resumed) {
+            std::cerr << "  a plan that names its process: " << resumed.error().message << '\n';
+        }
+    }
+}
+
+// Decision 0022, point 6: a plan says when its attempt worked from the moment
+// it is made, in the transaction that writes it, where only the heartbeat's
+// writes, which are best effort, said so. A registration whose every later
+// write of its plan fails (a trigger, sample failure, standing in for another
+// connection that holds the write lock for longer than a statement waits),
+// interrupted as a file's device goes away, leaves its plan as it made it:
+// saying when it worked and naming its process, without totals or the stop
+// mark. Its resume, as a script resumes this version's registrations, needs
+// no confirmation (point 7).
+void a_plan_says_when_it_worked_from_the_moment_it_is_made()
+{
+    Fixture fixture;
+    fixture.processes.self = {1000, "boot-1:1000", "veriarchive-cli.exe"};
+    fixture.repository.execute("CREATE TRIGGER sample_failure BEFORE UPDATE ON settings "
+                               "WHEN NEW.key LIKE 'registration:%' BEGIN SELECT RAISE(ABORT, 'sample failure'); END;");
+    const auto archive_uuid = interrupted_sample_registration(fixture);
+    fixture.repository.execute("DROP TRIGGER sample_failure;");
+    const auto plan = plan_of(fixture.store, archive_uuid);
+    CHECK(plan.is_object() && va::parse_timestamp(plan.value("updated", std::string{})).has_value() &&
+          plan.contains("process") && !plan.contains("files_total") && !plan.contains("stopped"));
+    fixture.processes.self = {2000, "boot-1:2000", "veriarchive-cli.exe"};
+    auto request = at("/vol");
+    request.resume = true;
+    const auto resumed = fixture.run(request);
+    CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
+    if (!resumed) {
+        std::cerr << "  a plan whose later writes failed: " << resumed.error().message << '\n';
     }
 }
 
@@ -3032,6 +3085,7 @@ void register_engine_tests()
     a_resume_goes_ahead_when_the_process_id_is_reused();
     a_resume_goes_ahead_where_the_attempt_before_has_ended_or_cannot_be_seen();
     a_resume_of_an_older_versions_plan_asks_for_confirmation();
+    a_plan_says_when_it_worked_from_the_moment_it_is_made();
     resumes_started_at_once_take_turns();
     an_attempt_stops_when_its_first_registration_is_abandoned();
     an_attempt_abandoned_while_it_writes_its_manifest_records_nothing();

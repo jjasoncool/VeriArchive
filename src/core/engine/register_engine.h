@@ -30,10 +30,11 @@ struct RegisterRequest {
     std::optional<Uuid> lost_manifest_of;
     // --confirm: of a registration over a lost manifest, as above; or of a
     // resume of a registration whose plan never says when its attempt last
-    // worked (an older version's, decision 0022, point 7), which that version
-    // may still run: without it, such a resume changes nothing and says what
-    // it would take up (Kind::Unconfirmed, OlderVersionRegistration). A resume
-    // of any other plan takes it and needs none.
+    // worked and names no process (an older version's, decision 0022, point
+    // 7), which that version may still run: without it, such a resume changes
+    // nothing and says what it would take up (Kind::Unconfirmed,
+    // OlderVersionRegistration). A resume of any other plan takes it and needs
+    // none.
     bool confirmed = false;
 };
 
@@ -109,10 +110,11 @@ struct LostManifestRegistration {
 };
 
 // An unfinished registration whose plan never says when its attempt last
-// worked: a version before decision 0022 wrote it, which may still run it,
-// and which names its manifest before it records it (decision 0023,
-// consequences). A resume says what it would take up before the operator
-// confirms that no program of that version runs it (decision 0022, point 7).
+// worked and names no process: a version before decision 0022 wrote it, which
+// may still run it, and which names its manifest before it records it
+// (decision 0023, consequences). A resume says what it would take up before
+// the operator confirms that no program of that version runs it (decision
+// 0022, point 7).
 struct OlderVersionRegistration {
     Uuid archive_uuid;
     std::string label;
