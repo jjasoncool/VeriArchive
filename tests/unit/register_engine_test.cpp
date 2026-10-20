@@ -1424,9 +1424,10 @@ std::uint64_t bytes_of(const std::vector<va::Entry>& rows)
 // it would take up; confirmed, as `register <root> --resume --confirm`, it
 // goes ahead as before, reading only the rest, and records the revision. Such
 // a plan whose revision is recorded goes as before, without a question
-// (decision 0023). A plan of this version, which says when it worked, resumes
-// without confirmation (the tests above), and takes one too: a script may
-// always pass --confirm. So does a plan that names its process but never says
+// (decision 0023). So is one whose "updated" is no time (sample damage). A
+// plan of this version, which says when it worked, resumes without
+// confirmation (the tests above), and takes one too: a script may always pass
+// --confirm. So does a plan that names its process but never says
 // when it worked, as a version since decision 0024 leaves one whose writes of
 // "updated" all failed: that version names its manifest in the transaction
 // that records it.
@@ -1493,6 +1494,22 @@ void a_resume_of_an_older_versions_plan_asks_for_confirmation()
         CHECK(!resumed && resumed.error().kind == va::RegisterFailure::Kind::Refused &&
               resumed.error().message == test::already_recorded_message(archive_uuid, 1));
         CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+    }
+    {
+        // A plan whose "updated" is no time (sample damage), and that names
+        // no process, says nothing of when it worked: it is asked about too.
+        Fixture fixture;
+        const auto archive_uuid = interrupted_sample_registration(fixture);
+        auto plan = as_an_older_version_wrote_it(fixture, archive_uuid);
+        plan["updated"] = "not a time (sample damage)";
+        CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+        fixture.archive.bytes_read = 0;
+        auto request = at("/vol");
+        request.resume = true;
+        const auto asked = fixture.run(request);
+        CHECK(!asked && asked.error().kind == va::RegisterFailure::Kind::Unconfirmed && asked.error().older_version);
+        CHECK(fixture.archive.bytes_read == 0);
+        CHECK(plan_of(fixture.store, archive_uuid) == plan);
     }
     {
         // A plan of this version, confirmed although it needs no confirmation.
@@ -2958,6 +2975,91 @@ void a_retired_archive_takes_no_registration_over_its_lost_manifest()
     }
 }
 
+// Decision 0022, point 7: a resume asks for the confirmation last, after
+// every refusal, so that a plan that can no longer finish is refused as
+// before, naming the abandon, also where it never says when it worked and
+// names no process (sample damage, as a version before decision 0022 wrote
+// it), rather than asked about first. A `register --new-revision` of the
+// sample at /vol, interrupted as a file's device went away, made for an older
+// revision once an import gives the archive revision 3 (decision 0030); and a
+// registration over the lost manifest of archive A (sample data), interrupted
+// likewise, whose archive is retired since (decision 0028, point 9). Each
+// resume, unconfirmed, is refused so, reads nothing and leaves the plan as it
+// was.
+void an_older_versions_plan_that_can_no_longer_finish_is_refused_unasked()
+{
+    const auto as_an_older_version_wrote_it = [](Fixture& fixture, const va::Uuid& archive_uuid) {
+        auto plan = plan_of(fixture.store, archive_uuid);
+        CHECK(plan.contains("updated") && plan.contains("process"));
+        for (const auto* member : {"updated", "stopped", "process", "files_total", "bytes_total", "media_copy"}) {
+            plan.erase(member);
+        }
+        CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+        return plan;
+    };
+    {
+        Fixture fixture;
+        const auto archive_uuid = registered_sample(fixture);
+        fixture.archive.node("videos/v130.bin").open_error =
+            va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+        auto again = at("/vol");
+        again.new_revision = true;
+        const auto interrupted = fixture.run(again);
+        CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+        fixture.archive.node("videos/v130.bin").open_error.reset();
+        const auto plan = as_an_older_version_wrote_it(fixture, archive_uuid);
+        test::import_later_revision(fixture, fixture.store, archive_uuid, 3);
+        fixture.archive.bytes_read = 0;
+        auto resume = at("/vol");
+        resume.resume = true;
+        const auto refused = fixture.run(resume);
+        CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+              refused.error().message == made_for_an_older_revision(archive_uuid, 2, 3) &&
+              !refused.error().older_version);
+        if (refused) {
+            std::cerr << "  made for an older revision: registered revision " << refused->revision << '\n';
+        } else if (refused.error().kind != va::RegisterFailure::Kind::Refused) {
+            std::cerr << "  made for an older revision: " << refused.error().message << '\n';
+        }
+        CHECK(fixture.archive.bytes_read == 0);
+        CHECK(plan_of(fixture.store, archive_uuid) == plan);
+    }
+    {
+        Fixture fixture;
+        const auto archive_uuid = archive_a_registered_twice(fixture);
+        std::filesystem::remove(va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2));
+        fixture.archive.node("a/SAMPLE-two.txt").open_error =
+            va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged (sample)"};
+        const auto interrupted = fixture.run(over_lost_manifest("/vol/a", archive_uuid, true));
+        CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+        fixture.archive.node("a/SAMPLE-two.txt").open_error.reset();
+        const auto plan = as_an_older_version_wrote_it(fixture, archive_uuid);
+        auto archive = fixture.store.find_archive(archive_uuid);
+        CHECK(archive && *archive);
+        if (archive && *archive) {
+            (*archive)->status = "RETIRED";
+            CHECK(fixture.store.update_archive(**archive));
+        }
+        fixture.archive.bytes_read = 0;
+        auto resume = at("/vol/a");
+        resume.resume = true;
+        const auto refused = fixture.run(resume);
+        CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+              refused.error().message == "archive " + archive_uuid +
+                                             " is retired and takes no new revisions (decision 0003): abandon its "
+                                             "unfinished registration with `archive abandon-registration " +
+                                             archive_uuid + "`" &&
+              !refused.error().older_version);
+        if (refused) {
+            std::cerr << "  for a retired archive: registered revision " << refused->revision << '\n';
+        } else if (refused.error().kind != va::RegisterFailure::Kind::Refused) {
+            std::cerr << "  for a retired archive: " << refused.error().message << '\n';
+        }
+        CHECK(fixture.archive.bytes_read == 0);
+        CHECK(plan_of(fixture.store, archive_uuid) == plan);
+    }
+}
+
 // Decision 0028, point 4: beside an archive whose latest manifest cannot be
 // used, a registration of a new revision goes ahead where its root is plainly
 // another archive's, by the rule that lets a verification by root go ahead.
@@ -3105,5 +3207,6 @@ void register_engine_tests()
     a_registration_over_a_lost_manifest_takes_the_root_of_its_twin_on_a_volume_matched_weakly();
     a_registration_over_a_lost_manifest_resumes();
     a_retired_archive_takes_no_registration_over_its_lost_manifest();
+    an_older_versions_plan_that_can_no_longer_finish_is_refused_unasked();
     a_new_revision_of_another_archives_root_goes_ahead_beside_a_damaged_archive();
 }
