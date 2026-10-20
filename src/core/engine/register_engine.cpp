@@ -103,6 +103,18 @@ std::unexpected<RegisterFailure> still_running(const AttemptProcess& attempt)
             ") on this computer; resume it once that process has ended");
 }
 
+// Whether a registration's plan says when its attempt last worked ("updated",
+// decision 0022), which every attempt since that decision writes with its
+// plan and while it works. A plan without it was written by a version before
+// that decision, as the Archive List and abandoning take it too (decision
+// 0025).
+bool said_when_it_worked(const nlohmann::json& plan)
+{
+    const auto updated = plan.find("updated");
+    return updated != plan.end() && updated->is_string() &&
+           parse_timestamp(updated->get<std::string>()).has_value();
+}
+
 // The operator abandoned the registration while this attempt ran, where its
 // process could not be seen (another computer sharing the repository, decision
 // 0025): its plan is gone, or the key holds a later registration's plan.
@@ -601,8 +613,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         return fail(Kind::Invalid, "--lost-manifest takes none of --label, --new-revision, --force-new-archive and "
                                    "--resume");
     }
-    if (request.confirmed && !request.lost_manifest_of) {
-        return fail(Kind::Invalid, "--confirm is used only with --lost-manifest");
+    // --confirm confirms a registration over a lost manifest, or a resume of
+    // an older version's registration (decision 0022, point 7); with nothing
+    // to confirm, it is a mistake.
+    if (request.confirmed && !request.lost_manifest_of && !request.resume) {
+        return fail(Kind::Invalid, "--confirm is used only with --lost-manifest or --resume");
     }
 
     const auto volume = services.media.volume_for_path(request.root);
@@ -711,9 +726,30 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     return {};
                 }
             }
-            if (const auto judged = judge_attempt(record, services.processes, services.host.host);
-                judged.state == AttemptState::Running) {
+            const auto judged = judge_attempt(record, services.processes, services.host.host);
+            if (judged.state == AttemptState::Running) {
                 refused = still_running(*judged.attempt).error();
+                store.rollback();
+                return {};
+            }
+            // Decision 0022, point 7 (operator, 2026-10-20): a plan that never
+            // says when its attempt last worked was written by a version
+            // before decision 0022, which may still run it: nothing tells
+            // whether it has stopped. That version names its manifest before
+            // it records it (decision 0023, consequences): still running, it
+            // would put its own manifest in place of the one that this resume
+            // records. So the resume takes the registration over only once
+            // the operator has confirmed that no program of that version runs
+            // it; until then it says so and changes nothing. A plan that says
+            // when it worked needs no confirmation, also where nothing tells
+            // whether its attempt still runs (another computer, a version
+            // before decision 0024): every version that writes it names its
+            // manifest in the transaction that records it, and the first to
+            // record the revision wins (decision 0023).
+            if (!said_when_it_worked(record) && !request.confirmed) {
+                refused = RegisterFailure{Kind::Unconfirmed, "run the command again with --confirm to resume it",
+                    std::nullopt,
+                    OlderVersionRegistration{plan.archive_uuid, plan.label, plan.revision, plan.root, plan.created}};
                 store.rollback();
                 return {};
             }

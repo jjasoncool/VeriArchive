@@ -28,7 +28,13 @@ struct RegisterRequest {
     // carrier), so the operator names it. Without `confirmed` it only checks
     // and says what it would register (Kind::Unconfirmed).
     std::optional<Uuid> lost_manifest_of;
-    bool confirmed = false;                 // --confirm
+    // --confirm: of a registration over a lost manifest, as above; or of a
+    // resume of a registration whose plan never says when its attempt last
+    // worked (an older version's, decision 0022, point 7), which that version
+    // may still run: without it, such a resume changes nothing and says what
+    // it would take up (Kind::Unconfirmed, OlderVersionRegistration). A resume
+    // of any other plan takes it and needs none.
+    bool confirmed = false;
 };
 
 struct RegisterServices {
@@ -102,6 +108,19 @@ struct LostManifestRegistration {
     std::vector<SameRoot> same_root;             // in the order of the archives' labels
 };
 
+// An unfinished registration whose plan never says when its attempt last
+// worked: a version before decision 0022 wrote it, which may still run it,
+// and which names its manifest before it records it (decision 0023,
+// consequences). A resume says what it would take up before the operator
+// confirms that no program of that version runs it (decision 0022, point 7).
+struct OlderVersionRegistration {
+    Uuid archive_uuid;
+    std::string label;
+    std::uint32_t revision = 0;             // the revision it creates
+    std::string root;                       // UTF-8, as its plan names it
+    Timestamp started;                      // when its plan was made (its "created")
+};
+
 struct RegisterFailure {
     enum class Kind {
         Invalid,     // a value of the request is malformed, e.g. the label (exit 10)
@@ -109,12 +128,15 @@ struct RegisterFailure {
         Media,       // the root or its volume cannot be read (exit 11)
         Repository,  // manifest or database could not be written (exit 11)
         Incomplete,  // cancelled or the device disappeared (exit 4)
-        Unconfirmed, // a registration over a lost manifest not confirmed: nothing written (exit 12)
+        Unconfirmed, // a registration over a lost manifest, or a resume of an older version's registration,
+                     // not confirmed: nothing written (exit 12)
     };
     Kind kind;
     std::string message;
     // Unconfirmed: what the registration would register once confirmed.
     std::optional<LostManifestRegistration> lost_manifest = std::nullopt;
+    // Unconfirmed: the older version's registration that the resume would take up once confirmed.
+    std::optional<OlderVersionRegistration> older_version = std::nullopt;
 };
 
 std::expected<RegisterOutcome, RegisterFailure> register_archive(

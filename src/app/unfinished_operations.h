@@ -326,12 +326,17 @@ VerifyRequest verification_resume(const UnfinishedOperation& verification, const
 // names, made as the command line makes a root typed there (typed_root), and
 // no media copy (R-03), as without --write-media-copy. Before anything of the
 // root is read, it is checked as that command checks it (root_not_taken, with
-// the plan's root as typed).
-RegisterRequest registration_resume(const UnfinishedOperation& registration);
+// the plan's root as typed). `confirmed`: the operator chose Resume in the
+// question that a resume of a registration an older version left asks first
+// (OperationRow::resume_asks_first, or the resume's own refusal,
+// RegisterFailure::older_version), as `--confirm` does on the command line;
+// a resume of any other registration needs none (decision 0022, point 7).
+RegisterRequest registration_resume(const UnfinishedOperation& registration, bool confirmed = false);
 
-// What Resume on a registration that an older version of VeriArchive left,
-// and that may have stopped, asks the operator to make sure of first
-// (OperationRow::resume_asks_first; decision 0022, point 7, operator,
+// What a resume of a registration that an older version of VeriArchive left,
+// and that may still run it, says before the operator confirms it: the
+// Archive List's question (OperationRow::resume_asks_first), and `register
+// <root> --resume` without --confirm (decision 0022, point 7, operator,
 // 2026-10-20). That version never records when it last worked, so nothing
 // tells whether it still runs the registration: it may be reading a large
 // file, or scanning, for minutes without a checkpoint. And it names its

@@ -2027,7 +2027,7 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
     const auto request = va::app::registration_resume(operation);
     CHECK(request.resume && request.root == sample_root() && request.root == va::app::typed_root(operation.root));
     CHECK(!request.label && !request.copy_of && !request.new_revision && !request.force_new_archive &&
-          !request.write_media_copy && !request.rotational);
+          !request.write_media_copy && !request.rotational && !request.confirmed);
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.register_root(request);
     CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 && resumed->counts.files == 6);
@@ -2041,9 +2041,11 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
 // waiting, and once its checkpoints have stood still for 3 minutes, as one
 // that may have stopped, with Resume, which asks first (operator,
 // 2026-10-20), and Abandon... (decision 0022, point 7; decision 0025). The
-// check that Abandon... runs first, the command line's, would abandon it; the
-// request that Resume makes continues it as `register <root> --resume` does,
-// reading only the rest, and then nothing is left.
+// check that Abandon... runs first, the command line's, would abandon it. A
+// request that Resume made without the operator's word is refused, changing
+// nothing, as `register <root> --resume` is; the one it makes once the
+// operator chose Resume in the question continues it as `register <root>
+// --resume --confirm` does, reading only the rest, and then nothing is left.
 void an_older_versions_quiet_registration_is_resumed_or_abandoned()
 {
     test::EngineFixture fixture(sample_root());
@@ -2097,9 +2099,19 @@ void an_older_versions_quiet_registration_is_resumed_or_abandoned()
         va::abandonable_registration(services, {archive_uuid, operation.revision, operation.started});
     CHECK(abandonable && abandonable->files >= 3 && abandonable->first_registration);
 
-    // Resume continues it, as `register <root> --resume`.
-    const auto request = va::app::registration_resume(operation);
-    CHECK(request.resume && request.root == sample_root() && !request.write_media_copy);
+    // Resume asks first. Unconfirmed, the resume itself refuses, reading and
+    // changing nothing, as `register <root> --resume` does on the command
+    // line; the request it makes once the operator chose Resume in the
+    // question continues it, as `register <root> --resume --confirm`.
+    const auto unconfirmed = va::app::registration_resume(operation);
+    CHECK(unconfirmed.resume && !unconfirmed.confirmed);
+    fixture.archive.bytes_read = 0;
+    const auto refused = fixture.register_root(unconfirmed);
+    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Unconfirmed &&
+          refused.error().older_version && refused.error().older_version->archive_uuid == archive_uuid);
+    CHECK(fixture.archive.bytes_read == 0 && read_operations(fixture).size() == 1);
+    const auto request = va::app::registration_resume(operation, true);
+    CHECK(request.resume && request.confirmed && request.root == sample_root() && !request.write_media_copy);
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.register_root(request);
     CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 && resumed->counts.files == 6);

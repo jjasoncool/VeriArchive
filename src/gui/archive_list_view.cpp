@@ -824,13 +824,15 @@ std::optional<app::UnfinishedOperation> listed_for_resume(GuiState& state, const
 // window's one operation, its progress and report where an operation of its
 // kind started in this window shows them; what is wrong with it by now (its
 // media not attached, its archive at another revision) the resume itself says
-// there, in the command line's words.
-void resume_operation(GuiState& state, const app::UnfinishedOperation& operation)
+// there, in the command line's words. `confirmed`: a registration that an
+// older version left, which the operator confirmed in the question (as
+// --confirm).
+void resume_operation(GuiState& state, const app::UnfinishedOperation& operation, bool confirmed = false)
 {
     if (operation.kind == app::OperationKind::Verification) {
         resume_verification(state, operation);
     } else {
-        resume_registration(state, operation);
+        resume_registration(state, operation, confirmed);
     }
 }
 
@@ -846,55 +848,18 @@ void resume_from_list(GuiState& state, const std::string& key)
     }
 }
 
-// What the operator is asked about, carried into the question's answer.
+// What the operator is asked about, carried into the question's answer
+// (ask_before_resuming).
 struct ResumeChoice {
     GuiState* state;
     std::function<void(GuiState&)> resume;
 };
 
-// Asks, with Cancel as the default, before a registration that an older
-// version of VeriArchive left is resumed (decision 0022, point 7; operator,
-// 2026-10-20): that version may still run it, and nothing tells whether it
-// has stopped, so the question says what happens where it still runs, and
-// asks the operator to make sure that its window or command has been closed.
-// `resume` runs only once the operator chose Resume; Cancel changes nothing.
-void ask_before_resuming(GuiState& state, const std::string& label, const std::string& root,
-    std::function<void(GuiState&)> resume)
-{
-    const auto& text = state.text;
-    const auto detail = text.format("Root: {}", root) + "\n\n" + text(app::older_version_resume_warning);
-    GtkAlertDialog* dialog =
-        gtk_alert_dialog_new("%s", text.format("Resume the unfinished registration of {}?", label).c_str());
-    gtk_alert_dialog_set_detail(dialog, detail.c_str());
-    const auto cancel = text("Cancel");
-    const auto go_on = text("Resume");
-    const char* buttons[] = {cancel.c_str(), go_on.c_str(), nullptr};
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_cancel_button(dialog, 0);
-    gtk_alert_dialog_set_default_button(dialog, 0);
-    auto* choice = new ResumeChoice{&state, std::move(resume)};
-    gtk_alert_dialog_choose(dialog, state.window, nullptr,
-        +[](GObject* source, GAsyncResult* result, gpointer data) {
-            std::unique_ptr<ResumeChoice> choice(static_cast<ResumeChoice*>(data));
-            GError* error = nullptr;
-            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
-            if (error) {
-                g_error_free(error); // dismissed, as when the window closed
-            }
-            g_object_unref(source);
-            auto& state = *choice->state;
-            if (button != 1 || !state.window) {
-                return;
-            }
-            guarded([&] { choice->resume(state); }, [&](const Report& report) { show_message(state, report); });
-        },
-        choice);
-}
-
 // The operator chose Resume on the registration `key` of the latest read,
 // whose row says that an older version left it and that it may have stopped
 // (OperationRow::resume_asks_first): it asks first, and only once the
-// operator chose Resume there does it resume as resume_from_list does.
+// operator chose Resume there does it resume as resume_from_list does, the
+// resume confirmed as with --confirm.
 void ask_to_resume(GuiState& state, const std::string& key)
 {
     if (!can_resume(state)) {
@@ -908,7 +873,7 @@ void ask_to_resume(GuiState& state, const std::string& key)
     ask_before_resuming(state, label, operation->root, [asked = *operation](GuiState& state) {
         // Another operation may have started while the question was shown.
         if (can_resume(state)) {
-            resume_operation(state, asked);
+            resume_operation(state, asked, true);
         }
     });
 }
@@ -944,6 +909,42 @@ GtkWidget* build_operations_section(GuiState& state)
 }
 
 } // namespace
+
+void ask_before_resuming(GuiState& state, const std::string& label, const std::string& root,
+    std::function<void(GuiState&)> resume)
+{
+    // What happens where the older version still runs the registration, and
+    // what to make sure of first, with the root, so that the operator knows
+    // which window or command to look for.
+    const auto& text = state.text;
+    const auto detail = text.format("Root: {}", root) + "\n\n" + text(app::older_version_resume_warning);
+    GtkAlertDialog* dialog =
+        gtk_alert_dialog_new("%s", text.format("Resume the unfinished registration of {}?", label).c_str());
+    gtk_alert_dialog_set_detail(dialog, detail.c_str());
+    const auto cancel = text("Cancel");
+    const auto go_on = text("Resume");
+    const char* buttons[] = {cancel.c_str(), go_on.c_str(), nullptr};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    auto* choice = new ResumeChoice{&state, std::move(resume)};
+    gtk_alert_dialog_choose(dialog, state.window, nullptr,
+        +[](GObject* source, GAsyncResult* result, gpointer data) {
+            std::unique_ptr<ResumeChoice> choice(static_cast<ResumeChoice*>(data));
+            GError* error = nullptr;
+            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
+            if (error) {
+                g_error_free(error); // dismissed, as when the window closed
+            }
+            g_object_unref(source);
+            auto& state = *choice->state;
+            if (button != 1 || !state.window) {
+                return;
+            }
+            guarded([&] { choice->resume(state); }, [&](const Report& report) { show_message(state, report); });
+        },
+        choice);
+}
 
 void refresh_archive_list(GuiState& state)
 {

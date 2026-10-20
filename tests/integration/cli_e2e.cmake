@@ -1477,4 +1477,107 @@ if(NOT weak_same EQUAL 1 OR NOT weak_clones EQUAL 0 OR NOT weak_named STREQUAL w
 endif()
 set(GLOBAL --config "${WORK}/config.json")
 
+# Decision 0022, point 7 (operator, 2026-10-20): `register <root> --resume` of
+# a registration that an older version left, which may still run it, says
+# what happens where that version still runs it and stops (exit 12), changing
+# nothing, until it is run again with --confirm. Where the sqlite3 command is
+# installed, in a repository of its own (sample data): two sample folders,
+# each registration stopped as its manifest cannot be written (a file stands
+# where the manifests folder belongs, sample data), the plan of one rewritten
+# as a version before decision 0022 wrote it, without "updated", its stop
+# mark and its process (sample damage). The other, this version's, resumes at
+# once, without the question, as scripts resume it; the older version's is
+# asked about in either language and in --json, its plan unchanged, and then
+# resumed with --confirm. --confirm with neither --resume nor --lost-manifest
+# is a usage error (exit 10).
+if(SQLITE3_PROGRAM)
+    file(WRITE "${WORK}/config6.json" "{\"language\": \"zh-TW\"}\n")
+    set(GLOBAL --config "${WORK}/config6.json")
+    run_cli("0" --repository "${WORK}/repo6" repo init)
+    set(OLDER_RESUME "${WORK}/older-resume-sample")
+    set(CURRENT_RESUME "${WORK}/current-resume-sample")
+    file(WRITE "${OLDER_RESUME}/a.txt" "older resume sample a\n")
+    file(WRITE "${OLDER_RESUME}/b.txt" "older resume sample b\n")
+    file(WRITE "${CURRENT_RESUME}/a.txt" "current resume sample a\n")
+    file(RENAME "${WORK}/repo6/manifests" "${WORK}/repo6/manifests.away")
+    file(WRITE "${WORK}/repo6/manifests" "not a folder (sample data)\n")
+    run_cli("11" register "${OLDER_RESUME}")
+    run_cli("0" archive list --json)
+    string(JSON older_resume_uuid GET "${last_output}" archives 0 archive_uuid)
+    string(JSON older_resume_label GET "${last_output}" archives 0 label)
+    run_cli("11" register "${CURRENT_RESUME}")
+    file(REMOVE "${WORK}/repo6/manifests")
+    file(RENAME "${WORK}/repo6/manifests.away" "${WORK}/repo6/manifests")
+    set(older_plan_key "registration:${older_resume_uuid}")
+    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+        "SELECT value FROM settings WHERE key = '${older_plan_key}'"
+        OUTPUT_VARIABLE older_plan OUTPUT_STRIP_TRAILING_WHITESPACE)
+    foreach(member IN ITEMS updated stopped process)
+        string(JSON older_plan REMOVE "${older_plan}" ${member})
+    endforeach()
+    string(REPLACE "'" "''" older_plan_sql "${older_plan}")
+    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+        "UPDATE settings SET value = '${older_plan_sql}' WHERE key = '${older_plan_key}'"
+        RESULT_VARIABLE older_resume_damaged)
+    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+        "SELECT value FROM settings WHERE key = '${older_plan_key}'"
+        OUTPUT_VARIABLE older_plan_written OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # This version's plan: resumed at once, as before.
+    run_cli("0" --lang en register "${CURRENT_RESUME}" --resume --json)
+    string(JSON current_resume_revision GET "${last_output}" revision)
+    set(current_resume_errors "${last_errors}")
+    # The older version's: asked about, in English, Chinese and --json.
+    run_cli("12" --lang en register "${OLDER_RESUME}" --resume)
+    set(older_asked "${last_output}")
+    set(older_asked_errors "${last_errors}")
+    run_cli("12" register "${OLDER_RESUME}" --resume)
+    set(older_asked_chinese "${last_output}")
+    set(older_asked_chinese_errors "${last_errors}")
+    run_cli("12" register "${OLDER_RESUME}" --resume --json)
+    string(JSON older_json_error GET "${last_output}" error)
+    string(JSON older_json_uuid GET "${last_output}" registration archive_uuid)
+    string(JSON older_json_label GET "${last_output}" registration label)
+    string(JSON older_json_revision GET "${last_output}" registration revision)
+    string(JSON older_json_root GET "${last_output}" registration root)
+    execute_process(COMMAND "${SQLITE3_PROGRAM}" "${WORK}/repo6/veriarchive.db"
+        "SELECT value FROM settings WHERE key = '${older_plan_key}'"
+        OUTPUT_VARIABLE older_plan_asked OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # Confirmed, it is resumed and recorded.
+    run_cli("0" register "${OLDER_RESUME}" --resume --confirm --json)
+    string(JSON older_resumed_uuid GET "${last_output}" archive_uuid)
+    string(JSON older_resumed_revision GET "${last_output}" revision)
+    run_cli("10" --lang en register "${CURRENT_RESUME}" --confirm)
+    set(confirm_alone "${last_errors}")
+    string(FIND "${older_asked}" "Unfinished registration of ${older_resume_label} (${older_resume_uuid}), revision 1\n  root: " older_header)
+    string(FIND "${older_asked}" "older-resume-sample\n  started: " older_root_line)
+    string(FIND "${older_asked}" "\nAn older version of VeriArchive left this registration unfinished. That version does not record when it last worked, so VeriArchive cannot tell whether it has stopped or is still reading a large file or scanning the folder or volume. If it is still running, it will later record its own manifest over the one that this resume records: from then on every verification of the archive fails, and other registrations and relocations stop until the archive gets a new revision. Make sure that the older version's window or command has been closed before you resume.\n" older_warning)
+    string(FIND "${older_asked_chinese}" "${older_resume_label}（${older_resume_uuid}）未完成的註冊，版次 1\n  根目錄：" older_header_chinese)
+    string(FIND "${older_asked_chinese}" "\n舊版 VeriArchive 留下了這個未完成的註冊。舊版不會記錄它最後一次運作的時間，所以程式無法判斷它已經停止，還是仍在讀取一個大檔案、或掃描資料夾或磁碟區。如果它仍在執行，之後會用自己的清單檔蓋掉這次繼續所記錄的清單檔：從此這個封存的每次驗證都會失敗，其他的註冊與搬移也都會停下來，直到這個封存有了新的版次為止。繼續之前，請先確認舊版的視窗或命令都已關閉。\n" older_warning_chinese)
+    if(NOT older_resume_damaged EQUAL 0 OR older_plan_written MATCHES "\"(updated|stopped|process)\""
+            OR NOT current_resume_revision EQUAL 1 OR current_resume_errors MATCHES "--confirm|older version"
+            OR older_header EQUAL -1 OR older_root_line EQUAL -1 OR older_warning EQUAL -1
+            OR NOT older_asked_errors STREQUAL "error: run the command again with --confirm to resume it\n"
+            OR older_header_chinese EQUAL -1 OR older_warning_chinese EQUAL -1
+            OR NOT older_asked_chinese_errors STREQUAL "錯誤：若要繼續，請加上 --confirm 再執行一次\n"
+            OR NOT older_json_error STREQUAL "run the command again with --confirm to resume it"
+            OR NOT older_json_uuid STREQUAL older_resume_uuid OR NOT older_json_label STREQUAL older_resume_label
+            OR NOT older_json_revision EQUAL 1 OR NOT older_json_root MATCHES "older-resume-sample$"
+            OR NOT older_plan_asked STREQUAL older_plan_written
+            OR NOT older_resumed_uuid STREQUAL older_resume_uuid OR NOT older_resumed_revision EQUAL 1
+            OR NOT confirm_alone STREQUAL "error: --confirm is used only with --lost-manifest or --resume\n")
+        message(FATAL_ERROR "a resume of an older version's registration: damaged ${older_resume_damaged}, current "
+            "r${current_resume_revision}, header ${older_header}/${older_header_chinese}, root ${older_root_line}, "
+            "warning ${older_warning}/${older_warning_chinese}; json ${older_json_error} ${older_json_uuid} "
+            "${older_json_label} r${older_json_revision} ${older_json_root}; resumed ${older_resumed_uuid} "
+            "r${older_resumed_revision}\n${older_plan_written}\n${older_plan_asked}\n${current_resume_errors}\n"
+            "${older_asked}\n${older_asked_errors}\n${older_asked_chinese}\n${older_asked_chinese_errors}\n"
+            "${confirm_alone}")
+    endif()
+    message(STATUS "a resume of an older version's registration: checked with ${SQLITE3_PROGRAM}")
+else()
+    message(STATUS "a resume of an older version's registration: skipped, as the sqlite3 command that rewrites "
+        "the plan (sample damage) is not installed")
+endif()
+set(GLOBAL --config "${WORK}/config.json")
+
 message(STATUS "veriarchive-cli end-to-end test passed")

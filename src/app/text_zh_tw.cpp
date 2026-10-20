@@ -69,8 +69,8 @@ constexpr CatalogEntry entries[] = {
         "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
-        "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
-        "           [--lost-manifest UUID [--confirm]]\n"
+        "           [--force-new-archive] [--copy-of UUID] [--write-media-copy]\n"
+        "           [--resume [--confirm]] [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> [--confirm]\n"
@@ -85,8 +85,8 @@ constexpr CatalogEntry entries[] = {
         "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
         "  register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision]\n"
-        "           [--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume]\n"
-        "           [--lost-manifest UUID [--confirm]]\n"
+        "           [--force-new-archive] [--copy-of UUID] [--write-media-copy]\n"
+        "           [--resume [--confirm]] [--lost-manifest UUID [--confirm]]\n"
         "  verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd]\n"
         "         [--resume RUN_ID]\n"
         "  archive list | show <uuid> | retire <uuid> [--confirm]\n"
@@ -162,9 +162,9 @@ constexpr CatalogEntry entries[] = {
         "在媒體上保留一份副本）。"},
     {"media copy: {}", "媒體副本：{}"},
     {"usage: register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume] [--lost-manifest UUID [--confirm]]",
+        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume [--confirm]] [--lost-manifest UUID [--confirm]]",
         "用法：register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume] [--lost-manifest UUID [--confirm]]"},
+        "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume [--confirm]] [--lost-manifest UUID [--confirm]]"},
     // A registration over a lost manifest (decision 0028, point 8): what it
     // would register, said before the operator confirms it, and its outcome.
     {"Lost manifest of {} ({}), revision {}", "無法取回的清單檔：{}（{}），版次 {}", Match::FormatOnly},
@@ -180,6 +180,11 @@ constexpr CatalogEntry entries[] = {
     {"run the command again with --confirm to register revision {}", "若要註冊版次 {}，請加上 --confirm 再執行一次"},
     {"revision {}, whose manifest was lost, was left out of the index; its verifications stay in the history",
         "清單檔已無法取回的版次 {} 已從索引移除；它的驗證紀錄仍保留在歷程中", Match::FormatOnly},
+    // A resume of a registration that an older version left, before it is
+    // confirmed (decision 0022, point 7): "Unfinished registration of ...",
+    // "root: {}" and "started: {}" are abandon-registration's, and the warning
+    // is the Archive List's question's.
+    {"run the command again with --confirm to resume it", "若要繼續，請加上 --confirm 再執行一次"},
     {"--io takes hdd or ssd", "--io 只接受 hdd 或 ssd"},
     {"not a directory: {}", "不是資料夾：{}"},
     // A root refused before anything of it is read (decision 0029), from src/app/typed_path.cpp; the
@@ -721,7 +726,7 @@ constexpr CatalogEntry entries[] = {
     // A registration over a lost manifest (decision 0028, point 8), refused.
     {"--lost-manifest takes none of --label, --new-revision, --force-new-archive and --resume",
         "--lost-manifest 不能與 --label、--new-revision、--force-new-archive 或 --resume 一起使用"},
-    {"--confirm is used only with --lost-manifest", "--confirm 只能與 --lost-manifest 一起使用"},
+    {"--confirm is used only with --lost-manifest or --resume", "--confirm 只能與 --lost-manifest 或 --resume 一起使用"},
     // A retired archive takes no new revision, not even over its lost manifest
     // (decision 0028, point 9): a registration of it that an older version
     // began waits to be abandoned.

@@ -2,9 +2,13 @@
 // directory tree (M3). Exit code 2 when some files could not be read at
 // registration (decision 0010). With `--lost-manifest <uuid>`, the next
 // revision of an archive whose latest manifest is lost, once confirmed
-// (decision 0028, point 8).
+// (decision 0028, point 8). With `--resume`, an interrupted registration
+// continued; one that an older version left, once confirmed (decision 0022,
+// point 7).
 #include "cli/commands.h"
 
+#include "app/local_time.h"
+#include "app/unfinished_operations.h"
 #include "common/utf8.h"
 #include "core/engine/register_engine.h"
 #include "platform/file_system.h"
@@ -123,6 +127,32 @@ int unconfirmed(const Arguments& arguments, const RegisterFailure& failure)
     return report_failure(arguments, {code, failure.message});
 }
 
+// Decision 0022, point 7 (operator, 2026-10-20): a resume of a registration
+// that an older version left, which may still run it, said before the
+// operator confirms it, as the Archive List's Resume asks first: the
+// registration it would take up, then what happens where that version still
+// runs it, in the words of the Archive List's question. `--json` gives the
+// registration as `archive abandon-registration` does.
+int unconfirmed_resume(const Arguments& arguments, const RegisterFailure& failure)
+{
+    const auto& registration = *failure.older_version;
+    const int code = failure_code(failure.kind);
+    if (arguments.json) {
+        print_json({{"error", failure.message}, {"exit_code", code},
+            {"registration", {{"archive_uuid", registration.archive_uuid}, {"label", registration.label},
+                                 {"revision", registration.revision}, {"root", registration.root},
+                                 {"started", registration.started}}}});
+        return code;
+    }
+    const auto& text = arguments.text;
+    std::cout << text.format("Unfinished registration of {} ({}), revision {}", registration.label,
+                     registration.archive_uuid, registration.revision)
+              << "\n  " << text.format("root: {}", registration.root)
+              << "\n  " << text.format("started: {}", app::local_time(registration.started, text)) << '\n'
+              << text(app::older_version_resume_warning) << '\n';
+    return report_failure(arguments, {code, failure.message});
+}
+
 void print_outcome(const app::Text& text, const RegisterOutcome& outcome, const std::filesystem::path& root)
 {
     std::cout << text.format("Registered {} ({}) revision {}", outcome.label, outcome.archive_uuid,
@@ -214,7 +244,7 @@ int register_command(const Arguments& arguments)
     if (words.size() != 2) {
         return report_failure(arguments, {exit_code::usage,
             "usage: register <root_path> [--label ARCH-NNNN] [--io hdd|ssd] [--new-revision] "
-            "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume] "
+            "[--force-new-archive] [--copy-of UUID] [--write-media-copy] [--resume [--confirm]] "
             "[--lost-manifest UUID [--confirm]]"});
     }
 
@@ -272,6 +302,9 @@ int register_command(const Arguments& arguments)
     if (!outcome) {
         if (outcome.error().kind == RegisterFailure::Kind::Unconfirmed && outcome.error().lost_manifest) {
             return unconfirmed(arguments, outcome.error());
+        }
+        if (outcome.error().kind == RegisterFailure::Kind::Unconfirmed && outcome.error().older_version) {
+            return unconfirmed_resume(arguments, outcome.error());
         }
         return report_failure(arguments, {failure_code(outcome.error().kind), outcome.error().message});
     }

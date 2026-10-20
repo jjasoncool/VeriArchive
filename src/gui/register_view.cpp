@@ -1,5 +1,7 @@
 // Register Archive (§B17): choose a folder or volume, register it (or a new
-// revision), with progress, cancel and resume for an interrupted registration.
+// revision), with progress, cancel and resume for an interrupted registration;
+// a resume of a registration that an older version left asks first (decision
+// 0022, point 7).
 #include "gui/gui_app.h"
 
 #include "app/typed_path.h"
@@ -8,6 +10,9 @@
 #include "platform/file_system.h"
 #include "platform/media_enumerator.h"
 #include "platform/process_table.h"
+
+#include <memory>
+#include <optional>
 
 namespace va::gui {
 namespace {
@@ -117,10 +122,15 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     show_report(state, [root = path_to_utf8(request.root)](const app::Text& text) {
         return text.format("Registering {} ...", root);
     });
+    // Filled by the worker where a resume waits for the operator's word, as
+    // it takes up a registration that an older version left, which may still
+    // run it (decision 0022, point 7); read by `done`, which runs only after
+    // the worker finished.
+    auto unconfirmed = std::make_shared<std::optional<OlderVersionRegistration>>();
     // The worker returns its report unworded; it is worded when shown, in the
     // language in use then.
     state.job.start(state.text, view.progress,
-        [&state, request, typed](CancelToken& cancel, IProgressSink& progress) -> Report {
+        [&state, request, typed, unconfirmed](CancelToken& cancel, IProgressSink& progress) -> Report {
             // Decision 0029: a root on a network share, or one written in the
             // \\?\ form, is refused before anything of it is read, and a
             // resumed one that is no folder too, as on the command line. Asked
@@ -145,13 +155,22 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                 *media, *store, session.context.repo, state.host, *processes};
             auto outcome = register_archive(services, request, cancel, progress);
             if (!outcome) {
+                // A resume of a registration that an older version left,
+                // which changed nothing: the window asks the operator, as the
+                // command line asks for --confirm, and says why meanwhile.
+                if (outcome.error().kind == RegisterFailure::Kind::Unconfirmed && outcome.error().older_version) {
+                    *unconfirmed = outcome.error().older_version;
+                    return [](const app::Text& text) {
+                        return text.format("Not registered: {}", text(app::older_version_resume_warning));
+                    };
+                }
                 return [message = outcome.error().message](const app::Text& text) {
                     return text.format("Not registered: {}", text(message));
                 };
             }
             return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
         },
-        [&state](const Report& result) {
+        [&state, request, typed, unconfirmed](const Report& result) {
             guarded(
                 [&] {
                     set_running(state, false);
@@ -160,6 +179,26 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                     show_report(state, result);
                     refresh_archive_list(state);
                     refresh_archive_choices(state);
+                    if (!*unconfirmed) {
+                        return;
+                    }
+                    // Decision 0022, point 7: the question, then the same
+                    // resume, confirmed as with --confirm, only once the
+                    // operator chose Resume in it.
+                    const auto& registration = **unconfirmed;
+                    const auto label = registration.label.empty() ? registration.archive_uuid.substr(0, 8)
+                                                                  : registration.label;
+                    ask_before_resuming(state, label, registration.root, [request, typed](GuiState& state) {
+                        // Another operation may have started while the question was shown.
+                        if (!state.session || state.job.running()) {
+                            show_report(state, fixed_message(state.session ? "Another operation is running."
+                                                                            : "Open a repository first (Settings)."));
+                            return;
+                        }
+                        auto confirmed = request;
+                        confirmed.confirmed = true;
+                        run_registration(state, std::move(confirmed), typed);
+                    });
                 },
                 [&](Report error) { show_error(state, std::move(error)); });
         });
@@ -167,14 +206,16 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
 
 } // namespace
 
-void resume_registration(GuiState& state, const app::UnfinishedOperation& registration)
+void resume_registration(GuiState& state, const app::UnfinishedOperation& registration, bool confirmed)
 {
     // Exactly `register <root> --resume`, the root its plan names: no media
     // copy, whatever this view's box says, which is not where Resume is
     // clicked (decision 0022, point 7). A resume with a media copy is started
-    // here, with the resume box and the media copy box.
+    // here, with the resume box and the media copy box. With --confirm where
+    // the operator confirmed it in the question about an older version's
+    // registration.
     gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "register");
-    run_registration(state, app::registration_resume(registration), registration.root);
+    run_registration(state, app::registration_resume(registration, confirmed), registration.root);
 }
 
 GtkWidget* build_register_view(GuiState& state)

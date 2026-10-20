@@ -786,14 +786,17 @@ VerifyRequest verification_resume(const UnfinishedOperation& verification, const
     return request;
 }
 
-RegisterRequest registration_resume(const UnfinishedOperation& registration)
+RegisterRequest registration_resume(const UnfinishedOperation& registration, bool confirmed)
 {
     // As `register <root> --resume` makes its request, the root its plan
     // names typed, and no --write-media-copy: nothing is written on the media.
+    // Confirmed in the question that Resume asks on an older version's
+    // registration, as with --confirm.
     RegisterRequest request;
     request.root = typed_root(registration.root);
     request.resume = true;
     request.write_media_copy = false;
+    request.confirmed = confirmed;
     return request;
 }
 

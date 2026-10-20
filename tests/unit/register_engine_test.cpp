@@ -1368,9 +1368,11 @@ void a_resume_goes_ahead_when_the_process_id_is_reused()
 
 // Where nothing tells whether the attempt before still runs, the resume goes
 // ahead as before (decision 0023: the first attempt to record the revision
-// wins): a plan of an older version names no process, a repository shared by
-// computers holds plans whose process id means something only on the other
-// computer, and the process table may refuse to answer. A plan that says the
+// wins): a plan of a version before decision 0024 names no process (it says
+// when it worked; one that never does is resumed only once confirmed, below),
+// a repository shared by computers holds plans whose process id means
+// something only on the other computer, and the process table may refuse to
+// answer. A plan that says the
 // attempt stopped (its last write) needs no process: the GUI's window goes on
 // after a cancel. And a plan that names this very process is of an attempt
 // that ended: a process runs one registration at a time.
@@ -1400,6 +1402,104 @@ void a_resume_goes_ahead_where_the_attempt_before_has_ended_or_cannot_be_seen()
         if (!resumed) {
             std::cerr << "  case " << static_cast<int>(kind) << ": " << resumed.error().message << '\n';
         }
+    }
+}
+
+// The bytes of `rows`, the saved progress of a registration.
+std::uint64_t bytes_of(const std::vector<va::Entry>& rows)
+{
+    std::uint64_t bytes = 0;
+    for (const auto& row : rows) {
+        bytes += row.size.value_or(0);
+    }
+    return bytes;
+}
+
+// Decision 0022, point 7 (operator, 2026-10-20): a plan that never says when
+// its attempt last worked, as a version before decision 0022 wrote it (sample
+// damage of the sample plan: no "updated", no stop mark, no process, no
+// totals), may be run still by that version, which would put its own manifest
+// in place of the one the resume records. Without confirmation the resume
+// reads nothing, changes nothing (the plan, its saved progress) and says what
+// it would take up; confirmed, as `register <root> --resume --confirm`, it
+// goes ahead as before, reading only the rest, and records the revision. Such
+// a plan whose revision is recorded goes as before, without a question
+// (decision 0023). A plan of this version, which says when it worked, resumes
+// without confirmation (the tests above), and takes one too: a script may
+// always pass --confirm.
+void a_resume_of_an_older_versions_plan_asks_for_confirmation()
+{
+    const auto as_an_older_version_wrote_it = [](Fixture& fixture, const va::Uuid& archive_uuid) {
+        auto plan = plan_of(fixture.store, archive_uuid);
+        CHECK(plan.contains("updated") && plan.contains("stopped") && plan.contains("process"));
+        for (const auto* member : {"updated", "stopped", "process", "files_total", "bytes_total", "media_copy"}) {
+            plan.erase(member);
+        }
+        CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+        return plan;
+    };
+    {
+        Fixture fixture;
+        const auto archive_uuid = interrupted_sample_registration(fixture);
+        const auto plan = as_an_older_version_wrote_it(fixture, archive_uuid);
+        const auto saved = fixture.store.file_rows(archive_uuid, 1);
+        CHECK(saved && !saved->empty());
+        if (!saved) {
+            return;
+        }
+
+        fixture.archive.bytes_read = 0;
+        auto request = at("/vol");
+        request.resume = true;
+        const auto asked = fixture.run(request);
+        CHECK(!asked && asked.error().kind == va::RegisterFailure::Kind::Unconfirmed &&
+              asked.error().message == "run the command again with --confirm to resume it" &&
+              asked.error().older_version && !asked.error().lost_manifest);
+        if (asked || !asked.error().older_version) {
+            return;
+        }
+        const auto& older = *asked.error().older_version;
+        CHECK(older.archive_uuid == archive_uuid && older.revision == 1 && older.root == "/vol" &&
+              older.label == plan.value("label", std::string{}) && !older.label.empty() &&
+              older.started == plan.value("created", std::string{}) && !older.started.empty());
+        CHECK(fixture.archive.bytes_read == 0);
+        CHECK(plan_of(fixture.store, archive_uuid) == plan);
+        const auto kept = fixture.store.file_rows(archive_uuid, 1);
+        CHECK(kept && kept->size() == saved->size());
+
+        request.confirmed = true;
+        const auto resumed = fixture.run(request);
+        CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 &&
+              resumed->counts.files == 40);
+        CHECK(resumed && fixture.archive.bytes_read == resumed->counts.bytes - bytes_of(*saved));
+        check_index_is_the_manifest(fixture, archive_uuid);
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+    }
+    {
+        // Its revision recorded by another operation, which left the plan
+        // (sample data): the resume removes the plan and records nothing, as
+        // for any plan (decision 0023), without asking first.
+        Fixture fixture;
+        const auto archive_uuid = interrupted_sample_registration(fixture);
+        as_an_older_version_wrote_it(fixture, archive_uuid);
+        CHECK(fixture.store.insert_revision({archive_uuid, 1, "manifests/" + archive_uuid + "/r0001.vam", "{}", "h",
+            "b", "", "2026-10-15T01:00:00Z"}));
+        auto request = at("/vol");
+        request.resume = true;
+        const auto resumed = fixture.run(request);
+        CHECK(!resumed && resumed.error().kind == va::RegisterFailure::Kind::Refused &&
+              resumed.error().message == test::already_recorded_message(archive_uuid, 1));
+        CHECK(fixture.store.setting("registration:" + archive_uuid).value_or("x").empty());
+    }
+    {
+        // A plan of this version, confirmed although it needs no confirmation.
+        Fixture fixture;
+        const auto archive_uuid = interrupted_sample_registration(fixture);
+        auto request = at("/vol");
+        request.resume = true;
+        request.confirmed = true;
+        const auto resumed = fixture.run(request);
+        CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1);
     }
 }
 
@@ -2270,7 +2370,7 @@ void a_registration_over_a_manifest_that_is_not_lost_is_refused()
         confirmed_alone.confirmed = true;
         const auto alone = fixture.run(confirmed_alone);
         CHECK(!alone && alone.error().kind == va::RegisterFailure::Kind::Invalid &&
-              alone.error().message == "--confirm is used only with --lost-manifest");
+              alone.error().message == "--confirm is used only with --lost-manifest or --resume");
     }
     {
         Fixture fixture;
@@ -2931,6 +3031,7 @@ void register_engine_tests()
     a_resume_waits_while_the_attempt_before_runs();
     a_resume_goes_ahead_when_the_process_id_is_reused();
     a_resume_goes_ahead_where_the_attempt_before_has_ended_or_cannot_be_seen();
+    a_resume_of_an_older_versions_plan_asks_for_confirmation();
     resumes_started_at_once_take_turns();
     an_attempt_stops_when_its_first_registration_is_abandoned();
     an_attempt_abandoned_while_it_writes_its_manifest_records_nothing();

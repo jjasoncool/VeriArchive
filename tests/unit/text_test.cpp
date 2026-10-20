@@ -759,7 +759,12 @@ void translation_tests()
     }
     CHECK(chinese("error: --lost-manifest takes none of --label, --new-revision, --force-new-archive and --resume") ==
           "錯誤：--lost-manifest 不能與 --label、--new-revision、--force-new-archive 或 --resume 一起使用");
-    CHECK(chinese("error: --confirm is used only with --lost-manifest") == "錯誤：--confirm 只能與 --lost-manifest 一起使用");
+    CHECK(chinese("error: --confirm is used only with --lost-manifest or --resume") ==
+          "錯誤：--confirm 只能與 --lost-manifest 或 --resume 一起使用");
+    // A resume of a registration that an older version left, not confirmed
+    // (decision 0022, point 7).
+    CHECK(chinese("error: run the command again with --confirm to resume it") ==
+          "錯誤：若要繼續，請加上 --confirm 再執行一次");
     CHECK(chinese.format("revision {}, whose manifest was lost, was left out of the index; its verifications stay in "
                          "the history",
               2) == "清單檔已無法取回的版次 2 已從索引移除；它的驗證紀錄仍保留在歷程中");

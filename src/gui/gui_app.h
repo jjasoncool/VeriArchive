@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <thread>
@@ -164,8 +165,23 @@ void show_runs(GuiState& state);
 // operation of its kind started in the window shows its progress and report
 // (Verify Archive, Register Archive), which it brings into view. The caller
 // has made sure that a repository is open and that no operation runs.
+// `confirmed`: the operator chose Resume in the question that a resume of a
+// registration an older version left asks first (ask_before_resuming), as
+// `register <root> --resume --confirm`; a resume of such a registration that
+// is not confirmed asks it in Register Archive.
 void resume_verification(GuiState& state, const app::UnfinishedOperation& verification);
-void resume_registration(GuiState& state, const app::UnfinishedOperation& registration);
+void resume_registration(GuiState& state, const app::UnfinishedOperation& registration, bool confirmed = false);
+
+// Asks, with Cancel as the default, before a registration that an older
+// version of VeriArchive left is resumed, as that version may still run it
+// (decision 0022, point 7; app::older_version_resume_warning): Resume in the
+// Archive List on such a registration asks it, and so does a resume of one
+// in Register Archive, which its own resume box or a stopped row's Resume
+// starts, when the resume says it waits for the operator's word
+// (RegisterFailure::older_version). `resume` runs only once the operator
+// chose Resume; Cancel changes nothing.
+void ask_before_resuming(GuiState& state, const std::string& label, const std::string& root,
+    std::function<void(GuiState&)> resume);
 
 // The Settings language drop-down. show_language_in_use selects the language
 // in use. lock_language makes the drop-down unavailable while an operation
