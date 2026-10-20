@@ -7,7 +7,7 @@
 | `01-settings.png` | Settings: the repository, the config file, the policy |
 | `02-archive-list.png` | Archive List with the two sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB) |
 | `03-register.png` | Register Archive with archive A's folder and label typed in (not started) |
-| `04-verify.png` | Verify Archive after a FULL verification of archive A |
+| `04-verify.png` | Verify Archive after a FULL verification of archive A, with the checkbox "Full verify, and add chunk hashes" greyed out: the folder above is verified, and the sample archives have chunk hashes |
 | `05-history.png` | Verification History of archive A, with the history chain checked |
 | `06-compare.png` | Compare Archives: A (`原始資料`) against its copy B (`備份資料`) |
 | `07-language.png` | Settings with the language list open |
