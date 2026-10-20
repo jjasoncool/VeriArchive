@@ -156,8 +156,9 @@ enum class OperationState {
     Quiet,     // no progress seen for a few minutes: stopped, or busy with a large file or the scan
     Silent,    // a registration whose plan has said nothing for a few minutes, while the process that
                // runs its attempt still runs (decision 0024): held up, not stopped
-    Stopped,   // certainly stopped (its record says so, has been silent for minutes, or the process
-               // that ran its attempt has ended)
+    Stopped,   // stopped as far as can be told (its record says so, has been silent for minutes, or the
+               // process that ran its attempt has ended); an attempt on another computer, or held up, may
+               // still run, whose version names its manifest in the record transaction (decision 0023)
     Differs,   // a relocation stopped as Stopped says, whose record says that its new carrier does not
                // hold the recorded content (decision 0026): it is never resumed, and waits to be abandoned
     LaterRevision,  // a registration or relocation stopped as Stopped says, made for an older revision
