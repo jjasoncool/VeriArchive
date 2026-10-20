@@ -1,6 +1,6 @@
-# Screenshots for the user guide
+# Screenshots for the user guides
 
-`make_screenshots.cmake` makes the pictures of the GUI that the user guide shows. It builds sample data, registers it as two archives with `veriarchive-cli`, then starts `veriarchive-gui` in its screenshot mode. The GUI tours its views as a reader of the guide would: it fills in forms and starts a verification and a comparison with the buttons' own handlers. It saves one PNG per view and quits.
+`make_screenshots.cmake` makes the pictures of the GUI that the user guides show: `docs/images/en/` for the English guide (`docs/user-guide.md`) and `docs/images/zh-TW/` for the Chinese one (`docs/user-guide.zh-TW.md`), with the same file names in both. It builds sample data, registers it as two archives with `veriarchive-cli`, then starts `veriarchive-gui` in its screenshot mode. The GUI tours its views as a reader of the guide would: it fills in forms and starts a verification and a comparison with the buttons' own handlers. It saves one PNG per view and quits.
 
 | File | What it shows |
 |---|---|
@@ -16,19 +16,24 @@ The pictures are 1100 × 720 and show the window only, title bar included. GTK d
 
 ## Making them again
 
-You need a build with the GUI and a desktop session: the window appears for a few seconds while the tour runs. On Windows, run from the MSYS2 UCRT64 shell (or put the GTK DLLs on `PATH` some other way):
+You need a build with the GUI and a desktop session: the window appears for a few seconds while the tour runs. On Windows, run from the MSYS2 UCRT64 shell (or put the GTK DLLs on `PATH` some other way), once for each guide:
 
 ```sh
 cmake -DCLI=build/windows-ucrt64-debug/veriarchive-cli.exe \
       -DGUI=build/windows-ucrt64-debug/veriarchive-gui.exe \
       -DWORK=D:/va-sample -DOUT=docs/images/zh-TW -DLANG=zh-TW \
       -P tools/screenshots/make_screenshots.cmake
+cmake -DCLI=build/windows-ucrt64-debug/veriarchive-cli.exe \
+      -DGUI=build/windows-ucrt64-debug/veriarchive-gui.exe \
+      -DWORK=D:/va-sample -DOUT=docs/images/en -DLANG=en \
+      -P tools/screenshots/make_screenshots.cmake
 ```
 
-`LANG` is `zh-TW` (the default) or `en`. Run once per language, each into its own `OUT`.
+`LANG` is `zh-TW` (the default) or `en`. Run once per language, each into its own `OUT`: `docs/images/zh-TW` with `LANG=zh-TW`, `docs/images/en` with `LANG=en`.
 
 - `WORK` holds the sample data, a config file and a repository. It is emptied on every run, so the script accepts only an empty folder or one it made itself (it leaves a `.veriarchive-screenshots` marker there).
 - The pictures show the paths under `WORK`, so a short `WORK` gives short paths. A drive letter made with `subst` does not shorten them: the program records the folder it stands for (decision 0027), so the pictures show the real path.
+- Both guides name the folder that their pictures show, `D:\va-sample\原始資料`: make both sets with the same `WORK`, and with another `WORK` change that sentence in both guides.
 - `OUT` must not be inside `WORK`.
 
 ## Sample data only

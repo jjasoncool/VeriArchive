@@ -19,9 +19,8 @@ in V1.1.
 ## Documentation
 
 - [`docs/user-guide.md`](docs/user-guide.md) / [`docs/user-guide.zh-TW.md`](docs/user-guide.zh-TW.md):
-  how to use VeriArchive (English / 繁體中文).
-- [圖解使用說明](docs/gui-guide.zh-TW.md) (Traditional Chinese): the graphical interface step by
-  step, with screenshots.
+  how to use VeriArchive (English / 繁體中文): the graphical interface step by step, with
+  screenshots, and the command line.
 - [`design/HANDOFF.md`](design/HANDOFF.md): the specification (principles, contracts, milestones).
 - [`design/decisions/`](design/decisions/): decisions that amend the specification.
 - [`GLOSSARY.md`](GLOSSARY.md): the words used in code, documents and output.
