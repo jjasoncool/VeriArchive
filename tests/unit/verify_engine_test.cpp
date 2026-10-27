@@ -762,6 +762,54 @@ void a_device_that_goes_away_leaves_the_run_incomplete()
     }
 }
 
+// Decision 0034: a device that goes away as the root is listed, or as a
+// link's target is read, its reads failing with I/O errors and its volume no
+// longer found, leaves the run INCOMPLETE and resumable, never FAILED for a
+// root that cannot be scanned (FilesystemAccessError) or for a link that
+// cannot be read. The archive of links holds no file, so nothing read later
+// would find the device gone instead. Attached again, the resume passes.
+// Sample data.
+void a_device_that_goes_away_at_the_root_or_a_link_leaves_the_run_incomplete()
+{
+    for (const bool at_link : {false, true}) {
+        EngineFixture fixture;
+        if (at_link) {
+            fixture.archive.add_link("SAMPLE-link-1", "SAMPLE-target-1.bin");
+            fixture.archive.add_link("SAMPLE-link-2", "SAMPLE-target-2.bin");
+        } else {
+            fixture.archive.add_file("SAMPLE-1.bin", "sample one");
+            fixture.archive.add_file("SAMPLE-dir/SAMPLE-2.bin", "sample two");
+        }
+        CHECK(fixture.register_root(fixture.archive.root()).has_value());
+
+        test::RemovableDevice device(fixture.archive);
+        if (at_link) {
+            device.link = "SAMPLE-link-2";
+        } else {
+            device.directory = va::path_to_utf8(fixture.archive.root().filename());
+        }
+        device.on_removed = [&fixture] {
+            fixture.media.error = va::IoError{va::IoErrorKind::NotFound, 2, "no volume at the root (sample)"};
+        };
+        fixture.media_files = &device;
+        const auto interrupted = fixture.verify(fixture.archive.root());
+        CHECK(interrupted && interrupted->result == "INCOMPLETE" && interrupted->items.empty() &&
+              interrupted->failure_classes.empty() &&
+              interrupted->warnings == std::vector<std::string>{device_went_away});
+        if (!interrupted) {
+            continue;
+        }
+
+        device.attach_again();
+        fixture.media.error.reset();
+        va::VerifyRequest request;
+        request.root = fixture.archive.root();
+        request.resume_run = interrupted->run_id;
+        const auto resumed = fixture.verify(request);
+        CHECK(resumed && resumed->result == "PASSED" && resumed->counts.at("Verified") == 2);
+    }
+}
+
 // What an INCOMPLETE run whose device stopped answering says (decision 0034).
 const std::string device_stopped_answering =
     "the device that holds the archive stopped answering while it was read: 10 entries in a row could not be read; "
@@ -2362,6 +2410,7 @@ void verify_engine_tests()
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
     a_device_that_goes_away_leaves_the_run_incomplete();
+    a_device_that_goes_away_at_the_root_or_a_link_leaves_the_run_incomplete();
     a_device_that_stops_answering_leaves_the_run_incomplete();
     io_errors_stop_a_run_only_ten_in_a_row();
     a_watch_tells_a_device_that_stopped_answering();

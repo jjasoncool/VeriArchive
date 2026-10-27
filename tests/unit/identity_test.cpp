@@ -384,6 +384,36 @@ void identity_text_is_made_valid_utf8()
     // Valid text, Chinese included, is left as it is.
     CHECK(va::with_valid_identity_text(clean).volume_label == clean.volume_label);
 
+    // Every identity string of the volume and of each of its devices, the
+    // driver too, each given an invalid byte of its own (sample values).
+    auto every = volume(disk_a, "SAMPLE-SERIAL");
+    every.devices.push_back(every.devices.front());
+    std::vector<std::string*> fields{&every.filesystem_type, &every.filesystem_uuid, &every.filesystem_uuid_short,
+        &every.volume_label, &every.volume_guid, &every.container, &every.driver};
+    for (auto& device : every.devices) {
+        for (auto* field : {&device.device_ref, &device.model, &device.serial, &device.wwn, &device.bus}) {
+            fields.push_back(field);
+        }
+    }
+    for (std::size_t index = 0; index < fields.size(); ++index) {
+        *fields[index] = "SAMPLE-" + std::to_string(index) + "-\xC0";
+    }
+    const auto all_clean = va::with_valid_identity_text(every);
+    const std::vector<const std::string*> cleaned{&all_clean.filesystem_type, &all_clean.filesystem_uuid,
+        &all_clean.filesystem_uuid_short, &all_clean.volume_label, &all_clean.volume_guid, &all_clean.container,
+        &all_clean.driver, &all_clean.devices[0].device_ref, &all_clean.devices[0].model,
+        &all_clean.devices[0].serial, &all_clean.devices[0].wwn, &all_clean.devices[0].bus,
+        &all_clean.devices[1].device_ref, &all_clean.devices[1].model, &all_clean.devices[1].serial,
+        &all_clean.devices[1].wwn, &all_clean.devices[1].bus};
+    CHECK(cleaned.size() == fields.size());
+    for (std::size_t index = 0; index < cleaned.size() && index < fields.size(); ++index) {
+        const bool replaced = *cleaned[index] == "SAMPLE-" + std::to_string(index) + "-" + replacement;
+        CHECK(replaced);
+        if (!replaced) {
+            std::cerr << "  identity string " << index << " was not made valid\n";
+        }
+    }
+
     va::ManifestHeader header;
     header.archive_uuid = "c0ffee00-0000-4000-8000-000000000035";
     header.label = "ARCH-0035";

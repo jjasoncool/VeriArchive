@@ -448,10 +448,11 @@ private:
 // error, as Linux gives (EIO) for the files of a USB disk pulled out: an
 // error that by itself says nothing of a removal. The device goes away when
 // the file named `file` is opened for the `nth` time (with `at_offset`: when
-// a read of that file reaches the offset), or when the directory named
-// `directory` is listed; then `on_removed` runs, which lets a test make the
-// media enumerator find no volume at the root any more. attach_again() puts
-// the device back, as plugging it in again does.
+// a read of that file reaches the offset), when the directory named
+// `directory` is listed (the root too, by its own name), or when the target
+// of the link named `link` is read; then `on_removed` runs, which lets a test
+// make the media enumerator find no volume at the root any more.
+// attach_again() puts the device back, as plugging it in again does.
 class RemovableDevice final : public va::IFileSystemAccess {
 public:
     explicit RemovableDevice(va::IFileSystemAccess& inner) : inner_(inner) {}
@@ -460,6 +461,7 @@ public:
     int nth = 1;
     std::optional<std::uint64_t> at_offset;  // at a read that reaches this offset, not at the opening
     std::string directory;                   // goes away when this directory is listed
+    std::string link;                        // goes away when this link's target is read
     va::IoError error{va::IoErrorKind::MediaError, 5, "Input/output error (sample)"};
     std::function<void()> on_removed;
     // Set after on_removed has run: a reader thread that sees it set also
@@ -471,6 +473,7 @@ public:
         removed = false;
         file.clear();
         directory.clear();
+        link.clear();
         at_offset.reset();
         opened_ = 0;
     }
@@ -502,12 +505,15 @@ public:
         }
         return std::make_unique<Source>(std::move(*source), *this);
     }
-    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& read) override
     {
+        if (!removed && !link.empty() && va::path_to_utf8(read.filename()) == link) {
+            remove();
+        }
         if (removed) {
             return std::unexpected(error);
         }
-        return inner_.read_link(link);
+        return inner_.read_link(read);
     }
     std::expected<void, va::IoError> drop_cache(const std::filesystem::path& dropped) override
     {
