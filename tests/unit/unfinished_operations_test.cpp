@@ -1968,14 +1968,19 @@ void a_stopped_verification_resumes_from_the_list_as_on_the_command_line()
     const auto row = describe_operation(va::app::Text{}, watch, Clock::time_point{}, now);
     CHECK(row.kind == "Verification" && row.state == "stopped; it can be resumed" && row.offers_resume);
 
-    const auto request = va::app::verification_resume(operation, va::Policy{});
+    const auto request = va::app::verification_resume(operation, va::Config{});
     CHECK(request.archive_uuid == registered->archive_uuid && request.resume_run == interrupted->run_id);
-    CHECK(!request.root && !request.strict_metadata && !request.rotational);
-    va::Policy strict_policy;
-    strict_policy.strict_metadata = true;
-    const auto strict = va::app::verification_resume(operation, strict_policy);
+    CHECK(!request.root && !request.strict_metadata && !request.rotational && request.rotational_override.empty());
+    // As on the command line given no option: strict metadata where the
+    // policy sets it, and the readers as io.rotational_override says (R-111,
+    // a sample serial).
+    va::Config config;
+    config.policy.strict_metadata = true;
+    config.rotational_override["SAMPLE-SERIAL"] = true;
+    const auto strict = va::app::verification_resume(operation, config);
     CHECK(strict.strict_metadata && strict.archive_uuid == request.archive_uuid &&
-          strict.resume_run == request.resume_run && !strict.root && !strict.rotational);
+          strict.resume_run == request.resume_run && !strict.root && !strict.rotational &&
+          strict.rotational_override == config.rotational_override);
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.verify(request);
     CHECK(resumed && resumed->result == "PASSED" && resumed->resumed_from == interrupted->run_id);
@@ -2033,10 +2038,13 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
     CHECK(row.kind == "Registration" && row.state == "stopped; it can be resumed" && row.offers_resume &&
           !row.resume_asks_first);
 
-    const auto request = va::app::registration_resume(operation);
+    va::Config config;
+    config.rotational_override["SAMPLE-SERIAL"] = false; // R-111, a sample serial
+    const auto request = va::app::registration_resume(operation, config);
     CHECK(request.resume && request.root == sample_root() && request.root == va::app::typed_root(operation.root));
     CHECK(!request.label && !request.copy_of && !request.new_revision && !request.force_new_archive &&
-          !request.write_media_copy && !request.rotational && !request.confirmed);
+          !request.write_media_copy && !request.rotational && !request.confirmed &&
+          request.rotational_override == config.rotational_override);
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.register_root(request);
     CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 && resumed->counts.files == 6);
@@ -2112,14 +2120,14 @@ void an_older_versions_quiet_registration_is_resumed_or_abandoned()
     // changing nothing, as `register <root> --resume` does on the command
     // line; the request it makes once the operator chose Resume in the
     // question continues it, as `register <root> --resume --confirm`.
-    const auto unconfirmed = va::app::registration_resume(operation);
+    const auto unconfirmed = va::app::registration_resume(operation, va::Config{});
     CHECK(unconfirmed.resume && !unconfirmed.confirmed);
     fixture.archive.bytes_read = 0;
     const auto refused = fixture.register_root(unconfirmed);
     CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Unconfirmed &&
           refused.error().older_version && refused.error().older_version->archive_uuid == archive_uuid);
     CHECK(fixture.archive.bytes_read == 0 && read_operations(fixture).size() == 1);
-    const auto request = va::app::registration_resume(operation, true);
+    const auto request = va::app::registration_resume(operation, va::Config{}, true);
     CHECK(request.resume && request.confirmed && request.root == sample_root() && !request.write_media_copy);
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.register_root(request);
@@ -2253,7 +2261,7 @@ void leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost()
     }
     CHECK(row_of(*a_operation).offers_resume);
     fixture.archive.bytes_read = 0;
-    const auto resumed = fixture.verify(va::app::verification_resume(*a_operation, va::Policy{}));
+    const auto resumed = fixture.verify(va::app::verification_resume(*a_operation, va::Config{}));
     CHECK(resumed && resumed->archive_uuid == a->archive_uuid && resumed->resumed_from == a_run->run_id &&
           resumed->result == "PASSED_WITH_WARNINGS" &&
           std::ranges::find(resumed->warnings, "identity: retired") != resumed->warnings.end());

@@ -20,6 +20,7 @@ struct VerifyRequest {
     std::optional<Uuid> archive_uuid;           // find this archive on the attached volumes
     bool strict_metadata = false;               // R-51: metadata differences fail the run
     std::optional<bool> rotational;             // --io hdd|ssd
+    std::map<std::string, bool> rotational_override = {}; // io.rotational_override of the config, by serial (R-111)
     std::optional<std::string> resume_run;      // R-104: continue an INCOMPLETE run
 };
 

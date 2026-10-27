@@ -857,6 +857,8 @@ int relocate(const Arguments& arguments, Opened& opened)
     const auto root_text = arguments.words.size() == 4 ? arguments.words[3] : arguments.value("--resume").value_or("");
     RelocateRequest request{status->archive.archive_uuid, app::typed_root(root_text), std::nullopt};
     request.resume = arguments.has("--resume") || arguments.value("--resume").has_value();
+    // R-111: the config's per-device override; --io wins over it.
+    request.rotational_override = opened.session.context.config.rotational_override;
     if (const auto io = arguments.value("--io")) {
         if (*io != "hdd" && *io != "ssd") {
             return report_failure(arguments, {exit_code::usage, "--io takes hdd or ssd"});

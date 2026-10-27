@@ -49,6 +49,29 @@ std::expected<std::optional<Config>, IoError> read_config(const std::filesystem:
                 policy.value("any_verify_max_age_days", config.policy.any_verify_max_age_days);
             config.policy.strict_metadata = policy.value("strict_metadata", config.policy.strict_metadata);
         }
+        if (document.contains("io")) {
+            const auto& io = document.at("io");
+            if (!io.is_object()) {
+                return std::unexpected(IoError{IoErrorKind::Other, 0, "io must be an object"});
+            }
+            if (io.contains("rotational_override")) {
+                const auto& overrides = io.at("rotational_override");
+                const auto bad_override = std::unexpected(IoError{IoErrorKind::Other, 0,
+                    "io.rotational_override must give each device serial \"hdd\" or \"ssd\""});
+                if (!overrides.is_object()) {
+                    return bad_override;
+                }
+                for (const auto& [serial, value] : overrides.items()) {
+                    if (value.is_boolean()) {
+                        config.rotational_override[serial] = value.get<bool>();
+                    } else if (value == "hdd" || value == "ssd") {
+                        config.rotational_override[serial] = value == "hdd";
+                    } else {
+                        return bad_override;
+                    }
+                }
+            }
+        }
         if (document.contains("trusted_keys")) {
             if (!document.at("trusted_keys").is_array()) {
                 return std::unexpected(IoError{IoErrorKind::Other, 0, "Trusted keys must be an array"});

@@ -274,10 +274,47 @@ void progress_moves_within_a_large_file()
     CHECK(progress.reports.back().bytes_done == 4096 * 100);
 }
 
+// R-110, R-111 (decision 0034): whether a volume's devices are rotational,
+// which sets the readers: --io wins; then the config's io.rotational_override
+// for a device's serial, compared as identity matching compares serials (case,
+// spaces and underscores aside); then what the platform detected. A device
+// without a serial has nothing to look up. Sample serials.
+void the_rotational_override_goes_by_serial()
+{
+    va::VolumeInfo volume;
+    va::PhysicalDeviceInfo bridge;
+    bridge.serial = "SAMPLE-BRIDGE 01";
+    bridge.rotational = false; // the bridge says SSD
+    volume.devices.push_back(bridge);
+    const std::map<std::string, bool> none;
+    const std::map<std::string, bool> hdd{{"sample-bridge_01", true}};
+    const std::map<std::string, bool> ssd{{"SAMPLE-BRIDGE 01", false}};
+    const std::map<std::string, bool> another{{"SAMPLE-OTHER", true}};
+    CHECK(va::volume_rotational(volume, std::nullopt, none) == false);
+    CHECK(va::volume_rotational(volume, std::nullopt, hdd) == true);
+    CHECK(va::volume_rotational(volume, std::nullopt, another) == false);
+    CHECK(va::volume_rotational(volume, false, hdd) == false); // --io ssd
+    CHECK(va::volume_rotational(volume, true, ssd) == true);   // --io hdd
+    volume.devices.front().rotational.reset(); // the bridge says nothing
+    CHECK(!va::volume_rotational(volume, std::nullopt, none));
+    CHECK(va::volume_rotational(volume, std::nullopt, ssd) == false);
+    // Of two devices (a volume over two disks), rotational when either is.
+    va::PhysicalDeviceInfo second;
+    second.serial = "SAMPLE-SECOND";
+    second.rotational = false;
+    volume.devices.push_back(second);
+    CHECK(va::volume_rotational(volume, std::nullopt, hdd) == true);
+    CHECK(va::volume_rotational(volume, std::nullopt, ssd) == false);
+    volume.devices.front().serial.clear();
+    CHECK(va::volume_rotational(volume, std::nullopt, hdd) == false);
+    CHECK(va::default_reader_count(true) == 1 && va::default_reader_count(std::nullopt) == 1);
+}
+
 } // namespace
 
 void hash_pipeline_tests()
 {
+    the_rotational_override_goes_by_serial();
     every_file_is_hashed_once();
     read_failures_are_reported_per_file();
     stopping_and_cancelling();

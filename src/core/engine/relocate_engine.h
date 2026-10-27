@@ -30,8 +30,9 @@ namespace va {
 struct RelocateRequest {
     Uuid archive_uuid;
     std::filesystem::path root;             // the archive root on the new carrier
-    std::optional<bool> rotational;
+    std::optional<bool> rotational;         // --io hdd|ssd (R-111)
     bool resume = false;                    // continue the archive's unfinished relocation (decision 0026)
+    std::map<std::string, bool> rotational_override = {}; // io.rotational_override of the config, by serial (R-111)
 };
 
 struct RelocateServices {

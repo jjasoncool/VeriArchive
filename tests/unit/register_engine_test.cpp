@@ -354,6 +354,25 @@ void a_device_that_goes_away_interrupts_the_registration()
     }
 }
 
+// R-111: the config's io.rotational_override applies to a registration: the
+// sample device reports an HDD (one reader), and the override of its serial
+// says SSD, so several readers hash its files at once (min(8, cores), on a
+// computer with more than one core).
+void the_rotational_override_applies_to_a_registration()
+{
+    Fixture fixture; // its device SERIAL-1 reports an HDD
+    for (int index = 1; index <= 6; ++index) {
+        fixture.archive.add_file(std::format("SAMPLE-{}.bin", index), std::string(1000, 'r'));
+    }
+    test::OpenFilesWatch watch(fixture.archive, true);
+    fixture.media_files = &watch;
+    auto request = at("/vol");
+    request.rotational_override = {{"SERIAL-1", false}};
+    const auto registered = fixture.run(request);
+    CHECK(registered && registered->counts.files == 6);
+    CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
+}
+
 // A root typed with separators at its end, as shells complete a folder name,
 // is the folder before them; a root keeps its own. A backslash separates only
 // on Windows (R-40).
@@ -3211,6 +3230,7 @@ void register_engine_tests()
     retired_archive_takes_no_revision();
     interrupted_registration_resumes();
     a_device_that_goes_away_interrupts_the_registration();
+    the_rotational_override_applies_to_a_registration();
     trailing_separators_leave_the_folder();
     a_plan_recorded_with_a_trailing_separator_is_found();
     media_copy_is_written_and_checked();

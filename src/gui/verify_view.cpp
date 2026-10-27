@@ -118,6 +118,8 @@ void start_verification(GuiState& state, bool resume)
     }
     VerifyRequest request;
     request.strict_metadata = strict_metadata(state);
+    // R-111: the window has no --io; the config's override by serial applies.
+    request.rotational_override = state.session->context.config.rotational_override;
     if (resume) {
         request.resume_run = view.incomplete_run;
         request.root = view.incomplete_root;
@@ -245,7 +247,7 @@ void resume_verification(GuiState& state, const app::UnfinishedOperation& verifi
     // metadata as the policy sets it, whatever this view's box says, which is
     // not where Resume is clicked (decision 0022, point 7).
     gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "verify");
-    run_verification(state, app::verification_resume(verification, state.session->context.config.policy));
+    run_verification(state, app::verification_resume(verification, state.session->context.config));
 }
 
 void refresh_archive_choices(GuiState& state)

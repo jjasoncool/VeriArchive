@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,6 +31,12 @@ struct Config {
     Policy policy;
     bool allow_network_repository = false;
     std::string language; // "" = follow the system, "en" or "zh-TW" (decision 0017)
+    // R-111, §B7.3 `io.rotational_override`: by device serial, whether the
+    // device is rotational (an HDD: true) or not (an SSD: false), for a USB
+    // bridge that reports it wrongly or not at all. Written in the file as
+    // "hdd" or "ssd" (or true or false). Read only: config_to_json keeps the
+    // file's own "io" as it is.
+    std::map<std::string, bool> rotational_override;
 };
 
 // Missing file is distinct from malformed or inaccessible configuration.

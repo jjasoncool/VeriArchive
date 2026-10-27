@@ -160,6 +160,8 @@ int verify_command(const Arguments& arguments)
     if (!request.strict_metadata) {
         request.strict_metadata = session->context.config.policy.strict_metadata;
     }
+    // R-111: the config's per-device override; --io wins over it.
+    request.rotational_override = session->context.config.rotational_override;
     auto store = ArchiveStore::open(session->context.repo);
     if (!store) {
         return report_failure(arguments, {exit_code::repository, store.error().message});

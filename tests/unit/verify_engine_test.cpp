@@ -19,8 +19,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <fstream>
 #include <iterator>
+#include <thread>
 #include <utility>
 
 namespace {
@@ -481,6 +483,28 @@ void interrupted_run_resumes_without_rehashing()
     const auto again = fixture.verify(request);
     CHECK(!again && again.error().kind == va::VerifyStop::Kind::NotFound &&
           again.error().message == "run " + interrupted->run_id + " is not an interrupted run");
+}
+
+// R-111: the config's io.rotational_override applies to a verification: the
+// sample device reports an HDD (one reader), and the override of its serial
+// says SSD, so several readers hash its files at once (min(8, cores), on a
+// computer with more than one core). Which wins over which, and how serials
+// compare, is the_rotational_override_goes_by_serial.
+void the_rotational_override_applies_to_a_verification()
+{
+    EngineFixture fixture; // its device SERIAL-1 reports an HDD
+    for (int index = 1; index <= 6; ++index) {
+        fixture.archive.add_file(std::format("SAMPLE-{}.bin", index), std::string(1000, 'v'));
+    }
+    CHECK(fixture.register_root(fixture.archive.root()).has_value());
+    test::OpenFilesWatch watch(fixture.archive, true);
+    fixture.media_files = &watch;
+    va::VerifyRequest request;
+    request.root = fixture.archive.root();
+    request.rotational_override = {{"SERIAL-1", false}};
+    const auto outcome = fixture.verify(request);
+    CHECK(outcome && outcome->result == "PASSED");
+    CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
 }
 
 // What an INCOMPLETE run whose device went away says (decision 0034).
@@ -1962,6 +1986,7 @@ void verify_engine_tests()
     interrupted_run_resumes_without_rehashing();
     a_device_that_goes_away_leaves_the_run_incomplete();
     a_volume_is_the_same_while_its_ids_and_devices_are();
+    the_rotational_override_applies_to_a_verification();
     resume_refused_after_new_revision();
     a_resume_by_uuid_stops_where_several_volumes_hold_the_archive();
     clones_registered_as_two_archives_say_to_detach_the_other_volumes();

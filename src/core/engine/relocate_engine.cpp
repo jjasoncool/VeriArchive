@@ -8,6 +8,7 @@
 #include "core/engine/recorded_manifest.h"
 #include "core/engine/registration_attempt.h"
 #include "core/engine/volume_watch.h"
+#include "core/hash/hash_pipeline.h"
 #include "core/identity/volume_json.h"
 #include "core/manifest/manifest_writer.h"
 
@@ -449,14 +450,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     ComparisonInput input;
     input.root = request.root;
     input.filesystem_type = volume->filesystem_type;
-    input.rotational = request.rotational;
-    if (!input.rotational) {
-        for (const auto& device : volume->devices) {
-            if (device.rotational) {
-                input.rotational = input.rotational.value_or(false) || *device.rotational;
-            }
-        }
-    }
+    // R-111: --io, else the config's override by serial, else detection.
+    input.rotational = volume_rotational(*volume, request.rotational, request.rotational_override);
     input.host_os = services.host.os;
     input.header = &manifest->header;
     input.recorded = &manifest->entries;

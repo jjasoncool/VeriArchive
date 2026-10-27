@@ -37,25 +37,6 @@ std::string describe(const ArchiveCandidate& candidate)
            (candidate.root_subpath.empty() ? " (volume root)" : " (root \"" + candidate.root_subpath + "\")");
 }
 
-// HDDs get one reader; so do devices whose type is unknown, because many USB
-// bridges hide it and parallel reads would make a disk seek (R-110, R-111).
-std::optional<bool> rotational_of(const VolumeInfo& volume, std::optional<bool> override_value)
-{
-    if (override_value) {
-        return override_value;
-    }
-    bool any_known = false;
-    for (const auto& device : volume.devices) {
-        if (device.rotational) {
-            if (*device.rotational) {
-                return true;
-            }
-            any_known = true;
-        }
-    }
-    return any_known ? std::optional<bool>(false) : std::nullopt;
-}
-
 // An unfinished registration (R-104) is described in settings under
 // "registration:<archive_uuid>"; its hashed entries are cached in the files
 // table under the revision being created.
@@ -1195,7 +1176,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     heartbeat.set("bytes_total", bytes_total);
     heartbeat.beat();
     HashPipelineOptions hash_options;
-    hash_options.readers = default_reader_count(rotational_of(*volume, request.rotational));
+    // HDDs get one reader; so do devices whose type is unknown, because many
+    // USB bridges hide it and parallel reads would make a disk seek (R-110,
+    // R-111): --io, else the config's override by serial, else detection.
+    hash_options.readers =
+        default_reader_count(volume_rotational(*volume, request.rotational, request.rotational_override));
     bool device_removed = false;
     const auto hashed = hash_files(services.archive_files, jobs, hash_options, cancel, heartbeat,
         [&](HashResult&& result) {

@@ -108,6 +108,8 @@ void start_registration(GuiState& state)
     request.force_new_archive = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.force_new_archive));
     request.write_media_copy = media_copy(state);
     request.resume = gtk_check_button_get_active(GTK_CHECK_BUTTON(view.resume));
+    // R-111: the window has no --io; the config's override by serial applies.
+    request.rotational_override = state.session->context.config.rotational_override;
     if (request.root.empty()) {
         show_report(state, fixed_message("Choose the folder or volume to register."));
         return;
@@ -215,7 +217,8 @@ void resume_registration(GuiState& state, const app::UnfinishedOperation& regist
     // the operator confirmed it in the question about an older version's
     // registration.
     gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "register");
-    run_registration(state, app::registration_resume(registration, confirmed), registration.root);
+    run_registration(state, app::registration_resume(registration, state.session->context.config, confirmed),
+        registration.root);
 }
 
 GtkWidget* build_register_view(GuiState& state)

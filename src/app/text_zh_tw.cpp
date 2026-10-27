@@ -1233,6 +1233,9 @@ constexpr CatalogEntry entries[] = {
     {"Repository path is empty", "儲存庫路徑是空的"},
     // Config keys stay as written in the file (decision 0017).
     {"Policy must be an object", "設定檔中的 policy 必須是 JSON 物件"},
+    {"io must be an object", "設定檔中的 io 必須是 JSON 物件"},
+    {"io.rotational_override must give each device serial \"hdd\" or \"ssd\"",
+        "設定檔中的 io.rotational_override 必須為每個裝置序號指定 \"hdd\" 或 \"ssd\""},
     {"Trusted keys must be an array", "設定檔中的 trusted_keys 必須是 JSON 陣列"},
     {"Invalid config: {}", "設定檔無效：{}", Match::Cause},
     // src/common/archive_path.cpp

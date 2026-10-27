@@ -442,6 +442,7 @@ struct AppContext {                 // built once in the composition root, passe
 - Keys: `repository` (path), `trusted_keys`, `policy` (`full_verify_max_age_days`, `any_verify_max_age_days`, `strict_metadata`), `io` (`rotational_override` by serial), `allow_network_repository` (bool).
 
 > Amended by `design/decisions/0017-interface-language.md`: adds `language` (`"en"`, `"zh-TW"`; absent = follow the system).
+> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: `io.rotational_override` gives each device serial `"hdd"` or `"ssd"` (`true` or `false` read alike); any other value makes the config invalid.
 > Amended by `design/decisions/0019-relative-repository-pin.md`: a relative `repository` is relative to the folder of the config file that holds it.
 
 ### B7.4 RepositoryRoot resolution (authoritative, R-83)
@@ -707,6 +708,8 @@ Evidence at verify time (`MediaEvidence`) is compared against every registered a
 - R-107 Windows V1.1 `NtfsUsnChangeTracker` (through the helper) stores USN Journal ID + last USN per archive. Verdicts: journal ID changed or USN gap → `ContinuityLost` → QUICK is invalid, DEEP or FULL required; records exist → `Changed`, affected paths are forced into the sample; no records → `Unchanged` (advisory only, R-17). Raw-sector edits and edits made from another OS leave no USN trace; this is why R-17 exists.
 
 ## B13. I/O engine
+
+> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: R-111's override applies in registration, FULL verification and relocation, on the command line and in the GUI: `--io` wins, then `io.rotational_override` for the device's serial (compared as identity matching compares serials), then detection.
 
 - R-110 Pipeline: scanner → ordered work queue → readers (1 for rotational; `min(8, cores)` for non-rotational) → hash workers → result sink, decoupled by bounded buffers (default 8 × 8 MiB per reader). Never one thread per file.
 - R-111 Rotational detection: Windows `StorageDeviceSeekPenaltyProperty`; Linux `/sys/block/<dev>/queue/rotational`. USB bridges misreport; `io.rotational_override` (by serial) and `--io hdd|ssd` win.

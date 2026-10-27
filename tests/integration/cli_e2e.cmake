@@ -1670,4 +1670,30 @@ if(CMAKE_HOST_WIN32)
     endif()
 endif()
 
+# R-111: --io hdd|ssd chooses how the media is read, and where it is not
+# given, the config's io.rotational_override does by device serial; --io
+# takes hdd or ssd only, and an override other than "hdd" or "ssd" makes the
+# config invalid (exit 11). Sample data, sample serials.
+set(IO_ROOT "${WORK}/io-SAMPLE")
+file(WRITE "${IO_ROOT}/SAMPLE-1.txt" "one\n")
+file(WRITE "${IO_ROOT}/SAMPLE-2.txt" "two\n")
+run_cli("0" register "${IO_ROOT}" --io ssd)
+run_cli("0;2" verify --full "${IO_ROOT}" --io hdd)
+run_cli("10" --lang en verify --full "${IO_ROOT}" --io fast)
+set(io_refused "${last_errors}")
+file(WRITE "${WORK}/config-io.json"
+    "{\"language\": \"en\", \"io\": {\"rotational_override\": {\"SAMPLE-SERIAL-1\": \"ssd\", \"SAMPLE-SERIAL-2\": \"hdd\"}}}\n")
+set(GLOBAL --config "${WORK}/config-io.json" --repository "${WORK}/repo")
+run_cli("0;2" verify --full "${IO_ROOT}")
+set(io_verified "${last_output}")
+file(WRITE "${WORK}/config-io-bad.json" "{\"io\": {\"rotational_override\": {\"SAMPLE-SERIAL-1\": \"fast\"}}}\n")
+set(GLOBAL --config "${WORK}/config-io-bad.json" --repository "${WORK}/repo")
+run_cli("11" --lang en repo info)
+set(io_bad_config "${last_errors}")
+set(GLOBAL --config "${WORK}/config.json")
+if(NOT io_refused STREQUAL "error: --io takes hdd or ssd\n" OR NOT io_verified MATCHES "^FULL VERIFY PASSED"
+        OR NOT io_bad_config MATCHES "io\\.rotational_override must give each device serial \"hdd\" or \"ssd\"")
+    message(FATAL_ERROR "--io and io.rotational_override:\n${io_refused}\n${io_verified}\n${io_bad_config}")
+endif()
+
 message(STATUS "veriarchive-cli end-to-end test passed")

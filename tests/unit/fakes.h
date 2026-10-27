@@ -7,10 +7,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -241,7 +244,9 @@ private:
             }
             const auto count = std::min<std::size_t>(output.size(), node_.content.size() - offset);
             std::memcpy(output.data(), node_.content.data() + offset, count);
-            counter_ += count;
+            // Several readers may read at once (an SSD, R-110); the test reads
+            // the counter once they have finished.
+            std::atomic_ref<std::uint64_t>(counter_).fetch_add(count);
             return count;
         }
         std::uint64_t size() const override { return node_.content.size(); }
@@ -543,6 +548,84 @@ private:
 
     va::IFileSystemAccess& inner_;
     std::atomic_int opened_{0};
+};
+
+// How many files the readers hold open at once, which tells how many readers
+// hash them (R-110: one for an HDD, several for an SSD). With `meet`, the
+// first file opened waits up to 10 s for a second one to be opened beside it,
+// so that several readers are seen together however their threads are
+// scheduled; one reader opens no second file meanwhile, and goes on after
+// the wait. Everything else passes to `inner`.
+class OpenFilesWatch final : public va::IFileSystemAccess {
+public:
+    OpenFilesWatch(va::IFileSystemAccess& inner, bool meet) : inner_(inner), met_(!meet) {}
+
+    int most_open_at_once()
+    {
+        std::lock_guard lock(mutex_);
+        return most_;
+    }
+
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& directory) override
+    {
+        return inner_.list(directory);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& file, va::ReadOptions options) override
+    {
+        auto source = inner_.open(file, options);
+        if (!source) {
+            return source;
+        }
+        {
+            std::unique_lock lock(mutex_);
+            most_ = std::max(most_, ++open_);
+            if (!met_) {
+                together_.wait_for(lock, std::chrono::seconds(10), [&] { return open_ >= 2; });
+                met_ = true;
+            }
+            together_.notify_all();
+        }
+        return std::make_unique<Source>(std::move(*source), *this);
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& file) override
+    {
+        return inner_.drop_cache(file);
+    }
+
+private:
+    class Source final : public va::IByteSource {
+    public:
+        Source(std::unique_ptr<va::IByteSource> inner, OpenFilesWatch& watch) : inner_(std::move(inner)), watch_(watch)
+        {
+        }
+        ~Source() override
+        {
+            std::lock_guard lock(watch_.mutex_);
+            --watch_.open_;
+        }
+        std::expected<std::size_t, va::IoError> read(std::uint64_t offset, std::span<std::byte> output) override
+        {
+            return inner_->read(offset, output);
+        }
+        std::uint64_t size() const override { return inner_->size(); }
+        std::size_t alignment() const override { return inner_->alignment(); }
+
+    private:
+        std::unique_ptr<va::IByteSource> inner_;
+        OpenFilesWatch& watch_;
+    };
+
+    va::IFileSystemAccess& inner_;
+    std::mutex mutex_;
+    std::condition_variable together_;
+    int open_ = 0;
+    int most_ = 0;
+    bool met_;
 };
 
 // Passes everything to `inner`, except that the `nth` opening of a file named

@@ -1,6 +1,7 @@
 #include "core/hash/hash_pipeline.h"
 
 #include "core/hash/hashers.h"
+#include "core/identity/matcher.h"
 
 #include <algorithm>
 #include <atomic>
@@ -290,6 +291,29 @@ std::size_t default_reader_count(std::optional<bool> rotational)
     }
     const auto cores = std::max(1u, std::thread::hardware_concurrency());
     return std::min<std::size_t>(8, cores);
+}
+
+std::optional<bool> volume_rotational(const VolumeInfo& volume, std::optional<bool> io_option,
+    const std::map<std::string, bool>& overrides)
+{
+    if (io_option) {
+        return io_option;
+    }
+    std::optional<bool> rotational;
+    for (const auto& device : volume.devices) {
+        auto known = device.rotational;
+        if (!device.serial.empty()) {
+            const auto chosen = std::ranges::find_if(overrides,
+                [&](const auto& entry) { return serials_equal(entry.first, device.serial); });
+            if (chosen != overrides.end()) {
+                known = chosen->second;
+            }
+        }
+        if (known) {
+            rotational = rotational.value_or(false) || *known;
+        }
+    }
+    return rotational;
 }
 
 std::expected<void, IoError> hash_files(

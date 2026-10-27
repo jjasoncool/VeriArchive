@@ -7,6 +7,7 @@
 #include "core/interfaces.h"
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -38,6 +39,16 @@ struct HashPipelineOptions {
 // (avoids seek amplification; USB bridges often hide the type), min(8, cores)
 // for SSDs (R-110, R-111).
 std::size_t default_reader_count(std::optional<bool> rotational);
+
+// Whether the devices of `volume` are rotational, which default_reader_count
+// turns into readers (R-110, R-111). `io_option` (--io hdd|ssd) wins. Without
+// it, each device is as the config's io.rotational_override says for its
+// serial (`overrides`, serial -> rotational; serials compared as identity
+// matching compares them, serials_equal), else as the platform detected it.
+// Rotational when any device is; not rotational when every device whose type
+// is known is not; unknown when none is known (decision 0034).
+std::optional<bool> volume_rotational(const VolumeInfo& volume, std::optional<bool> io_option,
+    const std::map<std::string, bool>& overrides);
 
 // Hashes every job. `on_result` runs on the calling thread once per finished
 // file; returning false stops the pipeline (e.g. the device disappeared).

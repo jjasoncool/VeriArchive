@@ -324,11 +324,16 @@ std::vector<OperationRow> describe_operations(const Text& text, const std::vecto
 // boxes of the views where operations start take no part, as they are not
 // where Resume is clicked.
 //
+// Both take from `config` what the command line takes from it given no
+// option: the readers of a device as its io.rotational_override says by the
+// device's serial (R-111, without --io).
+//
 // A stopped verification, as `verify --full <archive_uuid> --resume <run_id>`:
 // its archive named by its uuid, and so looked for among the attached volumes
 // (never at the root the run read before), and its run; strict metadata only
-// where `policy` sets it, as on the command line without --strict-metadata.
-VerifyRequest verification_resume(const UnfinishedOperation& verification, const Policy& policy);
+// where the config's policy sets it, as on the command line without
+// --strict-metadata.
+VerifyRequest verification_resume(const UnfinishedOperation& verification, const Config& config);
 // A stopped registration, as `register <root> --resume`: the root its plan
 // names, made as the command line makes a root typed there (typed_root), and
 // no media copy (R-03), as without --write-media-copy. Before anything of the
@@ -338,7 +343,8 @@ VerifyRequest verification_resume(const UnfinishedOperation& verification, const
 // (OperationRow::resume_asks_first, or the resume's own refusal,
 // RegisterFailure::older_version), as `--confirm` does on the command line;
 // a resume of any other registration needs none (decision 0022, point 7).
-RegisterRequest registration_resume(const UnfinishedOperation& registration, bool confirmed = false);
+RegisterRequest registration_resume(const UnfinishedOperation& registration, const Config& config,
+    bool confirmed = false);
 
 // What a resume of a registration that an older version of VeriArchive left,
 // and that may still run it, says before the operator confirms it: the

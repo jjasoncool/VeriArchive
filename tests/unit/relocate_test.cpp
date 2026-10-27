@@ -108,8 +108,11 @@ struct RelocationFixture : test::EngineFixture {
         va::RelocateServices services{archive_files(), *repository.files, *repository.writer, media, store,
             repository.context.repo, repository.context.repository_uuid, host, processes};
         va::RelocateRequest request{archive_uuid, root, std::nullopt, resume};
+        request.rotational_override = rotational_override;
         return va::relocate_archive(services, request, cancel, progress);
     }
+
+    std::map<std::string, bool> rotational_override; // the config's io.rotational_override (R-111)
 
     std::string key() const { return va::relocation_key(archive_uuid); }
 
@@ -864,6 +867,22 @@ void a_new_carrier_that_goes_away_leaves_the_relocation_resumable()
     const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
     CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id && resumed->result == "PASSED");
     CHECK(fixture.archive.bytes_read == sample_bytes - sample_photo_bytes);
+}
+
+// R-111: the config's io.rotational_override applies to a relocation: the
+// sample device of the new carrier reports an HDD (one reader), and the
+// override of its serial says SSD, so several readers hash the copy at once
+// (min(8, cores), on a computer with more than one core).
+void the_rotational_override_applies_to_a_relocation()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    test::OpenFilesWatch watch(fixture.archive, true);
+    fixture.media_files = &watch;
+    fixture.rotational_override = {{"NEW-DISK", false}};
+    const auto relocated = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(relocated && relocated->revision == 2 && relocated->result == "PASSED");
+    CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
 }
 
 // Decision 0010: entries unreadable at registration travel unchanged.
@@ -2500,6 +2519,7 @@ void relocate_tests()
     an_unreadable_entry_ends_the_relocation_once_everything_was_read();
     a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable();
     a_new_carrier_that_goes_away_leaves_the_relocation_resumable();
+    the_rotational_override_applies_to_a_relocation();
     known_unreadable_entries_are_carried();
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();

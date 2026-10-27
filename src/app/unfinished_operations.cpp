@@ -780,28 +780,32 @@ std::vector<OperationRow> describe_operations(const Text& text, const std::vecto
     return rows;
 }
 
-VerifyRequest verification_resume(const UnfinishedOperation& verification, const Policy& policy)
+VerifyRequest verification_resume(const UnfinishedOperation& verification, const Config& config)
 {
     // As `verify --full <archive_uuid> --resume <run_id>` makes its request:
     // no root, so the archive is looked for among the attached volumes, and
-    // strict metadata as the policy sets it, for no --strict-metadata is given.
+    // strict metadata as the policy sets it, for no --strict-metadata is
+    // given, and the readers as the config's override says, for no --io.
     VerifyRequest request;
     request.archive_uuid = verification.archive_uuid;
     request.resume_run = verification.run_id;
-    request.strict_metadata = policy.strict_metadata;
+    request.strict_metadata = config.policy.strict_metadata;
+    request.rotational_override = config.rotational_override;
     return request;
 }
 
-RegisterRequest registration_resume(const UnfinishedOperation& registration, bool confirmed)
+RegisterRequest registration_resume(const UnfinishedOperation& registration, const Config& config, bool confirmed)
 {
     // As `register <root> --resume` makes its request, the root its plan
-    // names typed, and no --write-media-copy: nothing is written on the media.
-    // Confirmed in the question that Resume asks on an older version's
-    // registration, as with --confirm.
+    // names typed, no --write-media-copy: nothing is written on the media,
+    // and no --io: the readers as the config's override says. Confirmed in
+    // the question that Resume asks on an older version's registration, as
+    // with --confirm.
     RegisterRequest request;
     request.root = typed_root(registration.root);
     request.resume = true;
     request.write_media_copy = false;
+    request.rotational_override = config.rotational_override;
     request.confirmed = confirmed;
     return request;
 }

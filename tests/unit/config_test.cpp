@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <map>
 #include <stdexcept>
 
 void config_tests()
@@ -47,9 +48,29 @@ void config_tests()
         CHECK(config.allow_network_repository);
         CHECK(config.trusted_keys.size() == 1);
         CHECK(config.document["io"] == original.document["io"]);
+        CHECK(config.rotational_override == (std::map<std::string, bool>{{"disk-serial", true}}));
         CHECK(config.document["extension"] == original.document["extension"]);
         CHECK(save(config));
     }
+
+    // R-111: io.rotational_override gives a device serial "hdd" or "ssd" (or
+    // true or false); anything else makes the config invalid. Sample serials.
+    std::ofstream(path) << R"({"io":{"rotational_override":{"SAMPLE-1":"hdd","SAMPLE-2":"ssd","SAMPLE-3":false}}})";
+    const auto overrides = va::read_config(path);
+    CHECK(overrides && *overrides &&
+          (**overrides).rotational_override ==
+              (std::map<std::string, bool>{{"SAMPLE-1", true}, {"SAMPLE-2", false}, {"SAMPLE-3", false}}));
+    std::ofstream(path) << R"({"io":{"rotational_override":{"SAMPLE-1":"fast"}}})";
+    const auto bad_value = va::read_config(path);
+    CHECK(!bad_value &&
+          bad_value.error().message == "io.rotational_override must give each device serial \"hdd\" or \"ssd\"");
+    std::ofstream(path) << R"({"io":{"rotational_override":["SAMPLE-1"]}})";
+    const auto bad_list = va::read_config(path);
+    CHECK(!bad_list &&
+          bad_list.error().message == "io.rotational_override must give each device serial \"hdd\" or \"ssd\"");
+    std::ofstream(path) << R"({"io":"hdd"})";
+    const auto bad_io = va::read_config(path);
+    CHECK(!bad_io && bad_io.error().message == "io must be an object");
 
     // Messages carry the JSON library's sentence without its
     // "[json.exception.<kind>.<id>] " tag, which means nothing to people.

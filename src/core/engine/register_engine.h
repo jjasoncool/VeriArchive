@@ -6,6 +6,7 @@
 #include "core/manifest/manifest.h"
 #include "core/repository/archive_store.h"
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@ struct RegisterRequest {
     bool force_new_archive = false;         // R-97: register again as a separate archive
     std::optional<Uuid> copy_of;            // decision 0005
     std::optional<bool> rotational;         // --io hdd|ssd overrides detection (R-111)
+    std::map<std::string, bool> rotational_override = {}; // io.rotational_override of the config, by serial (R-111)
     bool resume = false;                    // R-104: continue an interrupted registration
     bool write_media_copy = false;          // R-89: also write .veriarchive/ on the media (off by default)
     // A registration over a lost manifest (decision 0028, point 8): the next

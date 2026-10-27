@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-27
-amends: HANDOFF §A6 (run result `INCOMPLETE` when the device disappeared; item status `Unreadable(removed)` is never produced), §B9 (`IoErrorKind::DeviceRemoved`: which errors of the platform name a device that went away)
+amends: HANDOFF §A6 (run result `INCOMPLETE` when the device disappeared; item status `Unreadable(removed)` is never produced), §B9 (`IoErrorKind::DeviceRemoved`: which errors of the platform name a device that went away), §B7.3 and R-111 (`io.rotational_override`: its values, how a serial is found, where it applies; section "The readers of a device")
 ---
 
 # A device that goes away interrupts the read; it never makes entries unreadable
@@ -35,3 +35,13 @@ Rejected alternatives:
 - A read error costs one more lookup of the volume while the volume stays attached; nothing changes while every read succeeds.
 - No change to the manifests, the database or the golden test.
 - Tests: with the fakes, a device that goes away, its reads failing with I/O errors and its volume no longer found, at the first file, halfway through a later file and while the folders are scanned, in a verification, a registration and a relocation, each resumed once it is attached again; whether a volume is the same (`same_volume`); the errors each platform names a removal (built on each OS). On hardware, a FULL verification through a USB bridge with the device pulled out once stays an acceptance item on both OSes.
+
+## The readers of a device (R-111)
+
+Added 2026-10-27. How many readers hash a device's files follows whether it is rotational (R-110: one for an HDD, and for a device whose type is unknown; `min(8, cores)` for an SSD). The platform reports the type (Windows `StorageDeviceSeekPenaltyProperty`, Linux `/sys/block/<dev>/queue/rotational`), and a USB bridge may report it wrongly or not at all. R-111 makes `io.rotational_override` (by serial, §B7.3) and `--io hdd|ssd` win over that; only `--io` was implemented, per command, and the GUI, which has no `--io`, had no way at all.
+
+1. **Values.** `"io": {"rotational_override": {"<serial>": "hdd"}}` in the config file (R-82): each device serial names `"hdd"` (rotational) or `"ssd"`; `true` and `false` are read as `"hdd"` and `"ssd"`. Any other value, or an `io` or `rotational_override` that is no object, makes the config invalid (exit 11), as a malformed `policy` does: a typing mistake would otherwise go unseen while the device is read the wrong way. `config_to_json` keeps the file's own `io` as it is.
+2. **Which device.** A device takes the override whose serial equals its own as identity matching compares serials (`serials_equal`: case, spaces and underscores aside, and byte-swapped pairs), the serial that `media list` shows. A device without a serial takes none. A volume on several devices is rotational when any of them is (as before).
+3. **Precedence.** `--io` wins; then the override; then what the platform detected (`volume_rotational`, `core/hash/hash_pipeline.h`).
+4. **Where.** Registration, FULL verification and relocation, on the command line and in the GUI (Register Archive, Verify Archive, and Resume in the Archive List, which takes from the config what the command line takes given no option).
+5. Tests: the rule itself (precedence, serials as matching compares them, two devices); the config's values and its refusals; each engine read by several readers at once where the override makes its HDD an SSD; the Archive List's Resume carrying the override; on the command line `--io hdd`, `--io ssd`, a refused `--io` and a refused override. That the command line and the GUI hand the config's override to the engines is reviewed: readers are not seen from outside.
