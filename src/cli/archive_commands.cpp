@@ -1,6 +1,7 @@
 // `archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid>
 // <root_path> [--resume] | compare <uuid> <uuid> | abandon-registration
-// <uuid> | abandon-relocation <uuid>` and `history <uuid>`. Archives are always shown
+// <uuid> | abandon-relocation <uuid> | abandon-verification <uuid>` and
+// `history <uuid>`. Archives are always shown
 // with their last FULL verify and last verify of any mode, with dates and
 // OVERDUE flags, never a bare "integrity status" (R-21), and with their
 // unfinished registration and relocation, one line each (decision 0026).
@@ -15,6 +16,7 @@
 #include "common/utf8.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_relocation.h"
+#include "core/engine/abandon_verification.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
 #include "core/engine/recorded_manifest.h"
@@ -869,6 +871,92 @@ int abandon_relocation_command(const Arguments& arguments)
     return exit_code::passed;
 }
 
+// An unfinished verification that adds chunk hashes as --json shows it,
+// abandoned or to be.
+nlohmann::json abandonable_verification_json(const AbandonableVerification& verification)
+{
+    return {
+        {"archive_uuid", verification.archive_uuid},
+        {"label", verification.label},
+        {"revision", verification.revision},
+        {"root", verification.root},
+        {"run_id", verification.run_id},
+        {"started", verification.started},
+        {"saved_progress", {{"files", verification.files}, {"bytes", verification.bytes}}},
+    };
+}
+
+// `archive abandon-verification <uuid> [--confirm]` (decision 0033): gives up
+// an unfinished FULL verify that adds chunk hashes, which keeps every other
+// operation that creates the archive's next revision from beginning. Its
+// record and saved progress go; the archive, its revisions, manifests and the
+// history stay. Without --confirm it only says what would be lost (exit 12).
+int abandon_verification_command(const Arguments& arguments)
+{
+    auto session = open_session(arguments, false);
+    if (!session) {
+        return report_failure(arguments, session.error());
+    }
+    auto store = ArchiveStore::open(session->context.repo);
+    if (!store) {
+        return report_failure(arguments, {exit_code::repository, store.error().message});
+    }
+    const auto archive_uuid = find_archive_uuid(*store, arguments.words[2]);
+    if (!archive_uuid) {
+        return report_failure(arguments, archive_uuid.error());
+    }
+    const auto processes = platform::make_process_table();
+    AbandonServices services{*store, *processes, host_info().host};
+    const VerificationAbandonRequest request{*archive_uuid, std::nullopt};
+    const auto failed = [&](const AbandonFailure& failure) {
+        return report_failure(arguments, {failure.kind == AbandonFailure::Kind::Refused ? exit_code::identity_decision
+                                                                                       : exit_code::repository,
+                                             failure.message});
+    };
+    const auto& text = arguments.text;
+
+    // The confirmation: what would be lost, and how to go ahead.
+    if (!arguments.has("--confirm")) {
+        const auto verification = abandonable_verification(services, request);
+        if (!verification) {
+            return failed(verification.error());
+        }
+        const std::string confirm = "run the command again with --confirm to abandon it";
+        if (arguments.json) {
+            print_json({{"error", confirm}, {"exit_code", exit_code::identity_decision},
+                {"verification", abandonable_verification_json(*verification)}});
+            return exit_code::identity_decision;
+        }
+        std::cout << text.format("Unfinished verification of {} ({}) that adds chunk hashes, revision {}",
+                         verification->label, verification->archive_uuid, verification->revision)
+                  << "\n  " << text.format("root: {}", verification->root)
+                  << "\n  " << text.format("started: {}", app::local_time(verification->started, text))
+                  << "\n  " << text.format("run: {}", verification->run_id) << "\n  "
+                  << text.format("saved progress: {}, {}", app::count_of(text, verification->files, app::Counted::File),
+                         app::count_of(text, verification->bytes, app::Counted::Byte))
+                  << '\n'
+                  << text("Abandoning it removes its saved progress, and it can never be resumed afterwards. The "
+                          "archive, its revisions, manifests and the verification history stay as they are.")
+                  << '\n';
+        return report_failure(arguments, {exit_code::identity_decision, confirm});
+    }
+
+    const auto abandoned = abandon_verification(services, request);
+    if (!abandoned) {
+        return failed(abandoned.error());
+    }
+    if (arguments.json) {
+        print_json(abandonable_verification_json(*abandoned));
+        return exit_code::passed;
+    }
+    std::cout << text.format("Abandoned the unfinished verification of {} ({}) that adds chunk hashes: its saved "
+                             "progress ({}, {}) was removed.",
+                     abandoned->label, abandoned->archive_uuid, app::count_of(text, abandoned->files, app::Counted::File),
+                     app::count_of(text, abandoned->bytes, app::Counted::Byte))
+              << '\n';
+    return exit_code::passed;
+}
+
 } // namespace
 
 // Decision 0004: accept a copy (or a new enclosure) as the archive's carrier
@@ -977,10 +1065,13 @@ int archive_command(const Arguments& arguments)
     const bool abandon_command = arguments.words.size() == 3 && arguments.words[1] == "abandon-registration";
     const bool relocation_abandon_command =
         arguments.words.size() == 3 && arguments.words[1] == "abandon-relocation";
+    const bool verification_abandon_command =
+        arguments.words.size() == 3 && arguments.words[1] == "abandon-verification";
     // `retire` takes --confirm, needed where the archive's latest manifest is
     // lost (decision 0028, point 9).
     const bool retire_command = arguments.words.size() == 3 && arguments.words[1] == "retire";
-    const bool confirmed_command = abandon_command || relocation_abandon_command || retire_command;
+    const bool confirmed_command =
+        abandon_command || relocation_abandon_command || verification_abandon_command || retire_command;
     if (const auto problem = check_options(arguments,
             confirmed_command  ? std::initializer_list<std::string_view>{"--confirm"}
             : relocate_command ? std::initializer_list<std::string_view>{"--resume"}
@@ -993,12 +1084,11 @@ int archive_command(const Arguments& arguments)
     const bool uuid_command = arguments.words.size() == 3 &&
                               (arguments.words[1] == "show" || arguments.words[1] == "retire");
     const bool compare_command = arguments.words.size() == 4 && arguments.words[1] == "compare";
-    if (!list_command && !uuid_command && !relocate_command && !compare_command && !abandon_command &&
-        !relocation_abandon_command) {
+    if (!list_command && !uuid_command && !relocate_command && !compare_command && !confirmed_command) {
         return report_failure(arguments, {exit_code::usage,
             "usage: archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid> <root_path> [--io "
             "hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
-            "abandon-relocation <uuid> [--confirm]"});
+            "abandon-relocation <uuid> [--confirm] | abandon-verification <uuid> [--confirm]"});
     }
     // Compare needs no verification status of every archive, only the two
     // manifests; abandoning only the archive's unfinished registration or
@@ -1011,6 +1101,9 @@ int archive_command(const Arguments& arguments)
     }
     if (relocation_abandon_command) {
         return abandon_relocation_command(arguments);
+    }
+    if (verification_abandon_command) {
+        return abandon_verification_command(arguments);
     }
     // `list` shows every archive's latest header; `show` the named archive's;
     // `retire` and `relocate` none (a relocation reads what it matches itself).

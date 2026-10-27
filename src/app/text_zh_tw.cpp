@@ -82,6 +82,7 @@ constexpr CatalogEntry entries[] = {
         "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
+        "  archive abandon-verification <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n",
@@ -99,6 +100,7 @@ constexpr CatalogEntry entries[] = {
         "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
+        "  archive abandon-verification <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n"},
@@ -371,10 +373,10 @@ constexpr CatalogEntry entries[] = {
     {"no archive {}", "找不到封存 {}"},
     {"usage: archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid> <root_path> "
         "[--io hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
-        "abandon-relocation <uuid> [--confirm]",
+        "abandon-relocation <uuid> [--confirm] | abandon-verification <uuid> [--confirm]",
         "用法：archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid> <root_path> "
         "[--io hdd|ssd] [--resume] | compare <uuid> <uuid> | abandon-registration <uuid> [--confirm] | "
-        "abandon-relocation <uuid> [--confirm]"},
+        "abandon-relocation <uuid> [--confirm] | abandon-verification <uuid> [--confirm]"},
     // archive compare: A is the reference archive, B the copy compared with it.
     {"COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", "比較結果：{}  {}（{}）r{}  與  {}（{}）r{}"},
     {"A: {}, registered {}, {}", "A：{}，註冊於 {}，共 {}", Match::FormatOnly},
@@ -410,6 +412,13 @@ constexpr CatalogEntry entries[] = {
         "放棄後，已儲存的進度會被刪除，而且之後再也無法繼續。封存本身、已記錄的版次、清單檔與驗證歷程都維持不變。"},
     {"Abandoned the unfinished relocation of {} ({}): its saved progress ({}, {}) was removed.",
         "已放棄 {}（{}）未完成的搬移：已刪除其已儲存的進度（{}，{}）。"},
+    // archive abandon-verification (decision 0033); the other lines are
+    // abandon-registration's and abandon-relocation's.
+    {"Unfinished verification of {} ({}) that adds chunk hashes, revision {}",
+        "{}（{}）加入區塊雜湊的未完成驗證，版次 {}"},
+    {"Abandoned the unfinished verification of {} ({}) that adds chunk hashes: its saved progress ({}, {}) was "
+        "removed.",
+        "已放棄 {}（{}）加入區塊雜湊的未完成驗證：已刪除其已儲存的進度（{}，{}）。"},
     {"usage: history <uuid>", "用法：history <uuid>"},
     // src/cli/export_commands.cpp
     {"usage: export-sha256sums <uuid> --out FILE", "用法：export-sha256sums <uuid> --out FILE"},
@@ -980,6 +989,32 @@ constexpr CatalogEntry entries[] = {
         "(`register --new-revision` records them)",
         "版次 {0} 的項目行無法原樣寫出；版次 {1} 仍不含區塊雜湊（`register --new-revision` 會記錄它們）"},
     {"chunk hashes of {}: {} read, {} expected", "{} 的區塊雜湊：讀到 {} 個，應為 {} 個"},
+    {"the verification was abandoned while it ran", "這次驗證在執行期間被放棄"},
+    // One operation that creates an archive's next revision at a time: a
+    // verification that adds chunk hashes refuses, and is refused by, a
+    // registration and a relocation (decision 0033), and by another of its
+    // kind; and abandoning it.
+    {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
+        "was changed (finish it with `verify --full {} --resume {}` first, or abandon it with `archive "
+        "abandon-verification {}`)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先以 "
+        "`verify --full {3} --resume {4}` 完成它，或以 `archive abandon-verification {5}` 放棄它）"},
+    {"this verification is still running in process {} ({}) on this computer; resume it once that process has "
+        "ended",
+        "此驗證仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再繼續"},
+    {"cannot start the verification: {}", "無法開始驗證：{}", Match::Cause},
+    {"archive {} has no unfinished verification that adds chunk hashes", "封存 {} 沒有加入區塊雜湊的未完成驗證"},
+    {"the unfinished verification of archive {} that adds chunk hashes is no longer the one shown (it was resumed, "
+        "finished or abandoned meanwhile); nothing was changed",
+        "封存 {} 加入區塊雜湊的未完成驗證已不是畫面上的那一個（其間已被繼續、完成或放棄）；未做任何變更"},
+    {"the verification of archive {} that adds chunk hashes is still running in process {} ({}) on this computer; "
+        "abandon it once that process has ended",
+        "封存 {} 加入區塊雜湊的驗證仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再放棄"},
+    {"an attempt of the verification of archive {} that adds chunk hashes said it was working less than 3 minutes "
+        "ago; abandon it once it has stopped",
+        "封存 {} 加入區塊雜湊的驗證在不到 3 分鐘前仍回報正在執行；請等它停止後再放棄"},
+    {"cannot read the unfinished verification: {}", "無法讀取未完成的驗證：{}", Match::Cause},
+    {"cannot abandon the verification: {}", "無法放棄驗證：{}", Match::Cause},
     // A run that read everything keeps its saved progress when the revision
     // with chunk hashes cannot be written or recorded: its resume records it.
     {"verification finished as PASSED but its revision with chunk hashes could not be written: {}; resume the run "

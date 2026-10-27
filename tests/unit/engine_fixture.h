@@ -182,7 +182,7 @@ struct EngineFixture {
     std::expected<va::VerifyOutcome, va::VerifyStop> verify(va::VerifyRequest request)
     {
         va::VerifyServices services{archive_files(), *repository.files, media, store, repository.context.repo,
-            repository.context.repository_uuid, host, *repository.writer};
+            repository.context.repository_uuid, host, *repository.writer, processes};
         return va::verify_full(services, request, cancel, progress);
     }
 

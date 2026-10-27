@@ -8,6 +8,7 @@
 #include "core/engine/comparison.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/engine/registration_attempt.h"
 #include "core/engine/relocate_engine.h"
 #include "core/engine/volume_watch.h"
 #include "core/hash/hash_pipeline.h"
@@ -297,6 +298,19 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
             return stop(VerifyStop::Kind::NotFound, "run " + run_id +
                                                         " is an interrupted attempt of a relocation of archive " +
                                                         archive_uuid + " that has ended; nothing is left to resume");
+        }
+        // A run that added chunk hashes was taken over by another resume, or
+        // ended: while a verification that adds them to its archive is
+        // unfinished, that one is the one to finish or abandon (decision
+        // 0033).
+        if (*run && adding_chunk_size(nlohmann::json::parse((*run)->counts_json, nullptr, false)) > 0) {
+            const auto adding = unfinished_adding_verification(store, (*run)->archive_uuid);
+            if (!adding) {
+                return stop(VerifyStop::Kind::Repository, adding.error().message);
+            }
+            if (*adding) {
+                return stop(VerifyStop::Kind::Refused, adding_verification_refusal(**adding));
+            }
         }
         return stop(VerifyStop::Kind::NotFound, "run " + run_id + " is not an interrupted run");
     }
@@ -629,46 +643,144 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
 
     // Make this run resumable from now on, carrying over a resumed run's
     // checkpoints. The record also says where the run reads and, while it
-    // works, that it does ("updated"; decision 0022), and whether it adds
-    // chunk hashes, at which chunk size (decision 0033).
+    // works, that it does ("updated"; decision 0022); and whether it adds
+    // chunk hashes, at which chunk size, and which process runs it
+    // (decisions 0033, 0024).
     std::set<std::string> content_verified;
     nlohmann::json run_record{{"archive_uuid", outcome.archive_uuid}, {"revision", outcome.revision},
         {"started", started}, {"root", path_to_utf8(located->root)}, {"updated", started}};
-    if (adding > 0) {
-        run_record[adding_member] = adding;
-    }
-    (void)store.set_setting(run_setting(outcome.run_id), run_record.dump());
-    Heartbeat heartbeat(store, run_setting(outcome.run_id), std::move(run_record), progress);
     // The chunk hashes read, by entry key, of every file larger than the
     // chunk size whose content matched; with those that the checkpoints of a
     // resumed run kept (decision 0033).
     std::map<std::string, std::vector<std::string>> chunks_read;
-    if (resume) {
-        if (auto previous = store.progress(*request.resume_run)) {
-            content_verified = std::move(*previous);
+    bool abandoned = false; // the run's record is gone: the operator abandoned it (decision 0033)
+    if (adding > 0) {
+        run_record[adding_member] = adding;
+        if (const auto self = services.processes.current()) {
+            record_attempt(run_record, AttemptProcess{*self, services.host.host});
         }
-        if (adding > 0) {
-            if (auto kept = store.progress_chunks(*request.resume_run)) {
+        // One operation that creates the archive's next revision at a time
+        // (decision 0033): the run begins, or takes over the run it resumes
+        // with its checkpoints and kept chunk hashes, in one write transaction
+        // that looks first, before anything of the media is read. So two
+        // started at once cannot both go on.
+        std::optional<std::string> refused;
+        const auto claimed = [&]() -> std::expected<void, IoError> {
+            if (auto begun = store.begin(); !begun) {
+                return begun;
+            }
+            if (resume) {
+                const auto& before = *request.resume_run;
+                const auto stored = store.setting(run_setting(before));
+                if (!stored) {
+                    return std::unexpected(stored.error());
+                }
+                if (stored->empty()) {
+                    // Taken over by another resume meanwhile, or finished.
+                    const auto other = unfinished_adding_verification(store, outcome.archive_uuid);
+                    if (!other) {
+                        return std::unexpected(other.error());
+                    }
+                    refused = *other ? adding_verification_refusal(**other)
+                                     : "run " + before + " is not an interrupted run";
+                    store.rollback();
+                    return {};
+                }
+                // Never under an attempt whose process still runs on this
+                // computer (decision 0024); a run recorded INCOMPLETE stopped.
+                const auto recorded = store.verify_run(before);
+                if (!recorded) {
+                    return std::unexpected(recorded.error());
+                }
+                if (!*recorded || (*recorded)->result != "INCOMPLETE") {
+                    const auto judged = judge_attempt(
+                        nlohmann::json::parse(*stored, nullptr, false), services.processes, services.host.host);
+                    if (judged.state == AttemptState::Running) {
+                        const auto& process = judged.attempt->process;
+                        refused = "this verification is still running in process " + std::to_string(process.id) +
+                                  " (" + (process.program.empty() ? std::string("?") : process.program) +
+                                  ") on this computer; resume it once that process has ended";
+                        store.rollback();
+                        return {};
+                    }
+                }
+                auto previous = store.progress(before);
+                if (!previous) {
+                    return std::unexpected(previous.error());
+                }
+                content_verified = std::move(*previous);
+                auto kept = store.progress_chunks(before);
+                if (!kept) {
+                    return std::unexpected(kept.error());
+                }
                 chunks_read = std::move(*kept);
+                const std::vector<std::string> keys(content_verified.begin(), content_verified.end());
+                if (auto added = store.add_progress(outcome.run_id, keys); !added) {
+                    return added;
+                }
+                if (auto added = store.add_progress_chunks(outcome.run_id, chunks_read); !added) {
+                    return added;
+                }
+                if (auto cleared = store.clear_progress(before); !cleared) {
+                    return cleared;
+                }
+                if (auto removed = store.remove_setting(run_setting(before)); !removed) {
+                    return removed;
+                }
+            } else {
+                const auto now = store.find_archive(outcome.archive_uuid);
+                if (!now) {
+                    return std::unexpected(now.error());
+                }
+                if (*now) {
+                    auto another = another_operation_creates_the_revision(store, **now);
+                    if (!another) {
+                        return std::unexpected(another.error());
+                    }
+                    if (*another) {
+                        refused = std::move(*another);
+                        store.rollback();
+                        return {};
+                    }
+                    if (auto removed = remove_adding_verifications_of_earlier_revisions(store, **now); !removed) {
+                        return removed;
+                    }
+                }
             }
+            if (auto saved = store.set_setting(run_setting(outcome.run_id), run_record.dump()); !saved) {
+                return saved;
+            }
+            return store.commit();
+        }();
+        if (!claimed) {
+            store.rollback();
+            return stop(VerifyStop::Kind::Repository, "cannot start the verification: " + claimed.error().message);
         }
-        const std::vector<std::string> keys(content_verified.begin(), content_verified.end());
-        // All or nothing. When it fails, the run still skips what the run it
-        // resumes verified (the keys and chunk hashes are in memory), and that
-        // run stays as it was, resumable.
-        (void)store.write_transaction([&]() -> std::expected<void, IoError> {
-            if (auto added = store.add_progress(outcome.run_id, keys); !added) {
-                return added;
+        if (refused) {
+            return stop(VerifyStop::Kind::Refused, *refused);
+        }
+    } else {
+        (void)store.set_setting(run_setting(outcome.run_id), run_record.dump());
+        if (resume) {
+            if (auto previous = store.progress(*request.resume_run)) {
+                content_verified = std::move(*previous);
             }
-            if (auto added = store.add_progress_chunks(outcome.run_id, chunks_read); !added) {
-                return added;
-            }
-            if (auto cleared = store.clear_progress(*request.resume_run); !cleared) {
-                return cleared;
-            }
-            return store.remove_setting(run_setting(*request.resume_run));
-        });
+            const std::vector<std::string> keys(content_verified.begin(), content_verified.end());
+            // All or nothing. When it fails, the run still skips what the run
+            // it resumes verified (the keys are in memory), and that run stays
+            // as it was, resumable.
+            (void)store.write_transaction([&]() -> std::expected<void, IoError> {
+                if (auto added = store.add_progress(outcome.run_id, keys); !added) {
+                    return added;
+                }
+                if (auto cleared = store.clear_progress(*request.resume_run); !cleared) {
+                    return cleared;
+                }
+                return store.remove_setting(run_setting(*request.resume_run));
+            });
+        }
     }
+    Heartbeat heartbeat(store, run_setting(outcome.run_id), std::move(run_record), progress);
 
     const bool no_filesystem_id = std::ranges::find(identity.details, "filesystem-id-unavailable") !=
                                   identity.details.end();
@@ -757,11 +869,24 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         // record; its keys are tried again with the next checkpoint. The run
         // goes on: checkpoints only spare re-reading after an interruption.
         // Adding chunk hashes, a checkpoint keeps the chunk hashes of the
-        // files it saves, in its transaction (decision 0033).
+        // files it saves, in its transaction (decision 0033), only while the
+        // run's record is there: once the operator has abandoned the run
+        // (where this computer could not see that it runs), it saves nothing
+        // more, and records the verification alone.
         std::vector<std::string> unsaved;
         input.checkpoint = [&](const std::vector<std::string>& keys) {
             unsaved.insert(unsaved.end(), keys.begin(), keys.end());
             const auto saved = store.write_transaction([&]() -> std::expected<void, IoError> {
+                if (adding > 0) {
+                    const auto ours = store.setting(run_setting(outcome.run_id));
+                    if (!ours) {
+                        return std::unexpected(ours.error());
+                    }
+                    if (ours->empty()) {
+                        abandoned = true;
+                        return {};
+                    }
+                }
                 if (auto added = store.add_progress(outcome.run_id, unsaved); !added || adding == 0) {
                     return added;
                 }
@@ -773,7 +898,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                 }
                 return store.add_progress_chunks(outcome.run_id, kept);
             });
-            if (saved) {
+            if (saved || abandoned) {
                 unsaved.clear();
             }
             return true;
@@ -945,9 +1070,28 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         } else if (auto begun = store.begin(); !begun) {
             return begun;
         }
+        // A run that adds chunk hashes and whose record is gone was
+        // abandoned while it ran: its checkpoints go even when it was
+        // interrupted, as no resume can take it over.
+        if (adding > 0) {
+            const auto ours = store.setting(run_setting(outcome.run_id));
+            if (!ours) {
+                return std::unexpected(ours.error());
+            }
+            if (ours->empty()) {
+                abandoned = true;
+                if (added && not_recorded.empty()) {
+                    not_recorded = "the verification was abandoned while it ran";
+                }
+            }
+        }
         const bool records_revision = added && not_recorded.empty();
         auto row = run;
         auto row_counts = counts;
+        // The history says which runs added chunk hashes, at which chunk size.
+        if (adding > 0) {
+            row_counts[adding_member] = adding;
+        }
         row.revision = records_revision ? creates : previous_revision;
         if (records_revision) {
             row_counts["chunk_hashes_added_from_revision"] = previous_revision;
@@ -994,7 +1138,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             }
         }
         // A finished run needs no checkpoints; an INCOMPLETE one keeps them for --resume.
-        if (outcome.result != "INCOMPLETE") {
+        if (outcome.result != "INCOMPLETE" || abandoned) {
             if (auto cleared = store.clear_progress(outcome.run_id); !cleared) {
                 return cleared;
             }

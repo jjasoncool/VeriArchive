@@ -15,6 +15,7 @@
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
 #include "platform/media_enumerator.h"
+#include "platform/process_table.h"
 
 #include <algorithm>
 #include <iostream>
@@ -259,8 +260,9 @@ int verify_command(const Arguments& arguments)
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();
     const auto media = platform::make_media_enumerator();
+    const auto processes = platform::make_process_table();
     VerifyServices services{*archive_files, *repository_files, *media, *store, session->context.repo,
-        session->context.repository_uuid, host_info(), *session->writer};
+        session->context.repository_uuid, host_info(), *session->writer, *processes};
 
     CancelToken cancel;
     const platform::CancelOnInterrupt interrupt(cancel);

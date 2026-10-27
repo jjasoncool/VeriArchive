@@ -4,6 +4,7 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
+#include "core/engine/add_chunk_hashes.h"
 #include "core/engine/comparison.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
@@ -316,6 +317,18 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                         " was recorded by another operation before this relocation could begin; nothing was "
                         "changed (run `archive relocate` again)",
                     {}};
+                store.rollback();
+                return {};
+            }
+            // Nor while a FULL verify that adds chunk hashes to the archive
+            // is unfinished: one operation creating its next revision at a
+            // time (decision 0033).
+            const auto adding = unfinished_adding_verification(store, uuid);
+            if (!adding) {
+                return std::unexpected(adding.error());
+            }
+            if (*adding) {
+                refused = RelocateFailure{Kind::Refused, adding_verification_refusal(**adding), {}};
                 store.rollback();
                 return {};
             }

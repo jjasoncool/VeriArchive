@@ -1319,6 +1319,16 @@ string(JSON runs_after LENGTH "${last_output}" runs)
 if(NOT refused_error STREQUAL has_them OR NOT runs_after EQUAL runs_before)
     message(FATAL_ERROR "verify --add-chunk-hashes --json of an archive with chunk hashes:\n${refused_error}\n${last_output}")
 endif()
+# Nothing to abandon: no verification that adds chunk hashes to it is
+# unfinished (exit 12), with or without --confirm, in either language.
+run_cli("12" --lang en archive abandon-verification "${large_uuid}")
+if(NOT last_errors MATCHES "archive ${large_uuid} has no unfinished verification that adds chunk hashes")
+    message(FATAL_ERROR "archive abandon-verification with nothing to abandon:\n${last_errors}")
+endif()
+run_cli("12" archive abandon-verification "${large_uuid}" --confirm)
+if(NOT last_errors MATCHES "封存 ${large_uuid} 沒有加入區塊雜湊的未完成驗證")
+    message(FATAL_ERROR "archive abandon-verification --confirm with nothing to abandon, in Chinese:\n${last_errors}")
+endif()
 
 # One byte changed in chunk 1, 16000 bytes into it (sample data): a FULL
 # verify fails (exit 3) and names that chunk of the three and the byte where

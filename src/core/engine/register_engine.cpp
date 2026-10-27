@@ -5,6 +5,7 @@
 #include "common/utf8.h"
 #include "common/unicode.h"
 #include "common/uuid.h"
+#include "core/engine/add_chunk_hashes.h"
 #include "core/hash/hash_pipeline.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
@@ -1063,6 +1064,20 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 // archive takes no new revision over its lost manifest.
                 if (lost && *now && (*now)->status == "RETIRED") {
                     refused = RegisterFailure{Kind::Refused, retired_takes_no_revision};
+                    store.rollback();
+                    return {};
+                }
+            }
+            // Nor while a FULL verify that adds chunk hashes to the archive
+            // is unfinished: one operation creating its next revision at a
+            // time (decision 0033).
+            if (!plan.new_archive) {
+                const auto adding = unfinished_adding_verification(store, plan.archive_uuid);
+                if (!adding) {
+                    return std::unexpected(adding.error());
+                }
+                if (*adding) {
+                    refused = RegisterFailure{Kind::Refused, adding_verification_refusal(**adding)};
                     store.rollback();
                     return {};
                 }

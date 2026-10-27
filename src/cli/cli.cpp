@@ -28,6 +28,7 @@ void print_usage(const app::Text& text)
         "  archive relocate <uuid> <root_path> [--resume]\n"
         "  archive compare <uuid> <uuid>\n"
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
+        "  archive abandon-verification <uuid> [--confirm]\n"
         "  history <uuid>\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n");

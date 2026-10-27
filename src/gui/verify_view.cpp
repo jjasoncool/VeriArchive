@@ -15,6 +15,7 @@
 #include "core/engine/verify_engine.h"
 #include "platform/file_system.h"
 #include "platform/media_enumerator.h"
+#include "platform/process_table.h"
 
 #include <chrono>
 #include <memory>
@@ -229,8 +230,9 @@ void run_verification(GuiState& state, VerifyRequest request)
             const auto archive_files = platform::make_file_system_access();
             const auto repository_files = platform::make_file_system_access();
             const auto media = platform::make_media_enumerator();
+            const auto processes = platform::make_process_table();
             VerifyServices services{*archive_files, *repository_files, *media, *store, session.context.repo,
-                session.context.repository_uuid, state.host, *session.writer};
+                session.context.repository_uuid, state.host, *session.writer, *processes};
             auto outcome = verify_full(services, request, cancel, progress);
             if (!outcome) {
                 // Decision 0022, point 7: a chosen archive that more than one

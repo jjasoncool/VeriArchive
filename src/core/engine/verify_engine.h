@@ -47,6 +47,7 @@ struct VerifyServices {
     std::string repository_uuid;
     HostInfo host;
     IFileWriter& writer;                        // the manifest of a revision with chunk hashes added
+    IProcessTable& processes;                   // which process runs a verification that adds chunk hashes
 };
 
 // A finished (or interrupted) run, already recorded in the history chain.

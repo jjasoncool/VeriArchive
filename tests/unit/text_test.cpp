@@ -437,10 +437,26 @@ void translation_tests()
                   "resume the run with `verify --full " + sample + " --resume R` to record it") ==
           "驗證結果為通過，但無法記錄：無法執行 SQL：資料庫已被鎖定；請以 `verify --full " + sample +
               " --resume R` 繼續該執行，以記錄該版次");
-    CHECK(chinese("verification finished as PASSED but could not be recorded: cannot execute SQL: database is locked") ==
-          "驗證結果為通過，但無法記錄：無法執行 SQL：資料庫已被鎖定");
+    CHECK(chinese("verification finished as PASSED but could not be recorded: cannot execute SQL: database is "
+                  "locked") == "驗證結果為通過，但無法記錄：無法執行 SQL：資料庫已被鎖定");
     CHECK(chinese("run R adds no chunk hashes; resume it without --add-chunk-hashes, or start a new verification with "
                   "it") == "執行 R 不會加入區塊雜湊；請不加 --add-chunk-hashes 繼續它，或加上 --add-chunk-hashes 開始新的驗證");
+    // One operation creating an archive's next revision at a time, and
+    // abandoning a verification that adds chunk hashes (decision 0033).
+    CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run R) is creating "
+                  "revision 2; nothing was changed (finish it with `verify --full " + sample + " --resume R` first, "
+                  "or abandon it with `archive abandon-verification " + sample + "`)") ==
+          "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 R）正在建立版次 2；未做任何變更（請先以 `verify --full " +
+              sample + " --resume R` 完成它，或以 `archive abandon-verification " + sample + "` 放棄它）");
+    CHECK(chinese("archive " + sample + " has no unfinished verification that adds chunk hashes") ==
+          "封存 " + sample + " 沒有加入區塊雜湊的未完成驗證");
+    CHECK(chinese("this verification is still running in process 4242 (veriarchive-cli.exe) on this computer; resume "
+                  "it once that process has ended") ==
+          "此驗證仍在這台電腦的處理程序 4242（veriarchive-cli.exe）中執行；請等該處理程序結束後再繼續");
+    CHECK(chinese.format("chunk hashes not added: {}", chinese("the verification was abandoned while it ran")) ==
+          "未加入區塊雜湊：這次驗證在執行期間被放棄");
+    CHECK(chinese("cannot start the verification: cannot execute SQL: database is locked") ==
+          "無法開始驗證：無法執行 SQL：資料庫已被鎖定");
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==

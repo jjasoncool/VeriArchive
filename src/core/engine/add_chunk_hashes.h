@@ -9,7 +9,10 @@
 //
 // While it has not finished, the run's record ("run:<run_id>", decision 0022)
 // says that it adds chunk hashes and at which chunk size, so that `verify
-// --resume` goes on adding them.
+// --resume` goes on adding them, and which process runs it (decision 0024).
+// It is one of the operations that create an archive's next revision, with a
+// registration and a relocation: one of them at a time is unfinished, and
+// each refuses to begin while another is, naming how to finish or abandon it.
 #include "core/engine/candidates.h"
 #include "core/manifest/entry.h"
 #include "core/manifest/manifest.h"
@@ -38,6 +41,47 @@ inline constexpr const char* adding_member = "add_chunk_hashes";
 // and the GUI offers to.
 std::expected<std::optional<std::string>, IoError> why_chunk_hashes_cannot_be_added(ArchiveStore& store,
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const ArchiveRecord& archive);
+
+// An unfinished FULL verify that adds chunk hashes to an archive: its run's
+// record.
+struct AddingVerification {
+    std::string run_id;
+    Uuid archive_uuid;
+    std::uint32_t revision = 0;     // the revision it verifies; it records the next one
+    std::uint64_t chunk_size = 0;   // the chunk size at which it adds them
+    std::string root;               // where it reads (UTF-8)
+    Timestamp started;
+    nlohmann::json record;
+};
+
+// The archive's unfinished verification that adds chunk hashes: the record of
+// a run that adds them to the revision the archive is at now, as its record in
+// `archives` says. One that adds them to an earlier revision can never finish
+// (R-104), and is none. Inside a write transaction the answer holds until it
+// ends.
+std::expected<std::optional<AddingVerification>, IoError> unfinished_adding_verification(
+    ArchiveStore& store, const Uuid& archive_uuid);
+
+// The refusal of an operation that would create the archive's next revision
+// while `verification` is unfinished (one operation creating a revision at a
+// time), naming how to finish or abandon it.
+std::string adding_verification_refusal(const AddingVerification& verification);
+
+// Why a FULL verify that adds chunk hashes to `archive` does not begin:
+// another operation that creates its next revision is unfinished, a
+// registration (decision 0025), a relocation (decision 0026) or another
+// verification that adds chunk hashes, in the words of that operation's own
+// refusals, which name how to finish or abandon it. Nothing when none is. A
+// registration or relocation whose revision is recorded can never finish, and
+// is none. Called in the transaction that begins the verification.
+std::expected<std::optional<std::string>, IoError> another_operation_creates_the_revision(
+    ArchiveStore& store, const ArchiveRecord& archive);
+
+// Removes the records and saved progress of the verifications that add chunk
+// hashes to an earlier revision of `archive` than the one it is at: they can
+// never finish (R-104). Their runs in the history stay.
+std::expected<void, IoError> remove_adding_verifications_of_earlier_revisions(
+    ArchiveStore& store, const ArchiveRecord& archive);
 
 // The chunk size at which the run whose record is `record` adds chunk hashes;
 // 0 when it adds none (a FULL verify that only verifies, or a record of a
