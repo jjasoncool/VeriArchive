@@ -25,6 +25,7 @@
 #include <iterator>
 #include <map>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 namespace {
@@ -716,6 +717,182 @@ void a_device_that_goes_away_leaves_the_run_incomplete()
         CHECK(resumed && resumed->result == "PASSED" && resumed->counts.at("Verified") == 8);
         CHECK(fixture.archive.bytes_read == 8000 - verified_before);
     }
+}
+
+// What an INCOMPLETE run whose device stopped answering says (decision 0034).
+const std::string device_stopped_answering =
+    "the device that holds the archive stopped answering while it was read: 10 entries in a row could not be read; "
+    "unplug it and attach it again, then resume this run; if it stops again at the same place, the device may be "
+    "damaged";
+
+// Decision 0034 (operator, 2026-10-27): a device that stops answering while
+// the computer still lists its volume (a USB enclosure that hangs) fails every
+// read with an I/O error. Ten such reads in a row, with no read between them
+// that succeeds, end the run INCOMPLETE and resumable, with none of those
+// entries classified: at a file's opening, halfway through a file's read, and
+// while the folders are listed. Attached again, the resume reads only what
+// was not verified. Sample data.
+void a_device_that_stops_answering_leaves_the_run_incomplete()
+{
+    for (const std::string at : {"opening", "reading", "scanning"}) {
+        EngineFixture fixture;
+        for (int index = 1; index <= 15; ++index) {
+            fixture.archive.add_file(std::format("SAMPLE-dir-{:02}/SAMPLE-{:02}.bin", index, index),
+                std::string(1000, static_cast<char>('a' + index)));
+        }
+        CHECK(fixture.register_root(fixture.archive.root()).has_value());
+
+        test::RemovableDevice device(fixture.archive); // its volume stays listed
+        if (at == "scanning") {
+            device.directory = "SAMPLE-dir-15"; // the first folder the fake lists: then no folder can be
+        } else {
+            device.file = "SAMPLE-04.bin";
+            if (at == "reading") {
+                device.at_offset = 500;
+            }
+        }
+        fixture.media_files = &device;
+        const auto interrupted = fixture.verify(fixture.archive.root());
+        CHECK(interrupted && interrupted->result == "INCOMPLETE" && interrupted->items.empty() &&
+              interrupted->failure_classes.empty() &&
+              interrupted->warnings == std::vector<std::string>{device_stopped_answering});
+        const std::uint64_t verified_before = at == "scanning" ? 0 : 3000;
+        CHECK(interrupted && interrupted->coverage_bytes == verified_before);
+        if (!interrupted) {
+            continue;
+        }
+
+        device.attach_again();
+        fixture.archive.bytes_read = 0;
+        va::VerifyRequest request;
+        request.root = fixture.archive.root();
+        request.resume_run = interrupted->run_id;
+        const auto resumed = fixture.verify(request);
+        CHECK(resumed && resumed->result == "PASSED" && resumed->counts.at("Verified") == 15);
+        CHECK(fixture.archive.bytes_read == 15000 - verified_before);
+    }
+}
+
+// Decision 0034: fewer than ten I/O errors in a row are the entries' own
+// (Unreadable(media), the run FAILED), once a read succeeds after them or the
+// last file was read; a read that succeeds starts the count again, and an
+// error that is no I/O error (permission) neither counts nor ends a run of
+// them. Ten in a row stop the run, also where the damage is the disk's own:
+// none of the ten is classified, and its resume stops at the same place
+// again. Sample damage on twenty sample files.
+void io_errors_stop_a_run_only_ten_in_a_row()
+{
+    const auto damaged_run = [](const std::vector<int>& media, int permission) {
+        EngineFixture fixture;
+        for (int index = 1; index <= 20; ++index) {
+            fixture.archive.add_file(std::format("SAMPLE-{:02}.bin", index), std::string(1000, 'd'));
+        }
+        CHECK(fixture.register_root(fixture.archive.root()).has_value());
+        for (const int index : media) {
+            fixture.archive.node(std::format("SAMPLE-{:02}.bin", index)).read_error_offset = 0;
+        }
+        if (permission > 0) {
+            fixture.archive.node(std::format("SAMPLE-{:02}.bin", permission)).open_error =
+                va::IoError{va::IoErrorKind::PermissionDenied, 5, "denied (sample)"};
+        }
+        auto outcome = fixture.verify(fixture.archive.root());
+        CHECK(outcome.has_value());
+        std::vector<std::string> items;
+        for (const auto& item : outcome ? outcome->items : std::vector<va::VerifyItemRecord>{}) {
+            items.push_back(item.path.p + " " + item.status);
+        }
+        auto resumed = outcome;
+        if (outcome && outcome->result == "INCOMPLETE") {
+            va::VerifyRequest request;
+            request.root = fixture.archive.root();
+            request.resume_run = outcome->run_id;
+            resumed = fixture.verify(request);
+        }
+        return std::tuple{outcome ? outcome->result : "", items, outcome ? outcome->warnings : std::vector<std::string>{},
+            resumed ? resumed->result : ""};
+    };
+    const auto unreadable = [](const std::vector<int>& indexes, const std::string& status = "Unreadable(media)") {
+        std::vector<std::string> items;
+        for (const int index : indexes) {
+            items.push_back(std::format("SAMPLE-{:02}.bin {}", index, status));
+        }
+        return items;
+    };
+
+    // Two runs of five, a readable file between them.
+    auto [result, items, warnings, again] = damaged_run({2, 3, 4, 5, 6, 8, 9, 10, 11, 12}, 0);
+    CHECK(result == "FAILED" && items == unreadable({2, 3, 4, 5, 6, 8, 9, 10, 11, 12}) && warnings.empty());
+    // Nine, then a file that may not be read: the ten are the entries' own.
+    std::tie(result, items, warnings, again) = damaged_run({2, 3, 4, 5, 6, 7, 8, 9, 10}, 11);
+    auto expected = unreadable({2, 3, 4, 5, 6, 7, 8, 9, 10});
+    expected.push_back("SAMPLE-11.bin Unreadable(permission)");
+    CHECK(result == "FAILED" && items == expected && warnings.empty());
+    // Nine at the end, with no file after them.
+    std::tie(result, items, warnings, again) = damaged_run({12, 13, 14, 15, 16, 17, 18, 19, 20}, 0);
+    CHECK(result == "FAILED" && items == unreadable({12, 13, 14, 15, 16, 17, 18, 19, 20}) && warnings.empty());
+    // Ten, a file that may not be read among them: the run stops, and so does its resume.
+    std::tie(result, items, warnings, again) = damaged_run({2, 3, 4, 5, 6, 8, 9, 10, 11, 12}, 7);
+    CHECK(result == "INCOMPLETE" && items == unreadable({7}, "Unreadable(permission)") &&
+          warnings == std::vector<std::string>{device_stopped_answering} && again == "INCOMPLETE");
+
+    // Folders count as their listings: five that cannot be listed, then a
+    // folder listed (whichever way the scan walks them, one of SAMPLE-a and
+    // SAMPLE-c comes after them), then five damaged files: two runs of five.
+    EngineFixture fixture;
+    for (const std::string folder : {"SAMPLE-a", "SAMPLE-b1", "SAMPLE-b2", "SAMPLE-b3", "SAMPLE-b4", "SAMPLE-b5",
+             "SAMPLE-c"}) {
+        fixture.archive.add_file(folder + "/SAMPLE.bin", std::string(1000, 'f'));
+    }
+    for (int index = 1; index <= 6; ++index) {
+        fixture.archive.add_file(std::format("SAMPLE-{:02}.bin", index), std::string(1000, 'd'));
+    }
+    CHECK(fixture.register_root(fixture.archive.root()).has_value());
+    for (int index = 1; index <= 5; ++index) {
+        fixture.archive.node(std::format("SAMPLE-b{}", index)).list_error =
+            va::IoError{va::IoErrorKind::MediaError, 5, "Input/output error (sample)"};
+        fixture.archive.node(std::format("SAMPLE-{:02}.bin", index)).read_error_offset = 0;
+    }
+    const auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "FAILED" && outcome->counts.at("Unreadable(media)") == 10 &&
+          outcome->warnings.empty());
+}
+
+// Decision 0034: how a watch tells a read error. Its own for an error that is
+// no I/O error; held for an I/O error while the volume stays, the tenth in a
+// row without a read that succeeded between them making it a device that
+// stopped answering; a device that went away at once, by its error or by its
+// volume no longer found. Once stopped, it stays stopped. (Sample volumes.)
+void a_watch_tells_a_device_that_stopped_answering()
+{
+    test::FakeMediaEnumerator media;
+    media.volume = test::fake_volume("/vol");
+    const va::IoError io{va::IoErrorKind::MediaError, 5, "Input/output error (sample)"};
+    const va::IoError timeout{va::IoErrorKind::Timeout, 121, "timeout (sample)"};
+    const va::IoError denied{va::IoErrorKind::PermissionDenied, 13, "denied (sample)"};
+
+    va::VolumeWatch watch(media, "/vol", media.volume);
+    for (int round = 0; round < 3; ++round) {
+        for (std::size_t index = 1; index < va::io_errors_that_stop; ++index) {
+            CHECK(watch.failed(index % 2 == 0 ? io : timeout) == va::ReadFailure::Held);
+            CHECK(watch.failed(denied) == va::ReadFailure::Entry);
+        }
+        watch.answered();
+    }
+    CHECK(watch.stop() == va::DeviceStop::None);
+    for (std::size_t index = 1; index < va::io_errors_that_stop; ++index) {
+        CHECK(watch.failed(io) == va::ReadFailure::Held);
+    }
+    CHECK(watch.failed(io) == va::ReadFailure::Stop && watch.stop() == va::DeviceStop::NotAnswering);
+    watch.answered();
+    CHECK(watch.failed(denied) == va::ReadFailure::Stop && watch.stop() == va::DeviceStop::NotAnswering);
+
+    va::VolumeWatch removed(media, "/vol", media.volume);
+    CHECK(removed.failed(va::IoError{va::IoErrorKind::DeviceRemoved, 1167, "not connected (sample)"}) ==
+              va::ReadFailure::Stop &&
+          removed.stop() == va::DeviceStop::WentAway);
+    va::VolumeWatch gone(media, "/vol", media.volume);
+    media.error = va::IoError{va::IoErrorKind::NotFound, 2, "no volume at the root (sample)"};
+    CHECK(gone.failed(denied) == va::ReadFailure::Stop && gone.stop() == va::DeviceStop::WentAway);
 }
 
 // Decision 0034: whether the volume an operation began with is still the one
@@ -2142,6 +2319,9 @@ void verify_engine_tests()
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
     a_device_that_goes_away_leaves_the_run_incomplete();
+    a_device_that_stops_answering_leaves_the_run_incomplete();
+    io_errors_stop_a_run_only_ten_in_a_row();
+    a_watch_tells_a_device_that_stopped_answering();
     a_volume_is_the_same_while_its_ids_and_devices_are();
     the_rotational_override_applies_to_a_verification();
     resume_refused_after_new_revision();

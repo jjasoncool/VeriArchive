@@ -2,6 +2,7 @@
 // Compares a validated manifest with what is on the media now: scan, merge the
 // two sorted entry lists (R-43), re-hash every recorded file, and classify each
 // entry with an item status (§A6). Used by verification and by relocation.
+#include "core/engine/volume_watch.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
 #include "core/repository/archive_store.h"
@@ -36,16 +37,19 @@ struct ComparisonInput {
     // run (content_failure): a relocation marks its record as soon as the new
     // carrier is known not to hold the recorded content (decision 0026).
     std::function<void(const VerifyItemRecord& item, bool fails)> on_item;
-    // Asked when an entry cannot be read, before it is classified (decision
-    // 0034): false once the volume of the root is gone, which makes the
-    // comparison incomplete (volume_gone) instead of the entry Unreadable.
-    // Unset, the volume counts as attached.
-    std::function<bool()> volume_attached;
+    // Told of every read of the scan and of the hashing (decision 0034),
+    // which asks it before an entry that cannot be read is classified: when
+    // the device went away or stopped answering, the comparison is
+    // incomplete (device_stop) instead of the entry Unreadable. An I/O error
+    // it holds is classified only once a later read succeeds, or once every
+    // file was read. Unset, only an error that names a removed device stops
+    // the comparison.
+    VolumeWatch* watch = nullptr;
 };
 
 struct ComparisonResult {
-    bool incomplete = false;                // cancelled or the device disappeared
-    bool volume_gone = false;               // incomplete because the device disappeared (decision 0034)
+    bool incomplete = false;                // cancelled, or the device went away or stopped answering
+    DeviceStop device_stop = DeviceStop::None; // why the device made it incomplete (decision 0034)
     bool content_failure = false;           // an item status that fails the run
     bool warning = false;                   // an item status that caps the run at warnings
     std::string scan_error;                 // root could not be scanned (FilesystemAccessError)

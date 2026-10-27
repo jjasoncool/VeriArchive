@@ -115,7 +115,7 @@ Assume an attacker who may: modify/delete/add archive files; alter the SQLite da
 
 ### Run result
 
-> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: a read error is the entry's only while the volume of the root is still attached, as a lookup of it at once tells (the same filesystem id and devices); a volume that is gone makes the verification `INCOMPLETE`, the registration `REGISTRATION_INCOMPLETE` and the relocation's attempt interrupted, the entry whose read failed unclassified.
+> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: a read error is the entry's only while the volume of the root is still attached, as a lookup of it at once tells (the same filesystem id and devices); a volume that is gone makes the verification `INCOMPLETE`, the registration `REGISTRATION_INCOMPLETE` and the relocation's attempt interrupted, the entry whose read failed unclassified; so do ten reads in a row that fail with an I/O error, with no read between them that succeeds, while the volume stays attached (a device that stopped answering, operator 2026-10-27), none of those entries classified, and the report says to attach the device again and resume.
 
 | Result | Meaning |
 |---|---|
@@ -131,7 +131,7 @@ Every result is prefixed by its mode. Only `FULL VERIFY PASSED` means "100 % of 
 ### Item status
 
 > Amended by `design/decisions/0010-unreadable-entries-at-registration.md`: adds `Unbaselined`; maps unreadable entries to run results (newly unreadable → `FAILED`; unreadable since registration → at most `PASSED_WITH_WARNINGS`); `Unreadable(removed)` is never reported: a device that disappears ends the run `INCOMPLETE`; a run with `Unbaselined` items whose content otherwise matched says that registering a new revision takes a baseline for them.
-> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: `Unreadable(removed)` is never produced: a device that went away makes the run `INCOMPLETE` and no item.
+> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: `Unreadable(removed)` is never produced: a device that went away or stopped answering makes the run `INCOMPLETE` and no item.
 
 `Verified`, `Modified`, `Missing`, `New`, `Unreadable(permission|media|removed|other)`, `MetadataMismatch`, `Unrepresentable`, `TypeChanged`, `SkippedMountPoint`.
 
@@ -565,7 +565,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 > Amended by `design/decisions/0024-attempts-record-their-process.md`: adds `IProcessTable` (`current()`, `find(id)`, both `std::expected`) and `ProcessIdentity` (`id`, `start`, `program`): which process runs an attempt of a registration, and whether it still runs.
 > Amended by `design/decisions/0029-network-roots-are-refused.md`: on Windows `IMediaEnumerator::volumes()` also gives a volume that has no drive letter or folder path, with its GUID path (`\\?\Volume{...}\`) as its `mount_point`, so that verification by archive uuid finds an archive on it.
 > Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: there is no helper: the Windows `IChangeTracker`, `NtfsUsnChangeTracker`, runs in the main process, unprivileged; `IRawDeviceAccess` has no V1.1 implementation, as raw device reads serve only V2's whole-disk fingerprint.
-> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: `IoErrorKind::DeviceRemoved` also for Windows `ERROR_MEDIA_CHANGED`, `ERROR_NO_MEDIA_IN_DRIVE`, `ERROR_UNRECOGNIZED_VOLUME` and `ERROR_FILE_INVALID`, and for Linux `ENOLINK` and `ENOTCONN`; any other error of a read is taken for the entry's only once `IMediaEnumerator::volume_for_path` finds the volume of the root as the operation found it.
+> Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: `IoErrorKind::DeviceRemoved` also for Windows `ERROR_MEDIA_CHANGED`, `ERROR_NO_MEDIA_IN_DRIVE`, `ERROR_UNRECOGNIZED_VOLUME` and `ERROR_FILE_INVALID`, and for Linux `ENOLINK` and `ENOTCONN`; any other error of a read is taken for the entry's only once `IMediaEnumerator::volume_for_path` finds the volume of the root as the operation found it, and an I/O error (`MediaError`, `Timeout`) only once a later read succeeds: ten in a row are a device that stopped answering.
 > Amended by `design/decisions/0035-identity-strings-are-valid-utf-8.md`: `IMediaEnumerator` gives every identity string of a volume and its devices as valid UTF-8 (`with_valid_identity_text`).
 
 ```cpp

@@ -254,7 +254,7 @@ A result always carries its mode and date: only FULL VERIFY PASSED means 100% of
 | PASSED | every registered byte was read and matched | 0 |
 | PASSED_WITH_WARNINGS | content matched, but something needs attention (no hardware serial to compare, an unreadable filesystem id, metadata differences, names in one folder that differ only in upper and lower case or in Unicode normalisation, which a volume or system that does not tell them apart cannot keep all) | 2 |
 | FAILED | files were modified, missing or unreadable, or the media identity is wrong, or the archive's manifest in the repository cannot be used (missing, unreadable or changed: then the media is not read at all, and the result says how to fix the manifest) | 3 |
-| INCOMPLETE | the verification was interrupted (cancelled, disk removed); it can be resumed | 4 |
+| INCOMPLETE | the verification was interrupted (cancelled, or the device went away or stopped answering); it can be resumed | 4 |
 
 Item statuses:
 
@@ -280,7 +280,7 @@ An interrupted verification ends INCOMPLETE and can be continued; files already 
 
 If more than one attached volume holds the archive, as a device and a sector-by-sector clone of it do, a resume by the archive's uuid cannot tell which one the run read: it stops (exit code 12) and names them, with the root the run read. Resume it at the root on the volume it read with `veriarchive-cli verify --full <root> --resume <RUN_ID>`, or detach the other volumes and resume it again.
 
-A device that is unplugged, switched off or stops answering during a verification ends it INCOMPLETE, not FAILED: before VeriArchive reports a file as unreadable, it checks that the volume is still attached, so a device that went away is not taken for damage, and the result says what happened. Attach the device again and resume the run as above; what was verified is not read again. A registration and a relocation stop the same way and are resumed the same way: a registration with `register <root> --resume` or "Resume" in the Archive List, a relocation with `archive relocate <uuid> <root> --resume`.
+A device that is unplugged or switched off during a verification ends it INCOMPLETE, not FAILED: before VeriArchive reports a file as unreadable, it checks that the volume is still attached, so a device that went away is not taken for damage, and the result says what happened. A device that stops answering while the computer still lists it (a USB enclosure that hangs) fails every read with an input/output error, as damage does: when 10 entries (files or folders) in a row cannot be read because of such errors, with no entry read between them, the verification ends INCOMPLETE as well, lists none of them, and says that the device stopped answering; fewer in a row are reported unreadable, as damage. Attach the device again (unplug it first if it is still connected) and resume the run as above; what was verified is not read again. If it stops again at the same place, the device may be damaged: damage that spans 10 entries in a row stops the run in the same way instead of failing it. A registration and a relocation stop the same way and are resumed the same way: a registration with `register <root> --resume` or "Resume" in the Archive List, a relocation with `archive relocate <uuid> <root> --resume`.
 
 ### When VeriArchive needs your decision (exit code 12)
 

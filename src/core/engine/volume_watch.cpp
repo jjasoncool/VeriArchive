@@ -24,13 +24,38 @@ VolumeWatch::VolumeWatch(IMediaEnumerator& media, std::filesystem::path root, Vo
 {
 }
 
-bool VolumeWatch::still_attached()
+void VolumeWatch::answered()
 {
-    if (!gone_) {
-        const auto now = media_.volume_for_path(root_);
-        gone_ = !now || !same_volume(volume_, *now);
+    io_errors_in_a_row_ = 0;
+}
+
+ReadFailure VolumeWatch::failed(const IoError& error)
+{
+    if (stop_ != DeviceStop::None) {
+        return ReadFailure::Stop;
     }
-    return !gone_;
+    if (error.kind == IoErrorKind::DeviceRemoved) {
+        stop_ = DeviceStop::WentAway;
+        return ReadFailure::Stop;
+    }
+    if (const auto now = media_.volume_for_path(root_); !now || !same_volume(volume_, *now)) {
+        stop_ = DeviceStop::WentAway;
+        return ReadFailure::Stop;
+    }
+    if (error.kind != IoErrorKind::MediaError && error.kind != IoErrorKind::Timeout) {
+        return ReadFailure::Entry;
+    }
+    if (++io_errors_in_a_row_ >= io_errors_that_stop) {
+        stop_ = DeviceStop::NotAnswering;
+        return ReadFailure::Stop;
+    }
+    return ReadFailure::Held;
+}
+
+void VolumeWatch::watch_scan(ScanOptions& options)
+{
+    options.answered = [this] { answered(); };
+    options.must_stop = [this](const IoError& error) { return failed(error) == ReadFailure::Stop; };
 }
 
 } // namespace va

@@ -256,6 +256,25 @@ void translation_tests()
     CHECK(chinese("the device that holds the archive went away while it was read (unplugged, or no longer "
                   "answering); attach it again, then resume this run") ==
           "存放此封存的裝置在讀取期間離開了（被拔除，或不再回應）；請重新連接它，再繼續這次執行");
+    // Decision 0034: a verification, a registration and a relocation whose
+    // device stopped answering say so, and what to do.
+    CHECK(chinese("the device that holds the archive stopped answering while it was read: 10 entries in a row could "
+                  "not be read; unplug it and attach it again, then resume this run; if it stops again at the same "
+                  "place, the device may be damaged") ==
+          "存放此封存的裝置在讀取期間停止回應：連續 10 個項目無法讀取；請拔除它再重新連接，然後繼續這次執行；"
+          "如果它又在同一個地方停止，裝置可能已經損壞");
+    CHECK(chinese("the device stopped answering during registration: 10 entries in a row could not be read; unplug "
+                  "it and attach it again; continue with `register <root_path> --resume`; if it stops again at the "
+                  "same place, the device may be damaged") ==
+          "裝置在註冊期間停止回應：連續 10 個項目無法讀取；請拔除它再重新連接，然後以 `register <root_path> --resume` "
+          "繼續；如果它又在同一個地方停止，裝置可能已經損壞");
+    CHECK(chinese("relocation was interrupted: the device of the new carrier stopped answering (10 entries in a row "
+                  "could not be read); unplug it and attach it again, then continue it with `archive relocate "
+                  "c0ffee00-0000-4000-8000-000000000034 <root_path> --resume`; if it stops again at the same place, "
+                  "the device may be damaged") ==
+          "搬移已中斷：新載體的裝置停止回應（連續 10 個項目無法讀取）；請拔除它再重新連接，然後以 "
+          "`archive relocate c0ffee00-0000-4000-8000-000000000034 <root_path> --resume` 繼續；"
+          "如果它又在同一個地方停止，裝置可能已經損壞");
 
     // Only Match::Cause templates translate their last value: a path the user
     // typed is shown as typed, even when it looks like a message.

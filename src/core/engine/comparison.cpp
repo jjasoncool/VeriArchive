@@ -136,13 +136,21 @@ ComparisonResult compare_with_manifest(
     const auto& recorded = *input.recorded;
     ScanOptions scan_options;
     scan_options.exclusions = input.header->exclusions;
-    scan_options.volume_attached = input.volume_attached;
+    if (input.watch) {
+        input.watch->watch_scan(scan_options);
+    }
+    // Why a read that named a removed device, or that the watch stopped on, stops the comparison.
+    const auto device_stop = [&] {
+        return input.watch && input.watch->stop() != DeviceStop::None ? input.watch->stop() : DeviceStop::WentAway;
+    };
     auto scanned = scan_tree(files, input.root, scan_options, cancel, progress);
     if (!scanned) {
         const auto kind = scanned.error().kind;
         if (kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved) {
             result.incomplete = true;
-            result.volume_gone = kind == IoErrorKind::DeviceRemoved;
+            if (kind == IoErrorKind::DeviceRemoved) {
+                result.device_stop = device_stop();
+            }
         } else {
             result.scan_error = scanned.error().message;
         }
@@ -326,28 +334,57 @@ ComparisonResult compare_with_manifest(
         return go_on;
     };
 
+    // A file that could not be read, as the entry's own (decision 0010).
+    const auto unreadable = [&](const HashResult& hash) {
+        const auto& was = *to_hash[hash.id].first;
+        const bool known = !was.unreadable.empty();
+        classify.add(was, unreadable_status(unreadable_reason(*hash.error)),
+            known ? "known-since-registration" : hash.error->message, known ? Severity::Warning : Severity::Failure);
+        if (known) {
+            result.current_entries.push_back(was);
+        }
+    };
+    // Decision 0034: files whose reads failed with I/O errors since the last
+    // read that succeeded, while the volume stayed attached. They are the
+    // entries' own once the device answers again, or once every file was
+    // read; as many in a row as io_errors_that_stop are a device that stopped
+    // answering, and none of them is classified.
+    std::vector<HashResult> held;
+    const auto classify_held = [&] {
+        for (const auto& hash : held) {
+            unreadable(hash);
+        }
+        held.clear();
+    };
+
     const auto hashed = hash_files(files, jobs, hash_options, cancel, progress, [&](HashResult&& hash) {
         const auto& was = *to_hash[hash.id].first;
         const auto& is = to_hash[hash.id].second->entry;
         const bool known = !was.unreadable.empty(); // decision 0010
         if (hash.error) {
-            // Decision 0034: a read that failed because the device went away
-            // says nothing of the entry. The volume is looked up again before
-            // the entry is classified; gone, the comparison stops, resumable.
-            if (hash.error->kind == IoErrorKind::DeviceRemoved ||
-                (input.volume_attached && !input.volume_attached())) {
+            // Decision 0034: a read that failed because the device went away,
+            // or stopped answering, says nothing of the entry. The volume is
+            // looked up again before the entry is classified; gone, or no
+            // longer answering, the comparison stops, resumable.
+            const auto failure = input.watch ? input.watch->failed(*hash.error)
+                                 : hash.error->kind == IoErrorKind::DeviceRemoved ? ReadFailure::Stop
+                                                                                  : ReadFailure::Entry;
+            if (failure == ReadFailure::Stop) {
                 result.incomplete = true;
-                result.volume_gone = true;
+                result.device_stop = device_stop();
                 return false;
             }
-            classify.add(was, unreadable_status(unreadable_reason(*hash.error)),
-                known ? "known-since-registration" : hash.error->message,
-                known ? Severity::Warning : Severity::Failure);
-            if (known) {
-                result.current_entries.push_back(was);
+            if (failure == ReadFailure::Held) {
+                held.push_back(std::move(hash));
+            } else {
+                unreadable(hash);
             }
             return true;
         }
+        if (input.watch) {
+            input.watch->answered();
+        }
+        classify_held();
         if (known) {
             classify.add(was, "Unbaselined", "readable now, unreadable at registration", Severity::Warning);
             result.current_entries.push_back(was);
@@ -372,6 +409,12 @@ ComparisonResult compare_with_manifest(
     // The last matches, also of a run that stops: a resume skips them.
     if (!flush_checkpoint() || !hashed) {
         result.incomplete = true;
+    }
+    // Every file was read, and the last ones could not be: theirs. A
+    // comparison that stopped leaves them to its resume, which reads them
+    // again.
+    if (!result.incomplete) {
+        classify_held();
     }
     std::sort(result.current_entries.begin(), result.current_entries.end(), canonical_less);
     // Report items in canonical order (R-43). They were added in two passes

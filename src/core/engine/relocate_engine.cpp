@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include <exception>
+#include <format>
 #include <set>
 
 namespace va {
@@ -526,10 +527,11 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         }
     };
     // Decision 0034: an entry is unreadable only while the new carrier's
-    // volume is still attached at the new root; once it is gone, the attempt
-    // is interrupted, and its resume reads that entry again.
+    // volume is still attached at the new root and its device still answers;
+    // once it is gone or no longer answers, the attempt is interrupted, and
+    // its resume reads that entry again.
     VolumeWatch watch(services.media, request.root, *volume);
-    input.volume_attached = [&watch] { return watch.still_attached(); };
+    input.watch = &watch;
     auto comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
 
     // The revision was recorded by another operation, which may have left
@@ -621,6 +623,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             return made_for_older();
         }
         record_interruption(comparison);
+        if (comparison.device_stop == DeviceStop::NotAnswering) {
+            return fail(Kind::Incomplete,
+                std::format("relocation was interrupted: the device of the new carrier stopped answering ({} entries "
+                            "in a row could not be read); unplug it and attach it again, then {}; if it stops again "
+                            "at the same place, the device may be damaged",
+                    io_errors_that_stop, resume_hint));
+        }
         return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
     };
     // An attempt that a failure stops (its scan, its manifest, its record)

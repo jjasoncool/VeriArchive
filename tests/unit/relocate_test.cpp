@@ -786,9 +786,10 @@ void an_unreadable_entry_ends_the_relocation_once_everything_was_read()
 // (decision 0026). Its record stays, saying that it stopped and not that the
 // new carrier differs, so that a resume goes on, also after a process killed
 // at that point; it keeps the 19 photos that matched; and the attempt is
-// recorded INCOMPLETE with the entry that could not be read. Plugged in
-// again, the resume reads only the rest, that entry included, as it never
-// matched, and records revision 2.
+// recorded INCOMPLETE without an item: an I/O error is the entry's only once
+// a later read succeeds (decision 0034), and none did. Plugged in again, the
+// resume reads only the rest, that entry included, as it never matched, and
+// records revision 2.
 void a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable()
 {
     RelocationFixture fixture(true);
@@ -814,8 +815,7 @@ void a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable()
               attempt.coverage_bytes == sample_photo_bytes - p119_bytes && noted.is_object() &&
               noted.value("relocation", std::string{}) == run_id);
         const auto items = fixture.store.verify_items(attempt.run_id);
-        CHECK(items && items->size() == 1 && items->front().path.p == "photos/p119.bin" &&
-              items->front().status == "Unreadable(media)");
+        CHECK(items && items->empty());
     }
 
     fixture.archive.node("new/photos/p119.bin").read_error_offset.reset();
@@ -863,6 +863,48 @@ void a_new_carrier_that_goes_away_leaves_the_relocation_resumable()
 
     device.attach_again();
     fixture.media.error.reset();
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id && resumed->result == "PASSED");
+    CHECK(fixture.archive.bytes_read == sample_bytes - sample_photo_bytes);
+}
+
+// Decision 0034 (operator, 2026-10-27): the new carrier's device stops
+// answering while the computer still lists its volume, halfway through the
+// first of the videos: every read fails with an I/O error, and ten in a row
+// interrupt the relocation's attempt, as a device that went away does. It is
+// recorded INCOMPLETE without an item, the relocation keeps the 20 photos
+// matched, and its resume, once the device is attached again, reads only the
+// rest and records revision 2. Sample data.
+void a_new_carrier_that_stops_answering_leaves_the_relocation_resumable()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    test::RemovableDevice device(fixture.archive); // its volume stays listed
+    device.file = "v120.bin";
+    device.at_offset = 100;
+    fixture.media_files = &device;
+    const auto interrupted = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
+          interrupted.error().items.empty() &&
+          interrupted.error().message ==
+              "relocation was interrupted: the device of the new carrier stopped answering (10 entries in a row could "
+              "not be read); unplug it and attach it again, then continue it with `archive relocate " +
+                  fixture.archive_uuid +
+                  " <root_path> --resume`; if it stops again at the same place, the device may be damaged");
+    const auto record = fixture.record();
+    CHECK(record.is_object() && record.contains("stopped") && !record.contains("differs"));
+    const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
+    const auto saved = fixture.saved(run_id);
+    CHECK(saved.files == 20 && saved.bytes == sample_photo_bytes);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->front().result == "INCOMPLETE");
+    if (runs && runs->size() == 1) {
+        const auto items = fixture.store.verify_items(runs->front().run_id);
+        CHECK(items && items->empty());
+    }
+
+    device.attach_again();
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
     CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id && resumed->result == "PASSED");
@@ -2519,6 +2561,7 @@ void relocate_tests()
     an_unreadable_entry_ends_the_relocation_once_everything_was_read();
     a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable();
     a_new_carrier_that_goes_away_leaves_the_relocation_resumable();
+    a_new_carrier_that_stops_answering_leaves_the_relocation_resumable();
     the_rotational_override_applies_to_a_relocation();
     known_unreadable_entries_are_carried();
     an_interrupted_relocation_resumes_without_reading_again();

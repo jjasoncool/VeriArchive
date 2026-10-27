@@ -88,6 +88,7 @@ public:
         if (!listing) {
             return std::unexpected(removal(listing.error()).value_or(listing.error()));
         }
+        answered();
         if (auto walked = walk_children({}, *listing); !walked) {
             return std::unexpected(walked.error());
         }
@@ -181,6 +182,7 @@ private:
             add(directory_entry, root_ / relative);
             return 1;
         }
+        answered();
         const auto count = walk_children(relative, *listing);
         if (!count) {
             return std::unexpected(count.error());
@@ -203,6 +205,7 @@ private:
             entry.unreadable = unreadable_reason(target.error());
             return {};
         }
+        answered();
         entry.size = target->size();
         entry.b3 = blake3_hex(*target);
         entry.sha256 = sha256_hex(*target);
@@ -213,18 +216,30 @@ private:
     }
 
     // Decision 0034: `error`, from reading the tree, as the error of a device
-    // that went away, when it is one or the volume of the root is gone by
-    // now; nothing when the error is the entry's own.
+    // that went away or stopped answering, when it names a removed device or
+    // must_stop says so; nothing when the error is the entry's own.
     std::optional<IoError> removal(const IoError& error) const
     {
+        if (error.kind == IoErrorKind::Cancelled) {
+            return std::nullopt;
+        }
+        const bool stop = options_.must_stop ? options_.must_stop(error) : error.kind == IoErrorKind::DeviceRemoved;
+        if (!stop) {
+            return std::nullopt;
+        }
         if (error.kind == IoErrorKind::DeviceRemoved) {
             return error;
         }
-        if (error.kind != IoErrorKind::Cancelled && options_.volume_attached && !options_.volume_attached()) {
-            return IoError{IoErrorKind::DeviceRemoved, error.native_code,
-                "the volume of the root is no longer attached (" + error.message + ")"};
+        return IoError{IoErrorKind::DeviceRemoved, error.native_code,
+            "the device of the root went away or stopped answering (" + error.message + ")"};
+    }
+
+    // Decision 0034: a directory listed or a link target read; the device answers.
+    void answered() const
+    {
+        if (options_.answered) {
+            options_.answered();
         }
-        return std::nullopt;
     }
 
     void add(Entry entry, std::filesystem::path native)

@@ -155,13 +155,24 @@ std::unexpected<RegisterFailure> recorded_before_it_began(const Uuid& archive_uu
 // checkpoint with files to save looks for, and the resume would be refused.
 // Then it ends as one made for an older revision, as at such a checkpoint.
 // Read once, best effort as its stop mark: when the database cannot tell, the
-// resume is named, and says so itself.
-std::unexpected<RegisterFailure> interrupted(ArchiveStore& store, const Plan& plan, const std::string& why)
+// resume is named, and says so itself. `after` follows the resume.
+std::unexpected<RegisterFailure> interrupted(
+    ArchiveStore& store, const Plan& plan, const std::string& why, const std::string& after = "")
 {
     if (const auto later = later_than_planned(store, plan.archive_uuid, plan.revision); later && *later) {
         return made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, **later);
     }
-    return fail(RegisterFailure::Kind::Incomplete, why + "; continue with `register <root_path> --resume`");
+    return fail(RegisterFailure::Kind::Incomplete, why + "; continue with `register <root_path> --resume`" + after);
+}
+
+// Decision 0034: a registration whose device stopped answering, as `watch` found.
+std::unexpected<RegisterFailure> not_answering(ArchiveStore& store, const Plan& plan)
+{
+    return interrupted(store, plan,
+        std::format("the device stopped answering during registration: {} entries in a row could not be read; "
+                    "unplug it and attach it again",
+            io_errors_that_stop),
+        "; if it stops again at the same place, the device may be damaged");
 }
 
 // Another registration of the archive is unfinished: the plan its key holds
@@ -1049,14 +1060,18 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
 
     // Scan, then hash every readable file not already hashed before an interruption.
     // Decision 0034: what cannot be read is recorded unreadable (decision
-    // 0010) only while the volume is still attached at the root; a device
-    // that went away interrupts the registration instead, resumable.
+    // 0010) only while the volume is still attached at the root and its
+    // device still answers; a device that went away or stopped answering
+    // interrupts the registration instead, resumable.
     VolumeWatch watch(services.media, request.root, *volume);
     ScanOptions scan_options;
-    scan_options.volume_attached = [&watch] { return watch.still_attached(); };
+    watch.watch_scan(scan_options);
     auto scanned = scan_tree(services.archive_files, request.root, scan_options, cancel, heartbeat);
     if (!scanned) {
         const auto kind = scanned.error().kind;
+        if (kind == IoErrorKind::DeviceRemoved && watch.stop() == DeviceStop::NotAnswering) {
+            return not_answering(store, plan);
+        }
         if (kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved) {
             return interrupted(store, plan, "registration was interrupted while scanning");
         }
@@ -1186,13 +1201,18 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         [&](HashResult&& result) {
             auto& entry = scanned->entries[result.id].entry;
             if (result.error) {
-                if (result.error->kind == IoErrorKind::DeviceRemoved || !watch.still_attached()) {
+                // Decision 0034: a device that went away or stopped answering
+                // interrupts the registration, which records nothing of this
+                // attempt's unreadable files: what an I/O error that the
+                // watch holds marks here is never recorded then.
+                if (watch.failed(*result.error) == ReadFailure::Stop) {
                     device_removed = true;
                     return false;
                 }
                 entry.unreadable = unreadable_reason(*result.error); // decision 0010
                 return true;
             }
+            watch.answered();
             entry.b3 = std::move(result.b3);
             entry.sha256 = std::move(result.sha256);
             entry.size = result.size;
@@ -1208,6 +1228,9 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         });
     if (!flush_checkpoint()) {
         return stopped_at_checkpoint();
+    }
+    if (device_removed && watch.stop() == DeviceStop::NotAnswering) {
+        return not_answering(store, plan);
     }
     if (!hashed || device_removed) {
         return interrupted(store, plan,

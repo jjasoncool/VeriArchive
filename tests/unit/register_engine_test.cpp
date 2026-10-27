@@ -354,6 +354,64 @@ void a_device_that_goes_away_interrupts_the_registration()
     }
 }
 
+// Decision 0034 (operator, 2026-10-27): a device that stops answering while
+// the computer still lists its volume fails every read with an I/O error.
+// Ten such reads in a row interrupt the registration (resumable) and record
+// no file unreadable for them, at a file's opening and while the folders are
+// listed; fewer, before a file that reads, are the files' own, recorded
+// unreadable, and a file that reads starts the count again. Attached again,
+// the resume reads only what was not hashed before. Sample data.
+void a_device_that_stops_answering_interrupts_the_registration()
+{
+    const std::string stopped_answering =
+        "the device stopped answering during registration: 10 entries in a row could not be read; unplug it and "
+        "attach it again; continue with `register <root_path> --resume`; if it stops again at the same place, the "
+        "device may be damaged";
+    for (const bool while_scanning : {false, true}) {
+        Fixture fixture;
+        for (int index = 1; index <= 15; ++index) {
+            fixture.archive.add_file(std::format("SAMPLE-dir-{:02}/SAMPLE-{:02}.bin", index, index),
+                std::string(1000, static_cast<char>('a' + index)));
+        }
+        test::RemovableDevice device(fixture.archive); // its volume stays listed
+        if (while_scanning) {
+            device.directory = "SAMPLE-dir-15"; // the first folder the fake lists: then no folder can be
+        } else {
+            device.file = "SAMPLE-04.bin";
+        }
+        fixture.media_files = &device;
+        const auto interrupted = fixture.run(at("/vol"));
+        CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete &&
+              interrupted.error().message == stopped_answering);
+        const auto archives = fixture.store.archives();
+        CHECK(archives && archives->size() == 1 && archives->front().status == "REGISTRATION_INCOMPLETE" &&
+              archives->front().current_revision == 0);
+
+        device.attach_again();
+        fixture.archive.bytes_read = 0;
+        auto request = at("/vol");
+        request.resume = true;
+        const auto resumed = fixture.run(request);
+        CHECK(resumed && resumed->revision == 1 && resumed->counts.files == 15 && resumed->unreadable.empty());
+        CHECK(fixture.archive.bytes_read == (while_scanning ? 15000u : 12000u));
+    }
+
+    // Two runs of five damaged files, a file that reads between them, and
+    // one after them: the ten are recorded unreadable.
+    Fixture fixture;
+    for (int index = 1; index <= 13; ++index) {
+        fixture.archive.add_file(std::format("SAMPLE-{:02}.bin", index), std::string(1000, 'r'));
+    }
+    for (const int index : {2, 3, 4, 5, 6, 8, 9, 10, 11, 12}) {
+        fixture.archive.node(std::format("SAMPLE-{:02}.bin", index)).read_error_offset = 0;
+    }
+    const auto registered = fixture.run(at("/vol"));
+    CHECK(registered && registered->revision == 1 && registered->unreadable.size() == 10);
+    for (const auto& entry : registered ? registered->unreadable : std::vector<va::Entry>{}) {
+        CHECK(entry.unreadable == "media");
+    }
+}
+
 // R-111: the config's io.rotational_override applies to a registration: the
 // sample device reports an HDD (one reader), and the override of its serial
 // says SSD, so several readers hash its files at once (min(8, cores), on a
@@ -3230,6 +3288,7 @@ void register_engine_tests()
     retired_archive_takes_no_revision();
     interrupted_registration_resumes();
     a_device_that_goes_away_interrupts_the_registration();
+    a_device_that_stops_answering_interrupts_the_registration();
     the_rotational_override_applies_to_a_registration();
     trailing_separators_leave_the_folder();
     a_plan_recorded_with_a_trailing_separator_is_found();

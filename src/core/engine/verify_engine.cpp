@@ -15,6 +15,7 @@
 #include "core/write_file.h"
 
 #include <algorithm>
+#include <format>
 
 namespace va {
 namespace {
@@ -586,17 +587,23 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             return true;
         };
         // Decision 0034: a read error is the entry's only while the volume is
-        // still attached at the root.
+        // still attached at the root and its device still answers.
         VolumeWatch watch(services.media, located->root, located->volume);
-        input.volume_attached = [&watch] { return watch.still_attached(); };
+        input.watch = &watch;
         comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
         if (!comparison.scan_error.empty()) {
             outcome.failure_classes.push_back("FilesystemAccessError");
             outcome.warnings.push_back("scan: " + comparison.scan_error);
         }
-        if (comparison.volume_gone) {
+        if (comparison.device_stop == DeviceStop::WentAway) {
             outcome.warnings.push_back("the device that holds the archive went away while it was read (unplugged, "
                                        "or no longer answering); attach it again, then resume this run");
+        } else if (comparison.device_stop == DeviceStop::NotAnswering) {
+            outcome.warnings.push_back(std::format(
+                "the device that holds the archive stopped answering while it was read: {} entries in a row could "
+                "not be read; unplug it and attach it again, then resume this run; if it stops again at the same "
+                "place, the device may be damaged",
+                io_errors_that_stop));
         }
         // §A6, R-42: portability warnings that the manifest records make the
         // run PASSED_WITH_WARNINGS at most, in one plain line.

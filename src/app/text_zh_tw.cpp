@@ -715,6 +715,12 @@ constexpr CatalogEntry entries[] = {
     {"the device disappeared during registration; "
         "continue with `register <root_path> --resume`",
         "裝置在註冊期間中斷連線；請以 `register <root_path> --resume` 繼續"},
+    // A device that stopped answering while its volume stayed listed (decision 0034).
+    {"the device stopped answering during registration: {} entries in a row could not be read; unplug it and "
+        "attach it again; continue with `register <root_path> --resume`; if it stops again at the same place, the "
+        "device may be damaged",
+        "裝置在註冊期間停止回應：連續 {} 個項目無法讀取；請拔除它再重新連接，然後以 `register <root_path> --resume` "
+        "繼續；如果它又在同一個地方停止，裝置可能已經損壞"},
     {"registration was cancelled; continue with `register <root_path> --resume`",
         "註冊已取消；請以 `register <root_path> --resume` 繼續"},
     {"cannot scan the root: {}", "無法掃描根目錄：{}", Match::Cause},
@@ -885,6 +891,12 @@ constexpr CatalogEntry entries[] = {
     {"the device that holds the archive went away while it was read (unplugged, or no longer answering); attach it "
         "again, then resume this run",
         "存放此封存的裝置在讀取期間離開了（被拔除，或不再回應）；請重新連接它，再繼續這次執行"},
+    // A device that stopped answering while its volume stayed listed (decision 0034).
+    {"the device that holds the archive stopped answering while it was read: {} entries in a row could not be read; "
+        "unplug it and attach it again, then resume this run; if it stops again at the same place, the device may be "
+        "damaged",
+        "存放此封存的裝置在讀取期間停止回應：連續 {} 個項目無法讀取；請拔除它再重新連接，然後繼續這次執行；"
+        "如果它又在同一個地方停止，裝置可能已經損壞"},
     {"verification finished as PASSED but could not be recorded: {}",
         "驗證結果為通過，但無法記錄：{}",
         Match::Cause},
@@ -961,6 +973,12 @@ constexpr CatalogEntry entries[] = {
     // A relocation resumes (decision 0026).
     {"relocation was interrupted; continue it with `archive relocate {} <root_path> --resume`",
         "搬移已中斷；請以 `archive relocate {} <root_path> --resume` 繼續"},
+    // The new carrier's device stopped answering while its volume stayed listed (decision 0034).
+    {"relocation was interrupted: the device of the new carrier stopped answering ({} entries in a row could not be "
+        "read); unplug it and attach it again, then continue it with `archive relocate {} <root_path> --resume`; if "
+        "it stops again at the same place, the device may be damaged",
+        "搬移已中斷：新載體的裝置停止回應（連續 {} 個項目無法讀取）；請拔除它再重新連接，然後以 "
+        "`archive relocate {} <root_path> --resume` 繼續；如果它又在同一個地方停止，裝置可能已經損壞"},
     {"an unfinished relocation of archive {} (to \"{}\") exists; resume it with `archive relocate {} "
         "<root_path> --resume`, or abandon it with `archive abandon-relocation {}`",
         "封存 {} 有一個未完成的搬移（至「{}」）；請以 `archive relocate {} <root_path> --resume` 繼續，"
