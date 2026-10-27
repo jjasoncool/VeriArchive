@@ -12,3 +12,4 @@ The repository is hosted on GitLab (`gitlab.com:jjasoncool/veriarchive`), while 
 
 - A milestone counts as done only after this pipeline passes on all three jobs, which requires pushing to GitLab.
 - The Linux loop-device / `dm-flakey` test of R-120 needs a privileged runner and is not part of the default pipeline.
+- (2026-10-27) That test is not part of the GitLab pipeline at all, and no script for it is written: it needs a runner whose job may make loop devices and device-mapper targets as root, and the pipeline has none. Unreadable sectors are covered on every OS by the unit tests, whose fake file system injects a media error at a chosen offset (R-93), which gives `Unreadable(media)`; a disk with a failing sector read on real hardware belongs to the hardware acceptance (M3).

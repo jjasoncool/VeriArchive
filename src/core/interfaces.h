@@ -196,7 +196,7 @@ public:
         return std::unexpected(IoError{
             IoErrorKind::NotSupported,
             0,
-            "change tracking is not available in V1",
+            "change tracking is not available",
         });
     }
 
@@ -217,7 +217,7 @@ public:
         return std::unexpected(IoError{
             IoErrorKind::NotSupported,
             0,
-            "raw device access requires the V1.1 helper",
+            "raw device access is not available",
         });
     }
 };

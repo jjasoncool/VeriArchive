@@ -87,6 +87,7 @@ veriarchive_cli / veriarchive_gui / veriarchive_helper   composition roots
 > Amended by `design/decisions/0021-linux-without-udev.md`: R-09 on Linux also uses `statfs` on the mount point (the kernel call behind `statvfs`) for the kernel filesystem id.
 > Amended by `design/decisions/0027-subst-drive-letters.md`: R-09 on Windows also uses `QueryDosDeviceW`, which resolves a drive letter made with subst to the folder it stands for before the volume is looked up.
 > Amended by `design/decisions/0029-network-roots-are-refused.md`: R-09 on Windows also uses `GetDriveTypeW`, which tells a drive letter mapped to a network share, so that a root on one is refused before its volume is looked up.
+> Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: there is no `veriarchive-helper` and no IPC (R-11): the NTFS USN change journal is read in the main process without elevation (R-107); reads with `SeBackupPrivilege` / `CAP_DAC_READ_SEARCH` are put off until an archive needs them; raw device reads serve only V2's whole-disk fingerprint (§B14), which decides how they are made; a call of R-09 that needs elevation is left out, not worked around, until a decision record says how it is made.
 
 - R-08 V1 runs entirely unprivileged. The GUI MUST never require Administrator/root (GTK under Wayland refuses to run as root; elevated GUIs are an anti-pattern).
 - R-09 V1 media identity uses unprivileged APIs only.
@@ -127,7 +128,7 @@ Every result is prefixed by its mode. Only `FULL VERIFY PASSED` means "100 % of 
 
 ### Item status
 
-> Amended by `design/decisions/0010-unreadable-entries-at-registration.md`: adds `Unbaselined`; maps unreadable entries to run results (newly unreadable → `FAILED`; unreadable since registration → at most `PASSED_WITH_WARNINGS`).
+> Amended by `design/decisions/0010-unreadable-entries-at-registration.md`: adds `Unbaselined`; maps unreadable entries to run results (newly unreadable → `FAILED`; unreadable since registration → at most `PASSED_WITH_WARNINGS`); `Unreadable(removed)` is never reported: a device that disappears ends the run `INCOMPLETE`.
 
 `Verified`, `Modified`, `Missing`, `New`, `Unreadable(permission|media|removed|other)`, `MetadataMismatch`, `Unrepresentable`, `TypeChanged`, `SkippedMountPoint`.
 
@@ -268,6 +269,8 @@ Manifest paths (`ArchivePath`, `common/archive_path.*`) are relative to `archive
 - R-53 Stored fields: `size`, `mtime_ns`; optional `mode` (POSIX bits, decimal) and `attrs` (Windows attribute bitmask) when available, compared only under `--strict-metadata`.
 
 ### B3.3 Exclusions
+
+> Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: R-55's operator-defined additions are not part of V1; every manifest carries the default list (`exclusions_version` 1).
 
 - R-54 The default exclusion list (version 1) is embedded in every manifest header (`exclusions`, `exclusions_version`) and thereby covered by the signature:
 
@@ -552,6 +555,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 > Amended by `design/decisions/0023-manifest-named-in-the-record-transaction.md`: `IOutputFile::flush()` makes the bytes written so far durable without giving them the destination's name; a `commit()` with nothing written since only renames.
 > Amended by `design/decisions/0024-attempts-record-their-process.md`: adds `IProcessTable` (`current()`, `find(id)`, both `std::expected`) and `ProcessIdentity` (`id`, `start`, `program`): which process runs an attempt of a registration, and whether it still runs.
 > Amended by `design/decisions/0029-network-roots-are-refused.md`: on Windows `IMediaEnumerator::volumes()` also gives a volume that has no drive letter or folder path, with its GUID path (`\\?\Volume{...}\`) as its `mount_point`, so that verification by archive uuid finds an archive on it.
+> Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: there is no helper: the Windows `IChangeTracker`, `NtfsUsnChangeTracker`, runs in the main process, unprivileged; `IRawDeviceAccess` has no V1.1 implementation, as raw device reads serve only V2's whole-disk fingerprint.
 
 ```cpp
 namespace va {
@@ -687,6 +691,8 @@ Evidence at verify time (`MediaEvidence`) is compared against every registered a
 
 ## B12. Change tracking
 
+> Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: R-107's `NtfsUsnChangeTracker` reads the journal in the main process, unprivileged (a handle to the volume's root folder with backup semantics, `FSCTL_READ_UNPRIVILEGED_USN_JOURNAL`), not through a helper.
+
 - R-106 V1 ships `NullChangeTracker` only. Linux stays `Null` unless btrfs generation tracking is added later; ext4/XFS have no application-queryable change journal, and inotify/fanotify are meaningless for offline media. Do not attempt.
 - R-107 Windows V1.1 `NtfsUsnChangeTracker` (through the helper) stores USN Journal ID + last USN per archive. Verdicts: journal ID changed or USN gap → `ContinuityLost` → QUICK is invalid, DEEP or FULL required; records exist → `Changed`, affected paths are forced into the sample; no records → `Unchanged` (advisory only, R-17). Raw-sector edits and edits made from another OS leave no USN trace; this is why R-17 exists.
 
@@ -730,6 +736,7 @@ libsodium's SHA-256 is not used (no SHA-NI; becomes the bottleneck on NVMe).
 
 ### Targets and presets
 
+> Amended by `design/decisions/0012-gitlab-ci.md`: R-120's loop-device / `dm-flakey` test needs a privileged runner and is not part of the GitLab pipeline; the unit tests' injected media errors cover unreadable sectors on every OS.
 > Amended by `design/decisions/0038-the-windows-package.md`: R-121's zip holds no folder of its own (`bin`, `lib` and `share` at its root, the version in its file name), so that unzipping a new version into the program folder updates it in place; the package holds a short README of its own in English and Chinese beside the guides, not the repository's README; its notices include the licenses of the code compiled into the programs (nlohmann/json, BLAKE3), on every system; the install fails when `glib-compile-schemas` reports a schema it left out, also with exit code 0, and the package test checks that every GTK schema is compiled.
 
 ```text
@@ -744,6 +751,7 @@ presets: linux-debug  linux-release  windows-ucrt64-debug  windows-ucrt64-releas
 ### Repository structure
 
 > Amended by `design/decisions/0020-archive-comparison.md`: `src/core/engine/compare_archives.*`; `tools/screenshots/` makes the user guide's pictures of the GUI.
+> Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: no `src/helper/` (no `veriarchive-helper`); `usn_tracker_win.*` runs in the main process; `raw_device_win.*` and `raw_device_linux.*` are not V1.1, as raw device reads serve only V2's whole-disk fingerprint.
 
 ```text
 VeriArchive/
@@ -865,6 +873,8 @@ All views of §B17 (six, with decision 0020's Compare Archives); results per §A
 
 ## V1.1 (after V1 acceptance)
 
+> Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: no `veriarchive-helper` + IPC; the Windows USN tracker (R-107) runs in the main process, unprivileged; reads with `SeBackupPrivilege` / `CAP_DAC_READ_SEARCH` are put off until an archive needs them.
+
 Chunk lines + Merkle (§B4.4, §B6) · Ed25519 signing, `.sig`, trusted keys, `key_id` in results (§B5) · QUICK / DEEP with seed and coverage (§B11) · history checkpoints (R-76) · `veriarchive-helper` + IPC · Windows USN tracker (R-107) · NTFS ADS entries (`s`) · `SeBackupPrivilege` / `CAP_DAC_READ_SEARCH` reads.
 Constraint: no change to §B4 header/entry keys (only filling `chunk_size`, `merkle_root`, chunk lines, `s` entries); no `ALTER TABLE` on V1 columns (R-92).
 
@@ -881,9 +891,9 @@ Whole-disk fingerprint (§B14) · btrfs change tracking · hardware-token / serv
 | D1 | ~~Linux driver for verifying Windows-written NTFS media: kernel `ntfs3` or `ntfs-3g`? (affects mtime precision and ADS visibility)~~ | **Resolved** by `design/decisions/0006-ntfs3-reference-driver.md`: `ntfs3` read-only is the reference; `ntfs-3g` supported with an informational note; `filesystem_type` is the on-disk format name |
 | D2 | V1.1 chunk size: 64 MiB vs 16 MiB (smaller = finer corruption localisation, larger index) | 64 MiB |
 | D3 | ~~Overdue defaults (365 / 90 days) and whether OVERDUE blocks QUICK results~~ | **Resolved** by `design/decisions/0007-overdue-defaults.md`: 365 / 180; OVERDUE flags only |
-| D4 | Compile-time pinned keys for production builds (R-73)? | off |
+| D4 | ~~Compile-time pinned keys for production builds (R-73)?~~ | **Resolved** by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: off; no build embeds a key list until signing is built, when the question is asked again |
 | D5 | ~~Is writing `.veriarchive/` to sealed media ever acceptable in this organisation?~~ | **Resolved** (2026-10-08): off by default (R-89); `register` without `--write-media-copy` prints a one-line notice that the repository then holds the only copy of the baseline and must be backed up (R-86) |
-| D6 | Windows helper authorisation: Windows service, or UAC-elevated helper launched on demand? | on-demand elevated helper, exits when idle |
+| D6 | ~~Windows helper authorisation: Windows service, or UAC-elevated helper launched on demand?~~ | **Resolved** by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: there is no helper; the USN change journal is read without elevation |
 | D7 | ~~Retention of `verify_items` detail (storage growth on large archives)~~ | **Resolved** (2026-10-08): non-Verified items only, kept forever |
 | D8 | ~~Registering a *directory* (not a volume root) as an archive: allowed in V1, or volume roots only?~~ | **Resolved** by `design/decisions/0001-archive-matching-includes-root-subpath.md`: allowed; overlapping roots refused; matching keyed by volume evidence + `root_subpath` |
 | D9 | ~~Linux without the udev database (containers, minimal systems; seen on the GitLab runners, 2026-10-14): neither the filesystem UUID nor the SATA/SCSI drive serial can be read, so every volume is `UNKNOWN` — registration is never refused (R-97) and verification never finds the archive. Proposed (a decision record to be written): (a) fall back to the kernel filesystem id (`statvfs` `f_fsid`, recorded as `fsid-…`) for ext2/3/4 and btrfs, where the kernel derives it from the filesystem UUID (not xfs, where it follows the device number); an `fsid-…` id compared with a real UUID counts as unavailable, so decision 0018 applies; (b) read the drive serial from SCSI VPD page 0x80 (`/sys/block/<disk>/device/vpd_pg80`) when udev is missing.~~ | **Resolved** by `design/decisions/0021-linux-without-udev.md`: the kernel filesystem id (`fsid-…`) for ext2/3/4 and btrfs, compared only with another `fsid-…` id (against a UUID, decision 0018 applies); for a SATA device behind libata that udev does not know, the device serial from SCSI VPD page 0x80 |
@@ -893,6 +903,8 @@ Whole-disk fingerprint (§B14) · btrfs change tracking · hardware-token / serv
 ---
 
 # Appendix — Agent quick rules (copy into CLAUDE.md)
+
+> Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: rule 9 has no V1.1 helper to send an API to; an API that needs admin/root is left out until a decision record says how it is made.
 
 1. Read `design/HANDOFF.md` §A3, §A6, §B4, §B7.4, §B9 before writing code. Part B is frozen: propose changes as `design/decisions/NNNN-*.md`; do not just implement them. Accepted records override the HANDOFF text they amend; each amended section names its records.
 2. `core` / `common` never include OS headers and never link `veriarchive_platform`. OS selection lives in CMake only.
