@@ -16,7 +16,7 @@ void open_repository_session(GuiState& state, bool initialise)
     // An exception from the engines (a std::filesystem error, say) is one more
     // reason the repository could not be opened, shown in Settings.
     try {
-        auto session = app::open_session({initialise, std::nullopt, std::nullopt, {}});
+        auto session = app::open_session({initialise, std::nullopt, std::nullopt, {}, false});
         if (session) {
             state.session = std::move(*session);
             state.session_error = nullptr;

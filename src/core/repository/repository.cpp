@@ -8,6 +8,7 @@
 #include "core/write_file.h"
 #include "schema_sql.h"
 
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <sqlite3.h>
@@ -15,11 +16,11 @@
 namespace va {
 namespace {
 
-constexpr int repository_error_code = 11;
-
+// No SQLite result code: database_state tells SQLite's own codes apart
+// (SQLITE_CORRUPT is 11, the exit code these errors once carried).
 IoError repository_error(std::string message)
 {
-    return {IoErrorKind::Other, repository_error_code, std::move(message)};
+    return {IoErrorKind::Other, 0, std::move(message)};
 }
 
 // std::filesystem::exists without exceptions: the throwing overload would end
@@ -355,6 +356,31 @@ std::expected<void, IoError> initialise_repository(AppContext& context, IFileWri
     return write_pin(context, writer);
 }
 
+namespace {
+
+// What every command says of a database that `repo rebuild-index` makes
+// again (decision 0036), with the database's path.
+std::string make_it_again(const RepositoryLayout& layout, DatabaseState state)
+{
+    const auto database = path_to_utf8(layout.database());
+    const auto how = "; make it again from the manifests with `repo rebuild-index`";
+    switch (state) {
+    case DatabaseState::Missing:
+        return "the repository's database " + database + " is missing" + how;
+    case DatabaseState::Empty:
+        return "the repository's database " + database + " is empty" + how;
+    case DatabaseState::NotADatabase:
+        return "the repository's database " + database + " is not a database" + how;
+    case DatabaseState::Damaged:
+        return "the repository's database " + database + " is damaged" + how;
+    case DatabaseState::Usable:
+        break;
+    }
+    return {};
+}
+
+} // namespace
+
 std::expected<void, IoError> open_repository(AppContext& context)
 {
     const auto uuid = read_repository_uuid(context.repo.root);
@@ -362,10 +388,147 @@ std::expected<void, IoError> open_repository(AppContext& context)
         return std::unexpected(repository_error("Invalid repository.json"));
     }
     if (auto result = validate_schema(context.repo); !result) {
+        // A database that `repo rebuild-index` makes again says so, in every
+        // command and in `repo init` (decision 0036); any other failure
+        // keeps SQLite's own reason.
+        if (const auto state = database_state(context.repo); state && *state != DatabaseState::Usable) {
+            return std::unexpected(repository_error(make_it_again(context.repo, *state)));
+        }
         return result;
     }
     context.repository_uuid = *uuid;
     return {};
+}
+
+std::expected<DatabaseState, IoError> database_state(const RepositoryLayout& layout)
+{
+    const auto file = layout.database();
+    std::error_code error;
+    const auto status = std::filesystem::status(file, error);
+    if (status.type() == std::filesystem::file_type::not_found) {
+        return DatabaseState::Missing;
+    }
+    if (error) {
+        return std::unexpected(repository_error("cannot read the repository's database: " + error.message()));
+    }
+    if (status.type() != std::filesystem::file_type::regular) {
+        return std::unexpected(
+            repository_error("the repository's database " + path_to_utf8(file) + " is not a file"));
+    }
+    // SQLite reads a file of 0 bytes as a database without any table (Empty).
+    // SQLite's own codes tell a file that is no database, and a damaged
+    // one, from a database that cannot be read now (locked, access denied).
+    const auto unusable = [](const IoError& failure) -> std::optional<DatabaseState> {
+        switch (failure.native_code & 0xff) {
+        case SQLITE_NOTADB:
+            return DatabaseState::NotADatabase;
+        case SQLITE_CORRUPT:
+            return DatabaseState::Damaged;
+        default:
+            return std::nullopt;
+        }
+    };
+    const auto told = [&](const IoError& failure) -> std::expected<DatabaseState, IoError> {
+        if (const auto state = unusable(failure)) {
+            return *state;
+        }
+        return std::unexpected(failure);
+    };
+    {
+        auto database = repository_detail::SqliteDatabase::open(file, true);
+        if (!database) {
+            return told(database.error());
+        }
+        auto tables = database->prepare("SELECT count(*) FROM sqlite_master");
+        if (!tables) {
+            return told(tables.error());
+        }
+        const auto row = tables->step();
+        if (!row) {
+            return told(row.error());
+        }
+        if (*row && sqlite3_column_int(tables->get(), 0) == 0) {
+            return DatabaseState::Empty;
+        }
+    }
+    if (auto valid = validate_schema(layout); !valid) {
+        return told(valid.error());
+    }
+    return DatabaseState::Usable;
+}
+
+namespace {
+
+// Moves the database that cannot be used aside, with the files SQLite keeps
+// beside it, and creates a new one in its place (decision 0036).
+std::expected<ReplacedDatabase, IoError> replace_database(const RepositoryLayout& layout, DatabaseState state)
+{
+    // "veriarchive.db.damaged-2026-10-27T10-15-30Z": its own name and when it
+    // was put aside (UTC), the time without colons, which Windows does not
+    // take in a file name; "-2", "-3", ... where that name is taken.
+    auto stamp = current_timestamp();
+    for (auto& character : stamp) {
+        if (character == ':') {
+            character = '-';
+        }
+    }
+    const auto name = path_to_utf8(layout.database().filename());
+    // The files SQLite keeps beside a database: moved with it, so that a new
+    // database never takes up the journal of the one put aside.
+    constexpr std::array suffixes{"-wal", "-shm", "-journal", ""};
+    std::string aside;
+    for (int attempt = 1;; ++attempt) {
+        aside = name + ".damaged-" + stamp + (attempt > 1 ? "-" + std::to_string(attempt) : std::string{});
+        const bool taken = std::ranges::any_of(
+            suffixes, [&](const char* suffix) { return path_exists(layout.root / path_from_utf8(aside + suffix)); });
+        if (!taken) {
+            break;
+        }
+    }
+    ReplacedDatabase replaced{state, std::nullopt};
+    for (const char* suffix : suffixes) {
+        const auto from = layout.root / path_from_utf8(name + suffix);
+        if (!path_exists(from)) {
+            continue;
+        }
+        const auto to = layout.root / path_from_utf8(aside + suffix);
+        std::error_code error;
+        std::filesystem::rename(from, to, error);
+        if (error) {
+            return std::unexpected(repository_error(
+                "cannot put the repository's database aside: " + path_to_utf8(from) + ": " + error.message()));
+        }
+        if (*suffix == '\0') {
+            replaced.moved_to = to;
+        }
+    }
+    if (auto created = initialise_database(layout); !created) {
+        return std::unexpected(created.error());
+    }
+    return replaced;
+}
+
+} // namespace
+
+std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(AppContext& context)
+{
+    const auto uuid = read_repository_uuid(context.repo.root);
+    if (!uuid) {
+        return std::unexpected(repository_error("Invalid repository.json"));
+    }
+    const auto state = database_state(context.repo);
+    if (!state) {
+        return std::unexpected(state.error());
+    }
+    context.repository_uuid = *uuid;
+    if (*state == DatabaseState::Usable) {
+        return std::nullopt;
+    }
+    auto replaced = replace_database(context.repo, *state);
+    if (!replaced) {
+        return std::unexpected(replaced.error());
+    }
+    return std::optional<ReplacedDatabase>(std::move(*replaced));
 }
 
 std::expected<void, IoError> record_repository_uuid(AppContext& context, IFileWriter& writer)

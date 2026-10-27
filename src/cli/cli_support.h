@@ -8,6 +8,7 @@
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
 #include "core/repository/archive_store.h"
+#include "core/repository/repository.h"
 
 #include <chrono>
 #include <initializer_list>
@@ -67,10 +68,14 @@ struct Failure {
 struct Session {
     AppContext context;
     std::unique_ptr<IFileWriter> writer;
+    // repo rebuild-index: the database put aside and made again (decision 0036).
+    std::optional<ReplacedDatabase> replaced_database;
 };
 
-// Resolves and opens (or initialises) the repository per HANDOFF §B7.4.
-std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise);
+// Resolves and opens (or initialises) the repository per HANDOFF §B7.4;
+// `rebuild`: for repo rebuild-index, which makes a database that is missing,
+// empty, not a database or damaged again (decision 0036).
+std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise, bool rebuild = false);
 
 // A usage failure when the command received an option it does not accept.
 std::optional<Failure> check_options(const Arguments& arguments,

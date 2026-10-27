@@ -7,8 +7,10 @@
 #include "core/write_file.h"
 #include "platform/file_writer.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <optional>
 #include <sqlite3.h>
 
 namespace {
@@ -623,6 +625,184 @@ void elevated_warning_holds_also_without_a_repository()
     CHECK(opened_unelevated && opened_unelevated->warnings.empty());
 }
 
+// A repository made for the database tests below (sample data): resolved
+// and initialised at `root`/repository-SAMPLE with a config file of its own.
+std::optional<va::AppContext> sample_repository(const std::filesystem::path& root)
+{
+    auto options = make_options(root);
+    options.explicit_repository = root / "repository-SAMPLE";
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    if (!context) {
+        return std::nullopt;
+    }
+    return std::move(*context);
+}
+
+// Runs `sql` in a database of its own at `file` (sample data).
+void run_sql(const std::filesystem::path& file, const char* sql)
+{
+    sqlite3* database = nullptr;
+    const auto name = file.u8string();
+    CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &database) == SQLITE_OK);
+    CHECK(sqlite3_exec(database, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(database);
+}
+
+// Decision 0036: what is at veriarchive.db. A database of this version's
+// schema can be used. One that is missing, empty (0 bytes, or no table),
+// not a database (sample bytes) or damaged (its first page's b-tree marked
+// with a type that does not exist, sample damage) cannot, and every command
+// names `repo rebuild-index` for it. One that holds another program's
+// tables, a later version's schema, or that is locked is none of these: it
+// is an error, and nothing ever replaces it.
+void database_state_tells_what_cannot_be_used()
+{
+    TemporaryDirectory temporary("database-state");
+    auto context = sample_repository(temporary.path());
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    const auto database = layout.database();
+    const auto database_text = va::path_to_utf8(database);
+    const auto state = [&] { return va::database_state(layout); };
+    const auto opened_says = [&](const std::string& what) {
+        auto reopened = *context;
+        const auto opened = va::open_repository(reopened);
+        CHECK(!opened && opened.error().message == "the repository's database " + database_text + " " + what +
+                                                       "; make it again from the manifests with `repo rebuild-index`");
+    };
+    CHECK(state() == va::DatabaseState::Usable);
+    const auto usable = file_bytes(database);
+
+    std::filesystem::remove(database);
+    CHECK(state() == va::DatabaseState::Missing);
+    opened_says("is missing");
+
+    std::ofstream(database, std::ios::binary).flush();
+    CHECK(state() == va::DatabaseState::Empty);
+    opened_says("is empty");
+    std::filesystem::remove(database);
+    run_sql(database, "CREATE TABLE sample(x); DROP TABLE sample;");
+    CHECK(std::filesystem::file_size(database) > 0 && state() == va::DatabaseState::Empty);
+    opened_says("is empty");
+
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << std::string(4096, 'x');
+    CHECK(state() == va::DatabaseState::NotADatabase);
+    opened_says("is not a database");
+
+    // Byte 100 starts the first page's b-tree, whose type is 2, 5, 10 or 13.
+    auto damaged = usable;
+    CHECK(damaged.size() > 100);
+    damaged[100] = 7;
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << damaged;
+    CHECK(state() == va::DatabaseState::Damaged);
+    opened_says("is damaged");
+
+    // Another program's database, and a later version's schema: errors.
+    std::filesystem::remove(database);
+    run_sql(database, "CREATE TABLE sample(x);");
+    const auto other = state();
+    CHECK(!other && other.error().message == "unsupported repository schema");
+    std::filesystem::remove(database);
+    run_sql(database, "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (2);");
+    const auto later = state();
+    CHECK(!later && later.error().message == "unsupported repository schema");
+
+    // A database of this schema that another connection holds locked.
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << usable;
+    CHECK(state() == va::DatabaseState::Usable);
+    sqlite3* holder = nullptr;
+    const auto name = database.u8string();
+    CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &holder) == SQLITE_OK);
+    CHECK(sqlite3_exec(holder, "PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE; INSERT INTO settings VALUES ('sample', "
+                               "'locked');",
+              nullptr, nullptr, nullptr) == SQLITE_OK);
+    const auto locked = state();
+    CHECK(!locked && locked.error().message.ends_with("database is locked"));
+    sqlite3_exec(holder, "ROLLBACK;", nullptr, nullptr, nullptr);
+    sqlite3_close(holder);
+}
+
+// Decision 0036: opened for `repo rebuild-index`, a database that cannot be
+// used is put aside as veriarchive.db.damaged-<UTC date and time>, with the
+// journal beside it, and a new database of this schema made in its place;
+// the repository keeps its uuid. A missing one is made anew, with a journal
+// left beside it put aside too. A usable database, and one that is no state
+// (another program's tables), are left as they are.
+void rebuild_makes_a_database_that_cannot_be_used_again()
+{
+    TemporaryDirectory temporary("database-again");
+    auto context = sample_repository(temporary.path());
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    const auto database = layout.database();
+    const auto uuid = context->repository_uuid;
+    const auto rebuild = [&] {
+        auto reopened = *context;
+        reopened.repository_uuid.clear();
+        auto made = va::open_repository_to_rebuild(reopened);
+        CHECK(!made || reopened.repository_uuid == uuid);
+        return made;
+    };
+    const auto aside_files = [&] {
+        std::vector<std::string> names;
+        for (const auto& entry : std::filesystem::directory_iterator(layout.root)) {
+            const auto name = va::path_to_utf8(entry.path().filename());
+            if (name.starts_with("veriarchive.db.damaged-")) {
+                names.push_back(name);
+            }
+        }
+        std::sort(names.begin(), names.end());
+        return names;
+    };
+
+    const auto usable = rebuild();
+    CHECK(usable && !*usable && aside_files().empty());
+
+    // Not a database, with a journal beside it (sample bytes): both put aside.
+    const std::string sample_bytes(4096, 'x');
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << sample_bytes;
+    std::ofstream(layout.root / "veriarchive.db-wal", std::ios::binary) << "sample journal";
+    const auto replaced = rebuild();
+    CHECK(replaced && *replaced && (*replaced)->state == va::DatabaseState::NotADatabase && (*replaced)->moved_to);
+    if (!replaced || !*replaced || !(*replaced)->moved_to) {
+        return;
+    }
+    const auto moved = *(*replaced)->moved_to;
+    const auto moved_name = va::path_to_utf8(moved.filename());
+    CHECK(moved.parent_path() == layout.root && moved_name.starts_with("veriarchive.db.damaged-20") &&
+          moved_name.ends_with("Z") && moved_name.find(':') == std::string::npos);
+    CHECK(file_bytes(moved) == sample_bytes);
+    CHECK(file_bytes(layout.root / va::path_from_utf8(moved_name + "-wal")) == "sample journal");
+    CHECK(!std::filesystem::exists(layout.root / "veriarchive.db-wal"));
+    CHECK(va::database_state(layout) == va::DatabaseState::Usable);
+
+    // Missing, with a journal left beside it (sample bytes): made anew, the
+    // journal put aside, so the new database never takes it up.
+    std::filesystem::remove(database);
+    std::ofstream(layout.root / "veriarchive.db-journal", std::ios::binary) << "sample journal";
+    const auto missing = rebuild();
+    CHECK(missing && *missing && (*missing)->state == va::DatabaseState::Missing && !(*missing)->moved_to);
+    CHECK(!std::filesystem::exists(layout.root / "veriarchive.db-journal"));
+    CHECK(va::database_state(layout) == va::DatabaseState::Usable);
+    const auto names = aside_files();
+    const auto journal = std::ranges::find_if(names, [](const std::string& name) { return name.ends_with("-journal"); });
+    CHECK(journal != names.end() &&
+          file_bytes(layout.root / va::path_from_utf8(*journal)) == "sample journal");
+
+    // Another program's database: an error, and the file left as it was.
+    std::filesystem::remove(database);
+    run_sql(database, "CREATE TABLE sample(x);");
+    const auto other_bytes = file_bytes(database);
+    const auto other = rebuild();
+    CHECK(!other && other.error().message == "unsupported repository schema");
+    CHECK(file_bytes(database) == other_bytes && aside_files() == names);
+}
+
 } // namespace
 
 void repository_tests()
@@ -646,4 +826,6 @@ void repository_tests()
     absolute_pin_still_works();
     explicit_init_inside_config_folder_pins_a_relative_path();
     elevated_warning_holds_also_without_a_repository();
+    database_state_tells_what_cannot_be_used();
+    rebuild_makes_a_database_that_cannot_be_used_again();
 }

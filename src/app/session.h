@@ -5,6 +5,7 @@
 #include "app/text.h"
 #include "core/engine/candidates.h"
 #include "core/interfaces.h"
+#include "core/repository/repository.h"
 
 #include <functional>
 #include <memory>
@@ -21,12 +22,18 @@ struct SessionOptions {
     // Whether this process runs elevated (R-12): the platform's answer when
     // empty, as in the user interfaces; tests give their own.
     std::function<bool()> elevated;
+    // repo rebuild-index: a database that is missing, empty, not a database
+    // or damaged is put aside and made again (decision 0036).
+    bool rebuild = false;
 };
 
 struct Session {
     AppContext context;
     std::unique_ptr<IFileWriter> writer;
     std::vector<std::string> warnings;  // running elevated, repository uuid changed, ...
+    // The database that opening for repo rebuild-index put aside and made
+    // again (decision 0036); nothing otherwise.
+    std::optional<ReplacedDatabase> replaced_database;
 };
 
 // Why no repository could be opened, with the warnings that hold all the

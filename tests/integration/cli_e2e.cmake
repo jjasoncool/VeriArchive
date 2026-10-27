@@ -1726,4 +1726,75 @@ if(NOT io_refused STREQUAL "error: --io takes hdd or ssd\n" OR NOT io_verified M
     message(FATAL_ERROR "--io and io.rotational_override:\n${io_refused}\n${io_verified}\n${io_bad_config}")
 endif()
 
+# Decision 0036: `repo rebuild-index` makes a database that is missing, empty
+# or not a database again, in a repository of its own (sample data). Every
+# command, `repo init` too, names the rebuild for it (exit 11), in either
+# language. The rebuild puts what is there aside, makes a new database from
+# the manifests and keeps the repository's uuid, saying plainly that the
+# verification history is lost (exit 2), in either language and in --json:
+# the archive is listed again with its label, never verified, and verifies,
+# its history starting anew.
+file(WRITE "${WORK}/config7.json" "{\"language\": \"zh-TW\"}\n")
+set(GLOBAL --config "${WORK}/config7.json")
+run_cli("0" --repository "${WORK}/repo7" repo init)
+set(LOSS "${WORK}/database-loss-sample")
+file(WRITE "${LOSS}/a.txt" "database loss sample a\n")
+run_cli("0" register "${LOSS}" --label ARCH-0042 --json)
+string(JSON loss_uuid GET "${last_output}" archive_uuid)
+run_cli("0;2" verify --full "${LOSS}")
+run_cli("0" repo info --json)
+string(JSON loss_repository GET "${last_output}" repository_uuid)
+set(LOSS_DB "${WORK}/repo7/veriarchive.db")
+file(TO_NATIVE_PATH "${LOSS_DB}" loss_db_shown)
+file(REMOVE "${LOSS_DB}")
+run_cli("11" --lang en archive list)
+string(FIND "${last_errors}" "error: the repository's database ${loss_db_shown} is missing; make it again from the manifests with `repo rebuild-index`\n" loss_listed)
+run_cli("11" repo init)
+string(FIND "${last_errors}" "錯誤：儲存庫的資料庫 ${loss_db_shown} 已遺失；請以 `repo rebuild-index` 從清單檔重新建立\n" loss_init)
+run_cli("2" --lang en repo rebuild-index)
+set(loss_rebuilt "${last_output}")
+string(FIND "${loss_rebuilt}" "The repository's database was missing; a new one was made from the manifests.\nRebuilt the index from manifests: " loss_said)
+string(FIND "${loss_rebuilt}" "\nThe verification history was kept only in the repository's database, so the manifests cannot give it back: every archive is listed as never verified until it is verified again" loss_history)
+run_cli("0" archive list --json)
+string(JSON loss_label GET "${last_output}" archives 0 label)
+string(JSON loss_listed_uuid GET "${last_output}" archives 0 archive_uuid)
+string(JSON loss_never TYPE "${last_output}" archives 0 last_full_verify)
+run_cli("0" repo info --json)
+string(JSON loss_repository_after GET "${last_output}" repository_uuid)
+run_cli("0;2" verify --full "${LOSS}")
+run_cli("0" history "${loss_uuid}" --json)
+string(JSON loss_runs LENGTH "${last_output}" runs)
+if(loss_listed EQUAL -1 OR loss_init EQUAL -1 OR loss_said EQUAL -1 OR loss_history EQUAL -1
+        OR NOT loss_label STREQUAL "ARCH-0042" OR NOT loss_listed_uuid STREQUAL loss_uuid
+        OR NOT loss_never STREQUAL "NULL" OR NOT loss_repository_after STREQUAL loss_repository OR NOT loss_runs EQUAL 1)
+    message(FATAL_ERROR "repo rebuild-index of a missing database: listed ${loss_listed}, init ${loss_init}, said "
+        "${loss_said}, history ${loss_history}; ${loss_label} ${loss_listed_uuid} (${loss_never}), repository "
+        "${loss_repository_after}, runs ${loss_runs}\n${loss_rebuilt}")
+endif()
+# Not a database (sample bytes), then empty (0 bytes): each put aside.
+string(REPEAT "not a database, sample data. " 160 not_a_database)
+file(WRITE "${LOSS_DB}" "${not_a_database}")
+run_cli("11" --lang en archive list)
+string(FIND "${last_errors}" "error: the repository's database ${loss_db_shown} is not a database; make it again" garbage_listed)
+run_cli("2" repo rebuild-index --json)
+string(JSON garbage_state GET "${last_output}" replaced_database state)
+string(JSON garbage_aside GET "${last_output}" replaced_database moved_to)
+file(TO_CMAKE_PATH "${garbage_aside}" garbage_aside)
+file(READ "${garbage_aside}" garbage_kept)
+get_filename_component(garbage_name "${garbage_aside}" NAME)
+file(WRITE "${LOSS_DB}" "")
+run_cli("2" repo rebuild-index)
+string(FIND "${last_output}" "儲存庫的資料庫是空的；已將它改名為 " empty_said)
+string(FIND "${last_output}" "驗證歷程只存在儲存庫的資料庫中，清單檔無法還原它" empty_history)
+run_cli("0" repo rebuild-index --json)
+string(JSON usable_replaced TYPE "${last_output}" replaced_database)
+run_cli("0;2" verify --full "${loss_uuid}")
+if(garbage_listed EQUAL -1 OR NOT garbage_state STREQUAL "not_a_database" OR NOT garbage_kept STREQUAL not_a_database
+        OR NOT garbage_name MATCHES "^veriarchive[.]db[.]damaged-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]-[0-9][0-9]-[0-9][0-9]Z(-[0-9]+)?$"
+        OR empty_said EQUAL -1 OR empty_history EQUAL -1 OR NOT usable_replaced STREQUAL "NULL")
+    message(FATAL_ERROR "repo rebuild-index of a database that is not one: listed ${garbage_listed}, ${garbage_state} "
+        "put aside as ${garbage_name}; empty: said ${empty_said}, history ${empty_history}; usable: ${usable_replaced}")
+endif()
+set(GLOBAL --config "${WORK}/config.json")
+
 message(STATUS "veriarchive-cli end-to-end test passed")

@@ -1067,10 +1067,82 @@ void a_recorded_manifest_that_the_rebuild_skipped_is_listed_with_its_entry()
           status->unusable_manifest->kind == va::UnusableManifest::Kind::IndexDiffers);
 }
 
+// Decision 0036 (R-80): a database made again holds nothing (the state of a
+// new one, made here by emptying every table of a used one). The rebuild
+// gives each archive whose manifests manifests/ holds its record from them
+// alone: its uuid, its label and root as its latest manifest records them,
+// when its first revision was registered, its latest revision, every
+// revision and the index; each archive registered, as the database alone
+// knew which were retired. The archive then verifies against the index made
+// again, and its history starts anew.
+void a_lost_database_is_made_again_from_the_manifests()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("one/a.txt", "a");
+    fixture.archive.add_file("two/b.txt", "b");
+    const auto first = fixture.register_root(fixture.archive.root() / "one");
+    const auto second = fixture.register_root(fixture.archive.root() / "two");
+    CHECK(first && second);
+    if (!first || !second) {
+        return;
+    }
+    fixture.archive.add_file("one/c.txt", "c");
+    va::RegisterRequest again;
+    again.root = fixture.archive.root() / "one";
+    again.new_revision = true;
+    const auto revised = fixture.register_root(again);
+    CHECK(revised && revised->revision == 2);
+    CHECK(fixture.verify(fixture.archive.root() / "one").has_value());
+    const auto before = fixture.store.archives();
+    CHECK(before && before->size() == 2);
+    if (!before || before->size() != 2) {
+        return;
+    }
+    auto retired = before->back();
+    retired.status = "RETIRED";
+    CHECK(fixture.store.update_archive(retired));
+    const auto files_before = fixture.store.file_rows(first->archive_uuid, 2);
+
+    fixture.repository.execute("DELETE FROM archives; DELETE FROM archive_revisions; DELETE FROM media_evidence; "
+                               "DELETE FROM files; DELETE FROM chunks; DELETE FROM verify_runs; DELETE FROM "
+                               "verify_items; DELETE FROM verify_progress; DELETE FROM settings;");
+    const auto report = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
+    CHECK(report && report->archives == 2 && report->revisions == 3 && report->skipped.empty() &&
+          report->revisions_kept.empty() && report->revisions_left_out.empty() &&
+          report->revisions_not_indexed.empty());
+
+    const auto after = fixture.store.archives();
+    CHECK(after && after->size() == 2);
+    if (!after || after->size() != 2) {
+        return;
+    }
+    for (const auto& archive : *before) {
+        const auto found = std::ranges::find_if(
+            *after, [&](const va::ArchiveRecord& made) { return made.archive_uuid == archive.archive_uuid; });
+        CHECK(found != after->end());
+        if (found == after->end()) {
+            continue;
+        }
+        CHECK(found->label == archive.label && found->created == archive.created &&
+              found->current_revision == archive.current_revision && found->root_subpath == archive.root_subpath &&
+              found->status == "REGISTERED");
+    }
+    const auto revisions = fixture.store.revisions(first->archive_uuid);
+    CHECK(revisions && revisions->size() == 2);
+    const auto files_after = fixture.store.file_rows(first->archive_uuid, 2);
+    CHECK(files_before && files_after && files_after->size() == files_before->size() && files_after->size() == 2);
+
+    const auto verified = fixture.verify(fixture.archive.root() / "one");
+    CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
+    const auto runs = fixture.store.verify_runs(first->archive_uuid);
+    CHECK(runs && runs->size() == 1);
+}
+
 } // namespace
 
 void rebuild_index_tests()
 {
+    a_lost_database_is_made_again_from_the_manifests();
     rebuild_keeps_database_facts();
     skipped_manifests_say_why();
     rebuild_keeps_saved_progress();

@@ -63,11 +63,19 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
         return failed(context.error().message);
     }
 
-    Session session{std::move(*context), platform::make_file_writer(), warnings};
-    auto opened = session_options.initialise ? initialise_repository(session.context, *session.writer)
-                                             : open_repository(session.context);
-    if (!opened) {
-        return failed(opened.error().message);
+    Session session{std::move(*context), platform::make_file_writer(), warnings, std::nullopt};
+    if (session_options.rebuild) {
+        auto made = open_repository_to_rebuild(session.context);
+        if (!made) {
+            return failed(made.error().message);
+        }
+        session.replaced_database = std::move(*made);
+    } else {
+        auto opened = session_options.initialise ? initialise_repository(session.context, *session.writer)
+                                                 : open_repository(session.context);
+        if (!opened) {
+            return failed(opened.error().message);
+        }
     }
     if (auto recorded = record_repository_uuid(session.context, *session.writer); !recorded) {
         return failed(recorded.error().message);

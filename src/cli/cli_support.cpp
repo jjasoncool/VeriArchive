@@ -79,9 +79,9 @@ Arguments parse_arguments(const std::vector<std::string>& raw, std::string& erro
     return arguments;
 }
 
-std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise)
+std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise, bool rebuild)
 {
-    auto session = app::open_session({initialise, arguments.repository, arguments.config, {}});
+    auto session = app::open_session({initialise, arguments.repository, arguments.config, {}, rebuild});
     // The warnings first, also where no repository could be opened: that
     // VeriArchive runs elevated may be why (R-12, decision 0037).
     for (const auto& warning : session ? session->warnings : session.error().warnings) {
@@ -90,7 +90,7 @@ std::expected<Session, Failure> open_session(const Arguments& arguments, bool in
     if (!session) {
         return std::unexpected(Failure{exit_code::repository, session.error().message});
     }
-    return Session{std::move(session->context), std::move(session->writer)};
+    return Session{std::move(session->context), std::move(session->writer), std::move(session->replaced_database)};
 }
 
 void print_json(const nlohmann::json& document)

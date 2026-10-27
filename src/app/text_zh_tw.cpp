@@ -146,6 +146,24 @@ constexpr CatalogEntry entries[] = {
     {"left out of the index: {} ({}): {}", "已從索引移除：{}（{}）：{}", Match::Cause},
     {"not in the index: {} ({}): {}", "不在索引中：{}（{}）：{}", Match::Cause},
     {"skipped: {}", "已略過：{}"},
+    // A rebuild that made the repository's database again (decision 0036):
+    // what was wrong with it, where it was put aside, and what is lost.
+    {"The repository's database was missing; a new one was made from the manifests.",
+        "儲存庫的資料庫已遺失；已從清單檔建立新的資料庫。"},
+    {"The repository's database was empty; it was put aside as {} and a new one was made from the manifests.",
+        "儲存庫的資料庫是空的；已將它改名為 {} 留在一旁，並從清單檔建立新的資料庫。", Match::FormatOnly},
+    {"The repository's database was not a database; it was put aside as {} and a new one was made from the "
+        "manifests.",
+        "儲存庫的資料庫不是資料庫檔案；已將它改名為 {} 留在一旁，並從清單檔建立新的資料庫。", Match::FormatOnly},
+    {"The repository's database was damaged; it was put aside as {} and a new one was made from the manifests.",
+        "儲存庫的資料庫已損毀；已將它改名為 {} 留在一旁，並從清單檔建立新的資料庫。", Match::FormatOnly},
+    {"The verification history was kept only in the repository's database, so the manifests cannot give it back: "
+        "every archive is listed as never verified until it is verified again, an archive that was retired is listed "
+        "as registered, and unfinished registrations and relocations are gone. If a backup of the repository holds "
+        "veriarchive.db, put that file in place of the new one and run `repo rebuild-index` again.",
+        "驗證歷程只存在儲存庫的資料庫中，清單檔無法還原它：每個封存在再次驗證之前都會列為從未驗證，已停用的封存會列為"
+        "已註冊，未完成的註冊與搬移也都不在了。若儲存庫的備份中有 veriarchive.db，請用那個檔案取代新的資料庫，"
+        "再執行一次 `repo rebuild-index`。"},
     {"usage: repo init | info | rebuild-index | verify-history",
         "用法：repo init | info | rebuild-index | verify-history"},
     // src/cli/media_commands.cpp
@@ -1300,6 +1318,19 @@ constexpr CatalogEntry entries[] = {
     {"cannot record repository_uuid in config: {}", "無法在設定檔中記錄 repository_uuid：{}",
         Match::Cause},
     {"unsupported repository schema", "不支援的儲存庫結構描述"},
+    // A database that `repo rebuild-index` makes again (decision 0036), as
+    // every command and `repo init` name it, and what stops it being made again.
+    {"the repository's database {} is missing; make it again from the manifests with `repo rebuild-index`",
+        "儲存庫的資料庫 {} 已遺失；請以 `repo rebuild-index` 從清單檔重新建立"},
+    {"the repository's database {} is empty; make it again from the manifests with `repo rebuild-index`",
+        "儲存庫的資料庫 {} 是空的；請以 `repo rebuild-index` 從清單檔重新建立"},
+    {"the repository's database {} is not a database; make it again from the manifests with `repo rebuild-index`",
+        "儲存庫的資料庫 {} 不是資料庫檔案；請以 `repo rebuild-index` 從清單檔重新建立"},
+    {"the repository's database {} is damaged; make it again from the manifests with `repo rebuild-index`",
+        "儲存庫的資料庫 {} 已損毀；請以 `repo rebuild-index` 從清單檔重新建立"},
+    {"cannot read the repository's database: {}", "無法讀取儲存庫的資料庫：{}", Match::Cause},
+    {"the repository's database {} is not a file", "儲存庫的資料庫 {} 不是檔案"},
+    {"cannot put the repository's database aside: {}: {}", "無法將儲存庫的資料庫移到一旁：{}：{}", Match::Cause},
     {"unsupported or incomplete repository schema", "不支援或不完整的儲存庫結構描述"},
     // src/core/repository/sqlite_raii.cpp
     {"unknown SQLite error", "未知的 SQLite 錯誤"},
