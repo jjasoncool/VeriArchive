@@ -105,6 +105,12 @@ std::filesystem::path without_trailing_separators(std::filesystem::path root);
 // other, compared case-insensitively.
 bool roots_overlap(std::string_view left, std::string_view right);
 
+// Whether `path` is `folder` or lies below it, told from their text alone:
+// element by element after lexically_normal(), case-insensitively as
+// roots_overlap compares (decision 0029, point 6). "D:\" holds
+// "D:\VeriArchive\bin\data"; "D:\Data" does not hold "D:\Database".
+bool path_within(const std::filesystem::path& folder, const std::filesystem::path& path);
+
 // Where the process runs, recorded in manifests and history (§B4.3 created_by).
 struct HostInfo {
     std::string os;           // "windows" or "linux"

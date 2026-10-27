@@ -217,6 +217,23 @@ std::filesystem::path without_trailing_separators(std::filesystem::path root)
     return root;
 }
 
+bool path_within(const std::filesystem::path& folder, const std::filesystem::path& path)
+{
+    const auto elements = [](const std::filesystem::path& whole) {
+        std::vector<std::string> folded;
+        for (const auto& element : whole.lexically_normal()) {
+            // A separator at the end gives an empty last element.
+            if (const auto text = path_to_utf8(element); !text.empty()) {
+                folded.push_back(unicode_fold(text));
+            }
+        }
+        return folded;
+    };
+    const auto outer = elements(folder);
+    const auto inner = elements(path);
+    return !outer.empty() && outer.size() <= inner.size() && std::equal(outer.begin(), outer.end(), inner.begin());
+}
+
 bool roots_overlap(std::string_view left, std::string_view right)
 {
     const auto a = unicode_fold(left);

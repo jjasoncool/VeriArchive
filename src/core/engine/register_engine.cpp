@@ -613,6 +613,26 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     if (request.confirmed && !request.lost_manifest_of && !request.resume) {
         return fail(Kind::Invalid, "--confirm is used only with --lost-manifest or --resume");
     }
+    // Decision 0029, point 6 (operator, 2026-10-27): the repository is no
+    // part of an archive. A root that holds RepositoryRoot, or lies inside
+    // it, is refused before anything of it is read: the repository changes
+    // while the root is read (the database, its journal, new manifests), so
+    // no verification of the archive could ever pass. Leaving the repository
+    // out of the scan would change what a manifest holds (R-54), so the root
+    // is refused instead.
+    if (path_within(request.root, services.layout.root)) {
+        return fail(Kind::Invalid, "this folder or volume holds VeriArchive's repository " +
+                                       path_to_utf8(services.layout.root) +
+                                       ", which changes while it is read, so a verification of this archive could "
+                                       "never pass; register a folder that does not hold the repository, or move the "
+                                       "repository out of it first");
+    }
+    if (path_within(services.layout.root, request.root)) {
+        return fail(Kind::Invalid, "this folder lies inside VeriArchive's repository " +
+                                       path_to_utf8(services.layout.root) +
+                                       ", which changes while it is read, so a verification of this archive could "
+                                       "never pass; register a folder outside the repository");
+    }
 
     const auto volume = services.media.volume_for_path(request.root);
     if (!volume) {

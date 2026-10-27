@@ -91,6 +91,43 @@ void malformed_values_are_invalid()
     CHECK(!fixture.store.archives() || fixture.store.archives()->empty());
 }
 
+// Decision 0029, point 6: a root that holds the repository (its folder, the
+// repository itself, also written in other letter case), or lies inside it,
+// is refused before anything of it is read (exit 10), saying why; nothing is
+// recorded. A folder beside the repository is no such root.
+void a_root_that_holds_the_repository_is_refused()
+{
+    Fixture fixture;
+    const auto repository = fixture.repository.context.repo.root;
+    const auto shown = va::path_to_utf8(repository);
+    const auto holds = "this folder or volume holds VeriArchive's repository " + shown +
+                       ", which changes while it is read, so a verification of this archive could never pass; register "
+                       "a folder that does not hold the repository, or move the repository out of it first";
+    const auto inside = "this folder lies inside VeriArchive's repository " + shown +
+                        ", which changes while it is read, so a verification of this archive could never pass; "
+                        "register a folder outside the repository";
+    auto upper = va::path_to_utf8(repository.parent_path());
+    for (auto& character : upper) {
+        if (character >= 'a' && character <= 'z') {
+            character = static_cast<char>(character - 'a' + 'A');
+        }
+    }
+    for (const auto& [root, message] : std::vector<std::pair<std::filesystem::path, std::string>>{
+             {repository.parent_path(), holds}, {repository, holds}, {repository / "", holds},
+             {va::path_from_utf8(upper), holds}, {repository / "manifests", inside},
+             {repository / "manifests" / "sample-SAMPLE", inside}}) {
+        const auto refused = fixture.run(at(root));
+        CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Invalid && refused.error().message == message);
+        if (refused || refused.error().message != message) {
+            std::cerr << "  root " << va::path_to_utf8(root) << '\n';
+        }
+    }
+    const auto beside = fixture.run(at(repository.parent_path() / "beside-SAMPLE"));
+    CHECK(!beside || beside.error().message.find("VeriArchive's repository") == std::string::npos);
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->empty());
+}
+
 // R-97 still holds where the filesystem id cannot be read (decision 0018):
 // the device and the volume size recognise the registered volume.
 void registered_root_without_filesystem_id_needs_a_flag()
@@ -3310,6 +3347,7 @@ void register_engine_tests()
 {
     first_registration_writes_manifest_and_index();
     malformed_values_are_invalid();
+    a_root_that_holds_the_repository_is_refused();
     registered_root_needs_a_flag();
     registered_root_without_filesystem_id_needs_a_flag();
     a_new_revision_of_a_copy_stays_a_copy();

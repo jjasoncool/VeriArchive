@@ -731,6 +731,16 @@ constexpr CatalogEntry entries[] = {
         "--new-revision：此根目錄沒有已註冊的封存"},
     {"labels have the form ARCH-NNNN", "標籤的格式為 ARCH-NNNN"},
     {"--copy-of needs an archive uuid", "--copy-of 需要一個封存 uuid"},
+    // A root that holds the repository, or lies inside it (decision 0029, point 6).
+    {"this folder or volume holds VeriArchive's repository {}, which changes while it is read, so a verification of "
+        "this archive could never pass; register a folder that does not hold the repository, or move the repository "
+        "out of it first",
+        "此資料夾或磁碟區內含 VeriArchive 的儲存庫 {}，而儲存庫在讀取期間會變動，因此這個封存的驗證永遠無法通過；"
+        "請註冊不含儲存庫的資料夾，或先把儲存庫移出此處"},
+    {"this folder lies inside VeriArchive's repository {}, which changes while it is read, so a verification of this "
+        "archive could never pass; register a folder outside the repository",
+        "此資料夾位於 VeriArchive 的儲存庫 {} 之內，而儲存庫在讀取期間會變動，因此這個封存的驗證永遠無法通過；"
+        "請註冊儲存庫以外的資料夾"},
     {"cannot identify the volume of the root: {}", "無法識別根目錄所在的磁碟區：{}", Match::Cause},
     {"there is no interrupted registration of this root to resume", "此根目錄沒有可繼續的中斷註冊"},
     {"the archive of the interrupted registration is missing", "找不到中斷的註冊所屬的封存"},

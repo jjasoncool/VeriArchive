@@ -145,6 +145,24 @@ run_cli("10" register Missing)
 if(NOT last_errors MATCHES "不是資料夾：Missing")
     message(FATAL_ERROR "a typed path was translated:\n${last_errors}")
 endif()
+# Decision 0029, point 6: a root that holds the repository, or lies inside it,
+# is refused before anything is read (exit 10), in either language, and
+# nothing is recorded: WORK holds the repository, and its manifests folder
+# lies inside it.
+run_cli("0" archive list --json)
+string(JSON archives_before_repository LENGTH "${last_output}" archives)
+run_cli("10" --lang en register "${WORK}")
+string(FIND "${last_errors}" "error: this folder or volume holds VeriArchive's repository " repository_held)
+string(FIND "${last_errors}" ", which changes while it is read, so a verification of this archive could never pass; register a folder that does not hold the repository, or move the repository out of it first\n" repository_held_why)
+run_cli("10" register "${WORK}/repo/manifests")
+string(FIND "${last_errors}" "錯誤：此資料夾位於 VeriArchive 的儲存庫 " repository_inside)
+run_cli("0" archive list --json)
+string(JSON archives_after_repository LENGTH "${last_output}" archives)
+if(repository_held EQUAL -1 OR repository_held_why EQUAL -1 OR repository_inside EQUAL -1
+        OR NOT archives_after_repository EQUAL archives_before_repository)
+    message(FATAL_ERROR "register of a root that holds the repository, or lies inside it: ${repository_held} "
+        "${repository_held_why} ${repository_inside}\n${last_errors}")
+endif()
 # A new root of a relocation that is no folder is a usage error too, named as typed.
 run_cli("10" --lang en archive relocate "${archive_uuid}" Missing)
 if(NOT last_errors STREQUAL "error: not a directory: Missing\n")
