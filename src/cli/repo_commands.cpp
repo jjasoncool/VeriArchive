@@ -166,21 +166,21 @@ int rebuild_stopped(const Arguments& arguments, const std::optional<ReplacedData
 // empty, not a database or damaged, into a new one (decision 0036).
 int rebuild(const Arguments& arguments, const Session& session)
 {
-    const auto& replaced = session.replaced_database;
-    auto store = ArchiveStore::open(session.context.repo);
-    if (!store) {
-        return rebuild_stopped(arguments, replaced, store.error());
-    }
     const auto files = platform::make_file_system_access();
     // R-94: its progress on stderr, and Ctrl+C stops it with nothing changed.
     CancelToken cancel;
     const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments, ProgressUnit::manifests);
-    const auto report = rebuild_index(*store, *files, session.context.repo, cancel, progress);
+    // A database damaged in a way that only the rebuild meets is made again
+    // there, and the rebuild runs into the new one (decision 0036).
+    const auto rebuilt =
+        rebuild_repository(session.context.repo, session.replaced_database, *files, cancel, progress);
     progress.finish();
-    if (!report) {
-        return rebuild_stopped(arguments, replaced, report.error());
+    if (!rebuilt) {
+        return rebuild_stopped(arguments, rebuilt.error().replaced, rebuilt.error().error);
     }
+    const auto& replaced = rebuilt->replaced;
+    const auto* report = &rebuilt->report;
     if (arguments.json) {
         print_json({{"archives", report->archives}, {"revisions", report->revisions},
             {"entries", report->entries}, {"skipped", report->skipped},

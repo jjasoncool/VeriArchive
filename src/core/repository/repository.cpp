@@ -471,14 +471,17 @@ std::expected<void, IoError> check_schema(const repository_detail::SqliteDatabas
         "trusted_keys", "settings",
     };
 
+    // A database of this version's schema that lacks one of its tables is
+    // damaged (decision 0036): this version made all of them in one
+    // transaction (initialise_database).
     for (const char* table : required_tables) {
         auto exists = table_exists(database, table);
         if (!exists) {
             return std::unexpected(exists.error());
         }
         if (!*exists) {
-            return std::unexpected(
-                repository_error("unsupported or incomplete repository schema"));
+            return std::unexpected(IoError{
+                IoErrorKind::DatabaseDamaged, SQLITE_CORRUPT, "unsupported or incomplete repository schema"});
         }
     }
     return {};
@@ -504,7 +507,7 @@ std::expected<std::optional<std::string>, IoError> read_mark(const repository_de
 }
 
 // The state of the database at `file` (database_state), read only.
-std::expected<DatabaseState, IoError> state_at(const std::filesystem::path& file)
+std::expected<DatabaseState, IoError> state_at(const std::filesystem::path& file, DatabaseCheck check)
 {
     std::error_code error;
     const auto status = std::filesystem::status(file, error);
@@ -551,6 +554,22 @@ std::expected<DatabaseState, IoError> state_at(const std::filesystem::path& file
     if (auto valid = check_schema(*database); !valid) {
         return told(valid.error());
     }
+    // Every page, its first row "ok" where none is damaged: a damaged page of
+    // a table (sample damage in the tests) reads as damaged only here, or
+    // where a command reads that page (sqlite_error).
+    if (check == DatabaseCheck::EveryPage) {
+        auto pages = database->prepare("PRAGMA quick_check(1)");
+        if (!pages) {
+            return told(pages.error());
+        }
+        const auto row = pages->step();
+        if (!row) {
+            return told(row.error());
+        }
+        if (!*row || pages->text(0) != "ok") {
+            return DatabaseState::Damaged;
+        }
+    }
     const auto mark = read_mark(*database);
     if (!mark) {
         return told(mark.error());
@@ -560,9 +579,9 @@ std::expected<DatabaseState, IoError> state_at(const std::filesystem::path& file
 
 } // namespace
 
-std::expected<DatabaseState, IoError> database_state(const RepositoryLayout& layout)
+std::expected<DatabaseState, IoError> database_state(const RepositoryLayout& layout, DatabaseCheck check)
 {
-    return state_at(layout.database());
+    return state_at(layout.database(), check);
 }
 
 namespace {
@@ -694,44 +713,12 @@ std::optional<ReplacedDatabase> replaced_by_mark(const RepositoryLayout& layout,
     return replaced;
 }
 
-} // namespace
-
-std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(AppContext& context)
+// The mark of the database at its place: of the database made now, or by a
+// rebuild that did not finish, which names the database put aside then; none
+// where it holds none. Such a database is put in WAL mode (R-91), in which it
+// was not made.
+std::expected<std::optional<ReplacedDatabase>, IoError> marked_replacement(const RepositoryLayout& layout)
 {
-    const auto uuid = read_repository_uuid(context.repo.root);
-    if (!uuid) {
-        return std::unexpected(repository_error("Invalid repository.json"));
-    }
-    const auto& layout = context.repo;
-    auto state = database_state(layout);
-    if (!state) {
-        return std::unexpected(state.error());
-    }
-    // A rebuild that stopped between moving the database aside and moving its
-    // new one into place: the new one, complete with its mark, which names
-    // the database put aside, is taken up, unless a journal is left beside
-    // the place, which it would take up.
-    if (*state == DatabaseState::Missing && !files_beside_the_database(layout)) {
-        const auto made = new_database(layout);
-        if (const auto made_state = state_at(made); made_state && *made_state == DatabaseState::Unfilled) {
-            std::error_code error;
-            std::filesystem::rename(made, layout.database(), error);
-            if (error) {
-                return std::unexpected(repository_error("cannot put the new repository database in place: " +
-                                                        path_to_utf8(made) + ": " + error.message()));
-            }
-            state = DatabaseState::Unfilled;
-        }
-    }
-    context.repository_uuid = *uuid;
-    if (*state != DatabaseState::Usable && *state != DatabaseState::Unfilled) {
-        if (auto replaced = replace_database(layout, *state); !replaced) {
-            return std::unexpected(replaced.error());
-        }
-    }
-    // The mark: of the database made now, or by a rebuild that did not
-    // finish, which names the database put aside then. Such a database is
-    // put in WAL mode (R-91), in which it was not made.
     auto database = repository_detail::SqliteDatabase::open(layout.database());
     if (!database) {
         return std::unexpected(database.error());
@@ -747,6 +734,59 @@ std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebui
         return std::unexpected(wal.error());
     }
     return replaced_by_mark(layout, **mark);
+}
+
+} // namespace
+
+std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(AppContext& context)
+{
+    const auto uuid = read_repository_uuid(context.repo.root);
+    if (!uuid) {
+        return std::unexpected(repository_error("Invalid repository.json"));
+    }
+    const auto& layout = context.repo;
+    // Every page: the rebuild reads all of the database, so one damaged
+    // beyond its first page is made again before, never filled.
+    auto state = database_state(layout, DatabaseCheck::EveryPage);
+    if (!state) {
+        return std::unexpected(state.error());
+    }
+    // A rebuild that stopped between moving the database aside and moving its
+    // new one into place: the new one, complete with its mark, which names
+    // the database put aside, is taken up, unless a journal is left beside
+    // the place, which it would take up.
+    if (*state == DatabaseState::Missing && !files_beside_the_database(layout)) {
+        const auto made = new_database(layout);
+        if (const auto made_state = state_at(made, DatabaseCheck::Schema);
+            made_state && *made_state == DatabaseState::Unfilled) {
+            std::error_code error;
+            std::filesystem::rename(made, layout.database(), error);
+            if (error) {
+                return std::unexpected(repository_error("cannot put the new repository database in place: " +
+                                                        path_to_utf8(made) + ": " + error.message()));
+            }
+            state = DatabaseState::Unfilled;
+        }
+    }
+    context.repository_uuid = *uuid;
+    if (*state != DatabaseState::Usable && *state != DatabaseState::Unfilled) {
+        if (auto replaced = replace_database(layout, *state); !replaced) {
+            return std::unexpected(replaced.error());
+        }
+    }
+    return marked_replacement(layout);
+}
+
+std::expected<ReplacedDatabase, IoError> make_damaged_database_again(const RepositoryLayout& layout)
+{
+    if (auto replaced = replace_database(layout, DatabaseState::Damaged); !replaced) {
+        return std::unexpected(replaced.error());
+    }
+    auto marked = marked_replacement(layout);
+    if (!marked) {
+        return std::unexpected(marked.error());
+    }
+    return marked->value_or(ReplacedDatabase{DatabaseState::Damaged, std::nullopt});
 }
 
 std::expected<void, IoError> record_repository_uuid(AppContext& context, IFileWriter& writer)

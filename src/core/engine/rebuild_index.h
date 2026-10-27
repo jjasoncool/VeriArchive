@@ -17,6 +17,7 @@
 // its index, as every record that no manifest rebuilds.
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
+#include "core/repository/database_state.h"
 
 #include <optional>
 #include <string>
@@ -66,5 +67,29 @@ struct RebuildReport {
 // leaves the database usable.
 std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSystemAccess& repository_files,
     const RepositoryLayout& layout, CancelToken& cancel, IProgressSink& progress);
+
+// `repo rebuild-index` of the repository at `layout` (decision 0036): what it
+// did, and the database it put aside, by the opening for the rebuild
+// (open_repository_to_rebuild, `replaced`) or here.
+struct RepositoryRebuild {
+    RebuildReport report;
+    std::optional<ReplacedDatabase> replaced;
+};
+// Why it stopped (rebuild_index's error), and the database put aside.
+struct RepositoryRebuildStop {
+    IoError error;
+    std::optional<ReplacedDatabase> replaced;
+};
+
+// rebuild_index through a connection of its own, after the opening for the
+// rebuild gave `replaced`. Where SQLite finds the database damaged while it
+// rebuilds (IoErrorKind::DatabaseDamaged: damage that the check of every
+// page does not see, such as an index that does not agree with its table),
+// and no database was made again for it, the connection is closed, the
+// database put aside as damaged and made again (make_damaged_database_again),
+// and the rebuild runs once more, into the new one.
+std::expected<RepositoryRebuild, RepositoryRebuildStop> rebuild_repository(const RepositoryLayout& layout,
+    std::optional<ReplacedDatabase> replaced, IFileSystemAccess& repository_files, CancelToken& cancel,
+    IProgressSink& progress);
 
 } // namespace va

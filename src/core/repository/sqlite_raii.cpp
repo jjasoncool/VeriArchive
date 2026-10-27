@@ -13,10 +13,22 @@ namespace {
 
 IoError sqlite_error(sqlite3* database, std::string_view operation)
 {
+    const int code = database ? sqlite3_errcode(database) : 0;
+    // A damaged database, or a file that is none, wherever SQLite finds it
+    // (a damaged page that opening the repository does not read): what is
+    // wrong in plain words, with the database's path and the way to fix it,
+    // as opening the repository says it (decision 0036).
+    if ((code & 0xff) == SQLITE_CORRUPT || (code & 0xff) == SQLITE_NOTADB) {
+        const char* file = sqlite3_db_filename(database, "main");
+        return {IoErrorKind::DatabaseDamaged, code,
+            "the repository's database " + std::string(file ? file : "") +
+                ((code & 0xff) == SQLITE_CORRUPT ? " is damaged" : " is not a database") +
+                "; make it again from the manifests with `repo rebuild-index`"};
+    }
     std::string message(operation);
     message += ": ";
     message += database ? sqlite3_errmsg(database) : "unknown SQLite error";
-    return {IoErrorKind::Other, database ? sqlite3_errcode(database) : 0, std::move(message)};
+    return {IoErrorKind::Other, code, std::move(message)};
 }
 
 } // namespace

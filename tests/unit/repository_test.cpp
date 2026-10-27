@@ -142,7 +142,10 @@ void schema_check_reports_the_sqlite_reason()
 
     std::ofstream(layout.database(), std::ios::binary) << std::string(4096, 'x');
     const auto damaged = va::validate_schema(layout);
-    CHECK(!damaged && damaged.error().message == "cannot prepare SQL: file is not a database");
+    CHECK(!damaged && damaged.error().kind == va::IoErrorKind::DatabaseDamaged &&
+          damaged.error().message == "the repository's database " + va::path_to_utf8(layout.database()) +
+                                         " is not a database; make it again from the manifests with `repo "
+                                         "rebuild-index`");
     std::filesystem::remove(layout.database());
 
     sqlite3* database = nullptr;
@@ -711,6 +714,12 @@ void database_state_tells_what_cannot_be_used()
     CHECK(damaged.size() > 100);
     damaged[100] = 7;
     std::ofstream(database, std::ios::binary | std::ios::trunc) << damaged;
+    CHECK(state() == va::DatabaseState::Damaged);
+    opened_says("is damaged");
+
+    // This version's schema without one of its tables (sample damage).
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << usable;
+    run_sql(database, "DROP TABLE chunks;");
     CHECK(state() == va::DatabaseState::Damaged);
     opened_says("is damaged");
 

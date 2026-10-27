@@ -17,6 +17,7 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <sqlite3.h>
 
 namespace {
 
@@ -1335,12 +1336,96 @@ void a_rebuild_that_stops_leaves_the_new_database_unfilled()
     fixture.store = fixture.repository.store();
 }
 
+// Overwrites the first page of `table` in the database at `file` with bytes
+// that no page holds (sample damage), with every other connection closed:
+// the WAL is written into the database first, so no copy of the page in it
+// covers the damage.
+void damage_table_page(const std::filesystem::path& file, const char* table)
+{
+    sqlite3* database = nullptr;
+    const auto name = file.u8string();
+    CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &database) == SQLITE_OK);
+    CHECK(sqlite3_exec(database, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_stmt* statement = nullptr;
+    const auto query = std::string("SELECT rootpage, (SELECT page_size FROM pragma_page_size()) FROM sqlite_master "
+                                   "WHERE type = 'table' AND name = '") + table + "'";
+    CHECK(sqlite3_prepare_v2(database, query.c_str(), -1, &statement, nullptr) == SQLITE_OK);
+    CHECK(sqlite3_step(statement) == SQLITE_ROW);
+    const auto page = sqlite3_column_int64(statement, 0);
+    const auto page_size = sqlite3_column_int64(statement, 1);
+    sqlite3_finalize(statement);
+    sqlite3_close(database);
+    CHECK(page > 1 && page_size > 0);
+    std::fstream bytes(file, std::ios::binary | std::ios::in | std::ios::out);
+    bytes.seekp(static_cast<std::streamoff>((page - 1) * page_size));
+    const std::string damage(static_cast<std::size_t>(page_size), '\xff');
+    bytes.write(damage.data(), static_cast<std::streamsize>(damage.size()));
+}
+
+// Decision 0036: damage beyond the database's first page (a table's page
+// overwritten, sample damage). Opening the repository reads its first page,
+// schema and mark alone, so the database counts as usable there, and a
+// command that reads the damaged table says in plain words that the database
+// is damaged and how to make it again; the check of every page, as a rebuild
+// opens it, finds it damaged. A rebuild that meets the damage itself, given
+// the database as usable, puts it aside as damaged, makes it again and fills
+// the new one. Opened for a rebuild, a database damaged so is put aside and
+// made again before the rebuild fills it.
+void damage_beyond_the_first_page_is_named_and_made_again()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("one/a.txt", "a");
+    const auto first = fixture.register_root(fixture.archive.root() / "one");
+    CHECK(first.has_value());
+    if (!first) {
+        return;
+    }
+    const auto& layout = fixture.repository.context.repo;
+    const auto close_the_store = [&] { [[maybe_unused]] const auto closed = std::move(fixture.store); };
+    close_the_store();
+    damage_table_page(layout.database(), "files");
+    CHECK(va::database_state(layout) == va::DatabaseState::Usable);
+    CHECK(va::database_state(layout, va::DatabaseCheck::EveryPage) == va::DatabaseState::Damaged);
+    fixture.store = fixture.repository.store();
+    const auto rows = fixture.store.file_rows(first->archive_uuid, 1);
+    CHECK(!rows && rows.error().kind == va::IoErrorKind::DatabaseDamaged &&
+          rows.error().message == "the repository's database " + va::path_to_utf8(layout.database()) +
+                                      " is damaged; make it again from the manifests with `repo rebuild-index`");
+    close_the_store();
+
+    const auto rebuilt = va::rebuild_repository(
+        layout, std::nullopt, *fixture.repository.files, test::not_cancelled(), test::no_progress());
+    CHECK(rebuilt && rebuilt->replaced && rebuilt->replaced->state == va::DatabaseState::Damaged &&
+          rebuilt->replaced->moved_to && std::filesystem::exists(*rebuilt->replaced->moved_to) &&
+          rebuilt->report.archives == 1);
+    CHECK(va::database_state(layout, va::DatabaseCheck::EveryPage) == va::DatabaseState::Usable);
+    if (!rebuilt || !rebuilt->replaced) {
+        fixture.store = fixture.repository.store();
+        return;
+    }
+
+    damage_table_page(layout.database(), "archives");
+    auto context = fixture.repository.context;
+    const auto replaced = va::open_repository_to_rebuild(context);
+    CHECK(replaced && *replaced && (*replaced)->state == va::DatabaseState::Damaged &&
+          (*replaced)->moved_to != rebuilt->replaced->moved_to);
+    if (replaced && *replaced) {
+        const auto again = va::rebuild_repository(
+            layout, *replaced, *fixture.repository.files, test::not_cancelled(), test::no_progress());
+        CHECK(again && again->report.archives == 1 && again->replaced &&
+              again->replaced->moved_to == (*replaced)->moved_to);
+    }
+    CHECK(va::database_state(layout, va::DatabaseCheck::EveryPage) == va::DatabaseState::Usable);
+    fixture.store = fixture.repository.store();
+}
+
 } // namespace
 
 void rebuild_index_tests()
 {
     a_lost_database_is_made_again_from_the_manifests();
     a_rebuild_that_stops_leaves_the_new_database_unfilled();
+    damage_beyond_the_first_page_is_named_and_made_again();
     rebuild_reports_progress_and_stops_when_cancelled();
     rebuild_keeps_database_facts();
     skipped_manifests_say_why();

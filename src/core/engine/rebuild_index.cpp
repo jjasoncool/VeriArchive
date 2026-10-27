@@ -421,4 +421,32 @@ std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSy
     return report;
 }
 
+std::expected<RepositoryRebuild, RepositoryRebuildStop> rebuild_repository(const RepositoryLayout& layout,
+    std::optional<ReplacedDatabase> replaced, IFileSystemAccess& repository_files, CancelToken& cancel,
+    IProgressSink& progress)
+{
+    for (;;) {
+        // The connection closes before the database may be put aside.
+        auto report = [&]() -> std::expected<RebuildReport, IoError> {
+            auto store = ArchiveStore::open(layout);
+            if (!store) {
+                return std::unexpected(store.error());
+            }
+            return rebuild_index(*store, repository_files, layout, cancel, progress);
+        }();
+        if (report) {
+            return RepositoryRebuild{std::move(*report), std::move(replaced)};
+        }
+        // Once: a database made again for this rebuild is not put aside again.
+        if (report.error().kind != IoErrorKind::DatabaseDamaged || replaced) {
+            return std::unexpected(RepositoryRebuildStop{std::move(report.error()), std::move(replaced)});
+        }
+        auto made = make_damaged_database_again(layout);
+        if (!made) {
+            return std::unexpected(RepositoryRebuildStop{std::move(made.error()), std::move(replaced)});
+        }
+        replaced = std::move(*made);
+    }
+}
+
 } // namespace va

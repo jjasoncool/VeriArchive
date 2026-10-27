@@ -11,6 +11,10 @@ enum class IoErrorKind {
     Timeout,
     NotSupported,
     Cancelled,
+    // The repository's database is damaged or is no database (SQLite's
+    // SQLITE_CORRUPT and SQLITE_NOTADB), wherever SQLite finds it (decision
+    // 0036): `repo rebuild-index` makes it again.
+    DatabaseDamaged,
     Other,
 };
 
