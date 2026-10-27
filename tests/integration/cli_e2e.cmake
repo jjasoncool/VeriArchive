@@ -2245,6 +2245,40 @@ if(SQLITE3)
             message(FATAL_ERROR "an open that could not record the repository's uuid after the upgrade: exit ${code}\n${errors}")
         endif()
     endif()
+    # repo rebuild-index of a repository of V1's schema (version 1, whose
+    # Merkle roots and chunk rows V1 never indexed: sample data) upgrades it as
+    # an open does, keeping its copy and saying where it is on stderr, then
+    # fills the index of this version from the manifests: the revision's Merkle
+    # root is indexed again (decisions 0032, 0036).
+    set(REBUILT "${WORK}/rebuild-older-SAMPLE")
+    set(REBUILT_TREE "${WORK}/rebuild-older-tree-SAMPLE")
+    file(WRITE "${REBUILT_TREE}/sample-a.txt" "rebuild of an older repository, sample a\n")
+    run_cli("0" --repository "${REBUILT}" repo init)
+    run_cli("0" --repository "${REBUILT}" register "${REBUILT_TREE}" --json)
+    string(JSON rebuilt_uuid GET "${last_output}" archive_uuid)
+    execute_process(
+        COMMAND "${SQLITE3}" "${REBUILT}/veriarchive.db"
+            "DROP TABLE verify_progress_chunks; UPDATE archive_revisions SET merkle_root = NULL; DELETE FROM chunks; UPDATE schema_version SET version = 1;"
+        RESULT_VARIABLE code
+        ERROR_VARIABLE errors)
+    if(NOT code EQUAL 0)
+        message(FATAL_ERROR "sqlite3 could not make the sample repository one of version 1:\n${errors}")
+    endif()
+    string(TIMESTAMP before_open "%Y-%m-%d")
+    run_cli("0" --repository "${REBUILT}" --lang en repo rebuild-index)
+    string(TIMESTAMP after_open "%Y-%m-%d")
+    execute_process(
+        COMMAND "${SQLITE3}" "${REBUILT}/veriarchive.db"
+            "SELECT version FROM schema_version; SELECT merkle_root FROM archive_revisions WHERE archive_uuid = '${rebuilt_uuid}';"
+        OUTPUT_VARIABLE rebuilt_index
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    file(GLOB rebuilt_copies "${REBUILT}/veriarchive-schema-1-before-upgrade-*.db")
+    if(NOT last_errors MATCHES "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db\n"
+            OR NOT last_output MATCHES "Rebuilt the index from manifests"
+            OR NOT rebuilt_index MATCHES "^3[\r\n]+[0-9a-f]+$" OR NOT rebuilt_copies)
+        message(FATAL_ERROR "repo rebuild-index of a repository of schema version 1:\n${last_output}\n${last_errors}\n"
+            "index: ${rebuilt_index}; copies: ${rebuilt_copies}")
+    endif()
 else()
     message(STATUS "no sqlite3 program: the upgrade of an older repository is left to the unit tests")
 endif()
