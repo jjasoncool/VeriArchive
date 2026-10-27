@@ -403,7 +403,7 @@ veriarchive-cli export <uuid> --out D:\export             # 匯出目前版次�
 veriarchive-cli --repository D:\OtherRepository import D:\export\r0001.vam   # 匯入到另一個儲存庫
 ```
 
-`export` 匯出的是封存目前版次的清單檔和它的 `identity.json`，不包括較早版次的：要保留每個版次的匯出檔，請在每次建立新版次之後再匯出一次。`import` 會匯入到目前使用的儲存庫；要匯入到另一個儲存庫，請用 `--repository` 指定它，如果它還不存在，要先建立（`veriarchive-cli --repository D:\OtherRepository repo init`）。
+`export` 匯出的是封存目前版次的清單檔和它的 `identity.json`，不包括較早版次的：要保留每個版次的匯出檔，請在每次建立新版次之後再匯出一次。`import` 會匯入到目前使用的儲存庫；要匯入到另一個儲存庫，請用 `--repository` 指定它，如果它還不存在，要先建立（`veriarchive-cli --repository D:\OtherRepository repo init`）。VeriArchive 會記住上一次開啟的儲存庫，每次開啟另一個儲存庫時都會發出警告，所以執行上面的指令之後，下一次開啟平常那個儲存庫時就會出現這個警告：指令會顯示 `警告：repository_uuid 已從 … 變更為 …；已記錄新的 uuid`，圖形介面則在「設定」頁顯示同樣的警告。這只是記下換了儲存庫，兩個儲存庫都沒有被更動。
 
 `sums.txt` 以封存內的路徑列出每個檔案，所以要在封存的根目錄執行 `sha256sum -c sums.txt`，才能在沒有 VeriArchive 的情況下檢查封存。Windows 本身沒有 `sha256sum`；Git Bash（Git for Windows 的一部分）、WSL 和 Linux 都有。在 Git Bash 中，封存在 `F:\`、清單在 `D:\sums.txt` 時：`cd /f && sha256sum -c /d/sums.txt`。
 
