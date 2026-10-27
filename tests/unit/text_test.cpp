@@ -7,6 +7,7 @@
 #include "common/utf8.h"
 
 #include <array>
+#include <filesystem>
 #include <format>
 #include <set>
 #include <string>
@@ -993,11 +994,15 @@ void unbaselined_advice_tests()
     CHECK(va::app::unbaselined_advice(chinese, outcome, ReportedIn::CommandLine) ==
           "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次："
           "veriarchive-cli register /vol/SAMPLE-範例 --new-revision");
-    // A root with a space is quoted; a volume root keeps its separator outside quotes.
+    // A root with a space is quoted as every command a message names writes
+    // a root (shell_argument): in double quotes on Windows, in single quotes
+    // on Linux.
     auto spaced = outcome;
     spaced.root = va::path_from_utf8("/vol/SAMPLE 範例");
     CHECK(va::app::unbaselined_advice(english, spaced, ReportedIn::CommandLine).value_or("").ends_with(
-        "veriarchive-cli register \"/vol/SAMPLE 範例\" --new-revision"));
+        std::filesystem::path::preferred_separator == '\\'
+            ? "veriarchive-cli register \"/vol/SAMPLE 範例\" --new-revision"
+            : "veriarchive-cli register '/vol/SAMPLE 範例' --new-revision"));
     CHECK(va::app::unbaselined_advice(english, outcome, ReportedIn::Window) ==
           "The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. "
           "To take one for them, register a new revision of the archive: in Register Archive, choose its folder or "
@@ -1015,16 +1020,6 @@ void unbaselined_advice_tests()
     auto without = outcome;
     without.counts.erase("Unbaselined");
     CHECK(!va::app::unbaselined_advice(english, without, ReportedIn::Window));
-    // As a shell reads it: plain, or quoted with the backslashes before the
-    // closing quote doubled, so that cmd.exe and a POSIX shell alike hand the
-    // root on unchanged (sample roots, K: a sample drive letter).
-    using va::app::command_line_argument;
-    CHECK(command_line_argument("K:\\") == "K:\\");
-    CHECK(command_line_argument("K:\\SAMPLE-範例") == "K:\\SAMPLE-範例");
-    CHECK(command_line_argument("K:\\SAMPLE folder") == "\"K:\\SAMPLE folder\"");
-    CHECK(command_line_argument("K:\\SAMPLE folder\\") == "\"K:\\SAMPLE folder\\\\\"");
-    CHECK(command_line_argument("K:\\SAMPLE&more") == "\"K:\\SAMPLE&more\"");
-    CHECK(command_line_argument("") == "\"\"");
 
     auto retired = outcome;
     retired.identity.details = {"retired"};
