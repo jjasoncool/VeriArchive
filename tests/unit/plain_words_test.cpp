@@ -119,6 +119,8 @@ void windows_errors_are_plain_words()
     CHECK(error_from_win32(ERROR_CRC, "ReadFile").message ==
           "the device reported an error (ReadFile, Windows error 23)");
     CHECK(error_from_win32(1234, "CreateFileW").message == "Windows error 1234 (CreateFileW)");
+    CHECK(error_from_win32(ERROR_INVALID_DRIVE, "GetVolumePathNameW").message ==
+          "no such drive letter (GetVolumePathNameW, Windows error 15)");
     CHECK(chinese("cannot scan the root: " + error_from_win32(ERROR_ACCESS_DENIED, "FindFirstFileExW").message) ==
           "無法掃描根目錄：存取被拒（FindFirstFileExW，Windows 錯誤 5）");
     CHECK(chinese(error_from_win32(ERROR_FILE_NOT_FOUND, "CreateFileW").message) ==

@@ -1470,7 +1470,7 @@ constexpr CatalogEntry entries[] = {
     // the call and Windows' number (decision 0017, amended 2026-10-27).
     {"not found ({}, Windows error {})", "找不到（{}，Windows 錯誤 {}）"},
     {"access denied ({}, Windows error {})", "存取被拒（{}，Windows 錯誤 {}）"},
-    {"no such drive ({}, Windows error {})", "沒有這個磁碟機代號（{}，Windows 錯誤 {}）"},
+    {"no such drive letter ({}, Windows error {})", "沒有這個磁碟機代號（{}，Windows 錯誤 {}）"},
     {"the media is write-protected ({}, Windows error {})", "媒體已防寫（{}，Windows 錯誤 {}）"},
     {"the device is not ready ({}, Windows error {})", "裝置尚未就緒（{}，Windows 錯誤 {}）"},
     {"the device reported an error ({}, Windows error {})", "裝置回報錯誤（{}，Windows 錯誤 {}）"},

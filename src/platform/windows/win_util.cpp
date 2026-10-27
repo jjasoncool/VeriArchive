@@ -16,7 +16,9 @@ std::string_view plain_words(DWORD code)
     case ERROR_ACCESS_DENIED:
         return "access denied";
     case ERROR_INVALID_DRIVE:
-        return "no such drive";
+        // The letter, not the device ("drive" alone is a word the glossary
+        // keeps from meaning a device or a volume).
+        return "no such drive letter";
     case ERROR_WRITE_PROTECT:
         return "the media is write-protected";
     case ERROR_NOT_READY:
