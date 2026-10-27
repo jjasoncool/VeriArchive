@@ -633,7 +633,7 @@ int compare(const Arguments& arguments)
 
     const auto repository_files = platform::make_file_system_access();
     CancelToken cancel;
-    platform::cancel_on_interrupt(cancel);
+    const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments, ProgressUnit::entries);
     // Loading the manifests comes first and reports no progress; for large
     // archives it takes seconds, so say what is happening.
@@ -878,7 +878,7 @@ int relocate(const Arguments& arguments, Opened& opened)
     RelocateServices services{*archive_files, *repository_files, *opened.session.writer, *media, opened.store,
         opened.session.context.repo, opened.session.context.repository_uuid, host_info(), *processes};
     CancelToken cancel;
-    platform::cancel_on_interrupt(cancel);
+    const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments);
     const auto outcome = relocate_archive(services, request, cancel, progress);
     progress.finish();

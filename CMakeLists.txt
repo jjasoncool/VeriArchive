@@ -54,6 +54,7 @@ add_library(veriarchive_common
     src/common/archive_path.cpp
     src/common/canonical_json.cpp
     src/common/hex.cpp
+    src/common/shell_argument.cpp
     src/common/unicode.cpp
     src/common/config.cpp
     src/common/time.cpp
@@ -125,7 +126,8 @@ if(WIN32)
         src/platform/windows/subst_drive.cpp
         src/platform/windows/win_util.cpp
     )
-    target_link_libraries(veriarchive_platform PRIVATE mpr)
+    # user32: the hidden window that hears of the session's end (interrupt_win.cpp).
+    target_link_libraries(veriarchive_platform PRIVATE mpr user32)
 elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
         src/platform/linux/file_writer_linux.cpp
@@ -280,6 +282,7 @@ if(BUILD_TESTING)
         tests/unit/hash_pipeline_test.cpp
         tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
+        tests/unit/interrupt_test.cpp
         tests/unit/local_time_test.cpp
         tests/unit/progress_estimate_test.cpp
         tests/unit/manifest_test.cpp
@@ -309,6 +312,10 @@ if(BUILD_TESTING)
     endif()
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform VeriArchive::app)
+    if(WIN32)
+        # interrupt_test.cpp sends the session's end to the hidden window.
+        target_link_libraries(veriarchive_tests PRIVATE user32)
+    endif()
     target_compile_definitions(veriarchive_tests PRIVATE
         VERIARCHIVE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
     if(NOT (UNIX AND NOT APPLE))

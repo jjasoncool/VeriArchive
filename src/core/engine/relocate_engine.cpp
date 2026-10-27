@@ -1,5 +1,6 @@
 #include "core/engine/relocate_engine.h"
 
+#include "common/shell_argument.h"
 #include "common/time.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
@@ -226,7 +227,10 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     if (const auto self = services.processes.current()) {
         this_attempt = AttemptProcess{*self, services.host.host};
     }
-    const auto resume_hint = "continue it with `archive relocate " + uuid + " <root_path> --resume`";
+    // The resume names this attempt's new root, as it can be typed (decision
+    // 0022, amended 2026-10-27).
+    const auto resume_hint =
+        "continue it with `archive relocate " + uuid + " " + shell_argument(path_to_utf8(request.root)) + " --resume`";
 
     // The relocation begins, or takes over the archive's unfinished one, in
     // one write transaction before anything of the media is read (decision
@@ -288,8 +292,10 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             if (unfinished && !dead) {
                 refused = RelocateFailure{Kind::Refused,
                     "an unfinished relocation of archive " + uuid + " (to \"" + unfinished->root +
-                        "\") exists; resume it with `archive relocate " + uuid +
-                        " <root_path> --resume`, or abandon it with `archive abandon-relocation " + uuid + "`",
+                        "\") exists; resume it with `archive relocate " + uuid + " " +
+                        shell_argument(unfinished->root) + " --resume`, or abandon it with `archive "
+                        "abandon-relocation " +
+                        uuid + "`",
                     {}};
                 store.rollback();
                 return {};
@@ -922,10 +928,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             return fail(Kind::Refused, "an unfinished registration of archive " + uuid + " (root \"" + *registering +
                                            "\") is creating revision " + std::to_string(creates) +
                                            "; this relocation recorded nothing (finish that registration with "
-                                           "`register --resume`, then relocate again; or abandon it with `archive "
+                                           "`register " +
+                                           shell_argument(*registering) +
+                                           " --resume`, then relocate again; or abandon it with `archive "
                                            "abandon-registration " +
                                            uuid + "`, then continue this relocation with `archive relocate " + uuid +
-                                           " <root_path> --resume`)");
+                                           " " + shell_argument(path_to_utf8(request.root)) + " --resume`)");
         }
         if (cancelled_waiting) {
             return interrupted();

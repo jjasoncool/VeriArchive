@@ -5,6 +5,8 @@
 
 #include "engine_fixture.h"
 
+#include "common/shell_argument.h"
+
 #include "core/engine/abandon_registration.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/rebuild_index.h"
@@ -545,9 +547,9 @@ void retiring_writes_nothing_beside_a_registration_or_a_later_revision()
               refused.error().message ==
                   "an unfinished registration of archive " + archive_uuid + " (root \"" +
                       va::path_to_utf8(fixture.archive.root() / "a") +
-                      "\") is creating revision 3; nothing was changed (finish it with `register --resume` first, "
-                      "or abandon it with `archive abandon-registration " +
-                      archive_uuid + "`)");
+                      "\") is creating revision 3; nothing was changed (finish it with `register " +
+                      va::shell_argument(va::path_to_utf8(fixture.archive.root() / "a")) +
+                      " --resume` first, or abandon it with `archive abandon-registration " + archive_uuid + "`)");
         CHECK(status_of(fixture, archive_uuid) == "REGISTERED");
         va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
         CHECK(va::abandon_registration(services, va::AbandonRequest{archive_uuid, std::nullopt, std::nullopt}));

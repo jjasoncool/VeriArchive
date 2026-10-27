@@ -99,7 +99,7 @@ int export_command(const Arguments& arguments)
     const auto files = platform::make_file_system_access();
     // R-94: its progress on stderr, and Ctrl+C stops it with nothing written.
     CancelToken cancel;
-    platform::cancel_on_interrupt(cancel);
+    const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments, ProgressUnit::manifest);
     const auto exported = export_archive(*store, *files, *session->writer, session->context.repo,
         *archive_uuid, app::typed_path(*out), cancel, progress);
@@ -138,7 +138,7 @@ int import_command(const Arguments& arguments)
     const auto files = platform::make_file_system_access();
     // R-94: its progress on stderr, and Ctrl+C stops it with nothing imported.
     CancelToken cancel;
-    platform::cancel_on_interrupt(cancel);
+    const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments, ProgressUnit::manifest);
     const auto imported = import_manifest(*store, *files, *session->writer, session->context.repo,
         app::typed_path(arguments.words[1]), arguments.has("--force-rollback"), cancel, progress);

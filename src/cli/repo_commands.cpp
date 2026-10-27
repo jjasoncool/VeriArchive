@@ -151,7 +151,7 @@ int rebuild(const Arguments& arguments, const Session& session)
     const auto files = platform::make_file_system_access();
     // R-94: its progress on stderr, and Ctrl+C stops it with nothing changed.
     CancelToken cancel;
-    platform::cancel_on_interrupt(cancel);
+    const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments, ProgressUnit::manifests);
     const auto report = rebuild_index(*store, *files, session.context.repo, cancel, progress);
     progress.finish();

@@ -351,7 +351,7 @@ void an_import_leaves_a_registration_its_saved_files()
           refused.error().message ==
               "an unfinished registration of archive " + sample_uuid +
                   " (root \"/vol/photos\") is creating revision 2; nothing was imported (finish that registration "
-                  "with `register --resume`, or abandon it with `archive abandon-registration " +
+                  "with `register /vol/photos --resume`, or abandon it with `archive abandon-registration " +
                   sample_uuid + "` and import again)");
     const auto revision = store.revision(sample_uuid, 2);
     CHECK(revision && !*revision);

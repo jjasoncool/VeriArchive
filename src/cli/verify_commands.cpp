@@ -217,7 +217,7 @@ int verify_command(const Arguments& arguments)
         session->context.repository_uuid, host_info()};
 
     CancelToken cancel;
-    platform::cancel_on_interrupt(cancel);
+    const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments);
     const auto outcome = verify_full(services, request, cancel, progress);
     progress.finish();

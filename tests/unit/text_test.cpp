@@ -264,16 +264,16 @@ void translation_tests()
           "存放此封存的裝置在讀取期間停止回應：連續 10 個項目無法讀取；請拔除它再重新連接，然後繼續這次執行；"
           "如果它又在同一個地方停止，裝置可能已經損壞");
     CHECK(chinese("the device stopped answering during registration: 10 entries in a row could not be read; unplug "
-                  "it and attach it again; continue with `register <root_path> --resume`; if it stops again at the "
+                  "it and attach it again; continue with `register Z:\\範例 --resume`; if it stops again at the "
                   "same place, the device may be damaged") ==
-          "裝置在註冊期間停止回應：連續 10 個項目無法讀取；請拔除它再重新連接，然後以 `register <root_path> --resume` "
+          "裝置在註冊期間停止回應：連續 10 個項目無法讀取；請拔除它再重新連接，然後以 `register Z:\\範例 --resume` "
           "繼續；如果它又在同一個地方停止，裝置可能已經損壞");
     CHECK(chinese("relocation was interrupted: the device of the new carrier stopped answering (10 entries in a row "
                   "could not be read); unplug it and attach it again, then continue it with `archive relocate "
-                  "c0ffee00-0000-4000-8000-000000000034 <root_path> --resume`; if it stops again at the same place, "
-                  "the device may be damaged") ==
+                  "c0ffee00-0000-4000-8000-000000000034 \"Z:\\範例 SAMPLE\" --resume`; if it stops again at the "
+                  "same place, the device may be damaged") ==
           "搬移已中斷：新載體的裝置停止回應（連續 10 個項目無法讀取）；請拔除它再重新連接，然後以 "
-          "`archive relocate c0ffee00-0000-4000-8000-000000000034 <root_path> --resume` 繼續；"
+          "`archive relocate c0ffee00-0000-4000-8000-000000000034 \"Z:\\範例 SAMPLE\" --resume` 繼續；"
           "如果它又在同一個地方停止，裝置可能已經損壞");
 
     // Only Match::Cause templates translate their last value: a path the user
@@ -388,10 +388,18 @@ void translation_tests()
                   "(veriarchive-gui.exe) on this computer; abandon it once that process has ended") ==
           "錯誤：封存 " + uuid + " 的註冊仍在這台電腦的處理程序 77（veriarchive-gui.exe）中執行；請等該處理程序結束後再放棄");
     CHECK(chinese("an unfinished registration of archive " + uuid + " (root \"Z:\\範例\") is creating revision 2; "
-                  "nothing was changed (finish it with `register --resume` first, or abandon it with "
+                  "nothing was changed (finish it with `register Z:\\範例 --resume` first, or abandon it with "
                   "`archive abandon-registration " + uuid + "`)") ==
           "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；未做任何變更（請先以 "
-          "`register --resume` 完成該註冊，或以 `archive abandon-registration " + uuid + "` 放棄它）");
+          "`register Z:\\範例 --resume` 完成該註冊，或以 `archive abandon-registration " + uuid + "` 放棄它）");
+    // A resume names the root, in quotes where a shell would read it otherwise
+    // (decision 0022, amended 2026-10-27).
+    CHECK(chinese("error: registration was cancelled; continue with `register \"Z:\\範例 SAMPLE\" --resume`") ==
+          "錯誤：註冊已取消；請以 `register \"Z:\\範例 SAMPLE\" --resume` 繼續");
+    CHECK(chinese("the device disappeared during registration; continue with `register Z:\\範例 --resume`") ==
+          "裝置在註冊期間中斷連線；請以 `register Z:\\範例 --resume` 繼續");
+    CHECK(chinese("registration was interrupted while scanning; continue with `register '/media/sample/範例 SAMPLE' --resume`") ==
+          "註冊在掃描時中斷；請以 `register '/media/sample/範例 SAMPLE' --resume` 繼續");
     CHECK(chinese("error: an interrupted registration of this root exists (archive " + uuid +
                   "); finish it with --resume, or abandon it with `archive abandon-registration " + uuid + "`") ==
           "錯誤：此根目錄有一個中斷的註冊（封存 " + uuid + "）；請以 --resume 完成它，或以 `archive "
@@ -411,13 +419,13 @@ void translation_tests()
     // A relocation resumes, and may be abandoned (decision 0026). Revision
     // numbers keep their place in the Chinese word order.
     CHECK(chinese("error: relocation was interrupted; continue it with `archive relocate " + uuid +
-                  " <root_path> --resume`") ==
-          "錯誤：搬移已中斷；請以 `archive relocate " + uuid + " <root_path> --resume` 繼續");
+                  " \"Z:\\範例 SAMPLE\" --resume`") ==
+          "錯誤：搬移已中斷；請以 `archive relocate " + uuid + " \"Z:\\範例 SAMPLE\" --resume` 繼續");
     CHECK(chinese("an unfinished relocation of archive " + uuid + " (to \"Z:\\範例\") exists; resume it with `archive "
-                  "relocate " + uuid + " <root_path> --resume`, or abandon it with `archive abandon-relocation " +
+                  "relocate " + uuid + " Z:\\範例 --resume`, or abandon it with `archive abandon-relocation " +
                   uuid + "`") ==
           "封存 " + uuid + " 有一個未完成的搬移（至「Z:\\範例」）；請以 `archive relocate " + uuid +
-              " <root_path> --resume` 繼續，或以 `archive abandon-relocation " + uuid + "` 放棄它");
+              " Z:\\範例 --resume` 繼續，或以 `archive abandon-relocation " + uuid + "` 放棄它");
     CHECK(chinese("this relocation is still running in process 4242 (veriarchive-cli.exe) on this computer; "
                   "resume it once that process has ended") ==
           "此搬移仍在這台電腦的處理程序 4242（veriarchive-cli.exe）中執行；請等該處理程序結束後再繼續");
@@ -438,12 +446,12 @@ void translation_tests()
     CHECK(chinese("cannot abandon the relocation: cannot run SQL: database is locked") ==
           "無法放棄搬移：無法執行 SQL 陳述式：資料庫已被鎖定");
     CHECK(chinese("an unfinished registration of archive " + uuid + " (root \"Z:\\範例\") is creating revision 2; "
-                  "this relocation recorded nothing (finish that registration with `register --resume`, then "
-                  "relocate again; or abandon it with `archive abandon-registration " + uuid + "`, then continue "
-                  "this relocation with `archive relocate " + uuid + " <root_path> --resume`)") ==
+                  "this relocation recorded nothing (finish that registration with `register Z:\\範例 --resume`, "
+                  "then relocate again; or abandon it with `archive abandon-registration " + uuid + "`, then continue "
+                  "this relocation with `archive relocate " + uuid + " \"Y:\\新 SAMPLE\" --resume`)") ==
           "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；這次搬移未記錄任何內容（請以 "
-          "`register --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration " + uuid +
-              "` 放棄該註冊後，以 `archive relocate " + uuid + " <root_path> --resume` 繼續這次搬移）");
+          "`register Z:\\範例 --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration " + uuid +
+              "` 放棄該註冊後，以 `archive relocate " + uuid + " \"Y:\\新 SAMPLE\" --resume` 繼續這次搬移）");
     CHECK(chinese.format("Abandon the unfinished relocation of {}?", "ARCH-0007") == "要放棄 ARCH-0007 未完成的搬移嗎？");
     // Resume on a registration that an older version left and that may have
     // stopped asks first (decision 0022, point 7; operator, 2026-10-20): the
@@ -465,9 +473,9 @@ void translation_tests()
     // `verify --resume` of an interrupted attempt of a relocation (decision 0026).
     const std::string run = "5d0f3c1e-8b7a-4c69-9e21-3a4b5c6d7e8f";
     CHECK(chinese("error: run " + run + " is an interrupted attempt of the unfinished relocation of archive " + uuid +
-                  "; continue it with `archive relocate " + uuid + " <root_path> --resume`") ==
+                  "; continue it with `archive relocate " + uuid + " Y:\\範例 --resume`") ==
           "錯誤：執行 " + run + " 是封存 " + uuid + " 未完成的搬移中斷時留下的紀錄；請以 `archive relocate " + uuid +
-              " <root_path> --resume` 繼續");
+              " Y:\\範例 --resume` 繼續");
     CHECK(chinese("error: run " + run + " is an interrupted attempt of a relocation of archive " + uuid +
                   " that has ended; nothing is left to resume") ==
           "錯誤：執行 " + run + " 是封存 " + uuid + " 某次搬移中斷時留下的紀錄，該搬移已結束；沒有可繼續的作業");
@@ -512,10 +520,11 @@ void translation_tests()
                   "nothing was imported (import it again to compare it with the recorded manifest)") ==
           "錯誤：封存 " + uuid + " 的版次 2 已在這次匯入期間由其他作業記錄；未匯入任何內容（再匯入一次，即可與已記錄的清單檔比較）");
     CHECK(chinese("an unfinished registration of archive " + uuid + " (root \"Z:\\範例\") is creating revision 2; "
-                  "nothing was imported (finish that registration with `register --resume`, or abandon it with "
-                  "`archive abandon-registration " + uuid + "` and import again)") ==
-          "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；未匯入任何內容（請以 `register --resume` "
-          "完成該註冊，或以 `archive abandon-registration " + uuid + "` 放棄它後再匯入一次）");
+                  "nothing was imported (finish that registration with `register Z:\\範例 --resume`, or abandon it "
+                  "with `archive abandon-registration " + uuid + "` and import again)") ==
+          "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；未匯入任何內容（請以 "
+          "`register Z:\\範例 --resume` 完成該註冊，或以 `archive abandon-registration " + uuid +
+              "` 放棄它後再匯入一次）");
     CHECK(chinese("ManifestHashMismatch: the manifest changed while it was imported; nothing was imported") ==
           "清單檔雜湊不符：清單檔在匯入期間被變更；未匯入任何內容");
     // An import that puts back the manifest recorded, or finds its record
@@ -563,8 +572,9 @@ void translation_tests()
           "請先以 `archive abandon-relocation " + uuid + "` 放棄這次搬移，再重新搬移");
     // A failure that stops a relocation says how to go on (decision 0026).
     const auto kept = "; the relocation keeps its saved progress: continue it with `archive relocate " + uuid +
-                      " <root_path> --resume`";
-    const auto kept_chinese = "；搬移保留其已儲存的進度：請以 `archive relocate " + uuid + " <root_path> --resume` 繼續";
+                      " \"Y:\\範例 SAMPLE\" --resume`";
+    const auto kept_chinese =
+        "；搬移保留其已儲存的進度：請以 `archive relocate " + uuid + " \"Y:\\範例 SAMPLE\" --resume` 繼續";
     CHECK(chinese("error: cannot record the relocation: MoveFileExW failed (Win32 error 5)" + kept) ==
           "錯誤：無法記錄搬移：MoveFileExW 失敗（Win32 錯誤 5）" + kept_chinese);
     CHECK(chinese("cannot record the relocation: cannot execute SQL: database is locked" + kept) ==

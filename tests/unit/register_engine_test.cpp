@@ -2,6 +2,7 @@
 
 #include "engine_fixture.h"
 
+#include "common/shell_argument.h"
 #include "common/time.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/archive_status.h"
@@ -402,7 +403,7 @@ void a_device_that_stops_answering_interrupts_the_registration()
 {
     const std::string stopped_answering =
         "the device stopped answering during registration: 10 entries in a row could not be read; unplug it and "
-        "attach it again; continue with `register <root_path> --resume`; if it stops again at the same place, the "
+        "attach it again; continue with `register /vol --resume`; if it stops again at the same place, the "
         "device may be damaged";
     for (const bool while_scanning : {false, true}) {
         Fixture fixture;
@@ -1210,7 +1211,7 @@ void a_record_waiting_for_the_lock_can_be_cancelled()
         holder.join();
     }
     CHECK(!cancelled && cancelled.error().kind == va::RegisterFailure::Kind::Incomplete &&
-          cancelled.error().message == "registration was cancelled; continue with `register <root_path> --resume`");
+          cancelled.error().message == "registration was cancelled; continue with `register /vol --resume`");
     const auto revision = fixture.store.revision(archive_uuid, 1);
     CHECK(revision && !*revision);
     CHECK(names_in(fixture.repository.context.repo.manifests() / archive_uuid).empty());
@@ -1971,9 +1972,8 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     const auto another = [&](std::uint32_t revision) {
         return "an unfinished registration of archive " + archive_uuid + " (root \"" + va::path_to_utf8(data) +
                "\") is creating revision " + std::to_string(revision) +
-               "; nothing was changed (finish it with `register --resume` first, or abandon it with "
-               "`archive abandon-registration " +
-               archive_uuid + "`)";
+               "; nothing was changed (finish it with `register " + va::shell_argument(va::path_to_utf8(data)) +
+               " --resume` first, or abandon it with `archive abandon-registration " + archive_uuid + "`)";
     };
     auto through_alias = at(fixture.archive.root() / "alias" / "data");
     through_alias.new_revision = true;
@@ -2307,7 +2307,7 @@ void a_cancelled_resume_of_a_plan_made_for_an_older_revision_says_to_abandon_it(
     };
     const auto before = cancelled_resume();
     CHECK(!before && before.error().kind == va::RegisterFailure::Kind::Incomplete &&
-          before.error().message == "registration was cancelled; continue with `register <root_path> --resume`");
+          before.error().message == "registration was cancelled; continue with `register /vol --resume`");
 
     test::import_later_revision(fixture, fixture.store, archive_uuid, 3);
     const auto after = cancelled_resume();

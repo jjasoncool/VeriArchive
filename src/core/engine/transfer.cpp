@@ -1,6 +1,7 @@
 #include "core/engine/transfer.h"
 
 #include "common/canonical_json.h"
+#include "common/shell_argument.h"
 #include "common/utf8.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/hash/hashers.h"
@@ -511,8 +512,9 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
         if (registering) {
             return refuse("an unfinished registration of archive " + uuid + " (root \"" + *registering +
                           "\") is creating revision " + std::to_string(header.revision) +
-                          "; nothing was imported (finish that registration with `register --resume`, or abandon "
-                          "it with `archive abandon-registration " +
+                          "; nothing was imported (finish that registration with `register " +
+                          shell_argument(*registering) + " --resume`, or abandon it with `archive "
+                          "abandon-registration " +
                           uuid + "` and import again)");
         }
         return fail("RepositoryError", recorded.error().message);

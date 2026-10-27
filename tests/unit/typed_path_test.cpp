@@ -2,6 +2,7 @@
 
 #include "app/text.h"
 #include "app/typed_path.h"
+#include "common/shell_argument.h"
 #include "common/utf8.h"
 
 #include <chrono>
@@ -174,8 +175,33 @@ void roots_that_are_no_folder_are_not_taken()
 
 } // namespace
 
+// A root that a message names in a command to type back (decision 0022,
+// amended 2026-10-27): as it is where no shell reads anything in it, else in
+// quotes, double on Windows, with the backslash before the closing quote
+// doubled so that it stays a backslash, single on Linux, where a quote of its
+// own is written '\''.
+void roots_are_named_as_they_are_typed_in_a_command()
+{
+    CHECK(va::shell_argument(R"(K:\)") == R"(K:\)");
+    CHECK(va::shell_argument(R"(K:\Photos_2026\raw-01.d)") == R"(K:\Photos_2026\raw-01.d)");
+    CHECK(va::shell_argument("/media/sample/範例") == "/media/sample/範例");
+    if (std::filesystem::path::preferred_separator == '\\') {
+        CHECK(va::shell_argument(R"(K:\範例 SAMPLE)") == R"("K:\範例 SAMPLE")");
+        CHECK(va::shell_argument(R"x(K:\Photos (2026))x") == R"x("K:\Photos (2026)")x");
+        CHECK(va::shell_argument(R"(K:\A&B)") == R"("K:\A&B")");
+        CHECK(va::shell_argument(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)") ==
+              R"("\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\\")");
+        CHECK(va::shell_argument("") == R"("")");
+    } else {
+        CHECK(va::shell_argument("/media/sample/範例 SAMPLE") == "'/media/sample/範例 SAMPLE'");
+        CHECK(va::shell_argument("/media/sample/Jan's $HOME") == R"('/media/sample/Jan'\''s $HOME')");
+        CHECK(va::shell_argument("") == "''");
+    }
+}
+
 void typed_path_tests()
 {
+    roots_are_named_as_they_are_typed_in_a_command();
     typed_roots_name_their_folders();
     relative_paths_follow_the_working_directory();
     roots_on_shares_are_refused();

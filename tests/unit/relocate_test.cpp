@@ -4,6 +4,7 @@
 
 #include "app/history.h"
 #include "app/unfinished_operations.h"
+#include "common/shell_argument.h"
 #include "common/time.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/archive_status.h"
@@ -124,6 +125,10 @@ struct RelocationFixture : test::EngineFixture {
         return nlohmann::json::parse(store.setting(key()).value_or(""), nullptr, false);
     }
 
+    // The new disk's root as a command names it, to resume the relocation
+    // (decision 0022, amended 2026-10-27).
+    std::string new_root() const { return va::shell_argument(va::path_to_utf8(archive.root() / "new")); }
+
     // The checkpoints of the run `run_id`: entries and their recorded bytes.
     va::CheckpointCount saved(const std::string& run_id)
     {
@@ -146,7 +151,7 @@ struct RelocationFixture : test::EngineFixture {
         processes.self = runs_in;
         CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
               interrupted.error().message == "relocation was interrupted; continue it with `archive relocate " +
-                                                 archive_uuid + " <root_path> --resume`");
+                                                 archive_uuid + " " + new_root() + " --resume`");
         auto stored = record();
         if (killed && stored.is_object()) {
             stored.erase("stopped");
@@ -802,7 +807,7 @@ void a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable()
     const auto interrupted = fixture.relocate(fixture.archive.root() / "new");
     CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
           interrupted.error().message == "relocation was interrupted; continue it with `archive relocate " +
-                                             fixture.archive_uuid + " <root_path> --resume`");
+                                             fixture.archive_uuid + " " + fixture.new_root() + " --resume`");
     const auto record = fixture.record();
     CHECK(record.is_object() && record.contains("stopped") && !record.contains("differs"));
     const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
@@ -850,7 +855,7 @@ void a_new_carrier_that_goes_away_leaves_the_relocation_resumable()
     CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
           interrupted.error().items.empty() &&
           interrupted.error().message == "relocation was interrupted; continue it with `archive relocate " +
-                                             fixture.archive_uuid + " <root_path> --resume`");
+                                             fixture.archive_uuid + " " + fixture.new_root() + " --resume`");
     const auto record = fixture.record();
     CHECK(record.is_object() && record.contains("stopped") && !record.contains("differs"));
     const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
@@ -893,7 +898,8 @@ void a_new_carrier_that_stops_answering_leaves_the_relocation_resumable()
               "relocation was interrupted: the device of the new carrier stopped answering (10 entries in a row could "
               "not be read); unplug it and attach it again, then continue it with `archive relocate " +
                   fixture.archive_uuid +
-                  " <root_path> --resume`; if it stops again at the same place, the device may be damaged");
+                  " " + fixture.new_root() +
+                  " --resume`; if it stops again at the same place, the device may be damaged");
     const auto record = fixture.record();
     CHECK(record.is_object() && record.contains("stopped") && !record.contains("differs"));
     const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
@@ -1088,7 +1094,8 @@ void an_interrupted_relocation_resumes_without_reading_again()
           again.error().message == "an unfinished relocation of archive " + fixture.archive_uuid + " (to \"" +
                                        va::path_to_utf8(fixture.archive.root() / "new") +
                                        "\") exists; resume it with `archive relocate " + fixture.archive_uuid +
-                                       " <root_path> --resume`, or abandon it with `archive abandon-relocation " +
+                                       " " + fixture.new_root() +
+                                       " --resume`, or abandon it with `archive abandon-relocation " +
                                        fixture.archive_uuid + "`");
     CHECK(fixture.archive.bytes_read == 0);
     CHECK(fixture.record() == record);
@@ -1301,7 +1308,7 @@ void an_interrupted_attempt_is_recorded_incomplete()
         {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, cancel, fixture.progress);
     CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
           interrupted.error().message == "relocation was interrupted; continue it with `archive relocate " +
-                                             fixture.archive_uuid + " <root_path> --resume`");
+                                             fixture.archive_uuid + " " + fixture.new_root() + " --resume`");
     const auto record = fixture.record();
     const auto run_id = record.value("run_id", std::string{});
     const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
@@ -1333,7 +1340,7 @@ void an_interrupted_attempt_is_recorded_incomplete()
           refused.error().message == "run " + attempt.run_id +
                                          " is an interrupted attempt of the unfinished relocation of archive " +
                                          fixture.archive_uuid + "; continue it with `archive relocate " +
-                                         fixture.archive_uuid + " <root_path> --resume`");
+                                         fixture.archive_uuid + " " + fixture.new_root() + " --resume`");
     const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
     const auto statuses = va::archive_statuses(
         fixture.store, *fixture.repository.files, fixture.repository.context.repo, va::Policy{}, now);
@@ -1895,10 +1902,11 @@ void a_relocation_removes_the_plan_of_its_revision()
 std::string registering_message(RelocationFixture& fixture, const std::filesystem::path& root)
 {
     return "an unfinished registration of archive " + fixture.archive_uuid + " (root \"" + va::path_to_utf8(root) +
-           "\") is creating revision 2; this relocation recorded nothing (finish that registration with `register "
-           "--resume`, then relocate again; or abandon it with `archive abandon-registration " +
+           "\") is creating revision 2; this relocation recorded nothing (finish that registration with `register " +
+           va::shell_argument(va::path_to_utf8(root)) +
+           " --resume`, then relocate again; or abandon it with `archive abandon-registration " +
            fixture.archive_uuid + "`, then continue this relocation with `archive relocate " + fixture.archive_uuid +
-           " <root_path> --resume`)";
+           " " + fixture.new_root() + " --resume`)";
 }
 
 // Decision 0023: a relocation does not take the revision that an unfinished
@@ -2048,7 +2056,7 @@ void a_relocation_stopped_by_a_failure_says_how_to_go_on()
     RelocationFixture fixture(true);
     fixture.copy_to_new_disk();
     const auto kept = "; the relocation keeps its saved progress: continue it with `archive relocate " +
-                      fixture.archive_uuid + " <root_path> --resume`";
+                      fixture.archive_uuid + " " + fixture.new_root() + " --resume`";
     const auto stopped_with = [&](std::uint64_t matched) {
         const auto record = fixture.record();
         return record.is_object() && record.contains("stopped") &&
@@ -2167,7 +2175,7 @@ void a_relocation_waits_for_the_write_lock(WhileWaiting what)
     case WhileWaiting::CancelledThenFree:
         expected = !relocated && relocated.error().kind == va::RelocateFailure::Kind::Incomplete &&
                    relocated.error().message == "relocation was interrupted; continue it with `archive relocate " +
-                                                    fixture.archive_uuid + " <root_path> --resume`";
+                                                    fixture.archive_uuid + " " + fixture.new_root() + " --resume`";
         break;
     }
     CHECK(expected);
@@ -2422,7 +2430,8 @@ void a_relocation_made_for_an_older_revision_never_records()
                          "archive " + fixture.archive_uuid;
     const auto continued = fixture.verify(resume_run);
     CHECK(!continued && continued.error().message == attempt + "; continue it with `archive relocate " +
-                                                         fixture.archive_uuid + " <root_path> --resume`");
+                                                         fixture.archive_uuid + " " + fixture.new_root() +
+                                                         " --resume`");
     test::import_later_revision(fixture, fixture.store, fixture.archive_uuid, 3);
     const auto refusal = made_for_an_older_revision(fixture, 1, 3);
     const auto older = fixture.verify(resume_run);

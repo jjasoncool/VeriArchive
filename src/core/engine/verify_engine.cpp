@@ -1,5 +1,6 @@
 #include "core/engine/verify_engine.h"
 
+#include "common/shell_argument.h"
 #include "common/time.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
@@ -182,6 +183,24 @@ std::expected<std::optional<MadeForOlder>, IoError> made_for_older(ArchiveStore&
     return std::optional<MadeForOlder>(MadeForOlder{verifies, **later});
 }
 
+// The new root of the archive's unfinished relocation, as its record names
+// it, written as one argument of the command that resumes it
+// (shell_argument); a record that names none (none is written so) gives the
+// placeholder of the usage.
+std::expected<std::string, IoError> relocation_root_argument(ArchiveStore& store, const Uuid& archive_uuid)
+{
+    const auto stored = store.setting(relocation_key(archive_uuid));
+    if (!stored) {
+        return std::unexpected(stored.error());
+    }
+    const auto record = nlohmann::json::parse(*stored, nullptr, false);
+    const auto root = record.is_object() ? record.find("root") : record.end();
+    if (!record.is_object() || root == record.end() || !root->is_string() || root->get<std::string>().empty()) {
+        return std::string("<root_path>");
+    }
+    return shell_argument(root->get<std::string>());
+}
+
 std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, const std::string& run_id)
 {
     const auto setting = store.setting(run_setting(run_id));
@@ -220,10 +239,14 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
                             "); the relocation can no longer finish: abandon it with `archive abandon-relocation " +
                             archive_uuid + "`, then relocate again");
                 }
+                const auto root = relocation_root_argument(store, archive_uuid);
+                if (!root) {
+                    return stop(VerifyStop::Kind::Repository, root.error().message);
+                }
                 return stop(VerifyStop::Kind::NotFound,
                     "run " + run_id + " is an interrupted attempt of the unfinished relocation of archive " +
-                        archive_uuid + "; continue it with `archive relocate " + archive_uuid +
-                        " <root_path> --resume`");
+                        archive_uuid + "; continue it with `archive relocate " + archive_uuid + " " + *root +
+                        " --resume`");
             }
             return stop(VerifyStop::Kind::NotFound, "run " + run_id +
                                                         " is an interrupted attempt of a relocation of archive " +

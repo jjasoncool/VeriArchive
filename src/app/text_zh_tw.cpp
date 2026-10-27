@@ -767,20 +767,18 @@ constexpr CatalogEntry entries[] = {
     {"the archive to re-baseline is missing from the database",
         "資料庫中找不到要重新建立基準的封存"},
     {"cannot write the media copy: {}", "無法寫入媒體副本：{}", Match::Cause},
-    {"registration was interrupted while scanning; "
-        "continue with `register <root_path> --resume`",
-        "註冊在掃描時中斷；請以 `register <root_path> --resume` 繼續"},
-    {"the device disappeared during registration; "
-        "continue with `register <root_path> --resume`",
-        "裝置在註冊期間中斷連線；請以 `register <root_path> --resume` 繼續"},
+    // The resume names the root the registration reads (decision 0022, amended 2026-10-27).
+    {"registration was interrupted while scanning; continue with `register {} --resume`",
+        "註冊在掃描時中斷；請以 `register {} --resume` 繼續"},
+    {"the device disappeared during registration; continue with `register {} --resume`",
+        "裝置在註冊期間中斷連線；請以 `register {} --resume` 繼續"},
     // A device that stopped answering while its volume stayed listed (decision 0034).
     {"the device stopped answering during registration: {} entries in a row could not be read; unplug it and "
-        "attach it again; continue with `register <root_path> --resume`; if it stops again at the same place, the "
+        "attach it again; continue with `register {} --resume`; if it stops again at the same place, the "
         "device may be damaged",
-        "裝置在註冊期間停止回應：連續 {} 個項目無法讀取；請拔除它再重新連接，然後以 `register <root_path> --resume` "
+        "裝置在註冊期間停止回應：連續 {} 個項目無法讀取；請拔除它再重新連接，然後以 `register {} --resume` "
         "繼續；如果它又在同一個地方停止，裝置可能已經損壞"},
-    {"registration was cancelled; continue with `register <root_path> --resume`",
-        "註冊已取消；請以 `register <root_path> --resume` 繼續"},
+    {"registration was cancelled; continue with `register {} --resume`", "註冊已取消；請以 `register {} --resume` 繼續"},
     {"cannot scan the root: {}", "無法掃描根目錄：{}", Match::Cause},
     {"cannot write the manifest: {}", "無法寫入清單檔：{}", Match::Cause},
     {"cannot record the archive: {}", "無法記錄封存：{}", Match::Cause},
@@ -896,8 +894,8 @@ constexpr CatalogEntry entries[] = {
     {"run {} is not an interrupted run", "執行 {} 不是中斷的執行"},
     // An interrupted attempt of a relocation, which `verify --resume` does not continue (decision 0026).
     {"run {} is an interrupted attempt of the unfinished relocation of archive {}; continue it with `archive "
-        "relocate {} <root_path> --resume`",
-        "執行 {} 是封存 {} 未完成的搬移中斷時留下的紀錄；請以 `archive relocate {} <root_path> --resume` 繼續"},
+        "relocate {} {} --resume`",
+        "執行 {} 是封存 {} 未完成的搬移中斷時留下的紀錄；請以 `archive relocate {} {} --resume` 繼續"},
     {"run {} is an interrupted attempt of a relocation of archive {} that has ended; nothing is left to resume",
         "執行 {} 是封存 {} 某次搬移中斷時留下的紀錄，該搬移已結束；沒有可繼續的作業"},
     // A relocation made for an older revision never records (decision 0030).
@@ -1029,17 +1027,17 @@ constexpr CatalogEntry entries[] = {
     {"RepositoryError: {}", "儲存庫錯誤：{}", Match::Cause},
     {"relocation was interrupted; nothing was changed", "搬移已中斷；未做任何變更"},
     // A relocation resumes (decision 0026).
-    {"relocation was interrupted; continue it with `archive relocate {} <root_path> --resume`",
-        "搬移已中斷；請以 `archive relocate {} <root_path> --resume` 繼續"},
+    {"relocation was interrupted; continue it with `archive relocate {} {} --resume`",
+        "搬移已中斷；請以 `archive relocate {} {} --resume` 繼續"},
     // The new carrier's device stopped answering while its volume stayed listed (decision 0034).
     {"relocation was interrupted: the device of the new carrier stopped answering ({} entries in a row could not be "
-        "read); unplug it and attach it again, then continue it with `archive relocate {} <root_path> --resume`; if "
+        "read); unplug it and attach it again, then continue it with `archive relocate {} {} --resume`; if "
         "it stops again at the same place, the device may be damaged",
         "搬移已中斷：新載體的裝置停止回應（連續 {} 個項目無法讀取）；請拔除它再重新連接，然後以 "
-        "`archive relocate {} <root_path> --resume` 繼續；如果它又在同一個地方停止，裝置可能已經損壞"},
-    {"an unfinished relocation of archive {} (to \"{}\") exists; resume it with `archive relocate {} "
-        "<root_path> --resume`, or abandon it with `archive abandon-relocation {}`",
-        "封存 {} 有一個未完成的搬移（至「{}」）；請以 `archive relocate {} <root_path> --resume` 繼續，"
+        "`archive relocate {} {} --resume` 繼續；如果它又在同一個地方停止，裝置可能已經損壞"},
+    {"an unfinished relocation of archive {} (to \"{}\") exists; resume it with `archive relocate {} {} "
+        "--resume`, or abandon it with `archive abandon-relocation {}`",
+        "封存 {} 有一個未完成的搬移（至「{}」）；請以 `archive relocate {} {} --resume` 繼續，"
         "或以 `archive abandon-relocation {}` 放棄它"},
     {"archive {} has no unfinished relocation to resume", "封存 {} 沒有可繼續的未完成搬移"},
     {"revision {} of archive {} was recorded by another operation; the unfinished relocation can no longer "
@@ -1073,12 +1071,11 @@ constexpr CatalogEntry entries[] = {
     {"the unfinished relocation of archive {} was abandoned while this attempt ran; nothing was changed",
         "封存 {} 未完成的搬移已在這次執行期間被放棄；未做任何變更"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; this relocation recorded "
-        "nothing (finish that registration with `register --resume`, then relocate again; or abandon it with "
-        "`archive abandon-registration {}`, then continue this relocation with `archive relocate {} <root_path> "
-        "--resume`)",
+        "nothing (finish that registration with `register {} --resume`, then relocate again; or abandon it with "
+        "`archive abandon-registration {}`, then continue this relocation with `archive relocate {} {} --resume`)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；這次搬移未記錄任何內容（請以 "
-        "`register --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration {}` 放棄該註冊後，"
-        "以 `archive relocate {} <root_path> --resume` 繼續這次搬移）"},
+        "`register {} --resume` 完成該註冊後再重新搬移；或以 `archive abandon-registration {}` 放棄該註冊後，"
+        "以 `archive relocate {} {} --resume` 繼續這次搬移）"},
     // src/core/engine/abandon_relocation.cpp
     {"archive {} has no unfinished relocation", "封存 {} 沒有未完成的搬移"},
     {"the unfinished relocation of archive {} is no longer the one shown (it was resumed, finished or "
@@ -1095,16 +1092,16 @@ constexpr CatalogEntry entries[] = {
     {"cannot scan the new root: {}", "無法掃描新根目錄：{}", Match::Cause},
     // A failure that stops a relocation keeps its saved progress (decision 0026).
     {"cannot scan the new root: {}; the relocation keeps its saved progress: continue it with `archive relocate {} "
-        "<root_path> --resume`",
-        "無法掃描新根目錄：{}；搬移保留其已儲存的進度：請以 `archive relocate {} <root_path> --resume` 繼續",
+        "{} --resume`",
+        "無法掃描新根目錄：{}；搬移保留其已儲存的進度：請以 `archive relocate {} {} --resume` 繼續",
         Match::Cause},
     {"cannot write the manifest: {}; the relocation keeps its saved progress: continue it with `archive relocate {} "
-        "<root_path> --resume`",
-        "無法寫入清單檔：{}；搬移保留其已儲存的進度：請以 `archive relocate {} <root_path> --resume` 繼續",
+        "{} --resume`",
+        "無法寫入清單檔：{}；搬移保留其已儲存的進度：請以 `archive relocate {} {} --resume` 繼續",
         Match::Cause},
     {"cannot record the relocation: {}; the relocation keeps its saved progress: continue it with `archive "
-        "relocate {} <root_path> --resume`",
-        "無法記錄搬移：{}；搬移保留其已儲存的進度：請以 `archive relocate {} <root_path> --resume` 繼續",
+        "relocate {} {} --resume`",
+        "無法記錄搬移：{}；搬移保留其已儲存的進度：請以 `archive relocate {} {} --resume` 繼續",
         Match::Cause},
     {"the new carrier does not hold the recorded content; nothing was changed: copy the archive again from its "
         "carrier to the new one, then relocate again",
@@ -1121,10 +1118,10 @@ constexpr CatalogEntry entries[] = {
         "封存 {1} 的版次 {0} 已在這次搬移期間由其他作業記錄；未做任何變更"},
     // Also register_engine.cpp's, for a registration of the archive through another root path (decision 0025).
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; "
-        "nothing was changed (finish it with `register --resume` first, or abandon it with "
+        "nothing was changed (finish it with `register {} --resume` first, or abandon it with "
         "`archive abandon-registration {}`)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更"
-        "（請先以 `register --resume` 完成該註冊，或以 `archive abandon-registration {}` 放棄它）"},
+        "（請先以 `register {} --resume` 完成該註冊，或以 `archive abandon-registration {}` 放棄它）"},
     // src/core/engine/transfer.cpp
     {"cannot compare with the stored manifest", "無法與已儲存的清單檔比較"},
     {"revision {} is already known with different bytes", "版次 {} 已存在，但位元組內容不同"},
@@ -1137,9 +1134,9 @@ constexpr CatalogEntry entries[] = {
         "(import it again to compare it with the recorded manifest)",
         "封存 {1} 的版次 {0} 已在這次匯入期間由其他作業記錄；未匯入任何內容（再匯入一次，即可與已記錄的清單檔比較）"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was imported "
-        "(finish that registration with `register --resume`, or abandon it with `archive abandon-registration {}` "
+        "(finish that registration with `register {} --resume`, or abandon it with `archive abandon-registration {}` "
         "and import again)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未匯入任何內容（請以 `register --resume` "
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未匯入任何內容（請以 `register {} --resume` "
         "完成該註冊，或以 `archive abandon-registration {}` 放棄它後再匯入一次）"},
     {"the repository's record of revision {} of archive {} changed while this import ran; nothing was imported "
         "(import it again)",

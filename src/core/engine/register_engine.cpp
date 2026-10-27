@@ -1,5 +1,6 @@
 #include "core/engine/register_engine.h"
 
+#include "common/shell_argument.h"
 #include "common/time.h"
 #include "common/utf8.h"
 #include "common/unicode.h"
@@ -162,7 +163,10 @@ std::unexpected<RegisterFailure> interrupted(
     if (const auto later = later_than_planned(store, plan.archive_uuid, plan.revision); later && *later) {
         return made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, **later);
     }
-    return fail(RegisterFailure::Kind::Incomplete, why + "; continue with `register <root_path> --resume`" + after);
+    // The resume names the root the plan reads, as it can be typed (decision
+    // 0022, amended 2026-10-27).
+    return fail(RegisterFailure::Kind::Incomplete,
+        why + "; continue with `register " + shell_argument(plan.root) + " --resume`" + after);
 }
 
 // Decision 0034: a registration whose device stopped answering, as `watch` found.
@@ -228,9 +232,8 @@ std::unexpected<RegisterFailure> another_registration(const Uuid& archive_uuid,
     return fail(RegisterFailure::Kind::Refused,
         "an unfinished registration of archive " + archive_uuid + " (root \"" + registration.root +
             "\") is creating revision " + std::to_string(registration.revision) +
-            "; nothing was changed (finish it with `register --resume` first, or abandon it with "
-            "`archive abandon-registration " +
-            archive_uuid + "`)");
+            "; nothing was changed (finish it with `register " + shell_argument(registration.root) +
+            " --resume` first, or abandon it with `archive abandon-registration " + archive_uuid + "`)");
 }
 
 // A plan whose revision is recorded can never be finished. An attempt of the

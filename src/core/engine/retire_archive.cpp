@@ -1,5 +1,6 @@
 #include "core/engine/retire_archive.h"
 
+#include "common/shell_argument.h"
 #include "core/engine/candidates.h"
 
 #include <nlohmann/json.hpp>
@@ -152,9 +153,10 @@ std::expected<Retirement, RetireFailure> retire_archive(ArchiveStore& store, IFi
                                  uuid + "`"
                            : "an unfinished registration of archive " + uuid + " (root \"" + registration.root +
                                  "\") is creating revision " + std::to_string(registration.revision) +
-                                 "; nothing was changed (finish it with `register --resume` first, or abandon it "
-                                 "with `archive abandon-registration " +
-                                 uuid + "`)"};
+                                 "; nothing was changed (finish it with `register " +
+                                 shell_argument(registration.root) +
+                                 " --resume` first, or abandon it with `archive abandon-registration " + uuid +
+                                 "`)"};
                 return {};
             }
         }

@@ -331,7 +331,7 @@ int register_command(const Arguments& arguments)
         *store, session->context.repo, host_info(), *processes};
 
     CancelToken cancel;
-    platform::cancel_on_interrupt(cancel);
+    const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments);
     const auto outcome = register_archive(services, request, cancel, progress);
     progress.finish();
