@@ -81,6 +81,11 @@ string(JSON files GET "${last_output}" counts files)
 if(NOT files EQUAL 4)
     message(FATAL_ERROR "expected 4 files, got ${files}")
 endif()
+# One of a thing is said in the singular (decision 0017, amended 2026-10-27).
+run_cli("0" --lang en archive show "${archive_uuid}")
+if(NOT last_output MATCHES "\n  content: 4 files, 1 empty directory, 0 links, [0-9]+ bytes\n")
+    message(FATAL_ERROR "archive show of an archive with one empty directory:\n${last_output}")
+endif()
 
 # A malformed label is a usage error, not an operator decision.
 run_cli("10" register "${ROOT}" --label OS-1)

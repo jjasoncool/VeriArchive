@@ -1,5 +1,6 @@
 #include "app/unfinished_operations.h"
 
+#include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "common/time.h"
 #include "common/utf8.h"
@@ -667,8 +668,10 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
         row.progress = operation.total_is_estimate ? text.format("{} of about {} ({}%)", done, total, percent)
                                                    : text.format("{} of {} ({}%)", done, total, percent);
     } else if (row.fraction && by_files) {
-        row.progress = text.format("{} of {} files ({}%)", operation.files_done, operation.files_total,
-            percent_of(operation, *row.fraction));
+        const auto percent = percent_of(operation, *row.fraction);
+        row.progress = operation.files_total == 1
+                           ? text.format("{} of {} file ({}%)", operation.files_done, operation.files_total, percent)
+                           : text.format("{} of {} files ({}%)", operation.files_done, operation.files_total, percent);
     } else {
         row.progress = text.format("{} done", format_size(operation.bytes_done));
     }
@@ -678,9 +681,10 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     // a step (a large file): its speed and time left would then be those of
     // minutes ago, so they are left out until it moves again.
     if (operation.done_counted && !by_files) {
-        row.files = operation.files_total > 0
+        row.files = operation.files_total == 1 ? text.format("{} of {} file", operation.files_done, operation.files_total)
+                    : operation.files_total > 0
                         ? text.format("{} of {} files", operation.files_done, operation.files_total)
-                        : text.format("{} files", operation.files_done);
+                        : count_of(text, operation.files_done, Counted::File);
     }
     std::string details = row.files;
     const auto add = [&](const std::string& part) {

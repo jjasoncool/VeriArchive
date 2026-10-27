@@ -74,6 +74,34 @@ void failure_classes_are_plain_words()
     }
 }
 
+// A count of one is said in the singular, in English; Chinese has no plural.
+void one_is_said_in_the_singular()
+{
+    using va::app::count_of;
+    using va::app::Counted;
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    CHECK(count_of(english, 1, Counted::File) == "1 file" && count_of(english, 0, Counted::File) == "0 files" &&
+          count_of(english, 4, Counted::File) == "4 files");
+    CHECK(count_of(english, 1, Counted::EmptyDirectory) == "1 empty directory" &&
+          count_of(english, 2, Counted::EmptyDirectory) == "2 empty directories");
+    CHECK(count_of(english, 1, Counted::Link) == "1 link" && count_of(english, 3, Counted::Link) == "3 links");
+    CHECK(count_of(english, 1, Counted::Byte) == "1 byte" && count_of(english, 11, Counted::Byte) == "11 bytes");
+    CHECK(count_of(english, 1, Counted::Entry) == "1 entry" && count_of(english, 21, Counted::Entry) == "21 entries");
+    CHECK(count_of(english, 1, Counted::Archive) == "1 archive" && count_of(english, 2, Counted::Archive) == "2 archives");
+    CHECK(count_of(english, 1, Counted::Revision) == "1 revision" &&
+          count_of(english, 2, Counted::Revision) == "2 revisions");
+    CHECK(count_of(chinese, 1, Counted::EmptyDirectory) == "1 個空資料夾" &&
+          count_of(chinese, 2, Counted::EmptyDirectory) == "2 個空資料夾");
+    CHECK(count_of(chinese, 1, Counted::Byte) == "1 位元組" && count_of(chinese, 2, Counted::Revision) == "2 個版次");
+    CHECK(english.format("content: {}, {}, {}, {}", count_of(english, 4, Counted::File),
+              count_of(english, 1, Counted::EmptyDirectory), count_of(english, 0, Counted::Link),
+              count_of(english, 1, Counted::Byte)) == "content: 4 files, 1 empty directory, 0 links, 1 byte");
+    CHECK(chinese.format("content: {}, {}, {}, {}", count_of(chinese, 4, Counted::File),
+              count_of(chinese, 1, Counted::EmptyDirectory), count_of(chinese, 0, Counted::Link),
+              count_of(chinese, 1, Counted::Byte)) == "內容：4 個檔案、1 個空資料夾、0 個連結、1 位元組");
+}
+
 #ifdef _WIN32
 // The errors Windows reports most say what went wrong first, then the call
 // and Windows' number; others name the number alone. Translated.
@@ -114,6 +142,7 @@ void plain_words_tests()
 {
     item_details_are_plain_words();
     failure_classes_are_plain_words();
+    one_is_said_in_the_singular();
 #ifdef _WIN32
     windows_errors_are_plain_words();
 #endif

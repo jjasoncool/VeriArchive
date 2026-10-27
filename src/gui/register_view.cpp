@@ -4,6 +4,7 @@
 // 0022, point 7).
 #include "gui/gui_app.h"
 
+#include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "common/utf8.h"
 #include "core/engine/register_engine.h"
@@ -22,8 +23,9 @@ std::string report(const app::Text& text, const RegisterOutcome& outcome)
     std::string body =
         text.format("Registered {} ({}) revision {}", outcome.label, outcome.archive_uuid, outcome.revision) +
         "\n\n" +
-        text.format("{} files, {} empty directories, {} links, {} hashed", outcome.counts.files,
-            outcome.counts.dirs, outcome.counts.links, format_bytes(outcome.counts.bytes)) +
+        text.format("{}, {}, {}, {} hashed", app::count_of(text, outcome.counts.files, app::Counted::File),
+            app::count_of(text, outcome.counts.dirs, app::Counted::EmptyDirectory),
+            app::count_of(text, outcome.counts.links, app::Counted::Link), format_bytes(outcome.counts.bytes)) +
         "\n" + text.format("Manifest: {}", path_to_utf8(outcome.manifest)) + "\n";
     if (!outcome.unreadable.empty()) {
         body += "\n" + text("Unreadable at registration (recorded without hashes, never reported as verified):") +

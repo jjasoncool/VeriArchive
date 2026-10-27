@@ -326,7 +326,7 @@ std::string format_time_left(const Text& text, const std::optional<TimeLeft>& ti
     const auto from = static_cast<long long>(std::floor(low / unit_seconds / step) * step);
     const auto to = static_cast<long long>(std::ceil(high / unit_seconds / step) * step);
     if (from == 0) {
-        return text.format("less than {} minutes left", to);
+        return to == 1 ? text("less than a minute left") : text.format("less than {} minutes left", to);
     }
     if (from == to) {
         switch (unit) {
@@ -359,7 +359,9 @@ std::string describe_progress(const Text& text, const ProgressEstimate& estimate
     auto line = estimate.counts_bytes()
                     ? text.format("{} of {} ({}%)", format_size(progress.bytes_done),
                           format_size(progress.bytes_total), percent)
-                    : text.format("{} of {} files ({}%)", progress.items_done, progress.items_total, percent);
+                    : progress.items_total == 1
+                          ? text.format("{} of {} file ({}%)", progress.items_done, progress.items_total, percent)
+                          : text.format("{} of {} files ({}%)", progress.items_done, progress.items_total, percent);
     // No speed for work that reads no bytes.
     if (const auto speed = estimate.bytes_per_second(); speed && progress.bytes_done > 0) {
         const auto per_second = text.format("{}/s", format_size(static_cast<std::uint64_t>(std::llround(*speed))));

@@ -54,12 +54,18 @@ void refresh_settings(GuiState& state)
     } else {
         const auto& context = state.session->context;
         const auto& policy = context.config.policy;
+        // A day in the singular, the days in the plural; as the config file
+        // gives them, also where it gives no positive number.
+        const auto days = [&](int count) {
+            return count == 1 ? text.format("{} day", count) : text.format("{} days", count);
+        };
         info += text.format("RepositoryRoot: {}", path_to_utf8(context.repo.root)) + "\n" +
                text.format("Selected by: {}", text(context.repo_selected_by)) + "\n" +
                text.format("repository_uuid: {}", context.repository_uuid) + "\n" +
                text.format("Config file: {}", path_to_utf8(context.config_file)) + "\n\n" +
-               text.format("Overdue after: FULL verify {} days, any verify {} days",
-                   policy.full_verify_max_age_days, policy.any_verify_max_age_days) + "\n" +
+               text.format("Overdue after: FULL verify {}, any verify {}", days(policy.full_verify_max_age_days),
+                   days(policy.any_verify_max_age_days)) +
+               "\n" +
                text(policy.strict_metadata ? "Strict metadata: on" : "Strict metadata: off") + "\n\n" +
                text("Trusted signing keys: signed manifests are not part of this version.") + "\n\n" +
                text("Back up RepositoryRoot. Losing it loses all verification history; manifests "

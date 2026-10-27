@@ -422,8 +422,10 @@ int show(const Arguments& arguments, Opened& opened)
                       << std::endl;
         }
         std::cout << "  "
-                  << text.format("content: {} files, {} empty directories, {} links, {} bytes", header.counts.files,
-                         header.counts.dirs, header.counts.links, header.counts.bytes)
+                  << text.format("content: {}, {}, {}, {}", app::count_of(text, header.counts.files, app::Counted::File),
+                         app::count_of(text, header.counts.dirs, app::Counted::EmptyDirectory),
+                         app::count_of(text, header.counts.links, app::Counted::Link),
+                         app::count_of(text, header.counts.bytes, app::Counted::Byte))
                   << '\n';
         if (header.copy_of) {
             std::cout << "  " << text.format("copy of: {}", *header.copy_of) << '\n';
@@ -571,11 +573,13 @@ void print_comparison(const app::Text& text, const ArchiveComparison& comparison
                      comparison.archive_b, comparison.revision_b)
               // Details such as "unreadable in A" name the archives A and B.
               << "\n  "
-              << text.format("A: {}, registered {}, {} entries", comparison.label_a,
-                     app::local_time(comparison.registered_a, text), comparison.entries_a)
+              << text.format("A: {}, registered {}, {}", comparison.label_a,
+                     app::local_time(comparison.registered_a, text),
+                     app::count_of(text, comparison.entries_a, app::Counted::Entry))
               << "\n  "
-              << text.format("B: {}, registered {}, {} entries", comparison.label_b,
-                     app::local_time(comparison.registered_b, text), comparison.entries_b)
+              << text.format("B: {}, registered {}, {}", comparison.label_b,
+                     app::local_time(comparison.registered_b, text),
+                     app::count_of(text, comparison.entries_b, app::Counted::Entry))
               << "\n  " << text.format("same: {}", comparison.same);
     for (const auto& [status, count] : comparison.counts) {
         std::cout << "  " << text(status) << " " << count;
@@ -703,7 +707,8 @@ int abandon(const Arguments& arguments)
                   << "\n  " << text.format("root: {}", registration->root)
                   << "\n  " << text.format("started: {}", app::local_time(registration->created, text))
                   << "\n  "
-                  << text.format("saved progress: {} files, {} bytes", registration->files, registration->bytes)
+                  << text.format("saved progress: {}, {}", app::count_of(text, registration->files, app::Counted::File),
+                         app::count_of(text, registration->bytes, app::Counted::Byte))
                   << '\n'
                   << text("Abandoning it removes its saved progress, and it can never be resumed afterwards. "
                           "Recorded revisions, manifests and the verification history stay as they are.")
@@ -725,9 +730,10 @@ int abandon(const Arguments& arguments)
         return exit_code::passed;
     }
     std::cout << text.format("Abandoned the unfinished registration of {} ({}), revision {}: its saved progress "
-                             "({} files, {} bytes) was removed.",
-                     abandoned->label, abandoned->archive_uuid, abandoned->revision, abandoned->files,
-                     abandoned->bytes)
+                             "({}, {}) was removed.",
+                     abandoned->label, abandoned->archive_uuid, abandoned->revision,
+                     app::count_of(text, abandoned->files, app::Counted::File),
+                     app::count_of(text, abandoned->bytes, app::Counted::Byte))
               << '\n';
     if (abandoned->first_registration) {
         std::cout << "  " << text("The archive had no revision: it is no longer listed.") << '\n';
@@ -802,7 +808,8 @@ int abandon_relocation_command(const Arguments& arguments)
                   << "\n  " << text.format("new root: {}", relocation->root)
                   << "\n  " << text.format("started: {}", app::local_time(relocation->started, text))
                   << "\n  "
-                  << text.format("saved progress: {} files, {} bytes", relocation->files, relocation->bytes)
+                  << text.format("saved progress: {}, {}", app::count_of(text, relocation->files, app::Counted::File),
+                         app::count_of(text, relocation->bytes, app::Counted::Byte))
                   << '\n'
                   << text("Abandoning it removes its saved progress, and it can never be resumed afterwards. The "
                           "archive, its revisions, manifests and the verification history stay as they are.")
@@ -818,9 +825,9 @@ int abandon_relocation_command(const Arguments& arguments)
         print_json(abandonable_relocation_json(*abandoned));
         return exit_code::passed;
     }
-    std::cout << text.format("Abandoned the unfinished relocation of {} ({}): its saved progress ({} files, {} "
-                             "bytes) was removed.",
-                     abandoned->label, abandoned->archive_uuid, abandoned->files, abandoned->bytes)
+    std::cout << text.format("Abandoned the unfinished relocation of {} ({}): its saved progress ({}, {}) was removed.",
+                     abandoned->label, abandoned->archive_uuid, app::count_of(text, abandoned->files, app::Counted::File),
+                     app::count_of(text, abandoned->bytes, app::Counted::Byte))
               << '\n';
     return exit_code::passed;
 }
@@ -1033,8 +1040,9 @@ int history_command(const Arguments& arguments)
     for (const auto& run : *runs) {
         const auto note = app::history_note(text, run);
         std::cout << "  "
-                  << text.format("{}  {} VERIFY {}  r{}  {} bytes", app::local_time(run.finished, text),
-                         text(run.mode), text(run.result), run.revision, run.coverage_bytes.value_or(0))
+                  << text.format("{}  {} VERIFY {}  r{}  {}", app::local_time(run.finished, text),
+                         text(run.mode), text(run.result), run.revision,
+                         app::count_of(text, run.coverage_bytes.value_or(0), app::Counted::Byte))
                   << (run.failure_classes.empty() ? "" : "  " + app::failure_classes_words(text, run.failure_classes))
                   << "  " << run.run_id << (note.empty() ? "" : "  " + note) << '\n';
     }

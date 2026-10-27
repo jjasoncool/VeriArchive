@@ -1,5 +1,6 @@
 #include "gui/gui_support.h"
 
+#include "app/plain_words.h"
 #include "app/progress_estimate.h"
 #include "app/typed_path.h"
 #include "platform/platform_services.h"
@@ -312,10 +313,13 @@ private:
         auto update = std::make_unique<Update>(GTK_WIDGET(g_object_ref(bar_)));
         if (progress.items_total == 0) {
             update->pulse = true;
-            update->text = text_.format("Scanning: {} entries", progress.items_done);
+            update->text = text_.format("Scanning: {}", app::count_of(text_, progress.items_done, app::Counted::Entry));
         } else if (counting_ == Counting::Entries) {
             update->fraction = static_cast<double>(progress.items_done) / static_cast<double>(progress.items_total);
-            update->text = text_.format("Comparing: {} / {} entries", progress.items_done, progress.items_total);
+            // Two calls: the compiler checks each literal template against its values.
+            update->text = progress.items_total == 1
+                               ? text_.format("Comparing: {} / {} entry", progress.items_done, progress.items_total)
+                               : text_.format("Comparing: {} / {} entries", progress.items_done, progress.items_total);
         } else {
             update->fraction = estimate_.fraction().value_or(0);
             update->text = text_.format("Hashing: {}", app::describe_progress(text_, estimate_));

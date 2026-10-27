@@ -113,12 +113,14 @@ constexpr CatalogEntry entries[] = {
     {"unknown command {}", "未知的指令 {}"},
     {"a command is needed; veriarchive-cli without arguments shows the commands",
         "需要指定指令；不加任何引數執行 veriarchive-cli 即可列出所有指令"},
-    {"scanning: {} entries", "掃描中：{} 個項目"},
+    {"scanning: {}", "掃描中：{}", Match::FormatOnly},
     {"hashing: {}", "計算雜湊中：{}", Match::FormatOnly},
     {"comparing: {}/{} entries", "比較中：{}/{} 個項目"},
+    {"comparing: {}/{} entry", "比較中：{}/{} 個項目"},
     // repo rebuild-index, import and export (R-94): their progress, and a cancel.
     {"reading manifests: {}/{}", "讀取清單檔中：{}/{}"},
     {"reading the manifest: {}/{} entries", "讀取清單檔中：{}/{} 個項目"},
+    {"reading the manifest: {}/{} entry", "讀取清單檔中：{}/{} 個項目"},
     {"copying the manifest: {}", "複製清單檔中：{}", Match::FormatOnly},
     {"the rebuild of the index was cancelled; the index was left as it was", "重建索引已取消；索引維持原狀"},
     {"the import was cancelled; nothing was imported", "匯入已取消；未匯入任何內容"},
@@ -147,13 +149,14 @@ constexpr CatalogEntry entries[] = {
         "not part of this version.",
         "檢查歷程鏈可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除，也偵測不到修改後連雜湊鏈都"
         "重新計算過的紀錄；能偵測這些情況的歷程簽章，這個版本尚未提供。"},
+    {"History intact: {} verification run, hash chain verified.",
+        "歷程完整：共 {} 次驗證執行，雜湊鏈已驗證。"},
     {"History BROKEN at run {}: {}", "歷程於執行 {} 處斷裂：{}"},
     {"previous row was deleted or edited (prev_hash does not link)",
         "前一筆紀錄已被刪除或修改（prev_hash 無法銜接）"},
     {"row was edited (row_hash does not match its contents)",
         "此筆紀錄已被修改（row_hash 與其內容不符）"},
-    {"Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
-        "已從清單檔重建索引：{} 個封存、{} 個版次、{} 個項目。"},
+    {"Rebuilt the index from manifests: {}, {}, {}.", "已從清單檔重建索引：{}、{}、{}。", Match::FormatOnly},
     {"unfinished registrations whose saved progress was kept: {}", "保留了已儲存進度的未完成註冊：{} 個"},
     // Each revision whose manifest the rebuild could not read, by what became
     // of its record (decision 0028): the archive, then what is wrong.
@@ -247,6 +250,8 @@ constexpr CatalogEntry entries[] = {
     {"identity: {}", "媒體身分：{}", Match::Cause},
     {"coverage: {} of {} registered bytes read and matched",
         "涵蓋範圍：已註冊的 {1} 位元組中，有 {0} 位元組已讀取且相符"},
+    {"coverage: {} of {} registered byte read and matched",
+        "涵蓋範圍：已註冊的 {1} 位元組中，有 {0} 位元組已讀取且相符"},
     {"items:", "項目："},
     // A run that failed on its manifest before the media was looked for (decision 0028).
     {"media: not read, as the manifest of this revision cannot be used", "媒體：未讀取，因為這個版次的清單檔無法使用"},
@@ -281,8 +286,21 @@ constexpr CatalogEntry entries[] = {
     {"filesystem: {} {}  label \"{}\"", "檔案系統：{} {}  標籤「{}」"},
     {"device: {}  wwn {}", "裝置：{}  wwn {}"},
     {"device: {}  serial {}", "裝置：{}  序號 {}"},
-    {"content: {} files, {} empty directories, {} links, {} bytes",
-        "內容：{} 個檔案、{} 個空資料夾、{} 個連結、{} 位元組"},
+    {"content: {}, {}, {}, {}", "內容：{}、{}、{}、{}", Match::FormatOnly},
+    // A count in the singular for one, the plural otherwise (app/plain_words.h).
+    {"{} file", "{} 個檔案", Match::FormatOnly},
+    {"{} empty directory", "{} 個空資料夾", Match::FormatOnly},
+    {"{} empty directories", "{} 個空資料夾", Match::FormatOnly},
+    {"{} link", "{} 個連結", Match::FormatOnly},
+    {"{} links", "{} 個連結", Match::FormatOnly},
+    {"{} byte", "{} 位元組", Match::FormatOnly},
+    {"{} bytes", "{} 位元組", Match::FormatOnly},
+    {"{} entry", "{} 個項目", Match::FormatOnly},
+    {"{} entries", "{} 個項目", Match::FormatOnly},
+    {"{} revision", "{} 個版次", Match::FormatOnly},
+    {"{} revisions", "{} 個版次", Match::FormatOnly},
+    {"{} day", "{} 天", Match::FormatOnly},
+    {"{} days", "{} 天", Match::FormatOnly},
     {"copy of: {}", "副本來源：{}"},
     {"revisions:", "版次："},
     // An archive whose latest manifest cannot be used (decision 0028), and a
@@ -327,7 +345,7 @@ constexpr CatalogEntry entries[] = {
     {"Relocated {} ({}) to {} as revision {}", "已將 {}（{}）搬移至 {}，成為版次 {}"},
     {"FULL VERIFY {} of the new carrier (run {})", "新載體的完整驗證：{}（執行 {}）"},
     {"never verified", "從未驗證"},
-    {"{}  {} VERIFY {}  r{}  {} bytes", "{}  {} {}  r{}  {} 位元組", Match::FormatOnly},
+    {"{}  {} VERIFY {}  r{}  {}", "{}  {} {}  r{}  {}", Match::FormatOnly},
     // The runs of a relocation in history and the Verification History (decision 0026), from
     // src/app/history.cpp.
     {"interrupted relocation attempt", "中斷的搬移嘗試"},
@@ -342,8 +360,8 @@ constexpr CatalogEntry entries[] = {
         "abandon-relocation <uuid> [--confirm]"},
     // archive compare: A is the reference archive, B the copy compared with it.
     {"COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", "比較結果：{}  {}（{}）r{}  與  {}（{}）r{}"},
-    {"A: {}, registered {}, {} entries", "A：{}，註冊於 {}，共 {} 個項目"},
-    {"B: {}, registered {}, {} entries", "B：{}，註冊於 {}，共 {} 個項目"},
+    {"A: {}, registered {}, {}", "A：{}，註冊於 {}，共 {}", Match::FormatOnly},
+    {"B: {}, registered {}, {}", "B：{}，註冊於 {}，共 {}", Match::FormatOnly},
     {"same: {}", "相同：{}"},
     {"This compares what each registration read. A FULL verify of each archive proves that its "
         "carrier still holds that content.",
@@ -352,16 +370,15 @@ constexpr CatalogEntry entries[] = {
     // archive abandon-registration (decision 0025)
     {"Unfinished registration of {} ({}), revision {}", "{}（{}）未完成的註冊，版次 {}"},
     {"started: {}", "開始時間：{}"},
-    {"saved progress: {} files, {} bytes", "已儲存的進度：{} 個檔案，{} 位元組"},
+    {"saved progress: {}, {}", "已儲存的進度：{}，{}", Match::FormatOnly},
     {"Abandoning it removes its saved progress, and it can never be resumed afterwards. "
         "Recorded revisions, manifests and the verification history stay as they are.",
         "放棄後，已儲存的進度會被刪除，而且之後再也無法繼續。已記錄的版次、清單檔與驗證歷程都維持不變。"},
     {"The archive has no revision yet: it is removed with its registration.",
         "此封存還沒有任何版次：會隨著它的註冊一起移除。"},
     {"run the command again with --confirm to abandon it", "若要放棄，請加上 --confirm 再執行一次"},
-    {"Abandoned the unfinished registration of {} ({}), revision {}: its saved progress "
-        "({} files, {} bytes) was removed.",
-        "已放棄 {}（{}）未完成的註冊，版次 {}：已刪除其已儲存的進度（{} 個檔案，{} 位元組）。"},
+    {"Abandoned the unfinished registration of {} ({}), revision {}: its saved progress ({}, {}) was removed.",
+        "已放棄 {}（{}）未完成的註冊，版次 {}：已刪除其已儲存的進度（{}，{}）。"},
     {"The archive had no revision: it is no longer listed.", "此封存沒有任何版次：已不再列出。"},
     {"note: the media may still hold .veriarchive/identity.json naming this archive; delete it before "
         "registering the folder or volume again, unless you register it with --write-media-copy.",
@@ -374,8 +391,8 @@ constexpr CatalogEntry entries[] = {
     {"Abandoning it removes its saved progress, and it can never be resumed afterwards. The archive, its "
         "revisions, manifests and the verification history stay as they are.",
         "放棄後，已儲存的進度會被刪除，而且之後再也無法繼續。封存本身、已記錄的版次、清單檔與驗證歷程都維持不變。"},
-    {"Abandoned the unfinished relocation of {} ({}): its saved progress ({} files, {} bytes) was removed.",
-        "已放棄 {}（{}）未完成的搬移：已刪除其已儲存的進度（{} 個檔案，{} 位元組）。"},
+    {"Abandoned the unfinished relocation of {} ({}): its saved progress ({}, {}) was removed.",
+        "已放棄 {}（{}）未完成的搬移：已刪除其已儲存的進度（{}，{}）。"},
     {"usage: history <uuid>", "用法：history <uuid>"},
     // src/cli/export_commands.cpp
     {"usage: export-sha256sums <uuid> --out FILE", "用法：export-sha256sums <uuid> --out FILE"},
@@ -402,6 +419,7 @@ constexpr CatalogEntry entries[] = {
     // "計算雜湊中：2.16 TiB / 9.44 TiB（23%）・每秒 240 MiB・約剩 8～9 小時".
     {"{} of {} ({}%)", "{} / {}（{}%）", Match::FormatOnly},
     {"{} of {} files ({}%)", "{} / {} 個檔案（{}%）", Match::FormatOnly},
+    {"{} of {} file ({}%)", "{} / {} 個檔案（{}%）", Match::FormatOnly},
     {"{}/s", "每秒 {}", Match::FormatOnly},
     {"{} · {}", "{}・{}", Match::FormatOnly},
     {"estimating time left", "剩餘時間估算中"},
@@ -425,9 +443,10 @@ constexpr CatalogEntry entries[] = {
     {"Verification History", "驗證歷程"},
     {"Settings", "設定"},
     // src/gui/gui_support.cpp
-    {"Scanning: {} entries", "掃描中：{} 個項目"},
+    {"Scanning: {}", "掃描中：{}", Match::FormatOnly},
     {"Hashing: {}", "計算雜湊中：{}", Match::FormatOnly},
     {"Comparing: {} / {} entries", "比較中：{} / {} 個項目"},
+    {"Comparing: {} / {} entry", "比較中：{} / {} 個項目"},
     {"Starting...", "正在啟動……"},
     {"Unexpected error: {}", "未預期的錯誤：{}"},
     // src/gui/archive_list_view.cpp
@@ -472,6 +491,7 @@ constexpr CatalogEntry entries[] = {
     {"{} done", "已完成 {}", Match::FormatOnly},
     {"total not known: {}", "總量不明：{}", Match::FormatOnly},
     {"{} of {} files", "{} / {} 個檔案", Match::FormatOnly},
+    {"{} of {} file", "{} / {} 個檔案", Match::FormatOnly},
     {"{} files", "{} 個檔案", Match::FormatOnly},
     {"waiting for progress...", "等待進度更新……"},
     {"running", "執行中"},
@@ -514,8 +534,8 @@ constexpr CatalogEntry entries[] = {
     {"Abandon...", "放棄…"},
     {"Abandon", "放棄"},
     {"Abandon the unfinished registration of {}?", "要放棄 {} 未完成的註冊嗎？"},
-    {"Its saved progress will be lost: {} files ({}) hashed so far.",
-        "已儲存的進度會遺失：目前已計算雜湊的 {} 個檔案（{}）。"},
+    {"Its saved progress will be lost: {} ({}) hashed so far.", "已儲存的進度會遺失：目前已計算雜湊的 {}（{}）。",
+        Match::FormatOnly},
     {"It cannot be resumed afterwards. Recorded revisions, manifests and the verification history are not changed.",
         "之後再也無法繼續。已記錄的版次、清單檔與驗證歷程都不會變更。"},
     {"Reading the registration of {} ...", "正在讀取 {} 的註冊……"},
@@ -531,8 +551,8 @@ constexpr CatalogEntry entries[] = {
     // abandoned: {}" are the registration's.
     {"Abandon the unfinished relocation of {}?", "要放棄 {} 未完成的搬移嗎？"},
     {"New root: {}", "新根目錄：{}"},
-    {"Its saved progress will be lost: {} files ({}) matched so far.",
-        "已儲存的進度會遺失：目前已比對相符的 {} 個檔案（{}）。"},
+    {"Its saved progress will be lost: {} ({}) matched so far.", "已儲存的進度會遺失：目前已比對相符的 {}（{}）。",
+        Match::FormatOnly},
     {"It cannot be resumed afterwards. The archive, its revisions, manifests and the verification history are "
         "not changed.",
         "之後再也無法繼續。封存本身、已記錄的版次、清單檔與驗證歷程都不會變更。"},
@@ -563,8 +583,7 @@ constexpr CatalogEntry entries[] = {
         "則建立在您的個人資料夾），並記錄在設定檔中。"},
     {"Selected by: {}", "選定方式：{}"},
     {"Config file: {}", "設定檔：{}"},
-    {"Overdue after: FULL verify {} days, any verify {} days",
-        "逾期期限：完整驗證 {} 天，任何驗證 {} 天"},
+    {"Overdue after: FULL verify {}, any verify {}", "逾期期限：完整驗證 {}，任何驗證 {}", Match::FormatOnly},
     {"Strict metadata: on", "嚴格中繼資料：開啟"},
     {"Strict metadata: off", "嚴格中繼資料：關閉"},
     {"Trusted signing keys: signed manifests are not part of this version.",
@@ -583,9 +602,7 @@ constexpr CatalogEntry entries[] = {
     {"Finish or cancel the running operation before changing the language.",
         "請先完成或取消正在執行的作業，再切換語言。"},
     // src/gui/register_view.cpp
-    {"{} files, {} empty directories, {} links, {} hashed",
-        "{} 個檔案、{} 個空資料夾、{} 個連結，已計算雜湊 {}",
-        Match::FormatOnly},
+    {"{}, {}, {}, {} hashed", "{}、{}、{}，已計算雜湊 {}", Match::FormatOnly},
     {"Manifest: {}", "清單檔：{}"},
     {"Unreadable at registration (recorded without hashes, never reported as verified):",
         "註冊時無法讀取（已記錄但不含雜湊，絕不會回報為已驗證）："},
@@ -683,6 +700,7 @@ constexpr CatalogEntry entries[] = {
     {"Entries: {} in A, {} in B, {} the same", "項目：A 有 {} 個，B 有 {} 個，其中 {} 個相同"},
     {"Differences: {}", "差異：{}"},
     {"... and {} more differences, not listed here", "……另有 {} 個差異未列於此"},
+    {"... and {} more difference, not listed here", "……另有 {} 個差異未列於此"},
     {"This compares what each registration read. FULL verification of each archive proves that "
         "its media still holds it.",
         "此比較依據各封存註冊時讀取的內容。對各封存進行完整驗證，才能證明其媒體仍保有這些內容。"},

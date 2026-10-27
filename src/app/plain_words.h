@@ -1,10 +1,11 @@
 #pragma once
 // Plain words for what VeriArchive records as codes, for people to read
 // (decision 0017, amended 2026-10-27): an item's detail and a run's failure
-// class. The repository and --json keep the codes as they are; these give
-// the English, which Text translates.
+// class, and a count in the singular for one. The repository and --json keep
+// the codes as they are; these give the English, which Text translates.
 #include "app/text.h"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -30,5 +31,12 @@ std::string_view without_failure_class(std::string_view message);
 // ("ManifestHashMismatch,MediaIdentityMismatch"), each in plain words in the
 // language of `text`, separated by "; ".
 std::string failure_classes_words(const Text& text, std::string_view classes);
+
+// What is counted.
+enum class Counted { File, EmptyDirectory, Link, Byte, Entry, Archive, Revision };
+
+// `count` of `counted` in the language of `text`, singular for one: "1 file",
+// "2 files", "1 empty directory".
+std::string count_of(const Text& text, std::uint64_t count, Counted counted);
 
 } // namespace va::app

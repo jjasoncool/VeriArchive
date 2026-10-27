@@ -35,8 +35,10 @@ void check_chain(GuiState& state)
         });
     } else if (!check->first_broken_run) {
         show_chain_result(state, [runs = check->runs](const app::Text& text) {
-            return text.format("History intact: {} verification runs, hash chain verified.", runs) + "\n" +
-                   text(app::history_chain_limits);
+            // Two calls: the compiler checks each literal template against its value.
+            return (runs == 1 ? text.format("History intact: {} verification run, hash chain verified.", runs)
+                              : text.format("History intact: {} verification runs, hash chain verified.", runs)) +
+                   "\n" + text(app::history_chain_limits);
         });
     } else {
         show_chain_result(state,

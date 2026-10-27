@@ -52,8 +52,11 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
         std::cout << "\n  " << text.format("root: {}", path_to_utf8(outcome.root))
                   << "\n  " << text.format("identity: {}", text(to_string(outcome.identity.result)))
                   << "\n  "
-                  << text.format("coverage: {} of {} registered bytes read and matched", outcome.coverage_bytes,
-                         outcome.registered_bytes)
+                  << (outcome.registered_bytes == 1
+                             ? text.format("coverage: {} of {} registered byte read and matched",
+                                   outcome.coverage_bytes, outcome.registered_bytes)
+                             : text.format("coverage: {} of {} registered bytes read and matched",
+                                   outcome.coverage_bytes, outcome.registered_bytes))
                   << "\n  " << text("items:");
         for (const auto& [status, count] : outcome.counts) {
             std::cout << "  " << text(status) << " " << count;

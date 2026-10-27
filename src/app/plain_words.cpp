@@ -142,4 +142,27 @@ std::string failure_classes_words(const Text& text, std::string_view classes)
     return result;
 }
 
+std::string count_of(const Text& text, std::uint64_t count, Counted counted)
+{
+    // Two calls each: the compiler checks each literal template against its value.
+    const bool one = count == 1;
+    switch (counted) {
+    case Counted::File:
+        return one ? text.format("{} file", count) : text.format("{} files", count);
+    case Counted::EmptyDirectory:
+        return one ? text.format("{} empty directory", count) : text.format("{} empty directories", count);
+    case Counted::Link:
+        return one ? text.format("{} link", count) : text.format("{} links", count);
+    case Counted::Byte:
+        return one ? text.format("{} byte", count) : text.format("{} bytes", count);
+    case Counted::Entry:
+        return one ? text.format("{} entry", count) : text.format("{} entries", count);
+    case Counted::Archive:
+        return one ? text.format("{} archive", count) : text.format("{} archives", count);
+    case Counted::Revision:
+        return one ? text.format("{} revision", count) : text.format("{} revisions", count);
+    }
+    return std::to_string(count);
+}
+
 } // namespace va::app

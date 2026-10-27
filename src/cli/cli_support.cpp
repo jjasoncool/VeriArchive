@@ -189,15 +189,20 @@ void CliProgress::on_progress(const Progress& progress)
     }
     last_ = now;
     if (unit_ == ProgressUnit::entries) {
-        write(text_.format("comparing: {}/{} entries", progress.items_done, progress.items_total));
+        // Two calls: the compiler checks each literal template against its values.
+        write(progress.items_total == 1 ? text_.format("comparing: {}/{} entry", progress.items_done, progress.items_total)
+                                        : text_.format("comparing: {}/{} entries", progress.items_done,
+                                              progress.items_total));
     } else if (unit_ == ProgressUnit::manifests) {
         write(text_.format("reading manifests: {}/{}", progress.items_done, progress.items_total));
     } else if (unit_ == ProgressUnit::manifest && progress.items_total > 0) {
-        write(text_.format("reading the manifest: {}/{} entries", progress.items_done, progress.items_total));
+        write(progress.items_total == 1
+                  ? text_.format("reading the manifest: {}/{} entry", progress.items_done, progress.items_total)
+                  : text_.format("reading the manifest: {}/{} entries", progress.items_done, progress.items_total));
     } else if (unit_ == ProgressUnit::manifest) {
         write(text_.format("copying the manifest: {}", app::describe_progress(text_, estimate_)));
     } else if (progress.items_total == 0) {
-        write(text_.format("scanning: {} entries", progress.items_done));
+        write(text_.format("scanning: {}", app::count_of(text_, progress.items_done, app::Counted::Entry)));
     } else {
         write(text_.format("hashing: {}", app::describe_progress(text_, estimate_)));
     }

@@ -14,6 +14,7 @@
 #include "gui/gui_app.h"
 
 #include "app/local_time.h"
+#include "app/plain_words.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_relocation.h"
 #include "core/engine/archive_status.h"
@@ -572,8 +573,9 @@ void confirm_abandon(GuiState& state, const AbandonableRegistration& registratio
     const auto& text = state.text;
     const auto label = registration.label.empty() ? registration.archive_uuid.substr(0, 8) : registration.label;
     std::string detail = text.format("Root: {}", registration.root) + "\n\n" +
-                         text.format("Its saved progress will be lost: {} files ({}) hashed so far.",
-                             registration.files, format_bytes(registration.bytes)) +
+                         text.format("Its saved progress will be lost: {} ({}) hashed so far.",
+                             app::count_of(text, registration.files, app::Counted::File),
+                             format_bytes(registration.bytes)) +
                          " " +
                          text("It cannot be resumed afterwards. Recorded revisions, manifests and the verification "
                               "history are not changed.");
@@ -661,8 +663,9 @@ void confirm_relocation_abandon(GuiState& state, const AbandonableRelocation& re
     const auto& text = state.text;
     const auto label = relocation.label.empty() ? relocation.archive_uuid.substr(0, 8) : relocation.label;
     const std::string detail = text.format("New root: {}", relocation.root) + "\n\n" +
-                               text.format("Its saved progress will be lost: {} files ({}) matched so far.",
-                                   relocation.files, format_bytes(relocation.bytes)) +
+                               text.format("Its saved progress will be lost: {} ({}) matched so far.",
+                                   app::count_of(text, relocation.files, app::Counted::File),
+                                   format_bytes(relocation.bytes)) +
                                " " +
                                text("It cannot be resumed afterwards. The archive, its revisions, manifests and the "
                                     "verification history are not changed.");
@@ -984,9 +987,7 @@ void refresh_archive_list(GuiState& state)
     if (mark) {
         state.operations.archives_shown = *mark;
     }
-    // Two calls: the compiler checks each literal template against its value.
-    const auto count = statuses->size() == 1 ? text.format("{} archive", statuses->size())
-                                             : text.format("{} archives", statuses->size());
+    const auto count = app::count_of(text, statuses->size(), app::Counted::Archive);
     gtk_label_set_text(GTK_LABEL(view.status), count.c_str());
 
     const char* headers[] = {"Label", "UUID", "Volume", "Model", "Capacity", "Last FULL verify",

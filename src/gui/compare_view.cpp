@@ -63,8 +63,10 @@ std::string report(const app::Text& text, const Shown& shown)
                     "\n";
         }
         if (shown.differences > comparison.differences.size()) {
-            body += text.format("... and {} more differences, not listed here",
-                        shown.differences - comparison.differences.size()) +
+            const auto more = shown.differences - comparison.differences.size();
+            // Two calls: the compiler checks each literal template against its value.
+            body += (more == 1 ? text.format("... and {} more difference, not listed here", more)
+                               : text.format("... and {} more differences, not listed here", more)) +
                     "\n";
         }
     }

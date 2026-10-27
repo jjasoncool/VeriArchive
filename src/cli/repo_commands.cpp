@@ -4,6 +4,7 @@
 #include "cli/commands.h"
 
 #include "app/history.h"
+#include "app/plain_words.h"
 #include "common/utf8.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
@@ -56,8 +57,10 @@ int verify_history(const Arguments& arguments, const Session& session)
             {"first_broken_run", check->first_broken_run.value_or("")}, {"problem", check->problem}});
     } else if (intact) {
         const auto& text = arguments.text;
-        std::cout << text.format("History intact: {} verification runs, hash chain verified.",
-                         check->runs)
+        // Two calls: the compiler checks each literal template against its value.
+        std::cout << (check->runs == 1
+                          ? text.format("History intact: {} verification run, hash chain verified.", check->runs)
+                          : text.format("History intact: {} verification runs, hash chain verified.", check->runs))
                   << '\n'
                   << text(app::history_chain_limits) << '\n';
     } else {
@@ -180,9 +183,10 @@ int rebuild(const Arguments& arguments, const Session& session)
         if (replaced) {
             std::cout << replaced_line(text, *replaced) << '\n';
         }
-        std::cout << text.format(
-                         "Rebuilt the index from manifests: {} archives, {} revisions, {} entries.",
-                         report->archives, report->revisions, report->entries)
+        std::cout << text.format("Rebuilt the index from manifests: {}, {}, {}.",
+                         app::count_of(text, report->archives, app::Counted::Archive),
+                         app::count_of(text, report->revisions, app::Counted::Revision),
+                         app::count_of(text, report->entries, app::Counted::Entry))
                   << '\n';
         // Decision 0026: the saved progress of unfinished registrations stays.
         if (report->saved_progress_kept > 0) {
