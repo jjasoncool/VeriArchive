@@ -224,4 +224,76 @@ if(NOT unzipped EQUAL 0 OR NOT updated_cli STREQUAL packaged_cli OR NOT kept_con
         "${kept_config}")
 endif()
 file(REMOVE_RECURSE "${zip_folder}")
+
+# GTK settings schemas (decision 0038). glib-compile-schemas cannot open a
+# schema path of 260 characters or more, and a schema file it cannot open or
+# parse it names and leaves out, still exiting 0; packaging compiles a copy
+# in a short folder and takes any message for a failure. GTK's schemas, in a
+# folder deep enough that every path of them has 260 characters or more,
+# compile; with a broken schema beside them (sample data), the compile fails.
+include("${CMAKE_CURRENT_LIST_DIR}/compile_schemas.cmake")
+set(compiler "${MINGW_PREFIX}/bin/glib-compile-schemas.exe")
+set(schema_probe "${PREFIX}-schemas")
+file(REMOVE_RECURSE "${schema_probe}")
+set(deep_schemas "${schema_probe}")
+string(LENGTH "${deep_schemas}" deep_length)
+while(deep_length LESS 225)
+    string(APPEND deep_schemas "/a-folder-of-sample-schemas-deep-SAMPLE")
+    string(LENGTH "${deep_schemas}" deep_length)
+endwhile()
+file(GLOB gtk_schema_files "${MINGW_PREFIX}/share/glib-2.0/schemas/org.gtk.gtk4.*.gschema.xml")
+file(COPY ${gtk_schema_files} DESTINATION "${deep_schemas}")
+veriarchive_compile_schemas("${compiler}" "${deep_schemas}" intact_problem)
+set(deep_compiled FALSE)
+if(EXISTS "${deep_schemas}/gschemas.compiled")
+    set(deep_compiled TRUE)
+endif()
+file(WRITE "${deep_schemas}/org.example.SAMPLE-broken.gschema.xml"
+    "<schemalist>\n  <schema id=\"org.example.SAMPLE\" path=\"/org/example/sample/\">\n")
+veriarchive_compile_schemas("${compiler}" "${deep_schemas}" broken_problem)
+if(NOT intact_problem STREQUAL "" OR NOT deep_compiled OR broken_problem STREQUAL "")
+    message(FATAL_ERROR "the schema compile fails on GTK's schemas in a deep folder, or takes a broken schema "
+        "for a success:\n${intact_problem}\n${broken_problem}")
+endif()
+file(REMOVE_RECURSE "${schema_probe}")
+
+# Every schema of GTK's schema files is in the package's gschemas.compiled,
+# as GLib itself reads it: gsettings, kept from every other schema folder,
+# lists the schemas compiled in the package's alone. This is the zip's
+# compile, unzipped over the installed one above.
+set(no_data "${PREFIX}-no-data")
+file(MAKE_DIRECTORY "${no_data}")
+set(isolated "XDG_DATA_DIRS=${no_data}" "XDG_DATA_HOME=${no_data}"
+    "GSETTINGS_SCHEMA_DIR=${PREFIX}/share/glib-2.0/schemas")
+set(compiled_schemas "")
+foreach(listing list-schemas list-relocatable-schemas)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${isolated} "${MINGW_PREFIX}/bin/gsettings.exe" ${listing}
+        ENCODING UTF-8 RESULT_VARIABLE listed OUTPUT_VARIABLE schema_listing ERROR_VARIABLE schema_errors)
+    if(NOT listed EQUAL 0 AND listing STREQUAL "list-schemas")
+        message(FATAL_ERROR "gsettings finds no schema in the package (exit ${listed}):\n${schema_errors}")
+    endif()
+    string(REPLACE "\r" "" schema_listing "${schema_listing}")
+    string(REPLACE "\n" ";" schema_lines "${schema_listing}")
+    list(APPEND compiled_schemas ${schema_lines})
+endforeach()
+file(REMOVE_RECURSE "${no_data}")
+file(GLOB gtk_schema_files "${MINGW_PREFIX}/share/glib-2.0/schemas/org.gtk.gtk4.*.gschema.xml")
+set(expected_schemas "")
+foreach(schema_file IN LISTS gtk_schema_files)
+    file(READ "${schema_file}" schema_text)
+    string(REGEX MATCHALL "<schema [^>]*id=[\"'][^\"']+[\"']" schema_tags "${schema_text}")
+    foreach(tag IN LISTS schema_tags)
+        string(REGEX REPLACE ".*id=[\"']([^\"']+)[\"']$" "\\1" schema_id "${tag}")
+        list(APPEND expected_schemas "${schema_id}")
+    endforeach()
+endforeach()
+if(NOT expected_schemas)
+    message(FATAL_ERROR "found no GTK schema in ${MINGW_PREFIX}/share/glib-2.0/schemas")
+endif()
+foreach(schema_id IN LISTS expected_schemas)
+    if(NOT schema_id IN_LIST compiled_schemas)
+        message(FATAL_ERROR "the package's gschemas.compiled lacks the GTK schema ${schema_id}; it holds: "
+            "${compiled_schemas}")
+    endif()
+endforeach()
 message(STATUS "Windows package is self-contained: ${PREFIX}")

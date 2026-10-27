@@ -26,6 +26,7 @@ if(NOT VERIARCHIVE_RUNTIME_SCAN_DIR)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/desktop_dlls.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/compile_schemas.cmake")
 
 set(prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
 set(mingw "${VERIARCHIVE_MINGW_PREFIX}")
@@ -101,14 +102,15 @@ endforeach()
 file(INSTALL ${loaders} DESTINATION "${prefix}/${loader_dir}/loaders")
 file(INSTALL "${mingw}/${loader_dir}/loaders.cache" DESTINATION "${prefix}/${loader_dir}")
 
-# 3. GTK settings schemas, compiled for this package only.
+# 3. GTK settings schemas, compiled for this package only, in a short folder
+# (compile_schemas.cmake). A schema that glib-compile-schemas reports and
+# leaves out, though it exits 0, fails the install: GTK stops when a schema it
+# reads is missing (decision 0038).
 file(GLOB schemas "${mingw}/share/glib-2.0/schemas/org.gtk.gtk4.*.gschema.xml")
 file(INSTALL ${schemas} DESTINATION "${prefix}/share/glib-2.0/schemas")
-execute_process(
-    COMMAND "${mingw}/bin/glib-compile-schemas.exe" "${prefix}/share/glib-2.0/schemas"
-    RESULT_VARIABLE compiled)
-if(NOT compiled EQUAL 0)
-    message(FATAL_ERROR "glib-compile-schemas failed")
+veriarchive_compile_schemas("${mingw}/bin/glib-compile-schemas.exe" "${prefix}/share/glib-2.0/schemas" schema_problem)
+if(NOT schema_problem STREQUAL "")
+    message(FATAL_ERROR "the GTK settings schemas did not compile: ${schema_problem}")
 endif()
 
 # 4. Icon themes used by GTK widgets.

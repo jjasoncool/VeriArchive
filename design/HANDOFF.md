@@ -728,7 +728,7 @@ libsodium's SHA-256 is not used (no SHA-NI; becomes the bottleneck on NVMe).
 
 ### Targets and presets
 
-> Amended by `design/decisions/0038-the-windows-package.md`: R-121's zip holds no folder of its own (`bin`, `lib` and `share` at its root, the version in its file name), so that unzipping a new version into the program folder updates it in place; the package holds a short README of its own in English and Chinese beside the guides, not the repository's README; its notices include the licenses of the code compiled into the programs (nlohmann/json, BLAKE3), on every system.
+> Amended by `design/decisions/0038-the-windows-package.md`: R-121's zip holds no folder of its own (`bin`, `lib` and `share` at its root, the version in its file name), so that unzipping a new version into the program folder updates it in place; the package holds a short README of its own in English and Chinese beside the guides, not the repository's README; its notices include the licenses of the code compiled into the programs (nlohmann/json, BLAKE3), on every system; the install fails when `glib-compile-schemas` reports a schema it left out, also with exit code 0, and the package test checks that every GTK schema is compiled.
 
 ```text
 veriarchive_common  veriarchive_core  veriarchive_platform  veriarchive_cli  veriarchive_gui  veriarchive_tests
