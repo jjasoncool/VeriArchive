@@ -208,7 +208,7 @@ veriarchive-cli archive compare <uuid> <uuid>     # do two archives hold the sam
 
 An interrupted `archive relocate` keeps what it has matched and is listed with the unfinished operations: continue it with `archive relocate <uuid> <root> --resume`, or give it up with `archive abandon-relocation <uuid> --confirm`. A relocation that finds an entry on the new carrier that differs from the archive, such as a modified or missing file, ends instead, also when it is interrupted after that, and its saved progress is removed: copy again, and the next relocation reads the whole new carrier. An entry that cannot be read ends it only once everything else has been read; if the new carrier is unplugged before that, the relocation is interrupted, and its resume reads that entry again. If the saved progress of a relocation that ended cannot be removed, the relocation stays listed as "new carrier differs; abandon it": abandon it, then relocate again.
 
-`archive show`, `retire`, `relocate`, `compare`, `history`, `export`, `export-sha256sums` and `verify --full` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
+`archive show`, `retire`, `relocate`, `compare`, `history`, `export`, `export-sha256sums`, `verify --full` and `register --copy-of` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
 
 ## Verifying an archive
 
@@ -331,7 +331,7 @@ veriarchive-cli register F:\
 veriarchive-cli register G:\ --copy-of <uuid of F's archive>
 ```
 
-- `--copy-of` is optional: it records that G is a copy of F, for display only. It needs the full uuid, which `archive list` shows.
+- `--copy-of` is optional: it records that G is a copy of F, for display only. It takes the uuid of F's archive, or its first 8 or more characters, as `archive list` shows them.
 - Register the folder that corresponds to F's root, so the paths line up: if the copy of F sits in `G:\Backup\F`, register `G:\Backup\F`. Anything else in the folder registered on G shows up as New.
 - A sector-by-sector clone of F has F's filesystem id, so registering it stops with exit code 12 (MIGRATED). Add `--force-new-archive` (GUI: "Register as a separate archive even though this folder or volume is registered") to register it as an archive of its own.
 

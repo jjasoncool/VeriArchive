@@ -736,6 +736,14 @@ constexpr CatalogEntry entries[] = {
         "--new-revision：此根目錄沒有已註冊的封存"},
     {"labels have the form ARCH-NNNN", "標籤的格式為 ARCH-NNNN"},
     {"--copy-of needs an archive uuid", "--copy-of 需要一個封存 uuid"},
+    // --copy-of named by the start of an archive's uuid (decision 0005).
+    {"--copy-of {}: no archive's uuid starts with it; give the original's uuid or its first 8 or more characters, as "
+        "`archive list` shows them (`archive show <uuid>` shows the whole uuid)",
+        "--copy-of {}：沒有任何封存的 uuid 以它開頭；請填原始封存的 uuid，或它的前 8 個以上的字元，也就是 "
+        "`archive list` 列出的字元（`archive show <uuid>` 會列出完整的 uuid）"},
+    {"--copy-of {}: several archives' uuids start with it; give more of the original's uuid, which `archive show "
+        "<uuid>` shows whole",
+        "--copy-of {}：有多個封存的 uuid 以它開頭；請多填一些原始封存的 uuid（`archive show <uuid>` 會列出完整的 uuid）"},
     // A root that holds the repository, or lies inside it (decision 0029, point 6).
     {"this folder or volume holds VeriArchive's repository {}, which changes while it is read, so a verification of "
         "this archive could never pass; register a folder that does not hold the repository, or move the repository "

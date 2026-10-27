@@ -10,6 +10,7 @@
 #include "app/local_time.h"
 #include "app/unfinished_operations.h"
 #include "common/utf8.h"
+#include "common/uuid.h"
 #include "core/engine/register_engine.h"
 #include "platform/file_system.h"
 #include "platform/interrupt.h"
@@ -17,6 +18,7 @@
 #include "platform/process_table.h"
 
 #include <iostream>
+#include <vector>
 
 namespace va::cli {
 namespace {
@@ -253,7 +255,6 @@ int register_command(const Arguments& arguments)
     request.resume = arguments.has("--resume") || arguments.value("--resume").has_value();
     request.write_media_copy = arguments.has("--write-media-copy");
     request.label = arguments.value("--label");
-    request.copy_of = arguments.value("--copy-of");
     request.new_revision = arguments.has("--new-revision");
     request.force_new_archive = arguments.has("--force-new-archive");
     request.confirmed = arguments.has("--confirm");
@@ -279,6 +280,39 @@ int register_command(const Arguments& arguments)
     auto store = ArchiveStore::open(session->context.repo);
     if (!store) {
         return report_failure(arguments, {exit_code::repository, store.error().message});
+    }
+    // Decision 0005: the original that this archive is a copy of, named as
+    // `archive show` names one: its uuid, which may also name an archive of
+    // another repository (display only), or the first 8 or more characters
+    // of the uuid of one archive of this repository.
+    if (const auto copy_of = arguments.value("--copy-of")) {
+        if (is_canonical_uuid(*copy_of)) {
+            request.copy_of = *copy_of;
+        } else {
+            const auto archives = store->archives();
+            if (!archives) {
+                return report_failure(arguments, {exit_code::repository, archives.error().message});
+            }
+            std::vector<Uuid> named;
+            for (const auto& archive : *archives) {
+                if (names_archive(archive.archive_uuid, *copy_of)) {
+                    named.push_back(archive.archive_uuid);
+                }
+            }
+            // Where the whole uuid is shown, as archive list shows its first 8 characters.
+            if (named.empty()) {
+                return report_failure(arguments, {exit_code::usage,
+                    "--copy-of " + *copy_of + ": no archive's uuid starts with it; give the original's uuid or its "
+                    "first 8 or more characters, as `archive list` shows them (`archive show <uuid>` shows the whole "
+                    "uuid)"});
+            }
+            if (named.size() > 1) {
+                return report_failure(arguments, {exit_code::usage,
+                    "--copy-of " + *copy_of + ": several archives' uuids start with it; give more of the original's "
+                    "uuid, which `archive show <uuid>` shows whole"});
+            }
+            request.copy_of = named.front();
+        }
     }
     // The archive whose manifest is lost, named as `archive show` names one:
     // its uuid, or a unique prefix of at least 8 characters.

@@ -387,6 +387,24 @@ if(NOT result STREQUAL "IDENTICAL" OR NOT same EQUAL 5 OR NOT difference_count E
     message(FATAL_ERROR "compare --json of a copy:\n${last_output}")
 endif()
 
+# Decision 0005: --copy-of takes the original's uuid or its first 8 or more
+# characters, as `archive list` shows them, and records the whole uuid; the
+# start of no archive's uuid is a usage error (exit 10) that says where the
+# whole uuid is shown. (A copy of the copy's sample folder of its own.)
+set(COPY_OF "${WORK}/copy-of-sample")
+file(COPY "${ROOT}/" DESTINATION "${COPY_OF}")
+run_cli("10" --lang en register "${COPY_OF}" --copy-of abcdef12)
+if(NOT last_errors STREQUAL "error: --copy-of abcdef12: no archive's uuid starts with it; give the original's uuid or its first 8 or more characters, as `archive list` shows them (`archive show <uuid>` shows the whole uuid)\n")
+    message(FATAL_ERROR "register --copy-of of the start of no archive's uuid:\n${last_errors}")
+endif()
+run_cli("0" register "${COPY_OF}" --copy-of "${archive_prefix}" --json)
+string(JSON copy_of_uuid GET "${last_output}" archive_uuid)
+run_cli("0" archive show "${copy_of_uuid}" --json)
+string(JSON recorded_copy_of GET "${last_output}" copy_of)
+if(NOT recorded_copy_of STREQUAL archive_uuid)
+    message(FATAL_ERROR "register --copy-of of the start of an archive's uuid recorded ${recorded_copy_of}")
+endif()
+
 # One file changed, one deleted, one added in the copy and registered again:
 # the comparison lists each, and DIFFERENT exits with 3.
 file(WRITE "${COPY}/readme.txt" "hello, world\n")

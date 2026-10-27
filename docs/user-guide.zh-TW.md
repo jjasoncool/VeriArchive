@@ -208,7 +208,7 @@ veriarchive-cli archive compare <uuid> <uuid>    # 兩個封存的內容是否�
 
 中斷的 `archive relocate` 會保留已比對相符的進度，並列在未完成的作業中：以 `archive relocate <uuid> <根目錄> --resume` 繼續，或以 `archive abandon-relocation <uuid> --confirm` 放棄。如果搬移發現新載體上有項目和封存不符，例如檔案被修改或遺失，搬移就會結束（即使之後才被中斷也一樣），已儲存的進度也會刪除：請重新複製，下一次搬移會重讀整個新載體。讀不到的項目，要等其他項目都讀完才會結束搬移；如果新載體在那之前被拔除，搬移只是中斷，繼續時會重讀那個項目。結束的搬移若無法刪除已儲存的進度，會以「新載體上的內容不符；請放棄它」留在未完成的作業中：請先放棄它，再重新搬移。
 
-`archive show`、`retire`、`relocate`、`compare`、`history`、`export`、`export-sha256sums` 與 `verify --full` 的 uuid 可以只打前 8 個以上的字元，只要不會和其他封存混淆。
+`archive show`、`retire`、`relocate`、`compare`、`history`、`export`、`export-sha256sums`、`verify --full` 與 `register --copy-of` 的 uuid 可以只打前 8 個以上的字元，只要不會和其他封存混淆。
 
 ## 驗證封存
 
@@ -331,7 +331,7 @@ veriarchive-cli register F:\
 veriarchive-cli register G:\ --copy-of <F 的封存 uuid>
 ```
 
-- `--copy-of` 可以不加：它只是記錄「G 是 F 的副本」，供顯示用。這裡要填完整的 uuid，可用 `archive list` 查看。
+- `--copy-of` 可以不加：它只是記錄「G 是 F 的副本」，供顯示用。這裡填 F 的封存 uuid，或它的前 8 個以上的字元，也就是 `archive list` 列出的字元。
 - 要註冊和 F 根目錄相對應的資料夾，兩邊的路徑才對得上：如果 F 的副本放在 `G:\Backup\F`，就註冊 `G:\Backup\F`。G 這邊註冊的資料夾裡如果還有其他東西，都會被列為「新增」。
 - 如果 G 是用逐磁區方式複製（克隆）出來的，它的檔案系統 UUID 和 F 相同，註冊時會停下來（結束代碼 12，已遷移）。加上 `--force-new-archive`（圖形介面：勾選「即使此資料夾或磁碟區已註冊，仍註冊為另一個封存」），就能把它註冊成另一個封存。
 

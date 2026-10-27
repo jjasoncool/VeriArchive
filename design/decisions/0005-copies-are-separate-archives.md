@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-08
-amends: HANDOFF §B4.3 (optional header key), §B16 (CLI)
+amends: HANDOFF §B4.3 (optional header key), §B16 (CLI; amended 2026-10-27: `--copy-of` takes the first 8 or more characters of an archive's uuid)
 ---
 
 # Each physical copy is its own archive; `copy_of` is display-only
@@ -14,3 +14,4 @@ Keeping the same content on several media (3-2-1) could be modelled as one archi
 - Relocation (decision 0004) carries `copy_of` forward to the new revision; a unit test relocates a copy and reads `copy_of` in its next revision.
 - Amended by decision 0028 (point 8): a registration over a lost manifest names the original as `--copy-of` names it, otherwise as the newest manifest of the archive that can be used names it, as the lost manifest's own `copy_of` is no longer known.
 - "Only one healthy copy left" warnings need the one-archive-many-copies model and are deferred.
+- Amended 2026-10-27: `--copy-of` takes the original as `archive show` names one, its uuid or the first 8 or more characters of the uuid of one archive of this repository, which `archive list` shows; the header records the whole uuid. A whole uuid is taken as it is, also one of an archive of another repository (display only, as before). The start of no archive's uuid, or of several, is a usage error (exit 10) that says where the whole uuid is shown (`archive show <uuid>`); it said "--copy-of needs an archive uuid", while the guides sent the operator to `archive list`, which shows 8 characters. Tests: the CLI end to end, a copy registered with the first 8 characters of the original's uuid, which its header records whole, and the start of no archive's uuid refused; a mutation check dropped the prefix taken and the message that says where the whole uuid is, in turn, and each removal failed the test.
