@@ -399,11 +399,13 @@ veriarchive-cli archive compare 0d0ce48d a82ebd4e
 
 ```text
 veriarchive-cli export-sha256sums <uuid> --out sums.txt   # 產生 sha256sum 格式的清單
-veriarchive-cli export <uuid> --out D:\export             # 匯出清單檔
-veriarchive-cli import D:\export\r0001.vam                # 匯入到另一個儲存庫
+veriarchive-cli export <uuid> --out D:\export             # 匯出目前版次的清單檔
+veriarchive-cli --repository D:\OtherRepository import D:\export\r0001.vam   # 匯入到另一個儲存庫
 ```
 
-`sums.txt` 可以在沒有 VeriArchive 的電腦上用 `sha256sum -c sums.txt` 檢查。
+`export` 匯出的是封存目前版次的清單檔和它的 `identity.json`，不包括較早版次的：要保留每個版次的匯出檔，請在每次建立新版次之後再匯出一次。`import` 會匯入到目前使用的儲存庫；要匯入到另一個儲存庫，請用 `--repository` 指定它，如果它還不存在，要先建立（`veriarchive-cli --repository D:\OtherRepository repo init`）。
+
+`sums.txt` 以封存內的路徑列出每個檔案，所以要在封存的根目錄執行 `sha256sum -c sums.txt`，才能在沒有 VeriArchive 的情況下檢查封存。Windows 本身沒有 `sha256sum`；Git Bash（Git for Windows 的一部分）、WSL 和 Linux 都有。在 Git Bash 中，封存在 `F:\`、清單在 `D:\sums.txt` 時：`cd /f && sha256sum -c /d/sums.txt`。
 
 ## 其他
 

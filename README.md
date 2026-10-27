@@ -87,7 +87,7 @@ veriarchive-cli archive list                    # last FULL verify, last verify,
 veriarchive-cli archive compare <uuid_a> <uuid_b>   # does copy B hold what archive A holds?
 veriarchive-cli history <uuid>
 veriarchive-cli repo verify-history             # check the history hash chain
-veriarchive-cli export-sha256sums <uuid> --out sums.txt   # check later with sha256sum -c
+veriarchive-cli export-sha256sums <uuid> --out sums.txt   # sha256sum -c, run in the archive's root
 ```
 
 More: `register --new-revision | --force-new-archive | --copy-of UUID | --write-media-copy |

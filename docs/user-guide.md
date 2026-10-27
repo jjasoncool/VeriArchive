@@ -399,11 +399,13 @@ If F changed between its registration and the copy, the comparison shows the cha
 
 ```text
 veriarchive-cli export-sha256sums <uuid> --out sums.txt   # sha256sum-format list
-veriarchive-cli export <uuid> --out D:\export             # export the manifests
-veriarchive-cli import D:\export\r0001.vam                # import into another repository
+veriarchive-cli export <uuid> --out D:\export             # the current revision's manifest
+veriarchive-cli --repository D:\OtherRepository import D:\export\r0001.vam   # into another repository
 ```
 
-`sums.txt` can be checked without VeriArchive: `sha256sum -c sums.txt`.
+`export` writes the manifest of the archive's current revision and its `identity.json`, not those of earlier revisions: to keep an export of every revision, export the archive again after each new one. `import` imports into the repository in use; to import into another repository, name it with `--repository`, and create it first if it does not exist yet (`veriarchive-cli --repository D:\OtherRepository repo init`).
+
+`sums.txt` lists every file by its path inside the archive, so `sha256sum -c sums.txt` checks the archive without VeriArchive when it runs in the archive's root folder. Windows itself has no `sha256sum`; Git Bash (part of Git for Windows), WSL and Linux have it. In Git Bash, for an archive at `F:\` and the list at `D:\sums.txt`: `cd /f && sha256sum -c /d/sums.txt`.
 
 ## More
 
