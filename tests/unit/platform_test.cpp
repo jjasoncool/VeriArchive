@@ -2,6 +2,7 @@
 
 #include "app/typed_path.h"
 #include "common/utf8.h"
+#include "core/engine/candidates.h"
 #include "core/engine/registration_attempt.h"
 #include "platform/linux/mountinfo.h"
 #include "platform/media_enumerator.h"
@@ -14,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -21,6 +23,9 @@
 #include <string_view>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -307,6 +312,47 @@ void volume_guid_paths_name_folders()
     std::filesystem::remove_all(folder, error);
 }
 
+// Decision 0029, point 6: the path by which the file system names a folder
+// (final_path) is the same for every spelling of it: its short (8.3) name on
+// Windows, where the volume gives one, a junction to it on Windows and a
+// symbolic link to it on Linux (sample folders). A folder inside it is named
+// inside it, as path_within compares them, and a folder that is not there is
+// not named.
+void final_paths_name_a_folder_alike()
+{
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto base = std::filesystem::temp_directory_path() / ("va-SAMPLE-final-" + std::to_string(stamp));
+    const auto folder = base / "program folder with a long name SAMPLE";
+    std::filesystem::create_directories(folder / "data");
+    const auto named = va::platform::final_path(folder);
+    const auto inside = va::platform::final_path(folder / "data");
+    CHECK(named && inside && va::path_within(*named, *inside) && !va::path_within(*inside, *named));
+    CHECK(!va::platform::final_path(folder / "SAMPLE-missing"));
+#ifdef _WIN32
+    std::wstring short_name(32768, L'\0');
+    const auto length = GetShortPathNameW(folder.c_str(), short_name.data(), static_cast<DWORD>(short_name.size()));
+    short_name.resize(length);
+    if (length > 0 && std::filesystem::path(short_name) != folder) {
+        CHECK(va::platform::final_path(std::filesystem::path(short_name)) == named);
+        CHECK(va::platform::final_path(std::filesystem::path(short_name) / "data") == inside);
+    }
+    const auto command = "mklink /J \"" + va::path_to_utf8(base / "junction-SAMPLE") + "\" \"" +
+                         va::path_to_utf8(folder) + "\" >NUL";
+    const bool linked = std::system(command.c_str()) == 0;
+#else
+    std::error_code link_error;
+    std::filesystem::create_directory_symlink(folder, base / "junction-SAMPLE", link_error);
+    const bool linked = !link_error;
+#endif
+    CHECK(linked);
+    if (linked) {
+        CHECK(va::platform::final_path(base / "junction-SAMPLE") == named);
+        CHECK(va::platform::final_path(base / "junction-SAMPLE" / "data") == inside);
+    }
+    std::error_code error;
+    std::filesystem::remove_all(base, error);
+}
+
 // Decision 0029: on Linux a root on a network filesystem, told by the type of
 // the mount that contains it (sample mountinfo: NFS, SMB and sshfs mounts, a
 // local volume mounted in a folder of the NFS share, a local volume through
@@ -498,6 +544,7 @@ void platform_tests()
     volume_guid_paths_are_made_normal();
     volumes_without_a_mount_point_are_listed_by_their_guid_path();
     volume_guid_paths_name_folders();
+    final_paths_name_a_folder_alike();
     linux_roots_on_network_filesystems_are_told();
     linux_network_filesystems_are_told_by_statfs_and_mounts();
     network_types_are_recognised();

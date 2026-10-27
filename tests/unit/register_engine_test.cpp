@@ -124,7 +124,63 @@ void a_root_that_holds_the_repository_is_refused()
         }
     }
     const auto beside = fixture.run(at(repository.parent_path() / "beside-SAMPLE"));
-    CHECK(!beside || beside.error().message.find("VeriArchive's repository") == std::string::npos);
+    CHECK(beside || beside.error().message.find("VeriArchive's repository") == std::string::npos);
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->empty());
+}
+
+// Decision 0029, point 6: the root and the repository are compared by what
+// the file system names them (final_path, here a table of sample names), so
+// another spelling of either is told: a short name of the repository's
+// folder, another of a folder inside it, and the repository itself through a
+// drive letter made with subst while its folder is typed by its real path.
+// Where both are named, their text alone refuses nothing: a folder whose text
+// lies inside the repository but which names a folder elsewhere (a junction
+// out of it) is no such root.
+void a_root_that_names_the_repository_otherwise_is_refused()
+{
+    Fixture fixture;
+    const auto repository = fixture.repository.context.repo.root;
+    const std::filesystem::path short_name = "/vol/PROGRA~1-SAMPLE";
+    const std::filesystem::path inside_short = "/vol/INSIDE~1-SAMPLE";
+    const std::filesystem::path through_subst = "/subst-S-SAMPLE/repository";
+    const std::filesystem::path junction = repository / "junction-SAMPLE";
+    std::map<std::filesystem::path, std::filesystem::path> names{
+        {repository, repository},
+        {repository.parent_path(), repository.parent_path()},
+        {short_name, repository.parent_path()},
+        {inside_short, repository / "manifests"},
+        {through_subst, repository},
+        {junction, "/vol/elsewhere-SAMPLE"},
+    };
+    fixture.final_path = [&](const std::filesystem::path& path) -> std::optional<std::filesystem::path> {
+        const auto found = names.find(path);
+        return found == names.end() ? std::nullopt : std::optional(found->second);
+    };
+    const auto refusal = [](const std::filesystem::path& shown, bool holds) {
+        return holds ? "this folder or volume holds VeriArchive's repository " + va::path_to_utf8(shown) +
+                           ", which changes while it is read, so a verification of this archive could never pass; "
+                           "register a folder that does not hold the repository, or move the repository out of it "
+                           "first"
+                     : "this folder lies inside VeriArchive's repository " + va::path_to_utf8(shown) +
+                           ", which changes while it is read, so a verification of this archive could never pass; "
+                           "register a folder outside the repository";
+    };
+    const auto held = fixture.run(at(short_name));
+    CHECK(!held && held.error().kind == va::RegisterFailure::Kind::Invalid &&
+          held.error().message == refusal(repository, true));
+    const auto inside = fixture.run(at(inside_short));
+    CHECK(!inside && inside.error().kind == va::RegisterFailure::Kind::Invalid &&
+          inside.error().message == refusal(repository, false));
+    const auto elsewhere = fixture.run(at(junction));
+    CHECK(elsewhere || elsewhere.error().message.find("VeriArchive's repository") == std::string::npos);
+
+    va::RegisterServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media_writer, fixture.media, fixture.store, va::RepositoryLayout{through_subst}, fixture.host,
+        fixture.processes, fixture.final_path};
+    const auto through = va::register_archive(services, at(repository.parent_path()), fixture.cancel, fixture.progress);
+    CHECK(!through && through.error().kind == va::RegisterFailure::Kind::Invalid &&
+          through.error().message == refusal(through_subst, true));
     const auto archives = fixture.store.archives();
     CHECK(archives && archives->empty());
 }
@@ -3348,6 +3404,7 @@ void register_engine_tests()
     first_registration_writes_manifest_and_index();
     malformed_values_are_invalid();
     a_root_that_holds_the_repository_is_refused();
+    a_root_that_names_the_repository_otherwise_is_refused();
     registered_root_needs_a_flag();
     registered_root_without_filesystem_id_needs_a_flag();
     a_new_revision_of_a_copy_stays_a_copy();

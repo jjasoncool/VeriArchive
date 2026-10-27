@@ -221,6 +221,47 @@ if(repository_held EQUAL -1 OR repository_held_why EQUAL -1 OR repository_inside
     message(FATAL_ERROR "register of a root that holds the repository, or lies inside it: ${repository_held} "
         "${repository_held_why} ${repository_inside}\n${last_errors}")
 endif()
+# Another spelling of a folder that holds the repository is refused alike: a
+# link to the repository (a junction on Windows, a symbolic link on Linux,
+# sample), and on Windows WORK's short (8.3) name where its volume gives one.
+set(repository_link "${WORK}/link-to-repository-SAMPLE")
+if(CMAKE_HOST_WIN32)
+    file(TO_NATIVE_PATH "${repository_link}" repository_link_native)
+    file(TO_NATIVE_PATH "${WORK}/repo" repository_native)
+    execute_process(COMMAND cmd /c mklink /J "${repository_link_native}" "${repository_native}"
+        RESULT_VARIABLE linked OUTPUT_QUIET ERROR_QUIET)
+else()
+    file(CREATE_LINK "${WORK}/repo" "${repository_link}" RESULT linked SYMBOLIC)
+endif()
+if(NOT linked EQUAL 0)
+    message(FATAL_ERROR "cannot make a link to the sample repository: ${linked}")
+endif()
+run_cli("10" --lang en register "${repository_link}")
+string(FIND "${last_errors}" "error: this folder or volume holds VeriArchive's repository " link_held)
+file(REMOVE "${repository_link}")
+set(short_held 0)
+if(CMAKE_HOST_WIN32)
+    # The command prompt tells a path's short name (%~s), from a batch file
+    # that takes the path as its argument, whatever characters it holds.
+    file(TO_NATIVE_PATH "${WORK}" work_native)
+    file(WRITE "${WORK}/short-name-SAMPLE.bat" "@echo off\r\nfor %%I in (\"%~1\") do echo %%~sI\r\n")
+    file(TO_NATIVE_PATH "${WORK}/short-name-SAMPLE.bat" short_name_script)
+    execute_process(COMMAND cmd /c "${short_name_script}" "${work_native}"
+        OUTPUT_VARIABLE work_short OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    file(REMOVE "${WORK}/short-name-SAMPLE.bat")
+    if(work_short STREQUAL "" OR work_short STREQUAL work_native)
+        message(STATUS "short name probe skipped: the volume gives ${WORK} no short (8.3) name")
+    else()
+        run_cli("10" --lang en register "${work_short}")
+        string(FIND "${last_errors}" "error: this folder or volume holds VeriArchive's repository " short_held)
+    endif()
+endif()
+run_cli("0" archive list --json)
+string(JSON archives_after_links LENGTH "${last_output}" archives)
+if(link_held EQUAL -1 OR short_held EQUAL -1 OR NOT archives_after_links EQUAL archives_before_repository)
+    message(FATAL_ERROR "register of another spelling of a folder that holds the repository: link ${link_held}, "
+        "short name '${work_short}' ${short_held}\n${last_errors}")
+endif()
 # A new root of a relocation that is no folder is a usage error too, named as typed.
 run_cli("10" --lang en archive relocate "${archive_uuid}" Missing)
 if(NOT last_errors STREQUAL "error: the folder or volume Missing was not found\n")

@@ -622,15 +622,31 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // while the root is read (the database, its journal, new manifests), so
     // no verification of the archive could ever pass. Leaving the repository
     // out of the scan would change what a manifest holds (R-54), so the root
-    // is refused instead.
-    if (path_within(request.root, services.layout.root)) {
+    // is refused instead. The two are compared by what the file system names
+    // them, so that another spelling of either (a drive letter made with
+    // subst, a short name, a junction or symbolic link, a volume's GUID path)
+    // is told too; by their text where either cannot be told.
+    const auto named = [&](const std::filesystem::path& path) {
+        return services.final_path ? services.final_path(path) : std::nullopt;
+    };
+    const auto root_named = named(request.root);
+    const auto repository_named = named(services.layout.root);
+    const auto within = [&](bool root_holds) {
+        if (root_named && repository_named) {
+            return root_holds ? path_within(*root_named, *repository_named)
+                              : path_within(*repository_named, *root_named);
+        }
+        return root_holds ? path_within(request.root, services.layout.root)
+                          : path_within(services.layout.root, request.root);
+    };
+    if (within(true)) {
         return fail(Kind::Invalid, "this folder or volume holds VeriArchive's repository " +
                                        path_to_utf8(services.layout.root) +
                                        ", which changes while it is read, so a verification of this archive could "
                                        "never pass; register a folder that does not hold the repository, or move the "
                                        "repository out of it first");
     }
-    if (path_within(services.layout.root, request.root)) {
+    if (within(false)) {
         return fail(Kind::Invalid, "this folder lies inside VeriArchive's repository " +
                                        path_to_utf8(services.layout.root) +
                                        ", which changes while it is read, so a verification of this archive could "

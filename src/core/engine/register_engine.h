@@ -6,6 +6,8 @@
 #include "core/manifest/manifest.h"
 #include "core/repository/archive_store.h"
 
+#include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -50,6 +52,11 @@ struct RegisterServices {
     RepositoryLayout layout;
     HostInfo host;
     IProcessTable& processes;               // which process runs an attempt, and whether it still runs (decision 0024)
+    // The path by which the file system names a folder (platform::final_path),
+    // to tell a root that holds the repository, or lies inside it, however
+    // either is spelled (decision 0029, point 6); empty, or nothing for a
+    // path, where only the paths' text is compared.
+    std::function<std::optional<std::filesystem::path>(const std::filesystem::path&)> final_path = {};
 };
 
 struct RegisterOutcome {

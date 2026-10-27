@@ -162,6 +162,50 @@ RootPresence root_presence(const std::filesystem::path& root)
     });
 }
 
+std::optional<std::filesystem::path> final_path(const std::filesystem::path& path)
+{
+    // The final path of a handle opened as a folder is opened
+    // (FILE_FLAG_BACKUP_SEMANTICS), with no right but reading its attributes,
+    // unprivileged (R-09). Opened without FILE_FLAG_OPEN_REPARSE_POINT, a
+    // junction or symbolic link is followed to what it names.
+    const auto resolved = [](const std::wstring& name) -> std::optional<std::filesystem::path> {
+        HANDLE handle = CreateFileW(name.c_str(), FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            return std::nullopt;
+        }
+        std::optional<std::filesystem::path> named;
+        // The volume by its GUID path, which names it alike through every
+        // drive letter and mount point; a volume without one by its letter.
+        for (const DWORD volume_name : {DWORD{VOLUME_NAME_GUID}, DWORD{VOLUME_NAME_DOS}}) {
+            std::vector<wchar_t> buffer(MAX_PATH);
+            auto length = GetFinalPathNameByHandleW(
+                handle, buffer.data(), static_cast<DWORD>(buffer.size()), FILE_NAME_NORMALIZED | volume_name);
+            if (length >= buffer.size()) {
+                buffer.resize(length + 1);
+                length = GetFinalPathNameByHandleW(
+                    handle, buffer.data(), static_cast<DWORD>(buffer.size()), FILE_NAME_NORMALIZED | volume_name);
+            }
+            if (length > 0 && length < buffer.size()) {
+                named = std::filesystem::path(std::wstring(buffer.data(), length));
+                break;
+            }
+        }
+        CloseHandle(handle);
+        return named;
+    };
+    auto name = windows::long_path(resolve_subst_drive(path).native());
+    if (auto named = resolved(name)) {
+        return named;
+    }
+    // "\\?\Volume{...}" names the volume; its root folder is "\\?\Volume{...}\".
+    if (!name.empty() && name.back() != L'\\') {
+        return resolved(name + L'\\');
+    }
+    return std::nullopt;
+}
+
 bool is_directory(const std::filesystem::path& path)
 {
     auto name = windows::long_path(path.native());

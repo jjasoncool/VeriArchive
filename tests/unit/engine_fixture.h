@@ -14,6 +14,8 @@
 #include <nlohmann/json.hpp>
 
 #include <format>
+#include <functional>
+#include <optional>
 
 namespace test {
 
@@ -151,6 +153,9 @@ struct EngineFixture {
     // How the engines read the media: through `archive` itself unless a test
     // puts a view of it here, such as a device that goes away (RemovableDevice).
     va::IFileSystemAccess* media_files = nullptr;
+    // How the file system names a path (RegisterServices::final_path); none:
+    // the paths' text alone is compared.
+    std::function<std::optional<std::filesystem::path>(const std::filesystem::path&)> final_path;
 
     // An archive volume whose root, and mount point, is `root`.
     explicit EngineFixture(std::filesystem::path root = "/vol") : archive(std::move(root))
@@ -163,7 +168,7 @@ struct EngineFixture {
     std::expected<va::RegisterOutcome, va::RegisterFailure> register_root(va::RegisterRequest request)
     {
         va::RegisterServices services{archive_files(), *repository.files, *repository.writer, media_writer, media,
-            store, repository.context.repo, host, processes};
+            store, repository.context.repo, host, processes, final_path};
         return va::register_archive(services, request, cancel, progress);
     }
 

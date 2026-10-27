@@ -151,6 +151,16 @@ std::filesystem::path normal_volume_guid_path(const std::filesystem::path& path)
     return path;
 }
 
+std::optional<std::filesystem::path> final_path(const std::filesystem::path& path)
+{
+    std::error_code error;
+    auto canonical = std::filesystem::canonical(path, error);
+    if (error) {
+        return std::nullopt;
+    }
+    return canonical;
+}
+
 std::string os_name()
 {
     return "linux";

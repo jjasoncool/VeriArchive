@@ -10,6 +10,7 @@
 #include "core/engine/register_engine.h"
 #include "platform/file_system.h"
 #include "platform/media_enumerator.h"
+#include "platform/platform_services.h"
 #include "platform/process_table.h"
 
 #include <memory>
@@ -156,7 +157,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
             const auto media = platform::make_media_enumerator();
             const auto processes = platform::make_process_table();
             RegisterServices services{*archive_files, *repository_files, *session.writer, *session.writer,
-                *media, *store, session.context.repo, state.host, *processes};
+                *media, *store, session.context.repo, state.host, *processes, platform::final_path};
             auto outcome = register_archive(services, request, cancel, progress);
             if (!outcome) {
                 // A resume of a registration that an older version left,

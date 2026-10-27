@@ -2,6 +2,7 @@
 #include <chrono>
 #include <filesystem>
 #include <expected>
+#include <optional>
 #include <string>
 #include "common/error.h"
 
@@ -32,6 +33,17 @@ std::filesystem::path resolve_subst_drive(const std::filesystem::path& path);
 // the root read is the root identified. Any other path comes back unchanged,
 // and on Linux every path.
 std::filesystem::path normal_volume_guid_path(const std::filesystem::path& path);
+
+// The path by which the file system itself names the folder or file at
+// `path`, as two spellings of one folder name it alike (decision 0029,
+// point 6): on Windows the final path of a handle to it
+// (GetFinalPathNameByHandleW), with a drive letter made with subst, short
+// (8.3) names, junctions, symbolic links and the volume's mount point
+// resolved, the volume named by its GUID path ("\\?\Volume{...}\Photos") where
+// it has one, else by its drive letter; on Linux the canonical path, with
+// symbolic links resolved. Nothing where it cannot be told (not there,
+// access denied).
+std::optional<std::filesystem::path> final_path(const std::filesystem::path& path);
 
 // What keeps a folder the operator gave from being taken as an archive root
 // before anything of it is read (decision 0029). `root` is a root as the user
