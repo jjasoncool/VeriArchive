@@ -15,10 +15,11 @@
 namespace va::cli {
 namespace {
 
-// R-02. Translated in text output; --json keeps the English sentence.
+// R-02. Translated in text output; --json keeps the English sentence. It names
+// no version of the program (decision 0017).
 constexpr const char* guarantee =
-    "V1 detects accidental corruption and unintended change; tamper evidence "
-    "(signed manifests) begins in V1.1.";
+    "VeriArchive detects accidental corruption and unintended change; tamper evidence "
+    "(signed manifests) is not part of this version.";
 
 int result_code(const std::string& result)
 {
@@ -115,7 +116,7 @@ int verify_command(const Arguments& arguments)
 {
     if (arguments.has("--quick") || arguments.has("--deep")) {
         return report_failure(arguments, {exit_code::usage,
-            "QUICK and DEEP verification arrive in V1.1; use --full"});
+            "QUICK and DEEP verification are not available in this version; use --full"});
     }
     if (const auto problem = check_options(arguments, {"--full", "--strict-metadata"}, {"--io", "--resume"})) {
         return report_failure(arguments, *problem);

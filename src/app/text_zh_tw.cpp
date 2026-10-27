@@ -119,11 +119,13 @@ constexpr CatalogEntry entries[] = {
     {"first-run:home", "第一次使用（個人資料夾）"},
     {"History intact: {} verification runs, hash chain verified.",
         "歷程完整：共 {} 次驗證執行，雜湊鏈已驗證。"},
-    // What a check of the chain tells in V1, from src/app/history.h; the GUI shows it too.
-    {"V1 detects a recorded run that was changed or removed, but not the removal of the newest runs, nor runs "
-        "changed with the chain computed again; V1.1's signed checkpoints are planned for that.",
-        "V1 可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除，也偵測不到修改後連雜湊鏈都"
-        "重新計算過的紀錄；V1.1 預計以簽章檢查點補上這一點。"},
+    // What a check of the chain tells, from src/app/history.h; the GUI shows it too.
+    // Signed history checkpoints are 歷程簽章, kept apart from the 檢查點 of a resume.
+    {"Checking the chain detects a recorded run that was changed or removed, but not the removal of the newest "
+        "runs, nor runs changed with the chain computed again; history signatures, which would detect those, are "
+        "not part of this version.",
+        "檢查歷程鏈可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除，也偵測不到修改後連雜湊鏈都"
+        "重新計算過的紀錄；能偵測這些情況的歷程簽章，這個版本尚未提供。"},
     {"History BROKEN at run {}: {}", "歷程於執行 {} 處斷裂：{}"},
     {"previous row was deleted or edited (prev_hash does not link)",
         "前一筆紀錄已被刪除或修改（prev_hash 無法銜接）"},
@@ -209,11 +211,11 @@ constexpr CatalogEntry entries[] = {
         "若要繼續，請執行：veriarchive-cli verify --full {} --resume {}"},
     {"resumed from run: {}", "已從執行 {} 繼續"},
     {"run: {}", "執行：{}"},
-    {"V1 detects accidental corruption and unintended change; "
-        "tamper evidence (signed manifests) begins in V1.1.",
-        "V1 可偵測意外損毀與非預期的變更；竄改證據（簽章清單檔）自 V1.1 起提供。"},
-    {"QUICK and DEEP verification arrive in V1.1; use --full",
-        "快速驗證與深度驗證將於 V1.1 提供；請使用 --full"},
+    {"VeriArchive detects accidental corruption and unintended change; "
+        "tamper evidence (signed manifests) is not part of this version.",
+        "VeriArchive 能偵測意外損毀與非預期的變更；這個版本尚未提供竄改證據（簽章清單檔）。"},
+    {"QUICK and DEEP verification are not available in this version; use --full",
+        "這個版本尚未提供快速驗證與深度驗證；請使用 --full"},
     {"usage: verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd] "
         "[--resume RUN_ID]",
         "用法：verify --full <root_path|archive_uuid> [--strict-metadata] [--io hdd|ssd] "
@@ -521,8 +523,8 @@ constexpr CatalogEntry entries[] = {
         "逾期期限：完整驗證 {} 天，任何驗證 {} 天"},
     {"Strict metadata: on", "嚴格中繼資料：開啟"},
     {"Strict metadata: off", "嚴格中繼資料：關閉"},
-    {"Trusted signing keys: signed manifests arrive in V1.1.",
-        "受信任的簽章金鑰：簽章清單檔將於 V1.1 提供。"},
+    {"Trusted signing keys: signed manifests are not part of this version.",
+        "受信任的金鑰：這個版本尚未提供簽章清單檔。"},
     {"Back up RepositoryRoot. Losing it loses all verification history; "
         "manifests can be recovered only from media copies, if they were written.",
         "請備份儲存庫根目錄。遺失它會失去所有驗證歷程；"

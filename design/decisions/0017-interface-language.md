@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-08
-amends: HANDOFF §B7.3 (config keys), §B16 (global options), §B17 (Settings)
+amends: HANDOFF §B7.3 (config keys), §B16 (global options), §B17 (Settings); R-02 (§A1: how reports and the GUI word the guarantee, 2026-10-27)
 ---
 
 # The interface speaks English and Traditional Chinese
@@ -34,6 +34,19 @@ On Windows the CLI writes text for a console window as UTF-16 (`WriteConsoleW`),
 
 If the GUI ends unexpectedly, it appends the reason to `veriarchive-gui.log` in the user config folder (`%APPDATA%\VeriArchive` on Windows); an exception in a button or other GTK callback is shown in the view instead of ending the program.
 
+## What this version does not do (2026-10-27)
+
+The texts of the CLI and the GUI, the catalog, the user guides and the README never name a version of the program (V1, V1.1, 1.0.0) for what it does or does not do. The specification's milestones are not the numbers of the programs: 1.1.0 holds only the first stage of V1.1, so "tamper evidence begins in V1.1" was untrue in the very version it named. What this version does not do yet is said of "this version", which stays true in every version that lacks the feature, whatever its number, and goes when the feature comes:
+
+- R-02's guarantee, in every verify report of the CLI and the GUI: "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) is not part of this version." `--json` gives the same English sentence in `guarantee`.
+- The refusal of `verify --quick|--deep` (exit 10): "QUICK and DEEP verification are not available in this version; use --full".
+- Settings: "Trusted signing keys: signed manifests are not part of this version."
+- After a check of the history chain: "... history signatures, which would detect those, are not part of this version."
+
+A unit test fails on a catalog entry that names a version in either language ("V" and a digit at the start of a word); the end-to-end test checks the guarantee, its `--json` member and the refusal in both languages.
+
+Signed history checkpoints (R-76) are history signatures in the interface, 歷程簽章 in Chinese, never 簽章檢查點: 檢查點 is the checkpoint of a resume (operator's plan, item 4-3).
+
 ## Implementation
 
 English is the source language: the code keeps writing English. `va::app::Text` translates a message (`text("Settings")`) or a template with values (`text.format("Registered {} revision {}", label, revision)`). The compiler checks each English template against its values, as `std::format` does; a translation that does not fit is replaced by the English text rather than failing.
@@ -56,6 +69,8 @@ The catalog is C++ (`src/app/text_zh_tw.cpp`), not gettext `.po`/`.mo`: no extra
 | verify, FULL verify | 驗證、完整驗證 |
 | run, resume, checkpoint | 執行、繼續、檢查點 |
 | history, history chain | 歷程、歷程鏈 |
+| history signature (a signed history checkpoint, R-76) | 歷程簽章 |
+| tamper evidence, signed manifest, trusted key | 竄改證據、簽章清單檔、受信任的金鑰 |
 | volume, disk, carrier, media | 磁碟區、磁碟、載體、媒體 |
 | link (symlink or junction), symlink | 連結、符號連結 |
 | identity | 身分 |

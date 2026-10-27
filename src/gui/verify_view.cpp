@@ -17,8 +17,8 @@ namespace va::gui {
 namespace {
 
 constexpr const char* guarantee =
-    "V1 detects accidental corruption and unintended change; tamper evidence (signed manifests) "
-    "begins in V1.1.";
+    "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) "
+    "is not part of this version.";
 
 std::string report(const app::Text& text, const VerifyOutcome& outcome)
 {

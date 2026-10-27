@@ -42,6 +42,24 @@ std::size_t occurrences(std::string_view text, std::string_view part)
     return count;
 }
 
+// True when `text` names a version of the program as the specification does,
+// "V" and a digit at the start of a word ("V1", "V1.1"): an interface text that
+// promises something for a version stays true in no other (decision 0017).
+bool names_a_version(std::string_view text)
+{
+    const auto letter_or_digit = [](char character) {
+        return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+               (character >= '0' && character <= '9');
+    };
+    for (std::size_t index = 0; index + 1 < text.size(); ++index) {
+        if (text[index] == 'V' && text[index + 1] >= '0' && text[index + 1] <= '9' &&
+            (index == 0 || !letter_or_digit(text[index - 1]))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // True when every brace in `text` belongs to a placeholder: "{}", or with
 // `positional` also "{0}", "{1}", ... Format specs ("{:s}") and escaped braces
 // are left out on purpose: engine sentences are filled by the simple matcher in
@@ -72,7 +90,8 @@ bool plain_placeholders(std::string_view text, bool positional)
 // that take the same values, each value exactly once, written only as "{}"
 // (and "{0}", "{1}", ... in the translation); no English text appears twice; a
 // template matched against sentences has enough literal text that it cannot
-// match everything; the match mode fits the template.
+// match everything; the match mode fits the template. No entry names a version
+// of the program: what a version does not do yet is said of "this version".
 void catalog_tests()
 {
     std::set<std::string_view> seen;
@@ -80,6 +99,12 @@ void catalog_tests()
         const bool unique = seen.insert(entry.english).second;
         CHECK(unique);
         CHECK(!entry.english.empty() && !entry.translation.empty());
+
+        const bool versionless = !names_a_version(entry.english) && !names_a_version(entry.translation);
+        CHECK(versionless);
+        if (!versionless) {
+            std::cerr << "  names a version of the program: " << entry.english << '\n';
+        }
 
         const bool plain = plain_placeholders(entry.english, false) &&
                            plain_placeholders(entry.translation, true);
@@ -230,11 +255,12 @@ void translation_tests()
     CHECK(chinese("error: 12 entries carry portability warnings") ==
           "錯誤：12 entries carry portability warnings");
 
-    // What a check of the history chain tells in V1 (app/history.h), which
-    // the command line and the GUI show after a chain that holds.
+    // What a check of the history chain tells (app/history.h), which the
+    // command line and the GUI show after a chain that holds. Signed history
+    // checkpoints are 歷程簽章, never the 檢查點 of a resume.
     CHECK(chinese(va::app::history_chain_limits) ==
-          "V1 可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除，也偵測不到修改後連雜湊鏈都"
-          "重新計算過的紀錄；V1.1 預計以簽章檢查點補上這一點。");
+          "檢查歷程鏈可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除，也偵測不到修改後連雜湊鏈都"
+          "重新計算過的紀錄；能偵測這些情況的歷程簽章，這個版本尚未提供。");
 
     // FormatOnly templates are used through format and never match sentences.
     CHECK(chinese.format("{} archives", 3) == "3 個封存");

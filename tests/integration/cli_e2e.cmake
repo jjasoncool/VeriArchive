@@ -91,6 +91,25 @@ run_cli("0;2" --lang en verify --full "${archive_uuid}")
 if(NOT last_output MATCHES "FULL VERIFY")
     message(FATAL_ERROR "--lang en does not override the configured language:\n${last_output}")
 endif()
+# R-02: a verify report states the guarantee, and neither it nor the refusal
+# of QUICK and DEEP names a version of the program (decision 0017), in either
+# language; --json keeps the English sentence in "guarantee".
+set(guarantee "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) is not part of this version.")
+string(FIND "${last_output}" "\n  ${guarantee}\n" guarantee_english)
+run_cli("0;2" verify --full "${archive_uuid}")
+string(FIND "${last_output}" "\n  VeriArchive 能偵測意外損毀與非預期的變更；這個版本尚未提供竄改證據（簽章清單檔）。\n" guarantee_chinese)
+run_cli("0;2" verify --full "${archive_uuid}" --json)
+string(JSON guarantee_json GET "${last_output}" guarantee)
+run_cli("10" --lang en verify --quick "${archive_uuid}")
+set(quick_refusal "${last_errors}")
+run_cli("10" verify --deep "${archive_uuid}")
+set(deep_refusal "${last_errors}")
+if(guarantee_english EQUAL -1 OR guarantee_chinese EQUAL -1 OR NOT guarantee_json STREQUAL guarantee
+        OR NOT quick_refusal STREQUAL "error: QUICK and DEEP verification are not available in this version; use --full\n"
+        OR NOT deep_refusal STREQUAL "錯誤：這個版本尚未提供快速驗證與深度驗證；請使用 --full\n")
+    message(FATAL_ERROR "the guarantee or the refusal of QUICK and DEEP: ${guarantee_english} ${guarantee_chinese} "
+        "${guarantee_json}\n${quick_refusal}\n${deep_refusal}")
+endif()
 run_cli("10" --lang fr archive list)
 # Command-line errors follow --lang and the config file too.
 run_cli("10" --lang en archive list --label)
@@ -547,14 +566,15 @@ if(NOT item_count EQUAL 3)
 endif()
 
 # History is chained and intact (R-18); listing works. The check says what
-# it cannot tell in V1, in either language.
+# it cannot tell, in either language, naming no version of the program
+# (decision 0017).
 run_cli("0" repo verify-history)
-if(NOT last_output MATCHES "\nV1 可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除")
-    message(FATAL_ERROR "verify-history does not say what V1 cannot tell:\n${last_output}")
+if(NOT last_output MATCHES "\n檢查歷程鏈可偵測已記錄的執行紀錄被修改或刪除，但偵測不到最新幾筆執行紀錄被刪除.*；能偵測這些情況的歷程簽章，這個版本尚未提供。\n")
+    message(FATAL_ERROR "verify-history does not say what the chain cannot tell:\n${last_output}")
 endif()
 run_cli("0" --lang en repo verify-history)
-if(NOT last_output MATCHES "\nV1 detects a recorded run that was changed or removed, but not the removal of the newest runs, nor runs changed with the chain computed again; V1[.]1's signed checkpoints are planned for that[.]\n")
-    message(FATAL_ERROR "verify-history does not say what V1 cannot tell:\n${last_output}")
+if(NOT last_output MATCHES "\nChecking the chain detects a recorded run that was changed or removed, but not the removal of the newest runs, nor runs changed with the chain computed again; history signatures, which would detect those, are not part of this version[.]\n")
+    message(FATAL_ERROR "verify-history does not say what the chain cannot tell:\n${last_output}")
 endif()
 run_cli("0" archive list)
 # People see local time with its offset from UTC; --json keeps UTC.

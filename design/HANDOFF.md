@@ -36,6 +36,8 @@ Each rule has exactly one authoritative section; other sections reference it and
 
 ## A1. Purpose and scope
 
+> Amended by `design/decisions/0017-interface-language.md`: reports and the GUI state R-02's guarantee without naming a version of the program, "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) is not part of this version."; the milestones V1 and V1.1 are not the program's version numbers.
+
 VeriArchive registers backup/archive media, records integrity evidence, and later verifies whether archived content has been modified, corrupted, deleted, or added to. Windows and Linux, one codebase.
 
 - R-01 VeriArchive detects. It does not repair, restore, or create backups.

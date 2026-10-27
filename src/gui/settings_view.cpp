@@ -58,7 +58,7 @@ void refresh_settings(GuiState& state)
                text.format("Overdue after: FULL verify {} days, any verify {} days",
                    policy.full_verify_max_age_days, policy.any_verify_max_age_days) + "\n" +
                text(policy.strict_metadata ? "Strict metadata: on" : "Strict metadata: off") + "\n\n" +
-               text("Trusted signing keys: signed manifests arrive in V1.1.") + "\n\n" +
+               text("Trusted signing keys: signed manifests are not part of this version.") + "\n\n" +
                text("Back up RepositoryRoot. Losing it loses all verification history; manifests "
                     "can be recovered only from media copies, if they were written.");
         for (const auto& warning : state.session->warnings) {

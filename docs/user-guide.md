@@ -299,7 +299,7 @@ Choose an archive in "Archive:" and press "Show runs": every verification is lis
 
 An interrupted `archive relocate` is listed there too, as an INCOMPLETE FULL verification of the revision it compared the new carrier with, marked "interrupted relocation attempt": it read the new carrier, not the archive's carrier. While the relocation is unfinished, continue it with `archive relocate <uuid> <root> --resume`; `verify --resume` does not continue it, and says so. The FULL verification with which a relocation recorded the archive's next revision is marked "relocation from r1", r1 being the revision it compared the new carrier with. The GUI shows these marks in a column "Note" at the end of the table, which appears only for an archive that has such runs; `history --json` gives each run `relocation`: null, or the relocation's `run_id`, `from_revision` and `interrupted_attempt`.
 
-The history is a hash chain. In V1, checking it detects a recorded run that was changed or removed, but not the removal of the newest runs, nor runs changed with the chain computed again; V1.1's signed checkpoints are planned for that. To check it:
+The history is a hash chain. Checking it detects a recorded run that was changed or removed, but not the removal of the newest runs, nor runs changed with the chain computed again; history signatures, which would detect those, are not part of this version. To check it:
 
 - GUI: press "Check history chain"
 - CLI: `veriarchive-cli repo verify-history`
@@ -412,7 +412,7 @@ veriarchive-cli --repository D:\OtherRepository import D:\export\r0001.vam   # i
 - If the database is damaged, rebuild the index from the manifests: `veriarchive-cli repo rebuild-index`. Manifests are the truth; the database is an index.
 - Every command accepts `--json` for machine-readable output.
 - Exit codes: 0 passed, 2 passed with warnings, 3 failed, 4 incomplete, 10 usage, 11 repository, 12 needs your decision.
-- V1 detects accidental corruption and unintended change; tamper evidence (signed manifests) begins in V1.1.
+- VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) is not part of this version. Nor are QUICK and DEEP verification, which would read only a sample of the content: every verification of this version reads everything (FULL).
 - VeriArchive needs no administrator rights and should not be run elevated.
 - In PowerShell, run `[Console]::OutputEncoding = [Text.UTF8Encoding]::new()` before capturing, redirecting (`>`) or piping CLI output; otherwise Chinese text is garbled. Output shown directly in the window is not affected.
 - If the GUI closes unexpectedly, the reason is written to `veriarchive-gui.log` in the user config folder (`%APPDATA%\VeriArchive` on Windows, `~/.config/veriarchive` on Linux). Include it when reporting a problem.
