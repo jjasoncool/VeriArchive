@@ -379,7 +379,18 @@ public:
     // verifies against).
     std::expected<CheckpointCount, IoError> progress_count(
         const std::string& run_id, const Uuid& archive_uuid, std::uint32_t revision);
+    // Removes the run's checkpoints, and the chunk hashes kept with them.
     std::expected<void, IoError> clear_progress(const std::string& run_id);
+    // Adding chunk hashes (decision 0033): the chunk hashes of files
+    // checkpointed under `run_id`, kept with the checkpoints so that a resume
+    // reads none of them again: entry key -> the file's chunk hashes in idx
+    // order, each file's in place of any kept before. Written in the
+    // transaction of the checkpoint that saves the files' keys.
+    std::expected<void, IoError> add_progress_chunks(
+        const std::string& run_id, const std::map<std::string, std::vector<std::string>>& chunks);
+    // The chunk hashes kept under `run_id`. A file whose rows do not run from
+    // idx 0 without a gap gets none: it is taken for a file without them.
+    std::expected<std::map<std::string, std::vector<std::string>>, IoError> progress_chunks(const std::string& run_id);
 
     // Unfinished operations, for showing their progress while another process
     // may be running them. Read only. Each operation costs one pass over its

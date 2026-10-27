@@ -1327,11 +1327,89 @@ std::expected<CheckpointCount, IoError> ArchiveStore::progress_count(
 
 std::expected<void, IoError> ArchiveStore::clear_progress(const std::string& run_id)
 {
-    auto statement = database_.prepare("DELETE FROM verify_progress WHERE run_id = ?");
+    for (const char* sql :
+        {"DELETE FROM verify_progress WHERE run_id = ?", "DELETE FROM verify_progress_chunks WHERE run_id = ?"}) {
+        auto statement = database_.prepare(sql);
+        if (!statement) {
+            return std::unexpected(statement.error());
+        }
+        if (auto deleted = statement->bind(1, run_id).run(); !deleted) {
+            return deleted;
+        }
+    }
+    return {};
+}
+
+std::expected<void, IoError> ArchiveStore::add_progress_chunks(
+    const std::string& run_id, const std::map<std::string, std::vector<std::string>>& chunks)
+{
+    auto removed = database_.prepare(
+        "DELETE FROM verify_progress_chunks WHERE run_id = ? AND path = ? AND raw_hex = ? AND stream = ?");
+    auto inserted = database_.prepare(
+        "INSERT INTO verify_progress_chunks(run_id, path, raw_hex, stream, idx, b3) VALUES(?, ?, ?, ?, ?, ?)");
+    if (!removed || !inserted) {
+        return std::unexpected(!removed ? removed.error() : inserted.error());
+    }
+    for (const auto& [key, hashes] : chunks) {
+        // entry_key(): p '\0' raw '\0' stream
+        const auto first = key.find('\0');
+        const auto second = key.find('\0', first + 1);
+        const auto p = std::string_view(key).substr(0, first);
+        const auto raw = std::string_view(key).substr(first + 1, second - first - 1);
+        const auto stream = std::string_view(key).substr(second + 1);
+        removed->bind(1, run_id).bind(2, p).bind(3, raw).bind(4, stream);
+        if (auto done = removed->run(); !done) {
+            return done;
+        }
+        for (std::size_t idx = 0; idx < hashes.size(); ++idx) {
+            inserted->bind(1, run_id)
+                .bind(2, p)
+                .bind(3, raw)
+                .bind(4, stream)
+                .bind(5, static_cast<std::int64_t>(idx))
+                .bind(6, hashes[idx]);
+            if (auto done = inserted->run(); !done) {
+                return done;
+            }
+        }
+    }
+    return {};
+}
+
+std::expected<std::map<std::string, std::vector<std::string>>, IoError> ArchiveStore::progress_chunks(
+    const std::string& run_id)
+{
+    auto statement = database_.prepare("SELECT path, raw_hex, stream, idx, b3 FROM verify_progress_chunks "
+                                       "WHERE run_id = ? ORDER BY path, raw_hex, stream, idx");
     if (!statement) {
         return std::unexpected(statement.error());
     }
-    return statement->bind(1, run_id).run();
+    statement->bind(1, run_id);
+    std::map<std::string, std::vector<std::string>> chunks;
+    std::set<std::string> broken; // files whose rows have a gap
+    for (;;) {
+        const auto row = statement->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            break;
+        }
+        std::string key = statement->text(0);
+        key += '\0';
+        key += statement->text(1);
+        key += '\0';
+        key += statement->text(2);
+        auto& hashes = chunks[key];
+        if (statement->integer(3) != static_cast<std::int64_t>(hashes.size())) {
+            broken.insert(key);
+        }
+        hashes.push_back(statement->text(4));
+    }
+    for (const auto& key : broken) {
+        chunks.erase(key);
+    }
+    return chunks;
 }
 
 std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_registrations()

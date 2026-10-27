@@ -757,7 +757,7 @@ void database_state_tells_what_cannot_be_used()
     const auto other = state();
     CHECK(!other && other.error().message == "unsupported repository schema");
     std::filesystem::remove(database);
-    run_sql(database, "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (3);");
+    run_sql(database, "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (4);");
     const auto later = state();
     CHECK(!later && later.error().message == "unsupported repository schema");
 
@@ -924,12 +924,33 @@ void a_new_database_left_beside_its_place_is_taken_up()
     }
 }
 
-// Decision 0032: a new repository has schema version 2; one that V1 created
-// (version 1, whose tables are those of version 2) is raised to version 2
-// when this version opens it, keeping its rows, so that a V1 program refuses
-// it from then on. A version this program does not know is refused, and left
-// as it is.
-void a_v1_repository_is_raised_to_schema_version_2()
+// Whether the repository's database has the table `name`.
+bool has_table(const va::RepositoryLayout& layout, const char* name)
+{
+    sqlite3* database = nullptr;
+    const auto file = layout.database().u8string();
+    bool found = false;
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(file.c_str()), &database, SQLITE_OPEN_READONLY, nullptr) ==
+        SQLITE_OK) {
+        sqlite3_stmt* statement = nullptr;
+        if (sqlite3_prepare_v2(database, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", -1,
+                &statement, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(statement, 1, name, -1, SQLITE_TRANSIENT);
+            found = sqlite3_step(statement) == SQLITE_ROW && sqlite3_column_int(statement, 0) == 1;
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return found;
+}
+
+// Decisions 0032 and 0033: a new repository has schema version 3. One that V1
+// created (version 1, whose tables are those of version 2), and one of
+// version 2, are raised to version 3 when this version opens them, keeping
+// their rows: version 3 adds verify_progress_chunks (decision 0033), and a V1
+// program refuses the repository from then on. A version this program does
+// not know is refused, and left as it is.
+void an_older_repository_is_raised_to_schema_version_3()
 {
     TemporaryDirectory temporary("schema-v1");
     auto options = make_options(temporary.path());
@@ -939,38 +960,46 @@ void a_v1_repository_is_raised_to_schema_version_2()
         return;
     }
     const auto& layout = context->repo;
-    CHECK(stored_schema_version(layout) == 2);
+    CHECK(stored_schema_version(layout) == 3 && has_table(layout, "verify_progress_chunks"));
 
-    // As V1 left it (sample data).
-    run_sql(layout,
-        "UPDATE schema_version SET version = 1; "
-        "INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000032','ARCH-0001','2026-10-16T00:00:00Z',1,"
-        "'REGISTERED','',NULL)");
-    const auto unmigrated = va::validate_schema(layout);
-    CHECK(!unmigrated && unmigrated.error().message == "unsupported repository schema");
-    CHECK(va::open_repository(*context).has_value());
-    CHECK(stored_schema_version(layout) == 2);
-    CHECK(va::validate_schema(layout).has_value());
-    sqlite3* database = nullptr;
-    const auto name = layout.database().u8string();
-    CHECK(sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY, nullptr) ==
-          SQLITE_OK);
-    sqlite3_stmt* statement = nullptr;
-    CHECK(sqlite3_prepare_v2(database, "SELECT label FROM archives", -1, &statement, nullptr) == SQLITE_OK);
-    CHECK(statement && sqlite3_step(statement) == SQLITE_ROW &&
-          std::string(reinterpret_cast<const char*>(sqlite3_column_text(statement, 0))) == "ARCH-0001");
-    sqlite3_finalize(statement);
-    sqlite3_close(database);
+    // As V1 left it, and as a version 2 program left it (sample data).
+    for (const int older : {1, 2}) {
+        run_sql(layout,
+            ("DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = " + std::to_string(older) +
+                "; DELETE FROM archives; INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000032',"
+                "'ARCH-0001','2026-10-16T00:00:00Z',1,'REGISTERED','',NULL)")
+                .c_str());
+        const auto unmigrated = va::validate_schema(layout);
+        CHECK(!unmigrated && unmigrated.error().message == "unsupported repository schema");
+        CHECK(va::open_repository(*context).has_value());
+        CHECK(stored_schema_version(layout) == 3 && has_table(layout, "verify_progress_chunks"));
+        CHECK(va::validate_schema(layout).has_value());
+        sqlite3* database = nullptr;
+        const auto name = layout.database().u8string();
+        CHECK(sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY,
+                  nullptr) == SQLITE_OK);
+        sqlite3_stmt* statement = nullptr;
+        CHECK(sqlite3_prepare_v2(database, "SELECT label FROM archives", -1, &statement, nullptr) == SQLITE_OK);
+        CHECK(statement && sqlite3_step(statement) == SQLITE_ROW &&
+              std::string(reinterpret_cast<const char*>(sqlite3_column_text(statement, 0))) == "ARCH-0001");
+        sqlite3_finalize(statement);
+        sqlite3_close(database);
+    }
 
     // Opened again: nothing more to do.
     CHECK(va::open_repository(*context).has_value());
-    CHECK(stored_schema_version(layout) == 2);
+    CHECK(stored_schema_version(layout) == 3);
+
+    // A version 3 database without the table is incomplete, not raised.
+    run_sql(layout, "DROP TABLE verify_progress_chunks");
+    const auto incomplete = va::validate_schema(layout);
+    CHECK(!incomplete && incomplete.error().message == "unsupported or incomplete repository schema");
 
     // A later program's repository.
-    run_sql(layout, "UPDATE schema_version SET version = 3");
+    run_sql(layout, "UPDATE schema_version SET version = 4");
     const auto later = va::open_repository(*context);
     CHECK(!later && later.error().message == "unsupported repository schema");
-    CHECK(stored_schema_version(layout) == 3);
+    CHECK(stored_schema_version(layout) == 4);
 }
 
 // Decisions 0032 and 0036: a database of V1's schema (version 1) is judged by
@@ -994,8 +1023,9 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     const auto database = layout.database();
     const auto database_text = va::path_to_utf8(database);
     const auto current = file_bytes(database);
+    // As V1 left it: without the table that version 3 adds.
     run_sql(layout,
-        "UPDATE schema_version SET version = 1; "
+        "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1; "
         "INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000036','ARCH-0001','2026-10-27T00:00:00Z',1,"
         "'REGISTERED','',NULL)");
     const auto version_1 = file_bytes(database);
@@ -1033,7 +1063,7 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         auto rebuilding = *context;
         const auto marked = va::open_repository_to_rebuild(rebuilding);
         CHECK(marked && *marked && (*marked)->moved_to == layout.root / "veriarchive.db.damaged-SAMPLE");
-        CHECK(stored_schema_version(layout) == 2 && va::database_state(layout) == va::DatabaseState::Unfilled);
+        CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Unfilled);
     }
 
     // A usable version 1 database, opened for the rebuild: upgraded in place.
@@ -1042,7 +1072,7 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         auto rebuilding = *context;
         const auto opened = va::open_repository_to_rebuild(rebuilding);
         CHECK(opened && !*opened);
-        CHECK(stored_schema_version(layout) == 2 && va::database_state(layout) == va::DatabaseState::Usable);
+        CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Usable);
         CHECK(label_kept());
     }
 
@@ -1058,12 +1088,12 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         if (replaced && *replaced && (*replaced)->moved_to) {
             CHECK(file_bytes(*(*replaced)->moved_to) == damaged);
         }
-        CHECK(stored_schema_version(layout) == 2 && va::database_state(layout) == va::DatabaseState::Unfilled);
+        CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Unfilled);
     }
 
     // A later version's database: refused by the rebuild too, unchanged.
     std::ofstream(database, std::ios::binary | std::ios::trunc) << current;
-    run_sql(layout, "UPDATE schema_version SET version = 3;");
+    run_sql(layout, "UPDATE schema_version SET version = 4;");
     const auto later = file_bytes(database);
     {
         auto rebuilding = *context;
@@ -1122,7 +1152,7 @@ void repository_tests()
     database_state_tells_what_cannot_be_used();
     rebuild_makes_a_database_that_cannot_be_used_again();
     a_new_database_left_beside_its_place_is_taken_up();
-    a_v1_repository_is_raised_to_schema_version_2();
+    an_older_repository_is_raised_to_schema_version_3();
     an_older_schema_is_upgraded_only_where_it_can_be_used();
     opening_a_current_repository_takes_no_write_lock();
 }

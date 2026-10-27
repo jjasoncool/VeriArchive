@@ -12,6 +12,7 @@
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/hash/hashers.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
 #include "core/scan/scanner.h"
@@ -538,43 +539,182 @@ void entry_lines_that_cannot_be_written_again_add_nothing()
           fixture.manifest_files() == 1);
 }
 
-// R-104: a run that adds chunk hashes and is interrupted, here as its device
-// goes away at about half, is recorded INCOMPLETE with its record saying that
-// it adds them, at which chunk size; its resume, without --add-chunk-hashes,
-// goes on adding them and records revision 2 with all of them. A checkpoint
-// keeps no chunk hashes: the resume reads again each checkpointed file that
-// has chunk lines, and the files not reached.
+// The archive of the interruption tests: a.bin, b.txt, c.bin, then e.txt,
+// f.bin and g.bin (sample data), the bytes before e.txt about half of them.
+struct Halves : RegisteredWithout {
+    std::string e = "e (sample data)";
+    std::string f = test::patterned(2 * test_chunk_size + 100, 6);
+    std::string g = test::patterned(2 * test_chunk_size, 7);
+
+    Halves() : RegisteredWithout({{"e.txt", "e (sample data)"}, {"f.bin", f_content()}, {"g.bin", g_content()}}) {}
+
+    static std::string f_content() { return test::patterned(2 * test_chunk_size + 100, 6); }
+    static std::string g_content() { return test::patterned(2 * test_chunk_size, 7); }
+
+    // Interrupted where it reaches e.txt, as when its device goes away: a.bin,
+    // b.txt and c.bin are checkpointed.
+    std::optional<va::VerifyOutcome> interrupted()
+    {
+        archive.node("e.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+        auto outcome = add();
+        archive.node("e.txt").open_error.reset();
+        CHECK(outcome && outcome->result == "INCOMPLETE" && outcome->added_revision == 0 &&
+              outcome->not_added.empty() && outcome->adding_chunk_size == test_chunk_size);
+        return outcome ? std::optional<va::VerifyOutcome>(std::move(*outcome)) : std::nullopt;
+    }
+
+    // Revision 2: revision 1's entry lines, then the chunk lines of a.bin,
+    // c.bin, f.bin and g.bin, from their content.
+    void check_revision_2()
+    {
+        const auto first = test::split_manifest(read_file(manifest(1)));
+        auto expected = first.lines;
+        for (const auto& [p, content] :
+            std::vector<std::pair<std::string, const std::string*>>{{"a.bin", &a}, {"c.bin", &c}, {"f.bin", &f},
+                {"g.bin", &g}}) {
+            for (const auto& line : chunk_lines(p, *content)) {
+                expected.push_back(line);
+            }
+        }
+        CHECK(test::split_manifest(read_file(manifest(2))).lines == expected);
+    }
+};
+
+// R-104: a run that adds chunk hashes and is interrupted at about half, here
+// as its device goes away, is recorded INCOMPLETE with its record saying that
+// it adds them, at which chunk size, and its checkpoints keep the chunk hashes
+// of the files they hold (decision 0033). Its resume, without
+// --add-chunk-hashes, goes on adding them and reads only the files not
+// checkpointed (by bytes): nothing is read twice. It records revision 2 with
+// every chunk hash, and leaves no checkpoints or kept chunk hashes.
 void an_interrupted_run_resumes_adding()
 {
-    const auto f = test::patterned(2 * test_chunk_size + 100, 6);
-    const auto g = test::patterned(2 * test_chunk_size, 7);
-    RegisteredWithout fixture({{"e.txt", "e (sample data)"}, {"f.bin", f}, {"g.bin", g}});
-    fixture.archive.node("e.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
-    const auto interrupted = fixture.add();
-    CHECK(interrupted && interrupted->result == "INCOMPLETE" && interrupted->added_revision == 0 &&
-          interrupted->not_added.empty() && interrupted->adding_chunk_size == test_chunk_size);
+    Halves fixture;
+    const auto interrupted = fixture.interrupted();
     if (!interrupted) {
         return;
     }
     const auto record = fixture.store.setting("run:" + interrupted->run_id);
     CHECK(record && va::adding_chunk_size(nlohmann::json::parse(*record, nullptr, false)) == test_chunk_size);
     const auto saved = fixture.store.progress(interrupted->run_id);
-    CHECK(saved && saved->size() == 3); // a.bin, b.txt and c.bin, before e.txt
+    CHECK(saved && saved->size() == 3);
+    va::Entry a;
+    a.path.p = "a.bin";
+    va::Entry c;
+    c.path.p = "c.bin";
+    const auto kept = fixture.store.progress_chunks(interrupted->run_id);
+    CHECK(kept && *kept == (std::map<std::string, std::vector<std::string>>{
+                               {va::entry_key(a), test::chunk_hashes(fixture.a, test_chunk_size)},
+                               {va::entry_key(c), test::chunk_hashes(fixture.c, test_chunk_size)}}));
     CHECK(fixture.current_revision() == 1);
+    // Half of the bytes were matched before the interruption.
+    CHECK(interrupted->coverage_bytes == fixture.a.size() + fixture.b.size() + fixture.c.size());
 
-    fixture.archive.node("e.txt").open_error.reset();
     fixture.archive.bytes_read = 0;
     const auto resumed = fixture.add(interrupted->run_id);
     CHECK(resumed && resumed->result == "PASSED" && resumed->resumed_from == interrupted->run_id &&
           resumed->added_revision == 2 && resumed->added_chunks == 10);
-    CHECK(fixture.archive.bytes_read ==
-          fixture.a.size() + fixture.c.size() + std::string("e (sample data)").size() + f.size() + g.size());
-    const auto second = test::split_manifest(read_file(fixture.manifest(2)));
-    const auto first = test::split_manifest(read_file(fixture.manifest(1)));
-    CHECK(second.lines.size() == first.lines.size() + 10 &&
-          std::equal(first.lines.begin(), first.lines.end(), second.lines.begin()));
+    CHECK(fixture.archive.bytes_read == fixture.e.size() + fixture.f.size() + fixture.g.size());
+    fixture.check_revision_2();
     const auto left = fixture.store.settings_with_prefix("run:");
     CHECK(left && left->empty());
+    if (resumed) {
+        const auto progress = fixture.store.progress(resumed->run_id);
+        const auto chunks = fixture.store.progress_chunks(resumed->run_id);
+        CHECK(progress && progress->empty() && chunks && chunks->empty());
+    }
+    const auto old = fixture.store.progress_chunks(interrupted->run_id);
+    CHECK(old && old->empty());
+}
+
+// Interrupted twice, the run's resume takes over the checkpoints and the kept
+// chunk hashes of the run it resumes, and the next resume those of both:
+// nothing is read twice, though a.bin and c.bin were read by the first run.
+void a_run_interrupted_twice_reads_nothing_twice()
+{
+    Halves fixture;
+    const auto first = fixture.interrupted();
+    if (!first) {
+        return;
+    }
+    fixture.archive.node("f.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto second = fixture.add(first->run_id);
+    fixture.archive.node("f.bin").open_error.reset();
+    CHECK(second && second->result == "INCOMPLETE" && second->resumed_from == first->run_id);
+    if (!second) {
+        return;
+    }
+    const auto moved = fixture.store.progress_chunks(second->run_id);
+    CHECK(moved && moved->size() == 2);
+    fixture.archive.bytes_read = 0;
+    const auto third = fixture.add(second->run_id);
+    CHECK(third && third->result == "PASSED" && third->added_revision == 2 && third->added_chunks == 10);
+    CHECK(fixture.archive.bytes_read == fixture.f.size() + fixture.g.size());
+    fixture.check_revision_2();
+}
+
+// The chunk hashes kept with a run's checkpoints, in the repository: each
+// file's in place of those kept before; a file whose rows have a gap gets
+// none; clearing the run's checkpoints removes them, and no other run's.
+void kept_chunk_hashes_in_the_repository()
+{
+    test::TestRepository repository;
+    auto store = repository.store();
+    const std::string run = "c0ffee00-0000-4000-8000-0000000000b1";
+    const std::string other = "c0ffee00-0000-4000-8000-0000000000b2";
+    va::Entry one;
+    one.path.p = "one.bin";
+    va::Entry two;
+    two.path.p = "x\xEF\xBF\xBD";
+    two.path.raw = "78ff";
+    const std::map<std::string, std::vector<std::string>> first{
+        {va::entry_key(one), {va::blake3_hex("1/0"), va::blake3_hex("1/1"), va::blake3_hex("1/2")}},
+        {va::entry_key(two), {va::blake3_hex("2/0"), va::blake3_hex("2/1")}}};
+    CHECK(store.add_progress_chunks(run, first).has_value());
+    CHECK(store.add_progress_chunks(other, first).has_value());
+    CHECK(store.progress_chunks(run) == first);
+
+    const std::map<std::string, std::vector<std::string>> again{
+        {va::entry_key(one), {va::blake3_hex("1/0'"), va::blake3_hex("1/1'"), va::blake3_hex("1/2'")}}};
+    CHECK(store.add_progress_chunks(run, again).has_value());
+    auto expected = first;
+    expected[va::entry_key(one)] = again.at(va::entry_key(one));
+    CHECK(store.progress_chunks(run) == expected);
+
+    repository.execute(("UPDATE verify_progress_chunks SET idx = 3 WHERE run_id = '" + run +
+                        "' AND path = 'one.bin' AND idx = 2")
+                           .c_str());
+    expected.erase(va::entry_key(one));
+    CHECK(store.progress_chunks(run) == expected);
+
+    CHECK(store.clear_progress(run).has_value());
+    const auto cleared = store.progress_chunks(run);
+    CHECK(cleared && cleared->empty());
+    CHECK(store.progress_chunks(other) == first);
+}
+
+// A checkpointed file whose kept chunk hashes are not all there is read again
+// by the resume, which records revision 2 with its chunk hashes read again
+// (sample data): a.bin, whose rows have a gap (the middle one of its three
+// removed), and c.bin, whose rows are fewer than its size gives (the last of
+// its two removed).
+void a_file_without_all_its_kept_chunk_hashes_is_read_again()
+{
+    Halves fixture;
+    const auto interrupted = fixture.interrupted();
+    if (!interrupted) {
+        return;
+    }
+    for (const auto* row : {"path = 'a.bin' AND idx = 1", "path = 'c.bin' AND idx = 1"}) {
+        fixture.repository.execute(
+            ("DELETE FROM verify_progress_chunks WHERE run_id = '" + interrupted->run_id + "' AND " + row).c_str());
+    }
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.add(interrupted->run_id);
+    CHECK(resumed && resumed->added_revision == 2);
+    CHECK(fixture.archive.bytes_read ==
+          fixture.a.size() + fixture.c.size() + fixture.e.size() + fixture.f.size() + fixture.g.size());
+    fixture.check_revision_2();
 }
 
 // The rule by which a verification refuses to add chunk hashes, and by which
@@ -799,6 +939,9 @@ void add_chunk_hashes_tests()
     the_record_removes_what_can_no_longer_finish();
     entry_lines_that_cannot_be_written_again_add_nothing();
     an_interrupted_run_resumes_adding();
+    a_file_without_all_its_kept_chunk_hashes_is_read_again();
+    a_run_interrupted_twice_reads_nothing_twice();
+    kept_chunk_hashes_in_the_repository();
     what_takes_chunk_hashes();
     the_revision_that_adds_them();
     golden_revision_with_chunk_hashes_added();

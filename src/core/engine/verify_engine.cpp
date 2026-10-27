@@ -639,16 +639,28 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     (void)store.set_setting(run_setting(outcome.run_id), run_record.dump());
     Heartbeat heartbeat(store, run_setting(outcome.run_id), std::move(run_record), progress);
+    // The chunk hashes read, by entry key, of every file larger than the
+    // chunk size whose content matched; with those that the checkpoints of a
+    // resumed run kept (decision 0033).
+    std::map<std::string, std::vector<std::string>> chunks_read;
     if (resume) {
         if (auto previous = store.progress(*request.resume_run)) {
             content_verified = std::move(*previous);
         }
+        if (adding > 0) {
+            if (auto kept = store.progress_chunks(*request.resume_run)) {
+                chunks_read = std::move(*kept);
+            }
+        }
         const std::vector<std::string> keys(content_verified.begin(), content_verified.end());
         // All or nothing. When it fails, the run still skips what the run it
-        // resumes verified (the keys are in memory), and that run stays as it
-        // was, resumable.
+        // resumes verified (the keys and chunk hashes are in memory), and that
+        // run stays as it was, resumable.
         (void)store.write_transaction([&]() -> std::expected<void, IoError> {
             if (auto added = store.add_progress(outcome.run_id, keys); !added) {
+                return added;
+            }
+            if (auto added = store.add_progress_chunks(outcome.run_id, chunks_read); !added) {
                 return added;
             }
             if (auto cleared = store.clear_progress(*request.resume_run); !cleared) {
@@ -704,16 +716,19 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         }
     }
 
-    // The chunk hashes read, by entry key, of every file larger than the
-    // chunk size whose content matched (decision 0033).
-    std::map<std::string, std::vector<std::string>> chunks_read;
     ComparisonResult comparison;
     if (manifest) {
-        // A checkpoint keeps no chunk hashes: a resumed run that adds them
-        // reads again each checkpointed file that has chunk lines.
+        // A resumed run that adds chunk hashes reads again a checkpointed
+        // file that has chunk lines only where the checkpoints did not keep
+        // all of its chunk hashes (decision 0033).
         if (adding > 0) {
             for (const auto& entry : manifest->entries) {
-                if (has_chunk_lines(entry, adding)) {
+                if (!has_chunk_lines(entry, adding)) {
+                    continue;
+                }
+                const auto kept = chunks_read.find(entry_key(entry));
+                if (kept == chunks_read.end() ||
+                    kept->second.size() != chunk_line_count(*entry.size, adding)) {
                     content_verified.erase(entry_key(entry));
                 }
             }
@@ -741,10 +756,24 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         // transaction cannot swallow the next checkpoints and the run's
         // record; its keys are tried again with the next checkpoint. The run
         // goes on: checkpoints only spare re-reading after an interruption.
+        // Adding chunk hashes, a checkpoint keeps the chunk hashes of the
+        // files it saves, in its transaction (decision 0033).
         std::vector<std::string> unsaved;
         input.checkpoint = [&](const std::vector<std::string>& keys) {
             unsaved.insert(unsaved.end(), keys.begin(), keys.end());
-            if (store.write_transaction([&] { return store.add_progress(outcome.run_id, unsaved); })) {
+            const auto saved = store.write_transaction([&]() -> std::expected<void, IoError> {
+                if (auto added = store.add_progress(outcome.run_id, unsaved); !added || adding == 0) {
+                    return added;
+                }
+                std::map<std::string, std::vector<std::string>> kept;
+                for (const auto& key : unsaved) {
+                    if (const auto read = chunks_read.find(key); read != chunks_read.end()) {
+                        kept.insert(*read);
+                    }
+                }
+                return store.add_progress_chunks(outcome.run_id, kept);
+            });
+            if (saved) {
                 unsaved.clear();
             }
             return true;

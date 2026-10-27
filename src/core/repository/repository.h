@@ -49,10 +49,10 @@ std::expected<void, IoError> initialise_repository(AppContext& context, IFileWri
 // damaged, or one that a rebuild made again and did not fill
 // (database_state), fails with a message that names `repo rebuild-index`
 // (decision 0036); any other failure keeps SQLite's own reason. A database
-// that can be used, at an older schema version (V1's, version 1), is then
-// raised to this program's, in one write transaction (R-92, decision 0032);
-// one of a version this program does not know is refused ("unsupported
-// repository schema") and left as it is.
+// that can be used, at an older schema version (V1's version 1, or version
+// 2), is then raised to this program's, in one write transaction (R-92,
+// decisions 0032 and 0033); one of a version this program does not know is
+// refused ("unsupported repository schema") and left as it is.
 std::expected<void, IoError> open_repository(AppContext& context);
 // R-83 step 5, for the pinned repository only (decision 0037): when
 // repository.json's uuid differs from the one recorded in the config, sets

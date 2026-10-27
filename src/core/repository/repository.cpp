@@ -22,8 +22,9 @@ namespace {
 // The schema version this program creates and opens (§B8). Version 2 has the
 // tables of version 1 (V1), which created chunks and
 // archive_revisions.merkle_root and left them empty; version 2 fills them
-// (decision 0032).
-constexpr int schema_version = 2;
+// (decision 0032). Version 3 adds verify_progress_chunks, the chunk hashes
+// that a FULL verify adding them keeps with its checkpoints (decision 0033).
+constexpr int schema_version = 3;
 
 // R-92: forward-only migrations, each keyed by the version it upgrades and run
 // in the transaction that raises the version by one.
@@ -34,8 +35,14 @@ struct Migration {
 // 1 -> 2 adds nothing: every table and column is there. The version is raised
 // so that a V1 program, which neither writes nor removes chunk rows and whose
 // relocation drops chunk lines (decision 0031), refuses the repository from
-// then on ("unsupported repository schema").
-constexpr Migration migrations[] = {{1, ""}};
+// then on ("unsupported repository schema"). 2 -> 3 adds a table, as V1.1
+// may (§B8), to which no other table refers.
+constexpr Migration migrations[] = {
+    {1, ""},
+    {2, "CREATE TABLE verify_progress_chunks (run_id TEXT NOT NULL,path TEXT NOT NULL,raw_hex TEXT NOT NULL DEFAULT "
+        "'',stream TEXT NOT NULL DEFAULT '',idx INTEGER NOT NULL,b3 TEXT NOT NULL,PRIMARY KEY(run_id,path,raw_hex,"
+        "stream,idx)) WITHOUT ROWID;"},
+};
 
 // The tables of §B8, each with the schema version that first has it. A
 // database of a version holds all of that version's tables: this program, and
@@ -47,8 +54,8 @@ struct RequiredTable {
 };
 constexpr RequiredTable required_tables[] = {
     {"archives", 1}, {"archive_revisions", 1}, {"media_evidence", 1}, {"files", 1}, {"chunks", 1},
-    {"verify_runs", 1}, {"verify_items", 1}, {"verify_progress", 1}, {"history_checkpoints", 1},
-    {"trusted_keys", 1}, {"settings", 1},
+    {"verify_runs", 1}, {"verify_items", 1}, {"verify_progress", 1}, {"verify_progress_chunks", 3},
+    {"history_checkpoints", 1}, {"trusted_keys", 1}, {"settings", 1},
 };
 
 // No SQLite result code: database_state tells SQLite's own codes apart
