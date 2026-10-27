@@ -1,7 +1,8 @@
 # Implementation status
 
-Status of branch `v1-implementation`, version 1.0.0, against HANDOFF Part C. "Done" means implemented and covered
-by automated tests on Windows (MSYS2 UCRT64, GCC 16). A milestone is accepted only when its
+Status of branch `v1.1-implementation`, which is `v1-implementation`, version 1.0.0, with V1.1
+stage 1 on top (last section), against HANDOFF Part C. "Done" means implemented and covered by
+automated tests on Windows (MSYS2 UCRT64, GCC 16). A milestone is accepted only when its
 acceptance tests pass on both operating systems in CI (HANDOFF Part C), which needs the branch
 pushed to GitLab.
 
@@ -76,10 +77,20 @@ FULL verify is still to run.
 
 ## V1.1
 
-On branch `v1.1-implementation`, built on this branch. Stage 1, chunk hashes and the Merkle root
-(decisions 0031 to 0033), is implemented there: registration, relocation, import and the index
-keep 64 MiB chunk hashes, a FULL verify names the chunks that differ, and a FULL verify adds chunk
-hashes to an archive registered without them. Still to come: QUICK and DEEP verification, Ed25519
-signatures and trusted keys, signed history checkpoints, NTFS alternate data streams and the USN
-change tracker. The elevated helper is not planned: the change journal can be read without
-elevation.
+Stage 1, chunk hashes and the Merkle root (decisions 0031 to 0033), is done on this branch:
+
+| Part | Implemented |
+|---|---|
+| Chunk hashes | Registration and relocation write 64 MiB chunk lines and the Merkle root (總碼 in the interface) in every manifest, hashed in the same read pass as the file hashes; the index and export/import keep them; `archive show` gives each revision's chunk size, chunks and Merkle root. A manifest without a chunk size, as V1 wrote it, stays valid (decisions 0031, 0032) |
+| Verification by chunk | A FULL verify compares a file whose content differs chunk by chunk and names the chunks that differ and the first byte that differs, also after a resume, and warns where the chunk hashes and the whole-file hashes disagree (decision 0032) |
+| Adding chunk hashes | `verify --full <root_path\|archive_uuid> --add-chunk-hashes`, and in Verify Archive the checkbox "Full verify, and add chunk hashes", give an archive registered by V1 a next revision with chunk hashes, its entry lines byte for byte the verified revision's, where every entry still matches it. One operation at a time creates an archive's next revision; an unfinished one is listed until it finishes or is abandoned (`archive abandon-verification`) (decision 0033) |
+| Repository schema version 3 | The first open by this version keeps a copy of the database beside it, then upgrades it, the window shown at once with a notice while it does; Settings and `repo info` name each copy and what it is for, for as long as it is there (decision 0032). Only a database that can be used is upgraded: one that is missing, empty, not a database, damaged or made again and not filled is named for `repo rebuild-index` as V1 names it, and the rebuild upgrades an older database, keeping its copy, before it fills its chunk rows and Merkle roots from the manifests; one it makes again has version 3 (decisions 0032, 0036) |
+
+Still required before stage 1 is accepted: CI for this branch, which has not been pushed; the HDD
+throughput measurement (R-120) again, now that the read pass also hashes chunks; on the
+operator's repository, the upgrade from schema version 1 and a FULL verify that adds chunk hashes
+to its archives.
+
+Still to come: QUICK and DEEP verification, Ed25519 signatures and trusted keys, signed history
+checkpoints, NTFS alternate data streams and the USN change tracker. The elevated helper is not
+planned: the change journal can be read without elevation.
