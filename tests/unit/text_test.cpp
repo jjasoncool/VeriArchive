@@ -327,6 +327,16 @@ void translation_tests()
     CHECK(chinese("cannot prepare SQL: no such table: archives") ==
           "無法準備 SQL 陳述式：找不到資料表：archives");
     CHECK(chinese("cannot prepare SQL: file is not a database") == "無法準備 SQL 陳述式：檔案不是資料庫");
+    // A repository that cannot be opened is named with its path (decision 0037).
+    CHECK(chinese("error: the configured repository K:/VeriArchive-SAMPLE/bin/data is unavailable or is not a VeriArchive "
+                  "repository (the config file K:/VeriArchive-SAMPLE/bin/config.json names it)") ==
+          "錯誤：設定的儲存庫 K:/VeriArchive-SAMPLE/bin/data 無法使用，或不是 VeriArchive 儲存庫（記錄在設定檔 "
+          "K:/VeriArchive-SAMPLE/bin/config.json 中）");
+    CHECK(chinese("error: VERIARCHIVE_REPOSITORY names the repository K:/repository-SAMPLE, which is unavailable or "
+                  "is not a VeriArchive repository") ==
+          "錯誤：VERIARCHIVE_REPOSITORY 指定的儲存庫 K:/repository-SAMPLE 無法使用，或不是 VeriArchive 儲存庫");
+    CHECK(chinese("error: the repository K:/repository-SAMPLE is unavailable or is not a VeriArchive repository") ==
+          "錯誤：儲存庫 K:/repository-SAMPLE 無法使用，或不是 VeriArchive 儲存庫");
     CHECK(chinese("pread failed: Input/output error") == "pread 失敗：輸入/輸出錯誤");
     CHECK(chinese("cannot scan the root: open directory failed: Permission denied") ==
           "無法掃描根目錄：open directory 失敗：權限不足");

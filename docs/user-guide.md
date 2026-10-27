@@ -79,7 +79,7 @@ CLI: `veriarchive-cli repo init`
 
 By default the repository is created in `data` next to the program, or in `VeriArchive` in your home folder when the program folder is not writable. Its location is remembered in the config file and used from then on. To choose it yourself: `veriarchive-cli --repository D:\VeriArchiveRepo repo init`.
 
-If a configured repository is unavailable later (for example an external disk is not attached), VeriArchive stops with an error; it never falls back to another location.
+If a configured repository is unavailable later (for example an external disk is not attached), VeriArchive stops with an error that names the repository's folder and the config file that names it; it never falls back to another location.
 
 ## Registering an archive
 

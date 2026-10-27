@@ -2,6 +2,7 @@
 
 #include "common/canonical_json.h"
 #include "common/time.h"
+#include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/repository/sqlite_raii.h"
 #include "core/write_file.h"
@@ -266,8 +267,20 @@ std::expected<AppContext, IoError> resolve_repository(
     const bool explicit_init = options.initialise && context.repo_selected_by == "explicit";
     const bool exists = read_repository_uuid(context.repo.root).has_value();
     if (!first_run && !explicit_init && !exists) {
-        return std::unexpected(repository_error(
-            "configured repository is unavailable or is not a VeriArchive repository"));
+        // Named with its path, which the operator may have to attach (an
+        // external disk) or correct, and where it was named (decision 0037).
+        const auto root = path_to_utf8(context.repo.root);
+        if (context.repo_selected_by == "pinned") {
+            return std::unexpected(repository_error("the configured repository " + root +
+                                                    " is unavailable or is not a VeriArchive repository (the config "
+                                                    "file " + path_to_utf8(context.config_file) + " names it)"));
+        }
+        if (!options.explicit_repository) {
+            return std::unexpected(repository_error("VERIARCHIVE_REPOSITORY names the repository " + root +
+                                                    ", which is unavailable or is not a VeriArchive repository"));
+        }
+        return std::unexpected(
+            repository_error("the repository " + root + " is unavailable or is not a VeriArchive repository"));
     }
     if (explicit_init && !exists && path_exists(context.repo.root / "repository.json")) {
         return std::unexpected(repository_error("not a VeriArchive repository: invalid repository.json"));

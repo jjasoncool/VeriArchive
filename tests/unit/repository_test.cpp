@@ -174,7 +174,14 @@ void pinned_unavailable_repository_does_not_fall_back()
     options.executable_dir = temporary.path() / "different-executable";
     options.explicit_config = context->config_file;
 
-    CHECK(!va::resolve_repository(options, always_writable_local).has_value());
+    // The error names the pinned repository and the config file that names
+    // it (decision 0037): the operator may have to attach a disk.
+    const auto unavailable = va::resolve_repository(options, always_writable_local);
+    CHECK(!unavailable.has_value());
+    CHECK(!unavailable &&
+          unavailable.error().message == "the configured repository " + va::path_to_utf8(context->repo.root) +
+                                             " is unavailable or is not a VeriArchive repository (the config file " +
+                                             va::path_to_utf8(context->config_file) + " names it)");
 }
 
 void explicit_repository_must_already_be_initialised()
@@ -184,7 +191,18 @@ void explicit_repository_must_already_be_initialised()
     options.initialise = false;
     options.explicit_repository = temporary.path() / "missing";
 
-    CHECK(!va::resolve_repository(options, always_writable_local).has_value());
+    // Named with its path, and where it was named (decision 0037).
+    const auto missing = va::path_to_utf8((temporary.path() / "missing").lexically_normal());
+    const auto named = va::resolve_repository(options, always_writable_local);
+    CHECK(!named && named.error().message ==
+                        "the repository " + missing + " is unavailable or is not a VeriArchive repository");
+    options.explicit_repository.reset();
+    options.environment_repository = temporary.path() / "missing";
+    const auto from_environment = va::resolve_repository(options, always_writable_local);
+    CHECK(!from_environment && from_environment.error().message ==
+                                   "VERIARCHIVE_REPOSITORY names the repository " + missing +
+                                       ", which is unavailable or is not a VeriArchive repository");
+    options.environment_repository.reset();
 
     write_repository_metadata(temporary.path() / "existing");
     options.explicit_repository = temporary.path() / "existing";

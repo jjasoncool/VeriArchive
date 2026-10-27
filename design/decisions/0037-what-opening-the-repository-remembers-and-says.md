@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-27
-amends: HANDOFF §B7.4 (R-83 step 5: only the pinned repository's uuid is compared with the config's record and written into it)
+amends: HANDOFF §B7.4 (R-83 step 5: only the pinned repository's uuid is compared with the config's record and written into it; steps 1 and 2: a repository that cannot be opened is named with its path)
 ---
 
 # What opening the repository remembers and says
@@ -13,6 +13,8 @@ That comparison was made for every repository opened, also one named for a singl
 ## Decision
 
 1. **The record belongs to the pin.** R-83 step 5 applies to the pinned repository only (`repo_selected_by` is `pinned`): where its `repository.json` names another uuid than the config's `last_repository_uuid`, the program warns and records the new uuid, as before. A repository chosen with `--repository` or `VERIARCHIVE_REPOSITORY` is never compared with that record and never written into it, whatever the command, so using one once leaves the next command on the pinned repository without a warning. An init that pins a repository (the first use, or `repo init --repository P` while nothing is pinned) writes the pin and, as its record, the new repository's uuid, as before; `repo init --repository P` beside an existing pin creates P and leaves the config file as it is.
+
+2. **A repository that cannot be opened is named.** Where the repository chosen by step 1 or 2 is missing or holds no valid `repository.json` (exit 11, never a fallback), the message names its path, and for the pinned one the config file that names it: "the configured repository P is unavailable or is not a VeriArchive repository (the config file C names it)", "VERIARCHIVE_REPOSITORY names the repository P, which is unavailable or is not a VeriArchive repository", or, for `--repository`, "the repository P is unavailable or is not a VeriArchive repository". It said "configured repository is unavailable or is not a VeriArchive repository" in every case, so the operator could not tell which disk to attach, nor that an environment variable chose the place.
 
 ## Why
 
@@ -27,4 +29,5 @@ Rejected alternatives:
 
 - `--repository` and `VERIARCHIVE_REPOSITORY` no longer write the config file at all: neither the record nor, as before, the pin.
 - The user guide's example of an import into another repository names that repository with `--repository`, which it lacked, and works without a later warning.
+- Tests of point 2: the pinned repository that is gone, named with its path and its config file, and a missing repository named with `--repository` and with `VERIARCHIVE_REPOSITORY`, each in its own words, and each translated. A mutation check dropped the path from each message, and each removal failed the test meant for it.
 - Tests: a repository created and opened with `--repository` beside a pinned one leaves the config file byte for byte as it was and gives no warning, nor does the pinned repository opened plainly afterwards; one named by `VERIARCHIVE_REPOSITORY` the same; the pinned repository whose uuid changed still warns and is recorded (R-83 step 5); the CLI end to end: a plain `repo info` after a command on another repository named with `--repository` prints no warning. A mutation check removed each rule in turn (the comparison made for the pinned repository alone; the config written by an init only where it pins), and each removal failed the test meant for it.
