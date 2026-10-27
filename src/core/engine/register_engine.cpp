@@ -58,7 +58,33 @@ struct Plan {
     // revision whose manifest is lost, which this one follows. The plan
     // names it ("lost_manifest"), so that a resume records as it would have.
     std::optional<std::uint32_t> lost_revision;
+    // Fixed when the plan is made, for every attempt of the registration
+    // (decision 0032): the chunk hashes saved by one attempt are those the
+    // next one reuses.
+    std::uint64_t chunk_size = 0;
 };
+
+// The chunk size a plan fixed. A plan of a version before decision 0032 has
+// none: its saved files have no chunk hashes, and it finishes without chunk
+// lines (chunk size 0), so that none of them is read again. A value that is
+// no chunk size, which no version writes, counts as none.
+std::uint64_t planned_chunk_size(const nlohmann::json& plan)
+{
+    const auto found = plan.find("chunk_size");
+    if (found == plan.end() || !found->is_number_unsigned()) {
+        return 0;
+    }
+    const auto chunk_size = found->get<std::uint64_t>();
+    return valid_chunk_size(chunk_size) ? chunk_size : 0;
+}
+
+// Whether a saved file has the chunk hashes of its size at the plan's chunk
+// size, all of them (decision 0031), so that a resume can reuse it without
+// reading it again; one whose chunk rows are incomplete is read again.
+bool complete_chunks(const Entry& saved, std::uint64_t chunk_size)
+{
+    return saved.chunks.size() == (has_chunk_lines(saved, chunk_size) ? chunk_line_count(*saved.size, chunk_size) : 0);
+}
 
 // Two attempts of one registration can run at once (`register --resume` while
 // an attempt still runs, or two resumes), and another operation can record the
@@ -290,7 +316,7 @@ nlohmann::json plan_json(const Plan& plan, const std::filesystem::path& root)
 {
     nlohmann::json json{{"archive_uuid", plan.archive_uuid}, {"revision", plan.revision},
         {"label", plan.label}, {"created", plan.created}, {"new_archive", plan.new_archive},
-        {"root", path_to_utf8(root)}};
+        {"root", path_to_utf8(root)}, {"chunk_size", plan.chunk_size}};
     if (plan.copy_of) {
         json["copy_of"] = *plan.copy_of;
     }
@@ -332,6 +358,7 @@ std::expected<std::optional<Plan>, IoError> find_pending(ArchiveStore& store, co
         if (const auto lost = json.find("lost_manifest"); lost != json.end() && lost->is_number_unsigned()) {
             plan.lost_revision = lost->get<std::uint32_t>();
         }
+        plan.chunk_size = planned_chunk_size(json);
         return std::optional<Plan>(plan);
     }
     return std::optional<Plan>{};
@@ -652,6 +679,9 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                                        ", which changes while it is read, so a verification of this archive could "
                                        "never pass; register a folder outside the repository");
     }
+    if (!valid_chunk_size(request.chunk_size)) {
+        return fail(Kind::Invalid, invalid_chunk_size(request.chunk_size));
+    }
 
     const auto volume = services.media.volume_for_path(request.root);
     if (!volume) {
@@ -900,6 +930,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         plan.created = current_timestamp();
         plan.copy_of = request.copy_of;
         plan.root = path_to_utf8(request.root);
+        plan.chunk_size = request.chunk_size;
         if (target) {
             const auto found = store.find_archive(*target);
             if (!found || !*found) {
@@ -910,13 +941,15 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             plan.archive_uuid = existing->archive_uuid;
             plan.revision = existing->current_revision + 1;
             plan.label = existing->label;
+            // As the latest revision's manifest says, never the index's copy
+            // of it: a copy stays a copy (decision 0005), and an archive with
+            // a chunk size keeps it; one registered without (by V1) takes the
+            // chunk size of a new archive (decision 0032). Over a lost
+            // manifest (decision 0028, point 8), as the newest of the
+            // archive's manifests that can be used says, the latest one being
+            // lost.
             if (lost) {
                 plan.lost_revision = existing->current_revision;
-            }
-            if (!plan.copy_of && lost) {
-                // A copy stays a copy (decision 0005): as the newest of the
-                // archive's manifests that can be used says, the latest one
-                // being lost; never the index's copy of a header (R-14).
                 const auto revisions = store.revisions(existing->archive_uuid);
                 if (!revisions) {
                     return fail(Kind::Repository, revisions.error().message);
@@ -927,13 +960,16 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     }
                     if (const auto header =
                             load_recorded_header(services.repository_files, services.layout, *earlier)) {
-                        plan.copy_of = header->copy_of;
+                        if (!plan.copy_of) {
+                            plan.copy_of = header->copy_of;
+                        }
+                        if (header->chunk_size > 0) {
+                            plan.chunk_size = header->chunk_size;
+                        }
                         break;
                     }
                 }
-            } else if (!plan.copy_of) {
-                // A copy stays a copy (decision 0005): as the latest
-                // revision's manifest says, never the index's copy of it.
+            } else {
                 const auto previous = store.revision(existing->archive_uuid, existing->current_revision);
                 if (!previous) {
                     return fail(Kind::Repository, previous.error().message);
@@ -944,7 +980,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     if (!header) {
                         return fail(Kind::Repository, plain_message(header.error()));
                     }
-                    plan.copy_of = header->copy_of;
+                    if (!plan.copy_of) {
+                        plan.copy_of = header->copy_of;
+                    }
+                    if (header->chunk_size > 0) {
+                        plan.chunk_size = header->chunk_size;
+                    }
                 }
             }
         } else {
@@ -1131,9 +1172,10 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         bytes_total += entry.size.value_or(0);
         const auto hit = cached.find(entry_key(entry));
         if (hit != cached.end() && !hit->second.b3.empty() && hit->second.size == entry.size &&
-            hit->second.mtime_ns == entry.mtime_ns) {
+            hit->second.mtime_ns == entry.mtime_ns && complete_chunks(hit->second, plan.chunk_size)) {
             entry.b3 = hit->second.b3; // unchanged since the interrupted attempt hashed it
             entry.sha256 = hit->second.sha256;
+            entry.chunks = std::move(hit->second.chunks);
             cached.erase(hit);
             continue;
         }
@@ -1212,7 +1254,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 if (auto deleted = store.delete_file_rows(plan.archive_uuid, plan.revision, stale); !deleted) {
                     return deleted;
                 }
-                return store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint, 0);
+                return store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint, plan.chunk_size);
             })) {
             checkpoint.clear();
             stale.clear();
@@ -1235,6 +1277,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // R-111): --io, else the config's override by serial, else detection.
     hash_options.readers =
         default_reader_count(volume_rotational(*volume, request.rotational, request.rotational_override));
+    hash_options.chunk_size = plan.chunk_size; // the chunk hashes in the same read (R-101)
     bool device_removed = false;
     const auto hashed = hash_files(services.archive_files, jobs, hash_options, cancel, heartbeat,
         [&](HashResult&& result) {
@@ -1254,8 +1297,10 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             watch.answered();
             entry.b3 = std::move(result.b3);
             entry.sha256 = std::move(result.sha256);
+            entry.chunks = std::move(result.chunks);
             entry.size = result.size;
-            checkpoint.push_back(entry); // R-104: every 1000 files or 60 seconds
+            // R-104: every 1000 files or 60 seconds, its chunk hashes with it.
+            checkpoint.push_back(entry);
             if (++hashed_since_checkpoint >= 1000 ||
                 std::chrono::steady_clock::now() - last_checkpoint > std::chrono::seconds(60)) {
                 // False stops hashing: the revision is recorded, the
@@ -1308,9 +1353,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     outcome.manifest = manifest_path(services.layout.manifests(), plan.archive_uuid, plan.revision);
     std::error_code directory_error;
     std::filesystem::create_directories(outcome.manifest.parent_path(), directory_error);
-    // No chunk lines yet: registration switches them on in a later stage
-    // (decision 0031).
-    ManifestWriter manifest(services.writer, services.repository_files, outcome.manifest, 0);
+    // The chunk lines at the plan's chunk size (decision 0032).
+    ManifestWriter manifest(services.writer, services.repository_files, outcome.manifest, plan.chunk_size);
     std::vector<Entry> entries;
     entries.reserve(scanned->entries.size());
     for (auto& scanned_entry : scanned->entries) {
@@ -1414,7 +1458,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (auto cleared = store.delete_file_rows(plan.archive_uuid, plan.revision); !cleared) {
             return cleared;
         }
-        if (auto indexed = store.insert_file_rows(plan.archive_uuid, plan.revision, entries, 0); !indexed) {
+        if (auto indexed = store.insert_file_rows(plan.archive_uuid, plan.revision, entries, plan.chunk_size);
+            !indexed) {
             return indexed;
         }
         // A registration over a lost manifest matched nothing: the archive's

@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "engine_fixture.h"
+#include "manifest_samples.h"
 
 #include "common/shell_argument.h"
 #include "common/time.h"
@@ -3397,6 +3398,331 @@ void a_new_revision_of_another_archives_root_goes_ahead_beside_a_damaged_archive
     CHECK(c && c->revision == 1);
 }
 
+// ---- Chunk lines (decision 0032) --------------------------------------------
+
+constexpr std::uint64_t test_chunk_size = 64 * 1024;
+
+// A registration at `root` that gives an archive without a chunk size
+// `chunk_size` (64 KiB, as the tests use; 0 as V1 registered).
+va::RegisterRequest chunked_at(const std::filesystem::path& root, std::uint64_t chunk_size = test_chunk_size)
+{
+    auto request = at(root);
+    request.chunk_size = chunk_size;
+    return request;
+}
+
+// A manifest's header and entries by path (with their chunk hashes), read
+// to the end of the body, which checks its chunk lines and Merkle root.
+struct ManifestRead {
+    va::ManifestHeader header;
+    std::map<std::string, va::Entry> entries;
+    bool read = false;
+};
+
+ManifestRead read_manifest(Fixture& fixture, const std::filesystem::path& path)
+{
+    ManifestRead result;
+    auto reader = va::ManifestReader::open(*fixture.repository.files, path);
+    CHECK(reader.has_value());
+    if (!reader) {
+        return result;
+    }
+    result.header = reader->header();
+    for (;;) {
+        auto next = reader->next();
+        CHECK(next.has_value());
+        if (!next || !*next) {
+            result.read = next.has_value();
+            return result;
+        }
+        result.entries[(**next).path.p] = **next;
+    }
+}
+
+// The index's entries of a revision by path, with their chunk hashes.
+std::map<std::string, va::Entry> index_of(Fixture& fixture, const va::Uuid& archive_uuid, std::uint32_t revision)
+{
+    std::map<std::string, va::Entry> rows;
+    if (const auto read = fixture.store.file_rows(archive_uuid, revision)) {
+        for (const auto& row : *read) {
+            rows[row.path.p] = row;
+        }
+    }
+    return rows;
+}
+
+std::string chunk_rows_of(Fixture& fixture, const va::Uuid& archive_uuid)
+{
+    return fixture.repository.query("SELECT COUNT(*) FROM chunks WHERE archive_uuid = '" + archive_uuid + "'");
+}
+
+// Registration writes the chunk lines of every file larger than the chunk
+// size, hashed in the read that hashes the whole file (R-101), and the header
+// gets the chunk size, their number and the Merkle root; a file of exactly
+// the chunk size is one chunk and has none. The index holds the chunk rows
+// and the root, and a FULL verify passes (sample data).
+void registration_writes_chunk_lines()
+{
+    Fixture fixture;
+    const auto big = test::patterned(2 * test_chunk_size + 7, 1);
+    const auto exact = test::patterned(test_chunk_size, 2);
+    fixture.archive.add_file("video/big.bin", big);
+    fixture.archive.add_file("video/exact.bin", exact);
+    fixture.archive.add_file("notes.txt", "notes (sample)");
+    fixture.archive.add_link("notes-link", "notes.txt");
+    const auto outcome = fixture.run(chunked_at("/vol"));
+    CHECK(outcome.has_value());
+    if (!outcome) {
+        std::cerr << "  " << outcome.error().message << '\n';
+        return;
+    }
+    CHECK(outcome->counts.chunks == 3);
+    const auto manifest = read_manifest(fixture, outcome->manifest);
+    CHECK(manifest.read && manifest.header.chunk_size == test_chunk_size && manifest.header.counts.chunks == 3 &&
+          manifest.header.merkle_root.size() == 64);
+    CHECK(manifest.entries.size() == 4);
+    if (manifest.entries.size() == 4) {
+        CHECK(manifest.entries.at("video/big.bin").chunks == test::chunk_hashes(big, test_chunk_size));
+        CHECK(manifest.entries.at("video/big.bin").chunks.size() == 3);
+        CHECK(manifest.entries.at("video/exact.bin").chunks.empty());
+        CHECK(manifest.entries.at("notes.txt").chunks.empty());
+    }
+    const auto rows = index_of(fixture, outcome->archive_uuid, 1);
+    CHECK(rows.size() == 4 && rows.contains("video/big.bin") &&
+          rows.at("video/big.bin").chunks == test::chunk_hashes(big, test_chunk_size));
+    CHECK(chunk_rows_of(fixture, outcome->archive_uuid) == "3");
+    const auto revisions = fixture.store.revisions(outcome->archive_uuid);
+    CHECK(revisions && revisions->size() == 1 && revisions->front().merkle_root == manifest.header.merkle_root);
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+}
+
+// A new archive gets chunks of 64 MiB unless told otherwise (decision 0031,
+// D2): its manifest names the chunk size and a Merkle root, and has no chunk
+// lines while no file is larger.
+void a_new_archive_gets_64_mib_chunks()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    const auto outcome = fixture.run(at("/vol"));
+    CHECK(outcome.has_value());
+    if (!outcome) {
+        return;
+    }
+    const auto manifest = read_manifest(fixture, outcome->manifest);
+    CHECK(manifest.read && manifest.header.chunk_size == 67108864 && manifest.header.counts.chunks == 0 &&
+          manifest.header.merkle_root.size() == 64);
+    const auto revisions = fixture.store.revisions(outcome->archive_uuid);
+    CHECK(revisions && revisions->size() == 1 && revisions->front().merkle_root == manifest.header.merkle_root);
+}
+
+// An archive keeps its chunk size (decision 0032). One registered without a
+// chunk size (0, as V1 registered it) takes the chunk size of a new archive
+// at its next revision, and keeps that one from then on; another archive of
+// the same root takes its own.
+void an_archive_keeps_its_chunk_size()
+{
+    Fixture fixture;
+    const auto content = test::patterned(2 * test_chunk_size + 1, 3);
+    fixture.archive.add_file("a.bin", content);
+    const auto first = fixture.run(chunked_at("/vol", 0));
+    CHECK(first.has_value());
+    if (!first) {
+        return;
+    }
+    auto manifest = read_manifest(fixture, first->manifest);
+    CHECK(manifest.read && manifest.header.chunk_size == 0 && manifest.header.merkle_root.empty() &&
+          manifest.header.counts.chunks == 0);
+    CHECK(fixture.repository.query("SELECT COUNT(*) FROM archive_revisions WHERE merkle_root IS NULL") == "1");
+
+    auto next = chunked_at("/vol");
+    next.new_revision = true;
+    const auto second = fixture.run(next);
+    CHECK(second && second->revision == 2 && second->counts.chunks == 3);
+    if (second) {
+        manifest = read_manifest(fixture, second->manifest);
+        CHECK(manifest.read && manifest.header.chunk_size == test_chunk_size &&
+              manifest.entries["a.bin"].chunks == test::chunk_hashes(content, test_chunk_size));
+    }
+
+    // Also where the registration names the original itself (decision 0005).
+    auto third = chunked_at("/vol", 2 * test_chunk_size);
+    third.new_revision = true;
+    third.copy_of = "c0ffee00-0000-4000-8000-000000000040"; // sample data
+    const auto kept = fixture.run(third);
+    CHECK(kept && kept->revision == 3 && kept->counts.chunks == 3);
+    if (kept) {
+        manifest = read_manifest(fixture, kept->manifest);
+        CHECK(manifest.read && manifest.header.chunk_size == test_chunk_size);
+    }
+
+    auto separate = chunked_at("/vol", 2 * test_chunk_size);
+    separate.force_new_archive = true;
+    const auto other = fixture.run(separate);
+    CHECK(other && other->archive_uuid != first->archive_uuid && other->counts.chunks == 2);
+    if (other) {
+        manifest = read_manifest(fixture, other->manifest);
+        CHECK(manifest.read && manifest.header.chunk_size == 2 * test_chunk_size);
+    }
+}
+
+// A chunk size that no manifest may have is a usage error, before anything
+// is recorded.
+void an_invalid_chunk_size_is_refused()
+{
+    Fixture fixture;
+    fixture.archive.add_file("a.txt", "a (sample data)");
+    const auto refused = fixture.run(chunked_at("/vol", 1000));
+    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Invalid &&
+          refused.error().message == "chunk_size 1000 is not 0 or a multiple of 65536 up to 1073741824");
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->empty());
+}
+
+// Four large files of the sample, the last of which goes away when it is
+// opened: an interrupted registration with 64 KiB chunks that saved the
+// first three (sample data). Its archive uuid.
+va::Uuid interrupted_chunked_registration(Fixture& fixture)
+{
+    for (int index = 0; index < 4; ++index) {
+        fixture.archive.add_file("big" + std::to_string(index) + ".bin",
+            test::patterned(2 * test_chunk_size + 7 + 100 * static_cast<std::size_t>(index), index));
+    }
+    fixture.archive.node("big3.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.run(chunked_at("/vol"));
+    CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+    fixture.archive.node("big3.bin").open_error.reset();
+    const auto archives = fixture.store.archives();
+    CHECK(archives && archives->size() == 1);
+    return archives && archives->size() == 1 ? archives->front().archive_uuid : va::Uuid{};
+}
+
+// R-104 with decision 0032: the plan fixes the chunk size, and each saved
+// file's chunk hashes are saved with it. A resume keeps the plan's chunk size
+// whatever it is asked, and reuses a saved file only with all of its chunk
+// hashes: one whose chunk rows are incomplete is read again, and so is one
+// that changed meanwhile, whose saved rows are replaced. The manifest and the
+// index then hold every file's chunk hashes.
+void a_resume_reuses_only_complete_chunk_hashes()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_chunked_registration(fixture);
+    const auto plan = nlohmann::json::parse(
+        fixture.store.setting("registration:" + archive_uuid).value_or(""), nullptr, false);
+    CHECK(plan.is_object() && plan.value("chunk_size", std::uint64_t{0}) == test_chunk_size);
+    auto saved = index_of(fixture, archive_uuid, 1);
+    CHECK(saved.size() == 3);
+    for (const auto& [path, row] : saved) {
+        CHECK(row.chunks == test::chunk_hashes(fixture.archive.node(path).content, test_chunk_size));
+    }
+
+    // Meanwhile big1.bin's saved chunk hashes lose one, and big2.bin changes.
+    fixture.repository.execute("DELETE FROM chunks WHERE path = 'big1.bin' AND idx = 2");
+    fixture.archive.node("big2.bin").content = test::patterned(3 * test_chunk_size + 5, 9);
+    fixture.archive.bytes_read = 0;
+    auto resume = chunked_at("/vol", 2 * test_chunk_size);
+    resume.resume = true;
+    const auto resumed = fixture.run(resume);
+    CHECK(resumed.has_value());
+    if (!resumed) {
+        std::cerr << "  " << resumed.error().message << '\n';
+        return;
+    }
+    CHECK(fixture.archive.bytes_read == fixture.archive.node("big1.bin").content.size() +
+                                            fixture.archive.node("big2.bin").content.size() +
+                                            fixture.archive.node("big3.bin").content.size());
+    const auto manifest = read_manifest(fixture, resumed->manifest);
+    CHECK(manifest.read && manifest.header.chunk_size == test_chunk_size && manifest.entries.size() == 4);
+    const auto rows = index_of(fixture, archive_uuid, 1);
+    CHECK(rows.size() == 4);
+    for (const auto& [path, entry] : manifest.entries) {
+        const auto expected = test::chunk_hashes(fixture.archive.node(path).content, test_chunk_size);
+        CHECK(entry.chunks == expected && !expected.empty());
+        CHECK(rows.contains(path) && rows.at(path).chunks == expected);
+    }
+    CHECK(chunk_rows_of(fixture, archive_uuid) == std::to_string(manifest.header.counts.chunks));
+    const auto verified = fixture.verify(fixture.archive.root());
+    CHECK(verified && verified->result == "PASSED");
+}
+
+// A plan written before decision 0032 names no chunk size, and its saved
+// files have no chunk hashes: its registration finishes without chunk lines
+// (chunk size 0), reading none of them again. The archive's next revision
+// takes the chunk size of a new archive.
+void a_plan_without_a_chunk_size_finishes_without_chunk_lines()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_chunked_registration(fixture);
+    auto plan = nlohmann::json::parse(
+        fixture.store.setting("registration:" + archive_uuid).value_or(""), nullptr, false);
+    CHECK(plan.is_object());
+    if (!plan.is_object()) {
+        return;
+    }
+    plan.erase("chunk_size");
+    CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+    fixture.repository.execute("DELETE FROM chunks");
+    fixture.archive.bytes_read = 0;
+    auto resume = chunked_at("/vol");
+    resume.resume = true;
+    const auto resumed = fixture.run(resume);
+    CHECK(resumed.has_value());
+    if (!resumed) {
+        return;
+    }
+    CHECK(fixture.archive.bytes_read == fixture.archive.node("big3.bin").content.size());
+    const auto manifest = read_manifest(fixture, resumed->manifest);
+    CHECK(manifest.read && manifest.header.chunk_size == 0 && manifest.header.merkle_root.empty() &&
+          manifest.header.counts.chunks == 0 && resumed->counts.chunks == 0);
+    CHECK(fixture.repository.query("SELECT COUNT(*) FROM archive_revisions WHERE merkle_root IS NULL") == "1");
+
+    auto next = chunked_at("/vol");
+    next.new_revision = true;
+    const auto second = fixture.run(next);
+    CHECK(second && second->counts.chunks == 12);
+    if (second) {
+        CHECK(read_manifest(fixture, second->manifest).header.chunk_size == test_chunk_size);
+    }
+}
+
+// A plan's chunk_size that is no chunk size, which no version writes, counts
+// as none: the registration finishes without chunk lines.
+void a_plan_whose_chunk_size_is_no_chunk_size_finishes_without_chunk_lines()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_chunked_registration(fixture);
+    auto plan = nlohmann::json::parse(
+        fixture.store.setting("registration:" + archive_uuid).value_or(""), nullptr, false);
+    CHECK(plan.is_object());
+    if (!plan.is_object()) {
+        return;
+    }
+    plan["chunk_size"] = 1000;
+    CHECK(fixture.store.set_setting("registration:" + archive_uuid, plan.dump()));
+    fixture.repository.execute("DELETE FROM chunks");
+    auto resume = chunked_at("/vol");
+    resume.resume = true;
+    const auto resumed = fixture.run(resume);
+    CHECK(resumed.has_value());
+    if (resumed) {
+        const auto manifest = read_manifest(fixture, resumed->manifest);
+        CHECK(manifest.read && manifest.header.chunk_size == 0 && manifest.header.counts.chunks == 0);
+    }
+}
+
+// Decision 0025: abandoning an unfinished registration removes its saved
+// chunk hashes with its saved files.
+void abandoning_removes_saved_chunk_hashes()
+{
+    Fixture fixture;
+    const auto archive_uuid = interrupted_chunked_registration(fixture);
+    CHECK(chunk_rows_of(fixture, archive_uuid) == "9");
+    va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
+    const auto abandoned = va::abandon_registration(services, {archive_uuid, std::nullopt, std::nullopt});
+    CHECK(abandoned && abandoned->files == 3);
+    CHECK(chunk_rows_of(fixture, archive_uuid) == "0");
+}
+
 } // namespace
 
 void register_engine_tests()
@@ -3462,4 +3788,12 @@ void register_engine_tests()
     a_retired_archive_takes_no_registration_over_its_lost_manifest();
     an_older_versions_plan_that_can_no_longer_finish_is_refused_unasked();
     a_new_revision_of_another_archives_root_goes_ahead_beside_a_damaged_archive();
+    registration_writes_chunk_lines();
+    a_new_archive_gets_64_mib_chunks();
+    an_archive_keeps_its_chunk_size();
+    an_invalid_chunk_size_is_refused();
+    a_resume_reuses_only_complete_chunk_hashes();
+    a_plan_without_a_chunk_size_finishes_without_chunk_lines();
+    abandoning_removes_saved_chunk_hashes();
+    a_plan_whose_chunk_size_is_no_chunk_size_finishes_without_chunk_lines();
 }

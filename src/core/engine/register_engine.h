@@ -40,6 +40,12 @@ struct RegisterRequest {
     // OlderVersionRegistration). A resume of any other plan takes it and needs
     // none.
     bool confirmed = false;
+    // The chunk size of an archive that has none yet (decision 0032): its
+    // first revision, or a new revision of an archive whose latest revision
+    // has chunk size 0, as V1 registered it. An archive with a chunk size
+    // keeps it, and a resumed registration the one its plan fixed. 0
+    // registers without chunk lines, as V1 did; tests use 64 KiB.
+    std::uint64_t chunk_size = default_chunk_size;
 };
 
 struct RegisterServices {

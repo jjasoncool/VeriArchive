@@ -214,11 +214,16 @@ void merkle_root_is_ignored_without_a_chunk_size(const std::filesystem::path& ex
 }
 
 // M4: export -> import round trip, duplicate detection, rollback protection.
+// The archive is registered without a chunk size, as V1 registered archives,
+// for merkle_root_is_ignored_without_a_chunk_size.
 void export_import_round_trip()
 {
     test::EngineFixture source;
     source.archive.add_file("a.txt", "a");
-    const auto first = source.register_root(source.archive.root());
+    va::RegisterRequest as_v1;
+    as_v1.root = source.archive.root();
+    as_v1.chunk_size = 0;
+    const auto first = source.register_root(as_v1);
     CHECK(first.has_value());
     if (!first) {
         return;
@@ -235,6 +240,7 @@ void export_import_round_trip()
     va::RegisterRequest rebaseline;
     rebaseline.root = source.archive.root();
     rebaseline.new_revision = true;
+    rebaseline.chunk_size = 0;
     source.archive.add_file("b.txt", "b");
     CHECK(source.register_root(rebaseline).has_value());
     const auto r2 = va::export_archive(source.store, files, writer, layout, first->archive_uuid,
