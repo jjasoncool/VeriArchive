@@ -908,6 +908,7 @@ constexpr CatalogEntry entries[] = {
     {"link-target-translated", "連結目標已被轉換"},
     {"link target differs", "連結目標不同"},
     {"a mount point now covers this path", "此路徑現在被掛載點覆蓋"},
+    {"another volume is mounted here; it is not part of the archive", "這裡掛載了另一個磁碟區；它不屬於這個封存"},
     {"directory {} cannot be listed", "無法列出資料夾 {} 的內容"},
     {"name cannot exist on {}", "此名稱無法存在於 {}"},
     {"name cannot exist on windows", "此名稱無法存在於 Windows"},

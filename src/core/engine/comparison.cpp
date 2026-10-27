@@ -190,7 +190,7 @@ ComparisonResult compare_with_manifest(
                 // are New.
                 classify.add(entry, "TypeChanged", std::string(1, entry.type) + " -> d", Severity::Failure);
             }
-        } else if (ancestor_in(entry.path.p, mount_points_now)) {
+        } else if (mount_points_now.contains(entry.path.p) || ancestor_in(entry.path.p, mount_points_now)) {
             classify.add(entry, "SkippedMountPoint", "a mount point now covers this path", Severity::Failure);
         } else if (const auto dir = ancestor_in(entry.path.p, unreadable_dirs_now)) {
             classify.add(entry, unreadable_status(unreadable_dirs_now.at(*dir)),
@@ -225,6 +225,28 @@ ComparisonResult compare_with_manifest(
             classify.add(entry, "New", "", Severity::Failure);
         }
     };
+
+    // R-30, §A6: every mount point below the root is reported, never
+    // descended. One that covers recorded entries fails the run, through each
+    // of them (missing, above). One where the revision records nothing at or
+    // below it (it was there at registration, which skipped it, or it was
+    // mounted where nothing was recorded) holds no part of the archive: its
+    // item changes no result, as every registered byte is still read.
+    for (const auto& mount_point : scanned->skipped_mount_points) {
+        bool recorded_there = recorded_folder(mount_point);
+        for (auto at = std::lower_bound(recorded.begin(), recorded.end(), mount_point.p,
+                 [](const Entry& entry, const std::string& value) { return entry.path.p < value; });
+             !recorded_there && at != recorded.end() && at->path.p == mount_point.p; ++at) {
+            recorded_there = at->path.raw == mount_point.raw;
+        }
+        if (!recorded_there) {
+            Entry skipped;
+            skipped.type = 'd';
+            skipped.path = mount_point;
+            classify.add(skipped, "SkippedMountPoint", "another volume is mounted here; it is not part of the archive",
+                Severity::None);
+        }
+    }
 
     // Merge the two sorted lists and collect the files that must be re-hashed.
     std::vector<std::pair<const Entry*, const ScannedEntry*>> to_hash;

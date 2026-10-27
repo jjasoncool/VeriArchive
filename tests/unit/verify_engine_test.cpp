@@ -191,6 +191,42 @@ void a_type_change_to_or_from_a_folder_with_contents_is_reported()
     }
 }
 
+// R-30, §A6: a mount point below the root is never descended, and every
+// verification reports it (SkippedMountPoint). One that was there at
+// registration holds nothing the archive recorded: its item says so and the
+// run stays PASSED, as every registered byte was read. A volume mounted later
+// over a folder with recorded files, or over a recorded empty folder, hides
+// recorded content: each such entry is SkippedMountPoint and the run fails.
+// Sample data.
+void mount_points_below_the_root_are_reported()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("SAMPLE-a.txt", "a");
+    fixture.archive.add_file("SAMPLE-mounted/SAMPLE-other-volume.txt", "another volume's");
+    fixture.archive.node("SAMPLE-mounted").mount_point = true;
+    fixture.archive.add_file("SAMPLE-photos/p.jpg", "photo");
+    fixture.archive.add_directory("SAMPLE-empty");
+    const auto registered = fixture.register_root(fixture.archive.root());
+    CHECK(registered && registered->skipped_mount_points.size() == 1 &&
+          registered->skipped_mount_points.front().p == "SAMPLE-mounted" && registered->counts.files == 2);
+
+    auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "PASSED" && outcome->items.size() == 1 &&
+          outcome->counts.at("SkippedMountPoint") == 1 && outcome->counts.at("Verified") == 3);
+    CHECK(outcome && !outcome->items.empty() && outcome->items.front().path.p == "SAMPLE-mounted" &&
+          outcome->items.front().status == "SkippedMountPoint" &&
+          outcome->items.front().detail == "another volume is mounted here; it is not part of the archive");
+
+    fixture.archive.node("SAMPLE-photos").mount_point = true;
+    fixture.archive.node("SAMPLE-empty").mount_point = true;
+    outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "FAILED" && outcome->items.size() == 3);
+    CHECK(outcome && status_of(*outcome, "SAMPLE-empty") == "SkippedMountPoint" &&
+          status_of(*outcome, "SAMPLE-photos/p.jpg") == "SkippedMountPoint" &&
+          status_of(*outcome, "SAMPLE-mounted") == "SkippedMountPoint" &&
+          status_of(*outcome, "SAMPLE-photos") == "Verified");
+}
+
 // Items come in canonical order (R-43), not in the order they were found: a
 // missing file is found while merging, a modified one only after re-hashing.
 void items_are_in_canonical_order()
@@ -1910,6 +1946,7 @@ void verify_engine_tests()
     progress_counts_bytes();
     content_changes_fail();
     a_type_change_to_or_from_a_folder_with_contents_is_reported();
+    mount_points_below_the_root_are_reported();
     items_are_in_canonical_order();
     unreadable_files_fail_with_their_reason();
     metadata_changes_warn();
