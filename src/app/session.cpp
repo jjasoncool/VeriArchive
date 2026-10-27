@@ -9,9 +9,33 @@
 #include <cstdlib>
 
 namespace va::app {
+namespace {
 
-std::expected<Session, std::string> open_session(const SessionOptions& session_options)
+constexpr const char* running_elevated = "VeriArchive is running elevated; repository and home resolution may differ";
+
+} // namespace
+
+std::optional<std::string> elevated_warning()
 {
+    if (platform::process_is_elevated()) {
+        return std::string(running_elevated);
+    }
+    return std::nullopt;
+}
+
+std::expected<Session, SessionFailure> open_session(const SessionOptions& session_options)
+{
+    // R-12 first, also where no repository can be opened: running elevated
+    // may be the reason, as the home folder and the config file then resolve
+    // otherwise (decision 0037).
+    std::vector<std::string> warnings;
+    if (session_options.elevated ? session_options.elevated() : platform::process_is_elevated()) {
+        warnings.emplace_back(running_elevated);
+    }
+    const auto failed = [&](std::string message) {
+        return std::unexpected(SessionFailure{std::move(message), warnings});
+    };
+
     const auto executable = platform::executable_path();
     const auto config_directory = platform::user_config_dir();
     const auto home = platform::user_home();
@@ -19,7 +43,7 @@ std::expected<Session, std::string> open_session(const SessionOptions& session_o
         const auto& error = !executable ? executable.error()
                             : !config_directory ? config_directory.error()
                                                 : home.error();
-        return std::unexpected(error.message);
+        return failed(error.message);
     }
 
     RepositoryOptions options;
@@ -36,26 +60,22 @@ std::expected<Session, std::string> open_session(const SessionOptions& session_o
     const RepositoryProbes probes{platform::writable_directory, platform::network_filesystem};
     auto context = resolve_repository(options, probes);
     if (!context) {
-        return std::unexpected(context.error().message);
+        return failed(context.error().message);
     }
 
-    Session session{std::move(*context), platform::make_file_writer(), {}};
+    Session session{std::move(*context), platform::make_file_writer(), warnings};
     auto opened = session_options.initialise ? initialise_repository(session.context, *session.writer)
                                              : open_repository(session.context);
     if (!opened) {
-        return std::unexpected(opened.error().message);
+        return failed(opened.error().message);
     }
     if (auto recorded = record_repository_uuid(session.context, *session.writer); !recorded) {
-        return std::unexpected(recorded.error().message);
+        return failed(recorded.error().message);
     }
     if (!session.context.previous_repository_uuid.empty()) {
         session.warnings.push_back("repository_uuid changed from " +
                                    session.context.previous_repository_uuid + " to " +
                                    session.context.repository_uuid + "; recorded the new uuid");
-    }
-    if (platform::process_is_elevated()) {
-        session.warnings.push_back(
-            "VeriArchive is running elevated; repository and home resolution may differ");
     }
     return session;
 }

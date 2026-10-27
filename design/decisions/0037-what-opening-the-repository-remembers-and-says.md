@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-27
-amends: HANDOFF §B7.4 (R-83 step 5: only the pinned repository's uuid is compared with the config's record and written into it; steps 1 and 2: a repository that cannot be opened is named with its path)
+amends: HANDOFF §A4 (R-12: the warning of an elevated run also where no repository can be opened, and from `media list`), §B7.4 (R-83 step 5: only the pinned repository's uuid is compared with the config's record and written into it; steps 1 and 2: a repository that cannot be opened is named with its path)
 ---
 
 # What opening the repository remembers and says
@@ -16,6 +16,8 @@ That comparison was made for every repository opened, also one named for a singl
 
 2. **A repository that cannot be opened is named.** Where the repository chosen by step 1 or 2 is missing or holds no valid `repository.json` (exit 11, never a fallback), the message names its path, and for the pinned one the config file that names it: "the configured repository P is unavailable or is not a VeriArchive repository (the config file C names it)", "VERIARCHIVE_REPOSITORY names the repository P, which is unavailable or is not a VeriArchive repository", or, for `--repository`, "the repository P is unavailable or is not a VeriArchive repository". It said "configured repository is unavailable or is not a VeriArchive repository" in every case, so the operator could not tell which disk to attach, nor that an environment variable chose the place.
 
+3. **The warning of an elevated run comes first, always** (R-12). The warning "VeriArchive is running elevated; repository and home resolution may differ" was added only to a session that had opened its repository, so it was missing exactly where it explains the most: an elevated run finds another home folder and another user config file, and so may find no repository, or another one, and then failed without it. It now comes before anything else from every command that opens the repository, also where the repository cannot be opened (the CLI prints it before the error; the GUI's Settings shows it under the reason no repository is open), and from `media list`, which opens no repository.
+
 ## Why
 
 The record says which repository the pin last led to. Only opening the repository through the pin can tell that what the pin leads to has changed; a repository named for one command says nothing about it, and writing its uuid into the record made the record wrong for the next plain command. Leaving the record alone keeps the warning for the case it was made for: the folder behind the pin replaced by another repository.
@@ -29,5 +31,6 @@ Rejected alternatives:
 
 - `--repository` and `VERIARCHIVE_REPOSITORY` no longer write the config file at all: neither the record nor, as before, the pin.
 - The user guide's example of an import into another repository names that repository with `--repository`, which it lacked, and works without a later warning.
+- Tests of point 3: a session that cannot be opened (an explicit config file that does not exist) and one that opens (a repository named with `--repository`), each with the warning first where the process runs elevated and without it where it does not; the elevation is given by the test (`SessionOptions::elevated`), as no test system can run elevated and unelevated at once. A mutation check left the warning out of the session that cannot be opened, and the test failed. The CLI's printing of it and `media list` have no test of their own: the end-to-end test cannot make the process elevated, and leaves the warning out of what it compares where CI runs elevated.
 - Tests of point 2: the pinned repository that is gone, named with its path and its config file, and a missing repository named with `--repository` and with `VERIARCHIVE_REPOSITORY`, each in its own words, and each translated. A mutation check dropped the path from each message, and each removal failed the test meant for it.
 - Tests: a repository created and opened with `--repository` beside a pinned one leaves the config file byte for byte as it was and gives no warning, nor does the pinned repository opened plainly afterwards; one named by `VERIARCHIVE_REPOSITORY` the same; the pinned repository whose uuid changed still warns and is recorded (R-83 step 5); the CLI end to end: a plain `repo info` after a command on another repository named with `--repository` prints no warning. A mutation check removed each rule in turn (the comparison made for the pinned repository alone; the config written by an init only where it pins), and each removal failed the test meant for it.

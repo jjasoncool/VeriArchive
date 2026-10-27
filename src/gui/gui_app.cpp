@@ -16,13 +16,21 @@ void open_repository_session(GuiState& state, bool initialise)
     // An exception from the engines (a std::filesystem error, say) is one more
     // reason the repository could not be opened, shown in Settings.
     try {
-        auto session = app::open_session({initialise, std::nullopt, std::nullopt});
+        auto session = app::open_session({initialise, std::nullopt, std::nullopt, {}});
         if (session) {
             state.session = std::move(*session);
             state.session_error = nullptr;
         } else {
+            // The warnings too, which hold where no repository could be
+            // opened: running elevated may be why (R-12, decision 0037).
             state.session.reset();
-            state.session_error = fixed_message(session.error());
+            state.session_error = [failure = session.error()](const app::Text& text) {
+                auto shown = text(failure.message);
+                for (const auto& warning : failure.warnings) {
+                    shown += "\n\n" + text.format("Warning: {}", text(warning));
+                }
+                return shown;
+            };
         }
     } catch (const std::exception& error) {
         log_failure(std::string("exception while opening the repository: ") + error.what());

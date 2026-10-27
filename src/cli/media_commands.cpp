@@ -4,6 +4,7 @@
 // 0029). Needs no repository.
 #include "cli/commands.h"
 
+#include "app/session.h"
 #include "common/utf8.h"
 #include "core/identity/volume_json.h"
 #include "platform/media_enumerator.h"
@@ -53,6 +54,11 @@ int media_command(const Arguments& arguments)
 {
     if (arguments.words.size() != 2 || arguments.words[1] != "list") {
         return report_failure(arguments, {exit_code::usage, "usage: media list"});
+    }
+    // R-12: this command opens no repository, so it gives the warning that
+    // opening one gives every other command (decision 0037).
+    if (const auto elevated = app::elevated_warning()) {
+        print_warning(arguments.text, *elevated);
     }
     const auto enumerator = platform::make_media_enumerator();
     const auto volumes = enumerator->volumes();

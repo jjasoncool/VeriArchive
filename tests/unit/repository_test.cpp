@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "core/repository/repository.h"
+#include "app/session.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/write_file.h"
@@ -586,6 +587,42 @@ void explicit_init_inside_config_folder_pins_a_relative_path()
     CHECK(at_folder && at_folder->config.repository == settings.lexically_normal());
 }
 
+// R-12 (decision 0037): the warning that VeriArchive runs elevated comes
+// first with a session that opens, and with one that cannot be opened, where
+// running elevated may be why; not where it does not run elevated.
+void elevated_warning_holds_also_without_a_repository()
+{
+    TemporaryDirectory temporary("elevated");
+    const std::vector<std::string> elevated{
+        "VeriArchive is running elevated; repository and home resolution may differ"};
+    va::app::SessionOptions options;
+    options.config = temporary.path() / "missing-config-SAMPLE.json";
+    options.elevated = [] { return true; };
+    const auto failed = va::app::open_session(options);
+    CHECK(!failed && failed.error().message == "Explicit config does not exist" &&
+          failed.error().warnings == elevated);
+    options.elevated = [] { return false; };
+    const auto failed_unelevated = va::app::open_session(options);
+    CHECK(!failed_unelevated && failed_unelevated.error().warnings.empty());
+
+    // A repository named with --repository, beside a config file of its own.
+    auto repository_options = make_options(temporary.path());
+    repository_options.explicit_repository = temporary.path() / "repository-SAMPLE";
+    std::filesystem::create_directories(temporary.path() / "settings");
+    std::ofstream(temporary.path() / "settings" / "config.json") << "{}\n";
+    repository_options.explicit_config = temporary.path() / "settings" / "config.json";
+    auto created = va::resolve_repository(repository_options, always_writable_local);
+    CHECK(created && va::initialise_repository(*created, *va::platform::make_file_writer()));
+    options.repository = repository_options.explicit_repository;
+    options.config = repository_options.explicit_config;
+    options.elevated = [] { return true; };
+    const auto opened = va::app::open_session(options);
+    CHECK(opened && opened->warnings == elevated);
+    options.elevated = [] { return false; };
+    const auto opened_unelevated = va::app::open_session(options);
+    CHECK(opened_unelevated && opened_unelevated->warnings.empty());
+}
+
 } // namespace
 
 void repository_tests()
@@ -608,4 +645,5 @@ void repository_tests()
     relative_pin_follows_its_config_file();
     absolute_pin_still_works();
     explicit_init_inside_config_folder_pins_a_relative_path();
+    elevated_warning_holds_also_without_a_repository();
 }

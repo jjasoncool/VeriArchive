@@ -6,6 +6,7 @@
 #include "core/engine/candidates.h"
 #include "core/interfaces.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -17,15 +18,30 @@ struct SessionOptions {
     bool initialise = false;                          // repo init
     std::optional<std::filesystem::path> repository;  // --repository
     std::optional<std::filesystem::path> config;      // --config
+    // Whether this process runs elevated (R-12): the platform's answer when
+    // empty, as in the user interfaces; tests give their own.
+    std::function<bool()> elevated;
 };
 
 struct Session {
     AppContext context;
     std::unique_ptr<IFileWriter> writer;
-    std::vector<std::string> warnings;  // repository uuid changed, running elevated, ...
+    std::vector<std::string> warnings;  // running elevated, repository uuid changed, ...
 };
 
-std::expected<Session, std::string> open_session(const SessionOptions& options);
+// Why no repository could be opened, with the warnings that hold all the
+// same: running elevated (R-12), which may be why, as the home folder and the
+// config file then resolve otherwise (decision 0037).
+struct SessionFailure {
+    std::string message;
+    std::vector<std::string> warnings;
+};
+
+std::expected<Session, SessionFailure> open_session(const SessionOptions& options);
+
+// R-12: the warning that this process runs elevated, where it does; for a
+// command that opens no repository (`media list`).
+std::optional<std::string> elevated_warning();
 
 // Operating system, host name and version for manifests and history.
 HostInfo host_info(std::string app_version);
