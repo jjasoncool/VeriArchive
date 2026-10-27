@@ -876,6 +876,11 @@ constexpr CatalogEntry entries[] = {
         "apart cannot keep them all",
         "有些名稱與同一資料夾中的另一個名稱只差在大小寫，或帶重音、標記的字母的編碼方式（Unicode 正規化）；"
         "不區分這些差異的磁碟區或作業系統無法同時保存它們"},
+    // The program that read the media, where it is no kernel driver of its
+    // format (decision 0006), noted in a verification report.
+    {"note: {}", "附註：{}", Match::Cause},
+    {"Note: {}", "附註：{}"},
+    {"driver: {}", "驅動程式：{}"},
     // A device that went away while it was read (decision 0034).
     {"the device that holds the archive went away while it was read (unplugged, or no longer answering); attach it "
         "again, then resume this run",

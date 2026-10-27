@@ -424,6 +424,36 @@ void recorded_portability_warnings_make_the_run_pass_with_warnings()
                   "does not tell such names apart cannot keep them all"});
 }
 
+// Decision 0006: a verification through a FUSE program instead of the kernel's
+// driver of the format (ntfs-3g on Linux) notes it in its report, and nothing
+// else: the result, the identity and the recorded manifest never carry it.
+// (A sample volume.)
+void the_mount_driver_is_only_noted()
+{
+    Registered fixture("linux");
+    fixture.media.volume.driver = "ntfs-3g";
+    const auto outcome = fixture.verify_ok();
+    CHECK(outcome.result == "PASSED" && outcome.warnings.empty() &&
+          outcome.notes == std::vector<std::string>{"driver: ntfs-3g"});
+    CHECK(outcome.identity.result == va::MatchResult::Match && outcome.identity.details.empty());
+    // A registration through it records no driver in the manifest header.
+    va::RegisterRequest request;
+    request.root = fixture.archive.root();
+    request.new_revision = true;
+    const auto registered = fixture.register_root(request);
+    CHECK(registered.has_value());
+    std::string manifest;
+    if (registered) {
+        std::ifstream input(registered->manifest, std::ios::binary);
+        manifest.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+    CHECK(!manifest.empty() && manifest.find("ntfs-3g") == std::string::npos &&
+          manifest.find("driver") == std::string::npos);
+    fixture.media.volume.driver.clear();
+    const auto without = fixture.verify_ok();
+    CHECK(without.result == "PASSED" && without.notes.empty());
+}
+
 // Decision 0008: absolute targets may be translated across OSes.
 void link_targets_across_systems()
 {
@@ -1982,6 +2012,7 @@ void verify_engine_tests()
     unrepresentable_names_warn();
     a_name_registered_on_this_system_that_is_gone_is_missing();
     recorded_portability_warnings_make_the_run_pass_with_warnings();
+    the_mount_driver_is_only_noted();
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
     a_device_that_goes_away_leaves_the_run_incomplete();

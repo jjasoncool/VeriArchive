@@ -7,7 +7,8 @@ namespace va {
 
 // `volume` with each of its identity strings made valid UTF-8: the filesystem
 // type and id (full and short form), the volume label and GUID, the container,
-// and of each device its reference, model, serial, WWN and bus. Every byte
+// and of each device its reference, model, serial, WWN and bus; the mount's
+// driver too, which the verification report notes (decision 0006). Every byte
 // that belongs to no valid UTF-8 sequence becomes U+FFFD; valid text stays as
 // it is. The platform gives these strings as the hardware or the filesystem
 // holds them: a USB bridge may report bytes that are no text in its model or

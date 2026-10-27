@@ -17,6 +17,23 @@ struct FilesystemId {
     std::string uuid_short;  // VolumeInfo::filesystem_uuid_short (32-bit serial, 8 hex)
 };
 
+// Decision 0006: whether a Linux mount type is a FUSE one, by which the kernel
+// hands a mount to a program ("fuseblk", "fuse", "fuseblk.<name>",
+// "fuse.<name>"): such a type names the program, never an on-disk format.
+bool is_fuse_mount_type(std::string_view mount_type);
+
+// Decision 0006: the program that serves a FUSE mount of a volume whose
+// on-disk format is `filesystem_type` (normalised), for the note of a
+// verification report: "ntfs-3g" for NTFS, "exfat-fuse" for exFAT, otherwise
+// the name after "fuse." or "fuseblk.", or the mount type itself. Empty for a
+// mount type that is no FUSE one: the kernel's own driver of the format.
+std::string fuse_driver(std::string_view filesystem_type, std::string_view mount_type);
+
+// Decision 0006: the on-disk format that a volume's first sector shows, named
+// as blkid (and so udev's ID_FS_TYPE) names it: "ntfs" and "exfat" by the name
+// at byte 3, "vfat" by the FAT type field; empty for any other sector.
+std::string filesystem_format_from_boot_sector(std::string_view sector);
+
 // `filesystem_type` must already be normalised. Rules (§B1.3):
 //  - ntfs: 64-bit serial as 16 lowercase hex; the short form is its low 32 bits,
 //    which is what Windows' GetVolumeInformationW reports. A 32-bit-only

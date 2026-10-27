@@ -12,7 +12,7 @@ VolumeInfo with_valid_identity_text(VolumeInfo volume)
         }
     };
     for (auto* text : {&volume.filesystem_type, &volume.filesystem_uuid, &volume.filesystem_uuid_short,
-             &volume.volume_label, &volume.volume_guid, &volume.container}) {
+             &volume.volume_label, &volume.volume_guid, &volume.container, &volume.driver}) {
         make_valid(*text);
     }
     for (auto& device : volume.devices) {

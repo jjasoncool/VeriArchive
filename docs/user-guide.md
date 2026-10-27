@@ -245,6 +245,7 @@ How to read the report:
 - **Identity**: whether VeriArchive recognised the disk, for example "MATCH".
 - **Coverage**: how many bytes were read and matched.
 - **Items**: how many items have each status; every entry with a problem is listed below.
+- **Note** (Linux only): "driver: ntfs-3g" when the volume was read through ntfs-3g rather than the kernel's ntfs3 driver; it changes nothing in the result.
 
 A result always carries its mode and date: only FULL VERIFY PASSED means 100% of the registered content was read and matched.
 

@@ -480,6 +480,12 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     outcome.revision = (*archive)->current_revision;
     outcome.root = located->root;
     outcome.identity = identity;
+    // Decision 0006: the program that read the media, where it is no kernel
+    // driver of its format (ntfs-3g), is noted; identity and result never
+    // see it.
+    if (!located->volume.driver.empty()) {
+        outcome.notes.push_back("driver: " + located->volume.driver);
+    }
     const auto started = current_timestamp();
 
     // Make this run resumable from now on, carrying over a resumed run's

@@ -45,6 +45,44 @@ std::string normalise_filesystem_type(std::string_view raw)
     return type;
 }
 
+bool is_fuse_mount_type(std::string_view mount_type)
+{
+    return mount_type == "fuse" || mount_type == "fuseblk" || mount_type.starts_with("fuse.") ||
+           mount_type.starts_with("fuseblk.");
+}
+
+std::string fuse_driver(std::string_view filesystem_type, std::string_view mount_type)
+{
+    if (!is_fuse_mount_type(mount_type)) {
+        return {};
+    }
+    if (filesystem_type == "ntfs") {
+        return "ntfs-3g";
+    }
+    if (filesystem_type == "exfat") {
+        return "exfat-fuse";
+    }
+    const auto dot = mount_type.find('.');
+    return std::string(dot == std::string_view::npos ? mount_type : mount_type.substr(dot + 1));
+}
+
+std::string filesystem_format_from_boot_sector(std::string_view sector)
+{
+    const auto field = [&](std::size_t offset, std::size_t length) {
+        return sector.size() >= offset + length ? sector.substr(offset, length) : std::string_view{};
+    };
+    if (field(3, 8) == "NTFS    ") {
+        return "ntfs";
+    }
+    if (field(3, 8) == "EXFAT   ") {
+        return "exfat";
+    }
+    if (field(82, 5) == "FAT32" || field(54, 5) == "FAT12" || field(54, 5) == "FAT16") {
+        return "vfat";
+    }
+    return {};
+}
+
 FilesystemId normalise_filesystem_id(std::string_view filesystem_type, std::string_view raw)
 {
     if (filesystem_type == "ntfs") {

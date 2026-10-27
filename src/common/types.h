@@ -31,6 +31,10 @@ struct VolumeInfo {
     bool read_only = false;
     std::vector<PhysicalDeviceInfo> devices;
     std::string container;
+    // Runtime only, never identity or part of a result (decision 0006): the
+    // program that serves the mount where it is no kernel driver of the
+    // format, such as "ntfs-3g" for NTFS through FUSE on Linux; else empty.
+    std::string driver;
 };
 
 struct ArchiveIdentity {

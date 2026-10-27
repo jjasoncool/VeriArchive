@@ -327,6 +327,41 @@ void kernel_filesystem_id_matching()
     CHECK(outcome.result == va::MatchResult::Unknown);
 }
 
+// Decision 0006, as Linux describes a mount: a FUSE mount type names the
+// program that serves the mount, never the format, so the format comes from
+// the device's first sector, as blkid reads it for udev (sample sectors); the
+// program is named for the verification report's note ("ntfs-3g" for NTFS),
+// and nothing for a mount through the kernel's own driver.
+void fuse_mounts_name_their_program_not_the_format()
+{
+    CHECK(va::is_fuse_mount_type("fuseblk") && va::is_fuse_mount_type("fuse") &&
+          va::is_fuse_mount_type("fuse.sshfs") && va::is_fuse_mount_type("fuseblk.ntfs-3g"));
+    CHECK(!va::is_fuse_mount_type("ntfs3") && !va::is_fuse_mount_type("exfat") && !va::is_fuse_mount_type("fusectl"));
+    CHECK(va::normalise_filesystem_type("fuseblk") == "fuseblk"); // stays a FUSE type, for the device to be read
+
+    CHECK(va::fuse_driver("ntfs", "fuseblk") == "ntfs-3g");
+    CHECK(va::fuse_driver("exfat", "fuseblk") == "exfat-fuse");
+    CHECK(va::fuse_driver("", "fuseblk") == "fuseblk");
+    CHECK(va::fuse_driver("", "fuse.sample-fs") == "sample-fs");
+    CHECK(va::fuse_driver("ntfs", "ntfs3").empty() && va::fuse_driver("exfat", "exfat").empty());
+
+    std::string ntfs(512, '\0');
+    ntfs.replace(3, 8, "NTFS    ");
+    std::string exfat(512, '\0');
+    exfat.replace(3, 8, "EXFAT   ");
+    std::string fat32(512, '\0');
+    fat32.replace(3, 8, "MSDOS5.0");
+    fat32.replace(82, 8, "FAT32   ");
+    std::string fat16(512, '\0');
+    fat16.replace(54, 8, "FAT16   ");
+    CHECK(va::filesystem_format_from_boot_sector(ntfs) == "ntfs");
+    CHECK(va::filesystem_format_from_boot_sector(exfat) == "exfat");
+    CHECK(va::filesystem_format_from_boot_sector(fat32) == "vfat");
+    CHECK(va::filesystem_format_from_boot_sector(fat16) == "vfat");
+    CHECK(va::filesystem_format_from_boot_sector(std::string(512, 'x')).empty());
+    CHECK(va::filesystem_format_from_boot_sector("").empty() && va::filesystem_format_from_boot_sector("abc").empty());
+}
+
 // Decision 0035: identity strings as a platform may read them, with bytes that
 // are no UTF-8 text, become valid UTF-8: each such byte U+FFFD, valid text as
 // it was. Sample strings: a volume label in a legacy code page, as Linux's
@@ -383,5 +418,6 @@ void identity_tests()
     unreadable_filesystem_id();
     kernel_filesystem_id_format();
     kernel_filesystem_id_matching();
+    fuse_mounts_name_their_program_not_the_format();
     identity_text_is_made_valid_utf8();
 }

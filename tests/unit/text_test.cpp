@@ -249,6 +249,9 @@ void translation_tests()
                   "does not tell such names apart cannot keep them all") ==
           "有些名稱與同一資料夾中的另一個名稱只差在大小寫，或帶重音、標記的字母的編碼方式（Unicode 正規化）；"
           "不區分這些差異的磁碟區或作業系統無法同時保存它們");
+    // Decision 0006: the note of a verification read through ntfs-3g.
+    CHECK(chinese.format("note: {}", chinese("driver: ntfs-3g")) == "附註：驅動程式：ntfs-3g");
+    CHECK(chinese.format("Note: {}", chinese("driver: ntfs-3g")) == "附註：驅動程式：ntfs-3g");
     // Decision 0034: an INCOMPLETE run whose device went away says so.
     CHECK(chinese("the device that holds the archive went away while it was read (unplugged, or no longer "
                   "answering); attach it again, then resume this run") ==

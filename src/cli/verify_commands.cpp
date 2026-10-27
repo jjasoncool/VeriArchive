@@ -62,6 +62,9 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
     for (const auto& warning : outcome.warnings) {
         std::cout << "  " << text.format("warning: {}", text(warning)) << '\n';
     }
+    for (const auto& note : outcome.notes) {
+        std::cout << "  " << text.format("note: {}", text(note)) << '\n';
+    }
     for (const auto& item : outcome.items) {
         std::cout << "  " << text(item.status) << "  " << item.path.p
                   << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail)))
@@ -106,6 +109,7 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
         {"identity", identity},
         {"failure_classes", outcome.failure_classes},
         {"warnings", outcome.warnings},
+        {"notes", outcome.notes},
         {"counts", outcome.counts},
         {"items", std::move(items)},
         {"coverage_bytes", outcome.coverage_bytes},

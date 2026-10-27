@@ -46,6 +46,9 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
     for (const auto& warning : outcome.warnings) {
         body += text.format("Warning: {}", text(warning)) + "\n";
     }
+    for (const auto& note : outcome.notes) {
+        body += text.format("Note: {}", text(note)) + "\n";
+    }
     if (!outcome.items.empty()) {
         body += "\n";
         for (const auto& item : outcome.items) {

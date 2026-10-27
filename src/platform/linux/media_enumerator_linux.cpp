@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <compare> // IWYU pragma: keep (std::strong_ordering of the defaulted operator<=>)
 #include <cstdint>
+#include <fcntl.h>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -304,6 +305,27 @@ std::optional<FilesystemStatus> filesystem_status(const std::filesystem::path& m
     return status;
 }
 
+// The first sector of the block device `device_node`, as blkid reads it for
+// udev; empty where this process may not read the node (R-09: libblkid only
+// on device nodes the process can already read) or the read fails.
+std::string first_sector(const std::string& device_node)
+{
+    if (!device_node.starts_with("/dev/")) {
+        return {};
+    }
+    const posix::UniqueFd descriptor(::open(device_node.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK));
+    if (!descriptor.valid()) {
+        return {};
+    }
+    std::string sector(512, '\0');
+    const auto count = ::pread(descriptor.get(), sector.data(), sector.size(), 0);
+    if (count <= 0) {
+        return {};
+    }
+    sector.resize(static_cast<std::size_t>(count));
+    return sector;
+}
+
 VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
 {
     const auto properties = udev_properties(number);
@@ -312,9 +334,21 @@ VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
 
     auto type = property(properties, "ID_FS_TYPE");
     if (type.empty()) {
+        // Without the udev database the mount's type stands in, but that of a
+        // FUSE mount ("fuseblk", as ntfs-3g mounts) names the program, never
+        // the format (decision 0006): the format is then read from the
+        // device's first sector, as blkid reads it for udev, where this
+        // process may read the device, and is left unknown otherwise.
         type = mount.filesystem_type;
+        if (is_fuse_mount_type(normalise_filesystem_type(type))) {
+            type = filesystem_format_from_boot_sector(first_sector(mount.source));
+        }
     }
     volume.filesystem_type = normalise_filesystem_type(type);
+    // Decision 0006: a FUSE program that reads the format instead of the
+    // kernel's driver (ntfs-3g instead of ntfs3) is noted in the report of a
+    // verification, never in identity or the result.
+    volume.driver = fuse_driver(volume.filesystem_type, mount.filesystem_type);
 
     auto raw_uuid = property(properties, "ID_FS_UUID");
     if (raw_uuid.empty()) {
@@ -365,6 +399,7 @@ VolumeInfo describe_virtual_mount(const linux_mounts::Mount& mount)
     VolumeInfo volume;
     volume.mount_point = mount.mount_point;
     volume.filesystem_type = normalise_filesystem_type(mount.filesystem_type);
+    volume.driver = fuse_driver(volume.filesystem_type, mount.filesystem_type); // decision 0006
     volume.read_only = has_option(mount.options, "ro");
     if (const auto status = filesystem_status(mount.mount_point)) {
         volume.capacity_bytes = status->capacity_bytes;

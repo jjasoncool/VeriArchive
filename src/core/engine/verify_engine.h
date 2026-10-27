@@ -46,6 +46,10 @@ struct VerifyOutcome {
     MatchOutcome identity;
     std::vector<std::string> failure_classes;   // §A6 run-level failure classes
     std::vector<std::string> warnings;
+    // Informational, never part of the result (decision 0006): "driver:
+    // ntfs-3g" where a FUSE program read the media instead of the kernel's
+    // driver of its format.
+    std::vector<std::string> notes;
     std::map<std::string, std::uint64_t> counts; // item status -> number of entries
     std::vector<VerifyItemRecord> items;        // every non-Verified item (D7)
     std::uint64_t coverage_bytes = 0;           // bytes read and hashed in this run
