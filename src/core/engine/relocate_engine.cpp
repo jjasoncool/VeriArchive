@@ -698,9 +698,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                 comparison.items);
         }
         stop_mark.ended = true;
+        // The way on is the operator's copy, made again from the archive's
+        // carrier (decision 0004): `register --new-revision` re-baselines
+        // content changed on purpose at the archive's own root, never a copy.
         return fail(Kind::Differs,
-            "the new carrier does not hold the recorded content; nothing was changed (use "
-            "`register --new-revision` to re-baseline changed content)",
+            "the new carrier does not hold the recorded content; nothing was changed: copy the archive again from "
+            "its carrier to the new one, then relocate again",
             comparison.items);
     }
     if (comparison.incomplete) {

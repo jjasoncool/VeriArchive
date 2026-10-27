@@ -415,8 +415,8 @@ void differing_copy_is_refused()
 
 std::string differs_message()
 {
-    return "the new carrier does not hold the recorded content; nothing was changed (use `register "
-           "--new-revision` to re-baseline changed content)";
+    return "the new carrier does not hold the recorded content; nothing was changed: copy the archive again from "
+           "its carrier to the new one, then relocate again";
 }
 
 // Decision 0026: a copy that differs ends the relocation also while another

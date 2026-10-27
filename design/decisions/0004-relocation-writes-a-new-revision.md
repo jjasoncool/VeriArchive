@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-08
-amends: HANDOFF §B4.3 (`identity` semantics), §B10 (`MIGRATED`, matching), §B16 (CLI)
+amends: HANDOFF §B4.3 (`identity` semantics), §B10 (`MIGRATED`, matching), §B16 (CLI; amended 2026-10-27: the refusal of a new carrier that differs says to copy again, and its `--json` gives the entries that differ)
 ---
 
 # Changing an archive's carrier writes a new revision
@@ -10,7 +10,8 @@ The manifest header's `identity` is the only trusted record of which media holds
 
 ## Consequences
 
-- Any `Modified` / `Missing` / `New` / `TypeChanged` / `Unreadable` aborts the relocation; changing content is `register --new-revision`, not relocation. `MetadataMismatch` is allowed (copying commonly changes mtimes) and r(N+1) records the new metadata.
+- Any `Modified` / `Missing` / `New` / `TypeChanged` / `Unreadable` aborts the relocation; changing content is `register --new-revision`, not relocation.
+- Amended 2026-10-27: the refusal says what to do, as the user guides do: "the new carrier does not hold the recorded content; nothing was changed: copy the archive again from its carrier to the new one, then relocate again" (exit 3). It said "(use `register --new-revision` to re-baseline changed content)", which is for content changed on purpose at the archive's own root: run on the new carrier it was refused ("--new-revision: no registered archive at this root", exit 12), a dead end. The text lists each entry that differs with its detail, as a verification does, and `--json` gives them as `items` (`p`, `status`, `detail`, as a verification's), beside `error` and `exit_code`, where it gave only those two. Tests: the refusal's words in the engine, and the CLI end to end with a sample copy in which one file changed: the words in either language, never `--new-revision`, the entry with its detail, and `items` in `--json`; a mutation check that left the entries out of `--json` failed the test. `MetadataMismatch` is allowed (copying commonly changes mtimes) and r(N+1) records the new metadata.
 - Matching (§B10) uses the latest revision's `identity`. Media matching only an older revision's `identity` is reported as `PREVIOUS_CARRIER` (new `media_evidence.match_result` value) rather than `UNKNOWN`, and `register` on it is refused without `--force-new-archive`. It is not verified by default.
 - No header key changes, so no format version bump; `identity` now means "the carrier this revision was read from" rather than "the carrier at first registration".
 - Relocation is resumable like any FULL verify (R-104).

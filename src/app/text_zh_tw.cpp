@@ -1102,10 +1102,9 @@ constexpr CatalogEntry entries[] = {
         "relocate {} <root_path> --resume`",
         "無法記錄搬移：{}；搬移保留其已儲存的進度：請以 `archive relocate {} <root_path> --resume` 繼續",
         Match::Cause},
-    {"the new carrier does not hold the recorded content; "
-        "nothing was changed (use `register --new-revision` to re-baseline changed content)",
-        "新載體上的內容與記錄不符；未做任何變更（若內容已變更，"
-        "請使用 `register --new-revision` 重新建立基準）"},
+    {"the new carrier does not hold the recorded content; nothing was changed: copy the archive again from its "
+        "carrier to the new one, then relocate again",
+        "新載體上的內容與記錄不符；未做任何變更：請從封存的載體重新複製到新載體，再重新搬移"},
     {"the new carrier does not hold the recorded content; nothing was changed, but the relocation's saved "
         "progress could not be removed: {}; abandon the relocation with `archive abandon-relocation {}` before "
         "relocating again",

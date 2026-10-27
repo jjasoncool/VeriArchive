@@ -615,6 +615,35 @@ string(JSON relocated_revision GET "${last_output}" revision)
 if(resumed OR NOT relocated_revision EQUAL 3)
     message(FATAL_ERROR "relocate after an abandoned relocation:\n${last_output}")
 endif()
+# Decision 0004: a relocation to a copy that differs (one file changed, sample
+# data) is refused (exit 3), saying to copy the archive again from its
+# carrier, never `register --new-revision`, in either language; text lists
+# each entry that differs with its detail, and --json gives them as `items`.
+set(REFUSE_FROM "${WORK}/refuse-from-sample")
+set(REFUSE_TO "${WORK}/refuse-to-sample")
+file(WRITE "${REFUSE_FROM}/a.txt" "refusal sample a\n")
+file(WRITE "${REFUSE_FROM}/b.txt" "refusal sample b\n")
+file(COPY "${REFUSE_FROM}/" DESTINATION "${REFUSE_TO}")
+file(WRITE "${REFUSE_TO}/a.txt" "refusal sample a, changed\n")
+run_cli("0" register "${REFUSE_FROM}" --json)
+string(JSON refused_uuid GET "${last_output}" archive_uuid)
+run_cli("3" --lang en archive relocate "${refused_uuid}" "${REFUSE_TO}")
+set(refused_text "${last_output}")
+run_cli("3" archive relocate "${refused_uuid}" "${REFUSE_TO}")
+set(refused_chinese "${last_output}")
+run_cli("3" archive relocate "${refused_uuid}" "${REFUSE_TO}" --json)
+string(JSON refused_error GET "${last_output}" error)
+string(JSON refused_items LENGTH "${last_output}" items)
+string(JSON refused_path GET "${last_output}" items 0 p)
+string(JSON refused_status GET "${last_output}" items 0 status)
+if(NOT refused_text MATCHES "^RELOCATION REFUSED: the new carrier does not hold the recorded content; nothing was changed: copy the archive again from its carrier to the new one, then relocate again\n  Modified  a[.]txt  [(][^)\n]+[)]\n$"
+        OR NOT refused_chinese MATCHES "^拒絕搬移：新載體上的內容與記錄不符；未做任何變更：請從封存的載體重新複製到新載體，再重新搬移\n  已修改  a[.]txt"
+        OR refused_text MATCHES "new-revision" OR refused_chinese MATCHES "new-revision"
+        OR NOT refused_error STREQUAL "the new carrier does not hold the recorded content; nothing was changed: copy the archive again from its carrier to the new one, then relocate again"
+        OR NOT refused_items EQUAL 1 OR NOT refused_path STREQUAL "a.txt" OR NOT refused_status STREQUAL "Modified")
+    message(FATAL_ERROR "a relocation to a copy that differs:\n${refused_text}\n${refused_chinese}\n${last_output}")
+endif()
+
 # The history says which runs are a relocation's (decision 0026): the FULL
 # verifications that recorded revisions 2 and 3, in either language, and
 # --json names the relocation of each, which is the run itself.

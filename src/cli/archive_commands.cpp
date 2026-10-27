@@ -885,10 +885,23 @@ int relocate(const Arguments& arguments, Opened& opened)
 
     const auto& text = arguments.text;
     if (!outcome) {
-        if (outcome.error().kind == RelocateFailure::Kind::Differs && !arguments.json) {
+        // A new carrier that differs (decision 0004): each entry that
+        // differs, in text with its detail as a verification lists it, and
+        // in --json as a verification's `items`.
+        if (outcome.error().kind == RelocateFailure::Kind::Differs) {
+            if (arguments.json) {
+                auto items = nlohmann::json::array();
+                for (const auto& item : outcome.error().items) {
+                    items.push_back({{"p", item.path.p}, {"status", item.status}, {"detail", item.detail}});
+                }
+                print_json({{"error", outcome.error().message}, {"exit_code", exit_code::failed},
+                    {"items", std::move(items)}});
+                return exit_code::failed;
+            }
             std::cout << text.format("RELOCATION REFUSED: {}", text(outcome.error().message)) << '\n';
             for (const auto& item : outcome.error().items) {
-                std::cout << "  " << text(item.status) << "  " << item.path.p << '\n';
+                std::cout << "  " << text(item.status) << "  " << item.path.p
+                          << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail))) << '\n';
             }
             return exit_code::failed;
         }
