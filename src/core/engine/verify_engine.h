@@ -103,11 +103,12 @@ struct VerifyStop {
     // (decision 0022, point 7): the archive's root on each, for the user
     // interfaces to word what to do. Empty for every other stop.
     std::vector<std::filesystem::path> roots_found = {};
-    // Refused while the archive's verification that adds chunk hashes is
-    // unfinished (decision 0033): that verification. `message` names the
-    // commands that finish or abandon it, as the command line says them;
-    // the GUI names its own ways (app::stop_message_in_window).
-    std::optional<AddingVerification> adding = std::nullopt;
+    // Refused while another operation that creates the archive's next
+    // revision is unfinished (decision 0033): a registration, a relocation,
+    // or a verification that adds chunk hashes. `message` names the commands
+    // that finish or abandon it, as the command line says them; the GUI names
+    // its own ways (app::stop_message_in_window).
+    std::optional<RefusingOperation> refusing = std::nullopt;
 };
 
 std::expected<VerifyOutcome, VerifyStop> verify_full(

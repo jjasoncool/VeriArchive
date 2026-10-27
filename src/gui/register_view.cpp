@@ -13,6 +13,7 @@
 #include "platform/platform_services.h"
 #include "platform/process_table.h"
 
+#include <chrono>
 #include <memory>
 #include <optional>
 
@@ -169,7 +170,22 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                         return text.format("Not registered: {}", text(app::older_version_resume_warning));
                     };
                 }
-                return [message = outcome.error().message](const app::Text& text) {
+                // Refused while another operation that creates the archive's
+                // next revision is unfinished, it names the window's own ways
+                // on, or says that that operation still runs, judged as the
+                // Archive List judges its row (decisions 0025, 0033). The
+                // window's one operation is this registration, which wrote no
+                // plan of its own: a plan that names this process is of an
+                // attempt that has ended. When it cannot be judged, the ways
+                // on are named.
+                bool stopped = true;
+                if (const auto& refusing = outcome.error().refusing) {
+                    const app::AttemptCheck attempts{processes.get(), state.host.host, [] { return false; }};
+                    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+                    const auto judged = app::refusing_operation_stopped(*store, *refusing, attempts, now);
+                    stopped = !judged || *judged;
+                }
+                return [message = app::register_message_in_window(outcome.error(), stopped)](const app::Text& text) {
                     return text.format("Not registered: {}", text(message));
                 };
             }

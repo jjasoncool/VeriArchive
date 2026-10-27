@@ -1022,6 +1022,85 @@ constexpr CatalogEntry entries[] = {
         "the archive is chosen above, or abandon it with Abandon... in the Archive List)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
         "若它停止了，請在上方選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
+    // The same refusal of a registration in Register Archive (decision 0033).
+    {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
+        "was changed (finish it first with Resume interrupted run in Verify Archive once the archive is chosen there, "
+        "or abandon it with Abandon... in the Archive List)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「驗證封存」選擇該封存，"
+        "再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
+    {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {} and is still "
+        "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume interrupted run in "
+        "Verify Archive once the archive is chosen there, or abandon it with Abandon... in the Archive List)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
+        "若它停止了，請在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它，或在「封存列表」按「放棄…」放棄它）"},
+    // The refusal of Register Archive and Verify Archive while a registration
+    // of the archive is unfinished, in the windows' own words (decisions
+    // 0025, 0030, 0033): the one of the root entered, of another root of the
+    // archive, or one made for an older revision; once it has stopped, and
+    // while it runs.
+    {"an interrupted registration of this root exists (archive {}); finish it by ticking Resume an interrupted "
+        "registration of this folder or volume and pressing Register again, or abandon it with Abandon... in the "
+        "Archive List",
+        "此根目錄有一個中斷的註冊（封存 {}）；請勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」完成它，"
+        "或在「封存列表」按「放棄…」放棄它"},
+    {"a registration of this root (archive {}) is still running; wait for it to finish; if it stops, finish it by "
+        "ticking Resume an interrupted registration of this folder or volume and pressing Register again, or abandon "
+        "it with Abandon... in the Archive List",
+        "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請勾選「繼續此資料夾或磁碟區中斷的註冊」，"
+        "再按一次「註冊」完成它，或在「封存列表」按「放棄…」放棄它"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
+        "it first by entering its root above, ticking Resume an interrupted registration of this folder or volume "
+        "and pressing Register, or abandon it with Abandon... in the Archive List)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在上方輸入它的根目錄，"
+        "勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，或在「封存列表」按「放棄…」放棄它）"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
+        "was changed (wait for it to finish; if it stops, finish it by entering its root above, ticking Resume an "
+        "interrupted registration of this folder or volume and pressing Register, or abandon it with Abandon... in "
+        "the Archive List)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
+        "若它停止了，請在上方輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，"
+        "或在「封存列表」按「放棄…」放棄它）"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
+        "it first in Register Archive by entering its root, ticking Resume an interrupted registration of this "
+        "folder or volume and pressing Register, or abandon it with Abandon... in the Archive List)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「註冊封存」輸入它的根目錄，"
+        "勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，或在「封存列表」按「放棄…」放棄它）"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
+        "was changed (wait for it to finish; if it stops, finish it in Register Archive by entering its root, "
+        "ticking Resume an interrupted registration of this folder or volume and pressing Register, or abandon it "
+        "with Abandon... in the Archive List)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
+        "若它停止了，請在「註冊封存」輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它，"
+        "或在「封存列表」按「放棄…」放棄它）"},
+    {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
+        "later revision ({}); the registration can no longer finish: abandon it with Abandon... in the Archive List",
+        "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成："
+        "請在「封存列表」按「放棄…」放棄它"},
+    {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
+        "later revision ({}); the registration can no longer finish, and is still running: wait for it to stop, then "
+        "abandon it with Abandon... in the Archive List",
+        "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成，"
+        "而且仍在執行：請等它停止，再在「封存列表」按「放棄…」放棄它"},
+    // ... and while a relocation of the archive is unfinished: a relocation
+    // has no window, so it is continued on the command line (decision 0026).
+    {"an unfinished relocation of archive {} (to \"{}\") exists; resume it on the command line with `archive "
+        "relocate {} {} --resume`, or abandon it with Abandon... in the Archive List",
+        "封存 {} 有一個未完成的搬移（至「{}」）；請在命令列以 `archive relocate {} {} --resume` 繼續，"
+        "或在「封存列表」按「放棄…」放棄它"},
+    {"an unfinished relocation of archive {} (to \"{}\") exists and is still running; wait for it to finish; if it "
+        "stops, resume it on the command line with `archive relocate {} {} --resume`, or abandon it with "
+        "Abandon... in the Archive List",
+        "封存 {} 有一個未完成的搬移（至「{}」），而且仍在執行；請等它完成；若它停止了，請在命令列以 "
+        "`archive relocate {} {} --resume` 繼續，或在「封存列表」按「放棄…」放棄它"},
+    {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
+        "content and cannot be resumed; abandon it with Abandon... in the Archive List, then relocate again",
+        "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，無法繼續；請在「封存列表」按「放棄…」放棄它，"
+        "再重新搬移"},
+    {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
+        "content and is still running; wait for it to end; if it is then still listed in the Archive List, abandon "
+        "it there with Abandon..., then relocate again",
+        "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，而且仍在執行；請等它結束；結束後若它仍列在"
+        "「封存列表」中，請在那裡按「放棄…」放棄它，再重新搬移"},
     {"this verification is still running in process {} ({}) on this computer; resume it once that process has "
         "ended",
         "此驗證仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再繼續"},

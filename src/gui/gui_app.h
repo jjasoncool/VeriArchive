@@ -3,6 +3,7 @@
 // Register Archive, Verify Archive, Verification History, Settings) and
 // Compare Archives (decision 0020).
 #include "app/adding_chunk_hashes.h"
+#include "app/refusal_in_window.h"
 #include "app/unfinished_operations.h"
 #include "app/session.h"
 #include "gui/displayed_identity.h"

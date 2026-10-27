@@ -34,7 +34,8 @@ std::unexpected<VerifyStop> stop(VerifyStop::Kind kind, std::string message, Mat
 // verification for the GUI's.
 std::unexpected<VerifyStop> refused_by(const AddingVerification& adding)
 {
-    return std::unexpected(VerifyStop{VerifyStop::Kind::Refused, adding_verification_refusal(adding), {}, {}, adding});
+    return std::unexpected(VerifyStop{
+        VerifyStop::Kind::Refused, adding_verification_refusal(adding), {}, {}, refusing_verification(adding)});
 }
 
 struct Located {
@@ -673,9 +674,9 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         // that looks first, before anything of the media is read. So two
         // started at once cannot both go on.
         std::optional<std::string> refused;
-        // The archive's verification that adds chunk hashes, where it is what
-        // refuses this run.
-        std::optional<AddingVerification> refused_by_adding;
+        // The other operation that creates the archive's next revision, where
+        // it is what refuses this run.
+        std::optional<RefusingOperation> refusing;
         const auto claimed = [&]() -> std::expected<void, IoError> {
             if (auto begun = store.begin(); !begun) {
                 return begun;
@@ -694,7 +695,9 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                     }
                     refused = *other ? adding_verification_refusal(**other)
                                      : "run " + before + " is not an interrupted run";
-                    refused_by_adding = *other;
+                    if (*other) {
+                        refusing = refusing_verification(**other);
+                    }
                     store.rollback();
                     return {};
                 }
@@ -751,7 +754,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                     }
                     if (*another) {
                         refused = std::move((*another)->message);
-                        refused_by_adding = std::move((*another)->adding);
+                        refusing = std::move((*another)->refusing);
                         store.rollback();
                         return {};
                     }
@@ -771,7 +774,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         }
         if (refused) {
             return std::unexpected(
-                VerifyStop{VerifyStop::Kind::Refused, std::move(*refused), {}, {}, std::move(refused_by_adding)});
+                VerifyStop{VerifyStop::Kind::Refused, std::move(*refused), {}, {}, std::move(refusing)});
         }
     } else {
         (void)store.set_setting(run_setting(outcome.run_id), run_record.dump());

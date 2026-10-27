@@ -107,6 +107,49 @@ std::expected<std::optional<AddingVerification>, IoError> unfinished_adding_veri
     return std::optional<AddingVerification>{};
 }
 
+RefusingOperation refusing_registration(const Uuid& archive_uuid, const nlohmann::json& plan)
+{
+    RefusingOperation refusing;
+    refusing.kind = RefusingOperation::Kind::Registration;
+    refusing.archive_uuid = archive_uuid;
+    if (plan.is_object()) {
+        refusing.root = text_member(plan, "root");
+        refusing.revision = static_cast<std::uint32_t>(unsigned_member(plan, "revision").value_or(0));
+        refusing.started = text_member(plan, "created");
+    }
+    refusing.record = plan;
+    return refusing;
+}
+
+RefusingOperation refusing_relocation(const Uuid& archive_uuid, const nlohmann::json& record)
+{
+    RefusingOperation refusing;
+    refusing.kind = RefusingOperation::Kind::Relocation;
+    refusing.archive_uuid = archive_uuid;
+    if (record.is_object()) {
+        refusing.root = text_member(record, "root");
+        refusing.revision = static_cast<std::uint32_t>(unsigned_member(record, "revision").value_or(0));
+        refusing.run_id = text_member(record, "run_id");
+        refusing.started = text_member(record, "started");
+        refusing.differs = !text_member(record, "differs").empty();
+    }
+    refusing.record = record;
+    return refusing;
+}
+
+RefusingOperation refusing_verification(const AddingVerification& verification)
+{
+    RefusingOperation refusing;
+    refusing.kind = RefusingOperation::Kind::AddingVerification;
+    refusing.archive_uuid = verification.archive_uuid;
+    refusing.root = verification.root;
+    refusing.revision = verification.revision;
+    refusing.run_id = verification.run_id;
+    refusing.started = verification.started;
+    refusing.record = verification.record;
+    return refusing;
+}
+
 std::string adding_verification_refusal(const AddingVerification& verification)
 {
     const auto& uuid = verification.archive_uuid;
@@ -139,7 +182,7 @@ std::expected<std::optional<NextRevisionRefusal>, IoError> another_operation_cre
                            "; nothing was changed (finish it with `register --resume` first, or abandon it with "
                            "`archive abandon-registration " +
                                uuid + "`)",
-                std::nullopt});
+                refusing_registration(uuid, plan)});
         }
     }
     // A relocation of the archive (decision 0026) whose revision is not
@@ -160,20 +203,20 @@ std::expected<std::optional<NextRevisionRefusal>, IoError> another_operation_cre
                            "\") found that the new carrier does not hold the recorded content and cannot be resumed; "
                            "abandon it with `archive abandon-relocation " +
                                uuid + "`, then relocate again",
-                std::nullopt});
+                refusing_relocation(uuid, relocation)});
         }
         if (!*recorded) {
             return Refusal({"an unfinished relocation of archive " + uuid + " (to \"" + to +
                            "\") exists; resume it with `archive relocate " + uuid + " " + shell_argument(to) +
                                " --resume`, or abandon it with `archive abandon-relocation " + uuid + "`",
-                std::nullopt});
+                refusing_relocation(uuid, relocation)});
         }
     }
     const auto adding = unfinished_adding_verification(store, uuid);
     if (!adding) {
         return std::unexpected(adding.error());
     }
-    return *adding ? Refusal({adding_verification_refusal(**adding), **adding}) : Refusal{};
+    return *adding ? Refusal({adding_verification_refusal(**adding), refusing_verification(**adding)}) : Refusal{};
 }
 
 std::expected<void, IoError> remove_adding_verifications_of_earlier_revisions(

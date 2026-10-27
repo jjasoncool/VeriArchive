@@ -67,14 +67,51 @@ std::expected<std::optional<AddingVerification>, IoError> unfinished_adding_veri
 // time), naming how to finish or abandon it.
 std::string adding_verification_refusal(const AddingVerification& verification);
 
+// The unfinished operation that keeps another from creating an archive's next
+// revision, as the refusal found it (decisions 0025, 0026, 0033): what the
+// windows need to name their own ways on in place of the command lines that
+// the refusal names, and to judge whether it still runs, as the Archive List
+// judges its row (app::refusal_in_window).
+struct RefusingOperation {
+    enum class Kind {
+        Registration,        // a registration's plan, "registration:<archive_uuid>" (decision 0025)
+        Relocation,          // a relocation's record, "relocation:<archive_uuid>" (decision 0026)
+        AddingVerification,  // the record of a FULL verify that adds chunk hashes, "run:<run_id>" (decision 0033)
+    };
+    Kind kind = Kind::Registration;
+    Uuid archive_uuid;
+    std::string root;               // where it reads (UTF-8): a registration's root, a relocation's new root
+    std::uint32_t revision = 0;     // the revision a registration creates; the one a relocation or a
+                                    // verification verifies, whose next one it creates
+    std::string run_id;             // a relocation's or a verification's
+    Timestamp started;              // when its plan or record was made
+    bool this_root = false;         // a registration of the very root of the refused registration (decision
+                                    // 0025, point 1), not of another root of its archive
+    bool differs = false;           // a relocation whose new carrier does not hold the recorded content
+    std::optional<std::uint32_t> later_revision;  // made for an older revision than the archive has now
+                                                  // (decision 0030): the archive's revision
+    nlohmann::json record;          // its plan or record as the refusal read it
+};
+
+// The registration whose plan is `plan` (a stored plan, parsed), as the
+// operation that refuses another.
+RefusingOperation refusing_registration(const Uuid& archive_uuid, const nlohmann::json& plan);
+
+// The relocation whose record is `record`, as the operation that refuses
+// another; its record says whether its new carrier differs.
+RefusingOperation refusing_relocation(const Uuid& archive_uuid, const nlohmann::json& record);
+
+// The verification that adds chunk hashes `verification`, as the operation
+// that refuses another.
+RefusingOperation refusing_verification(const AddingVerification& verification);
+
 // Why an operation that would create an archive's next revision does not
 // begin while another one that creates it is unfinished: the refusal, which
-// names the commands that finish or abandon the other one, and the other one
-// when it is a verification that adds chunk hashes, whose ways on the GUI
-// names in its own words (decision 0033).
+// names the commands that finish or abandon the other one, and the other one,
+// whose ways on the windows name in their own words (decision 0033).
 struct NextRevisionRefusal {
     std::string message;
-    std::optional<AddingVerification> adding;
+    RefusingOperation refusing;
 };
 
 // Why a FULL verify that adds chunk hashes to `archive` does not begin:

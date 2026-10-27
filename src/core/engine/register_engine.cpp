@@ -30,7 +30,21 @@ namespace {
 
 std::unexpected<RegisterFailure> fail(RegisterFailure::Kind kind, std::string message)
 {
-    return std::unexpected(RegisterFailure{kind, std::move(message)});
+    return std::unexpected(RegisterFailure{kind, std::move(message), std::nullopt});
+}
+
+// The refusal `failure` of a registration that does not begin while the
+// registration whose plan is `plan` is unfinished, with that registration for
+// the GUI's words (decision 0025): of this very root, or of another root of
+// the archive; made for an older revision when the archive has a later one
+// (decision 0030).
+RegisterFailure refused_by_registration(RegisterFailure failure, const Uuid& archive_uuid, const nlohmann::json& plan,
+    bool this_root, std::optional<std::uint32_t> later_revision)
+{
+    failure.refusing = refusing_registration(archive_uuid, plan);
+    failure.refusing->this_root = this_root;
+    failure.refusing->later_revision = later_revision;
+    return failure;
 }
 
 std::string describe(const ArchiveCandidate& candidate)
@@ -63,6 +77,7 @@ struct Plan {
     // (decision 0032): the chunk hashes saved by one attempt are those the
     // next one reuses.
     std::uint64_t chunk_size = 0;
+    nlohmann::json record; // the plan as stored, where it was found (find_pending)
 };
 
 // The chunk size a plan fixed. A plan of a version before decision 0032 has
@@ -212,6 +227,7 @@ struct UnfinishedRegistration {
     std::string root;
     std::uint32_t revision = 0;
     std::optional<std::uint32_t> later_revision; // the archive's, when it was made for an older one
+    nlohmann::json plan;                         // its plan as stored
 };
 
 // The archive's unfinished registration, if its key holds one: a plan whose
@@ -245,6 +261,7 @@ std::expected<std::optional<UnfinishedRegistration>, IoError> unfinished_registr
         return std::unexpected(later.error());
     }
     registration.later_revision = *later;
+    registration.plan = plan;
     return std::optional<UnfinishedRegistration>(std::move(registration));
 }
 
@@ -360,6 +377,7 @@ std::expected<std::optional<Plan>, IoError> find_pending(ArchiveStore& store, co
             plan.lost_revision = lost->get<std::uint32_t>();
         }
         plan.chunk_size = planned_chunk_size(json);
+        plan.record = json;
         return std::optional<Plan>(plan);
     }
     return std::optional<Plan>{};
@@ -768,7 +786,9 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 return std::unexpected(later.error());
             }
             if (*later) {
-                refused = made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, **later).error();
+                refused = refused_by_registration(
+                    made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, **later).error(),
+                    plan.archive_uuid, record, true, *later);
                 store.rollback();
                 return {};
             }
@@ -820,7 +840,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             // resume beside one of them goes unasked (decision 0022, point 7).
             if (!said_when_it_worked(record) && !recorded_attempt(record) && !request.confirmed) {
                 refused = RegisterFailure{Kind::Unconfirmed, "run the command again with --confirm to resume it",
-                    std::nullopt,
+                    std::nullopt, std::nullopt,
                     OlderVersionRegistration{plan.archive_uuid, plan.label, plan.revision, plan.root, plan.created}};
                 store.rollback();
                 return {};
@@ -880,14 +900,20 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 return fail(Kind::Repository, later.error().message);
             }
             if (*later) {
-                return made_for_an_older_revision(
-                    (*pending)->archive_uuid, (*pending)->root, (*pending)->revision, **later);
+                return std::unexpected(refused_by_registration(
+                    made_for_an_older_revision(
+                        (*pending)->archive_uuid, (*pending)->root, (*pending)->revision, **later)
+                        .error(),
+                    (*pending)->archive_uuid, (*pending)->record, true, *later));
             }
-            return fail(Kind::Refused, "an interrupted registration of this root exists (archive " +
-                                           (*pending)->archive_uuid +
-                                           "); finish it with --resume, or abandon it with "
-                                           "`archive abandon-registration " +
-                                           (*pending)->archive_uuid + "`");
+            return std::unexpected(refused_by_registration(
+                fail(Kind::Refused, "an interrupted registration of this root exists (archive " +
+                                        (*pending)->archive_uuid +
+                                        "); finish it with --resume, or abandon it with "
+                                        "`archive abandon-registration " +
+                                        (*pending)->archive_uuid + "`")
+                    .error(),
+                (*pending)->archive_uuid, (*pending)->record, true, std::nullopt));
         }
         // The archive that receives a new revision: the one named for a
         // registration over its lost manifest (decision 0028, point 8), or
@@ -1039,11 +1065,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             if (*other) {
                 // One made for an older revision can no longer finish
                 // (decision 0030): the way out is to abandon it.
-                refused = (*other)->later_revision
-                              ? made_for_an_older_revision(plan.archive_uuid, (*other)->root, (*other)->revision,
-                                    *(*other)->later_revision)
-                                    .error()
-                              : another_registration(plan.archive_uuid, **other).error();
+                refused = refused_by_registration((*other)->later_revision
+                                                      ? made_for_an_older_revision(plan.archive_uuid, (*other)->root,
+                                                            (*other)->revision, *(*other)->later_revision)
+                                                            .error()
+                                                      : another_registration(plan.archive_uuid, **other).error(),
+                    plan.archive_uuid, (*other)->plan, false, (*other)->later_revision);
                 store.rollback();
                 return {};
             }
@@ -1077,7 +1104,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     return std::unexpected(adding.error());
                 }
                 if (*adding) {
-                    refused = RegisterFailure{Kind::Refused, adding_verification_refusal(**adding)};
+                    refused = RegisterFailure{
+                        Kind::Refused, adding_verification_refusal(**adding), std::nullopt, refusing_verification(**adding)};
                     store.rollback();
                     return {};
                 }

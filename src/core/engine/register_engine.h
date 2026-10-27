@@ -1,6 +1,7 @@
 #pragma once
 // Registration: scan an archive root, hash every file, write the first (or a
 // new) revision's manifest, and index it in the repository.
+#include "core/engine/add_chunk_hashes.h"
 #include "core/engine/candidates.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
@@ -152,6 +153,14 @@ struct RegisterFailure {
     std::string message;
     // Unconfirmed: what the registration would register once confirmed.
     std::optional<LostManifestRegistration> lost_manifest = std::nullopt;
+    // Refused at its start while another operation that creates the archive's
+    // next revision is unfinished: a registration of the archive, the one of
+    // this root or of another root (decision 0025), also one made for an
+    // older revision (decision 0030), or a verification that adds chunk
+    // hashes (decision 0033). `message` names the commands that finish or
+    // abandon it, as the command line says them; the GUI names its own ways
+    // (app::register_message_in_window).
+    std::optional<RefusingOperation> refusing = std::nullopt;
     // Unconfirmed: the older version's registration that the resume would take up once confirmed.
     std::optional<OlderVersionRegistration> older_version = std::nullopt;
 };

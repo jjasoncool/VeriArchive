@@ -117,35 +117,6 @@ nlohmann::json abandonable_verification_member(const AbandonableVerification& ve
     return {{"verification", abandonable_verification_json(verification)}};
 }
 
-std::string stop_message_in_window(const VerifyStop& stop, bool stopped)
-{
-    if (!stop.adding) {
-        return stop.message;
-    }
-    const auto& adding = *stop.adding;
-    const auto refusing = "an unfinished verification of archive " + adding.archive_uuid +
-                          " that adds chunk hashes (run " + adding.run_id + ") is creating revision " +
-                          std::to_string(adding.revision + 1);
-    if (!stopped) {
-        return refusing +
-               " and is still running; nothing was changed (wait for it to finish; if it stops, finish it with Resume "
-               "interrupted run once the archive is chosen above, or abandon it with Abandon... in the Archive List)";
-    }
-    return refusing +
-           "; nothing was changed (finish it first with Resume interrupted run once the archive is chosen above, or "
-           "abandon it with Abandon... in the Archive List)";
-}
-
-std::expected<bool, IoError> adding_verification_stopped(ArchiveStore& store, const AddingVerification& adding,
-    const AttemptCheck& attempts, std::chrono::sys_seconds wall_now)
-{
-    const auto recorded = store.verify_run(adding.run_id);
-    if (!recorded) {
-        return std::unexpected(recorded.error());
-    }
-    return judged_stopped(adding, *recorded && (*recorded)->result == "INCOMPLETE", attempts, wall_now);
-}
-
 std::expected<std::optional<RunToResume>, IoError> resumable_adding_verification(
     ArchiveStore& store, const Uuid& archive_uuid, const AttemptCheck& attempts, std::chrono::sys_seconds wall_now)
 {

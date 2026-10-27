@@ -10,6 +10,7 @@
 #include "manifest_samples.h"
 
 #include "app/adding_chunk_hashes.h"
+#include "app/refusal_in_window.h"
 #include "app/unfinished_operations.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/abandon_verification.h"
@@ -969,13 +970,28 @@ std::string runs_in_window(const va::Uuid& uuid, const std::string& run)
            "the Archive List)";
 }
 
+// The same refusal of a registration in Register Archive (decision 0033),
+// once the verification that refuses has stopped and while it runs.
+std::string waits_for_in_register_archive(const va::Uuid& uuid, const std::string& run, bool stopped)
+{
+    const auto refusal = "an unfinished verification of archive " + uuid + " that adds chunk hashes (run " + run +
+                         ") is creating revision 2";
+    return stopped ? refusal + "; nothing was changed (finish it first with Resume interrupted run in Verify Archive "
+                               "once the archive is chosen there, or abandon it with Abandon... in the Archive List)"
+                   : refusal + " and is still running; nothing was changed (wait for it to finish; if it stops, finish "
+                               "it with Resume interrupted run in Verify Archive once the archive is chosen there, or "
+                               "abandon it with Abandon... in the Archive List)";
+}
+
 // A verification refused while the verification that adds chunk hashes `run`
 // is unfinished: the command line's words, that verification, and the
 // window's words once it has stopped and while it runs.
 bool refused_by(const va::VerifyStop& stop, const va::Uuid& uuid, const std::string& run)
 {
     const bool said = stop.kind == va::VerifyStop::Kind::Refused && stop.message == waits_for(uuid, run) &&
-                      stop.adding && stop.adding->run_id == run && stop.adding->archive_uuid == uuid &&
+                      stop.refusing && stop.refusing->kind == va::RefusingOperation::Kind::AddingVerification &&
+                      stop.refusing->run_id == run && stop.refusing->archive_uuid == uuid &&
+                      stop.refusing->revision == 1 &&
                       va::app::stop_message_in_window(stop, true) == waits_for_in_window(uuid, run) &&
                       va::app::stop_message_in_window(stop, false) == runs_in_window(uuid, run);
     if (!said) {
@@ -1057,6 +1073,21 @@ void a_registration_waits_for_a_verification_that_adds_chunk_hashes()
               refused.error().message == waits_for(fixture.archive_uuid, interrupted->run_id));
         CHECK(fixture.archive.bytes_read == 0 && fixture.store.setting("registration:" + fixture.archive_uuid) == "" &&
               fixture.current_revision() == 1);
+        // Register Archive names its own ways on: the verification that
+        // refuses is recorded INCOMPLETE, so it has stopped.
+        CHECK(!refused && refused.error().refusing &&
+              refused.error().refusing->kind == va::RefusingOperation::Kind::AddingVerification &&
+              refused.error().refusing->run_id == interrupted->run_id &&
+              va::app::register_message_in_window(refused.error(), true) ==
+                  waits_for_in_register_archive(fixture.archive_uuid, interrupted->run_id, true) &&
+              va::app::register_message_in_window(refused.error(), false) ==
+                  waits_for_in_register_archive(fixture.archive_uuid, interrupted->run_id, false));
+        if (!refused && refused.error().refusing) {
+            const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+            const auto stopped = va::app::refusing_operation_stopped(
+                other.store, *refused.error().refusing, {&other.processes, fixture.host.host, {}}, now);
+            CHECK(stopped && *stopped);
+        }
 
         const auto resumed = fixture.add(interrupted->run_id);
         CHECK(resumed && resumed->added_revision == 2);
@@ -1068,10 +1099,18 @@ void a_registration_waits_for_a_verification_that_adds_chunk_hashes()
         OtherProcess other(fixture);
         std::string running;
         std::optional<std::expected<va::RegisterOutcome, va::RegisterFailure>> meanwhile;
+        std::optional<std::expected<bool, va::IoError>> stopped_meanwhile;
         test::HookedFiles hooked(fixture.archive, "c.bin", [&] {
             const auto runs = fixture.repository.query("SELECT substr(key, 5) FROM settings WHERE key LIKE 'run:%'");
             running = runs;
             meanwhile = other.register_new_revision(fixture, fixture.archive);
+            // Judged as the Archive List judges its row: its process, which
+            // the other process sees running, reads.
+            if (!*meanwhile && (*meanwhile).error().refusing) {
+                const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+                stopped_meanwhile = va::app::refusing_operation_stopped(
+                    other.store, *(*meanwhile).error().refusing, {&other.processes, fixture.host.host, {}}, now);
+            }
         });
         va::VerifyServices services{hooked, *fixture.repository.files, fixture.media, fixture.store,
             fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
@@ -1082,6 +1121,10 @@ void a_registration_waits_for_a_verification_that_adds_chunk_hashes()
         request.chunk_size = test_chunk_size;
         const auto outcome = va::verify_full(services, request, fixture.cancel, fixture.progress);
         CHECK(meanwhile && !*meanwhile && (*meanwhile).error().message == waits_for(fixture.archive_uuid, running));
+        CHECK(stopped_meanwhile && *stopped_meanwhile && !**stopped_meanwhile);
+        CHECK(meanwhile && !*meanwhile &&
+              va::app::register_message_in_window((*meanwhile).error(), false) ==
+                  waits_for_in_register_archive(fixture.archive_uuid, running, false));
         CHECK(outcome && outcome->run_id == running && outcome->added_revision == 2);
     }
 }
@@ -1090,8 +1133,10 @@ void a_registration_waits_for_a_verification_that_adds_chunk_hashes()
 // unfinished, stopped with saved files or still hashing, and a verification
 // that adds chunk hashes is refused at once in the words of a registration
 // through another root (decision 0025), changing nothing and reading
-// nothing. Once the stopped registration is abandoned, the verification adds
-// them; once the running one records revision 2, which has chunk hashes, the
+// nothing; Verify Archive names Register Archive's way to finish it and the
+// Archive List's to abandon it, or, while it hashes, says so and to wait.
+// Once the stopped registration is abandoned, the verification adds them;
+// once the running one records revision 2, which has chunk hashes, the
 // verification has none to add.
 void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
 {
@@ -1102,6 +1147,18 @@ void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
                "it with `archive abandon-registration " +
                fixture.archive_uuid + "`)";
     };
+    const auto registration_in_window = [](const RegisteredWithout& fixture, bool stopped) {
+        const auto creating = "an unfinished registration of archive " + fixture.archive_uuid + " (root \"" +
+                              va::path_to_utf8(fixture.archive.root()) + "\") is creating revision 2";
+        const std::string resume = "in Register Archive by entering its root, ticking Resume an interrupted "
+                                   "registration of this folder or volume and pressing Register";
+        return stopped ? creating + "; nothing was changed (finish it first " + resume +
+                             ", or abandon it with Abandon... in the Archive List)"
+                       : creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
+                                    "finish it " +
+                             resume + ", or abandon it with Abandon... in the Archive List)";
+    };
+    const auto now = [] { return std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()); };
     {
         RegisteredWithout fixture;
         OtherProcess other(fixture);
@@ -1115,10 +1172,20 @@ void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
         const auto refused = fixture.add();
         CHECK(!refused && refused.error().kind == va::VerifyStop::Kind::Refused &&
               refused.error().message == registration_refusal(fixture));
-        // A registration's refusal is no verification's: the window keeps its words.
-        CHECK(!refused && !refused.error().adding &&
-              va::app::stop_message_in_window(refused.error(), true) == registration_refusal(fixture) &&
-              va::app::stop_message_in_window(refused.error(), false) == registration_refusal(fixture));
+        // The window names its own ways on (decision 0033); the registration
+        // was cancelled, so its plan says that it stopped.
+        CHECK(!refused && refused.error().refusing &&
+              refused.error().refusing->kind == va::RefusingOperation::Kind::Registration &&
+              refused.error().refusing->revision == 2 && !refused.error().refusing->this_root &&
+              va::app::stop_message_in_window(refused.error(), true) == registration_in_window(fixture, true) &&
+              va::app::stop_message_in_window(refused.error(), false) == registration_in_window(fixture, false));
+        if (!refused && refused.error().refusing) {
+            fixture.processes.others = {other.processes.self};
+            const auto judged = va::app::refusing_operation_stopped(
+                fixture.store, *refused.error().refusing, {&fixture.processes, fixture.host.host, {}}, now());
+            CHECK(judged && *judged);
+            fixture.processes.others.clear();
+        }
         CHECK(fixture.archive.bytes_read == 0);
         const auto records = fixture.store.settings_with_prefix("run:");
         CHECK(records && records->empty());
@@ -1133,10 +1200,22 @@ void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
     {
         RegisteredWithout fixture;
         OtherProcess other(fixture);
+        // This fixture's process, the window's, sees the registration's run.
+        fixture.processes.others = {other.processes.self};
         std::optional<std::expected<va::VerifyOutcome, va::VerifyStop>> meanwhile;
-        test::HookedFiles hooked(fixture.archive, "c.bin", [&] { meanwhile = fixture.add(); });
+        std::optional<std::expected<bool, va::IoError>> stopped_meanwhile;
+        test::HookedFiles hooked(fixture.archive, "c.bin", [&] {
+            meanwhile = fixture.add();
+            if (!*meanwhile && (*meanwhile).error().refusing) {
+                stopped_meanwhile = va::app::refusing_operation_stopped(fixture.store,
+                    *(*meanwhile).error().refusing, {&fixture.processes, fixture.host.host, {}}, now());
+            }
+        });
         const auto registered = other.register_new_revision(fixture, hooked);
         CHECK(meanwhile && !*meanwhile && (*meanwhile).error().message == registration_refusal(fixture));
+        CHECK(stopped_meanwhile && *stopped_meanwhile && !**stopped_meanwhile);
+        CHECK(meanwhile && !*meanwhile &&
+              va::app::stop_message_in_window((*meanwhile).error(), false) == registration_in_window(fixture, false));
         CHECK(registered && registered->revision == 2);
         const auto refused = fixture.add();
         CHECK(!refused && refused.error().message ==
@@ -1183,6 +1262,37 @@ void a_relocation_and_a_verification_that_adds_chunk_hashes_wait_for_each_other(
                                              " (to \"K:/SAMPLE\") exists; resume it with `archive relocate " + uuid +
                                              " K:/SAMPLE --resume`, or abandon it with `archive abandon-relocation " +
                                              uuid + "`");
+        // Verify Archive names the Archive List's Abandon...; a relocation
+        // has no window, so its command line goes on naming how to continue
+        // it (decision 0033).
+        const auto resume_or_abandon = "resume it on the command line with `archive relocate " + uuid +
+                                       " K:/SAMPLE --resume`, or abandon it with Abandon... in the Archive List";
+        CHECK(!refused && refused.error().refusing &&
+              refused.error().refusing->kind == va::RefusingOperation::Kind::Relocation &&
+              refused.error().refusing->run_id == "c0ffee00-0000-4000-8000-0000000000c1" &&
+              !refused.error().refusing->differs &&
+              va::app::stop_message_in_window(refused.error(), true) ==
+                  "an unfinished relocation of archive " + uuid + " (to \"K:/SAMPLE\") exists; " + resume_or_abandon &&
+              va::app::stop_message_in_window(refused.error(), false) ==
+                  "an unfinished relocation of archive " + uuid +
+                      " (to \"K:/SAMPLE\") exists and is still running; wait for it to finish; if it stops, " +
+                      resume_or_abandon);
+        // Judged from its record as the Archive List judges its row: one that
+        // says nothing of its state is not taken for stopped; one that says
+        // it stopped is.
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        if (!refused && refused.error().refusing) {
+            auto refusing = *refused.error().refusing;
+            const auto judged = [&] {
+                const auto stopped = va::app::refusing_operation_stopped(
+                    fixture.store, refusing, {&fixture.processes, fixture.host.host, {}}, now);
+                CHECK(stopped.has_value());
+                return stopped && *stopped;
+            };
+            CHECK(!judged());
+            refusing.record["stopped"] = "2026-10-16T00:00:00Z";
+            CHECK(judged());
+        }
         fixture.repository.execute(("UPDATE settings SET value = json_set(value, '$.differs', "
                                     "'2026-10-16T00:00:00Z') WHERE key = 'relocation:" +
                                     uuid + "'")
@@ -1193,6 +1303,14 @@ void a_relocation_and_a_verification_that_adds_chunk_hashes_wait_for_each_other(
                                   " (to \"K:/SAMPLE\") found that the new carrier does not hold the recorded content "
                                   "and cannot be resumed; abandon it with `archive abandon-relocation " +
                                   uuid + "`, then relocate again");
+        const auto found = "the unfinished relocation of archive " + uuid +
+                           " (to \"K:/SAMPLE\") found that the new carrier does not hold the recorded content";
+        CHECK(!refused && refused.error().refusing && refused.error().refusing->differs &&
+              va::app::stop_message_in_window(refused.error(), true) ==
+                  found + " and cannot be resumed; abandon it with Abandon... in the Archive List, then relocate again" &&
+              va::app::stop_message_in_window(refused.error(), false) ==
+                  found + " and is still running; wait for it to end; if it is then still listed in the Archive "
+                          "List, abandon it there with Abandon..., then relocate again");
         fixture.repository.execute(("DELETE FROM settings WHERE key = 'relocation:" + uuid + "'").c_str());
         const auto added = fixture.add();
         CHECK(added && added->added_revision == 2);
@@ -1628,17 +1746,19 @@ void what_resume_continues()
     CHECK(resumes() == "none");  // it adds none
 }
 
-// Verify Archive's refusal while the archive's verification that adds chunk
-// hashes is unfinished (decision 0033) says whether that verification still
-// runs, judged as the Archive List judges its row from one read
-// (adding_verification_stopped), as its Resume and Abandon... are offered
+// The windows' refusal while another operation that creates the archive's
+// next revision is unfinished (decision 0033) says whether that operation
+// still runs, judged as the Archive List judges its row from one read
+// (refusing_operation_stopped), as Resume and Abandon... are offered for it
 // only once it has stopped. The window is a process of its own. A second
 // verification, refused while the first reads in a process that the window
 // sees running, finds it running; one refused by a run recorded INCOMPLETE
 // finds it stopped, though the process that recorded it goes on. Records
-// written by hand (sample data, as the engine writes them) give a run held
-// up, silent for minutes while its process runs, and one whose process has
-// ended.
+// written by hand (sample data, as the engines write them) give a
+// verification, a registration's plan and a relocation's record that run,
+// are held up, silent for minutes while their process runs, say that they
+// stopped, or whose process has ended; and one on another computer, silent
+// for a moment and for minutes.
 void what_the_refusal_in_the_window_says()
 {
     using namespace std::chrono_literals;
@@ -1653,9 +1773,9 @@ void what_the_refusal_in_the_window_says()
         test::HookedFiles hooked(fixture.archive, "c.bin", [&] {
             running = fixture.repository.query("SELECT substr(key, 5) FROM settings WHERE key LIKE 'run:%'");
             second = fixture.add();
-            if (second && !*second && (*second).error().adding) {
-                stopped = va::app::adding_verification_stopped(
-                    fixture.store, *(*second).error().adding, {&fixture.processes, fixture.host.host, {}}, now());
+            if (second && !*second && (*second).error().refusing) {
+                stopped = va::app::refusing_operation_stopped(
+                    fixture.store, *(*second).error().refusing, {&fixture.processes, fixture.host.host, {}}, now());
             }
         });
         const auto first = other.add(fixture, hooked);
@@ -1674,27 +1794,51 @@ void what_the_refusal_in_the_window_says()
     const va::app::AttemptCheck attempts{&window, fixture.host.host, {}};
     const auto refused = fixture.add();
     CHECK(!refused && refused_by(refused.error(), fixture.archive_uuid, interrupted->run_id));
-    if (refused || !refused.error().adding) {
+    if (refused || !refused.error().refusing) {
         return;
     }
     const auto recorded_incomplete =
-        va::app::adding_verification_stopped(fixture.store, *refused.error().adding, attempts, now());
+        va::app::refusing_operation_stopped(fixture.store, *refused.error().refusing, attempts, now());
     CHECK(recorded_incomplete && *recorded_incomplete);
 
-    // The record of the refusing verification as another read finds it, last
-    // working `silent` ago in the command line's process, not recorded.
-    auto adding = *refused.error().adding;
-    adding.run_id = "c0ffee00-0000-4000-8000-0000000000e2";
-    const auto judged = [&](std::chrono::seconds silent) {
-        adding.record["updated"] = std::format("{:%Y-%m-%dT%H:%M:%SZ}", now() - silent);
-        const auto stopped = va::app::adding_verification_stopped(fixture.store, adding, attempts, now());
+    // The refusing operation as another read finds its record, last working
+    // `silent` ago in the command line's process on `host`, with or without
+    // a stop mark; a verification not recorded.
+    const auto timestamp = [](std::chrono::sys_seconds time) { return std::format("{:%Y-%m-%dT%H:%M:%SZ}", time); };
+    const auto judge = [&](va::RefusingOperation refusing, std::chrono::seconds silent, const std::string& host,
+                           bool stopped_mark) {
+        refusing.record["updated"] = timestamp(now() - silent);
+        refusing.record.erase("process");
+        va::record_attempt(refusing.record, {fixture.processes.self, host});
+        if (stopped_mark) {
+            refusing.record["stopped"] = timestamp(now() - silent);
+        }
+        const auto stopped = va::app::refusing_operation_stopped(fixture.store, refusing, attempts, now());
         CHECK(stopped.has_value());
         return stopped && *stopped;
     };
-    CHECK(!judged(10s));     // it runs
-    CHECK(!judged(10min));   // held up: its process runs
-    window.others.clear();
-    CHECK(judged(10s));      // its process has ended
+    auto verification = *refused.error().refusing;
+    verification.run_id = "c0ffee00-0000-4000-8000-0000000000e2";
+    auto registration = va::refusing_registration(fixture.archive_uuid,
+        nlohmann::json{{"archive_uuid", fixture.archive_uuid}, {"revision", 2u}, {"label", "ARCH-0001"},
+            {"created", timestamp(now() - 1h)}, {"new_archive", false}, {"root", "K:/SAMPLE"}});
+    auto relocation = va::refusing_relocation(fixture.archive_uuid,
+        nlohmann::json{{"archive_uuid", fixture.archive_uuid}, {"revision", 1u},
+            {"run_id", "c0ffee00-0000-4000-8000-0000000000e3"}, {"started", timestamp(now() - 1h)},
+            {"root", "K:/SAMPLE"}});
+    CHECK(registration.kind == va::RefusingOperation::Kind::Registration && registration.revision == 2 &&
+          registration.root == "K:/SAMPLE" && relocation.kind == va::RefusingOperation::Kind::Relocation &&
+          relocation.revision == 1 && relocation.run_id == "c0ffee00-0000-4000-8000-0000000000e3");
+    for (const auto& refusing : {verification, registration, relocation}) {
+        window.others = {fixture.processes.self};
+        CHECK(!judge(refusing, 10s, fixture.host.host, false));               // it runs
+        CHECK(!judge(refusing, 10min, fixture.host.host, false));             // held up: its process runs
+        CHECK(!judge(refusing, 10s, "another-computer", false));              // it may run there
+        CHECK(judge(refusing, 10min, "another-computer", false));             // silent for minutes there
+        CHECK(judge(refusing, 10s, fixture.host.host, true));                 // it says that it stopped
+        window.others.clear();
+        CHECK(judge(refusing, 10s, fixture.host.host, false));                // its process has ended
+    }
 }
 
 // Which run Verify Archive's Resume continues (decision 0033): the run
