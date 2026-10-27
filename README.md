@@ -112,10 +112,16 @@ loses the verification history.
 
 ## Graphical interface
 
-`veriarchive-gui` offers the same operations in six views: Archive List, Register Archive,
-Verify Archive, Compare Archives, Verification History and Settings. Long operations show progress
-and can be cancelled; interrupted registrations and verifications can be resumed. The GUI runs
-unprivileged.
+`veriarchive-gui` has six views: Archive List, Register Archive, Verify Archive, Compare Archives,
+Verification History and Settings. Long operations show progress and can be cancelled;
+interrupted registrations and verifications can be resumed, and unfinished registrations and
+relocations abandoned. The GUI runs unprivileged.
+
+Only the command line relocates an archive (`archive relocate`, also with `--resume`), retires one
+(`archive retire`), exports and imports manifests (`export`, `import`), writes a list for
+`sha256sum -c` (`export-sha256sums`), rebuilds the index (`repo rebuild-index`), lists the media
+(`media list`), registers over a lost manifest (`register --lost-manifest`), records a copy
+(`register --copy-of`), chooses the reading strategy (`--io hdd|ssd`) and writes `--json`.
 
 ## Interface language
 

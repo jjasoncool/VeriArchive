@@ -1,11 +1,7 @@
 VeriArchive for Windows
 
-This folder is self-contained: it runs without MSYS2. Start bin\veriarchive-gui.exe for the
-graphical interface or use bin\veriarchive-cli.exe from a terminal.
-
-On first use the repository is created in bin\data (when this folder is writable) or in
-%USERPROFILE%\VeriArchive, and remembered in bin\config.json. Back up the repository: losing it
-loses the verification history.
+README.md beside this file (README.zh-TW.md in Traditional Chinese) says how to start the program
+and where it keeps its records.
 
 Third-party components
 ----------------------

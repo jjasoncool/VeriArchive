@@ -24,7 +24,7 @@ The zip holds no folder of its own: its `bin`, `lib` and `share` go straight int
 
 - `bin/veriarchive-gui.exe`: the graphical interface
 - `bin/veriarchive-cli.exe`: the command line
-- `lib/` and `share/`: image loaders, icons, settings and translations GTK needs; `share/licenses/`: licenses of the bundled libraries
+- `lib/` and `share/`: image loaders, icons, settings and translations GTK needs; `share/doc/VeriArchive/`: this guide and a short README; `share/licenses/`: licenses of the bundled libraries
 
 To update the program, close VeriArchive, then unzip the new version's zip **into the same folder** (`D:\VeriArchive` in the example) and let it replace the files there. In Windows Explorer: right-click the zip, choose "Extract All...", type the program folder as the destination, and when asked, choose to replace the files in the destination. Explorer proposes a new folder named after the zip instead; a program unzipped there finds none of your records. The zip holds no `bin\data` and no `bin\config.json`, so the existing records are not overwritten. Do not delete the old folder first.
 

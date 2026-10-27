@@ -728,7 +728,7 @@ libsodium's SHA-256 is not used (no SHA-NI; becomes the bottleneck on NVMe).
 
 ### Targets and presets
 
-> Amended by `design/decisions/0038-the-windows-package.md`: R-121's zip holds no folder of its own (`bin`, `lib` and `share` at its root, the version in its file name), so that unzipping a new version into the program folder updates it in place.
+> Amended by `design/decisions/0038-the-windows-package.md`: R-121's zip holds no folder of its own (`bin`, `lib` and `share` at its root, the version in its file name), so that unzipping a new version into the program folder updates it in place; the package holds a short README of its own in English and Chinese beside the guides, not the repository's README.
 
 ```text
 veriarchive_common  veriarchive_core  veriarchive_platform  veriarchive_cli  veriarchive_gui  veriarchive_tests

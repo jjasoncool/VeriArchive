@@ -212,7 +212,7 @@ install(TARGETS veriarchive_cli RUNTIME DESTINATION bin COMPONENT VeriArchive)
 if(VERIARCHIVE_BUILD_GUI)
     install(TARGETS veriarchive_gui RUNTIME DESTINATION bin COMPONENT VeriArchive)
 endif()
-install(FILES README.md docs/user-guide.md docs/user-guide.zh-TW.md
+install(FILES docs/user-guide.md docs/user-guide.zh-TW.md
     DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
 # The guides show their screenshots from images/ beside them.
 install(DIRECTORY docs/images DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
@@ -221,6 +221,13 @@ if(WIN32)
     get_filename_component(VERIARCHIVE_MINGW_PREFIX "${VERIARCHIVE_MINGW_PREFIX}" DIRECTORY)
     find_program(VERIARCHIVE_OBJDUMP objdump HINTS "${VERIARCHIVE_MINGW_PREFIX}/bin" REQUIRED)
     install(FILES packaging/windows/NOTICE.txt DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
+    # The package's own short README, in English and Chinese, beside the
+    # guides: what the program is, how to start it, where the records are
+    # (decision 0038). The repository's README.md is for developers.
+    install(FILES packaging/windows/package-readme.md DESTINATION share/doc/VeriArchive
+        RENAME README.md COMPONENT VeriArchive)
+    install(FILES packaging/windows/package-readme.zh-TW.md DESTINATION share/doc/VeriArchive
+        RENAME README.zh-TW.md COMPONENT VeriArchive)
     install(CODE "set(VERIARCHIVE_MINGW_PREFIX \"${VERIARCHIVE_MINGW_PREFIX}\")
 set(VERIARCHIVE_OBJDUMP \"${VERIARCHIVE_OBJDUMP}\")
 set(VERIARCHIVE_RUNTIME_SCAN_DIR \"${CMAKE_CURRENT_BINARY_DIR}/runtime-scan\")" COMPONENT VeriArchive)

@@ -82,6 +82,8 @@ foreach(required
         "share/licenses/glib2"
         "share/locale/zh_TW/LC_MESSAGES/gtk40.mo"
         "share/doc/VeriArchive/NOTICE.txt"
+        "share/doc/VeriArchive/README.md"
+        "share/doc/VeriArchive/README.zh-TW.md"
         "share/doc/VeriArchive/user-guide.md"
         "share/doc/VeriArchive/user-guide.zh-TW.md")
     if(NOT EXISTS "${PREFIX}/${required}")
@@ -105,6 +107,28 @@ foreach(guide user-guide.md user-guide.zh-TW.md)
             message(FATAL_ERROR "the installed ${guide} shows ${picture}, which is missing from the package")
         endif()
     endforeach()
+endforeach()
+
+# The README in either language is the package's own (decision 0038), not
+# the repository's README for developers: it points to both guides beside
+# it, and everything it links to is in the package.
+foreach(readme README.md README.zh-TW.md)
+    file(READ "${PREFIX}/share/doc/VeriArchive/${readme}" readme_text)
+    # "](" becomes a marker first: a "]" in a list item would keep CMake
+    # from splitting the list.
+    string(REPLACE "](" "<link>" readme_text "${readme_text}")
+    string(REGEX MATCHALL "<link>[^)]+[)]" links "${readme_text}")
+    set(targets "")
+    foreach(link IN LISTS links)
+        string(REGEX REPLACE "^<link>(.+)[)]$" "\\1" target "${link}")
+        list(APPEND targets "${target}")
+        if(NOT EXISTS "${PREFIX}/share/doc/VeriArchive/${target}")
+            message(FATAL_ERROR "the installed ${readme} links to ${target}, which is not in the package beside it")
+        endif()
+    endforeach()
+    if(NOT "user-guide.md" IN_LIST targets OR NOT "user-guide.zh-TW.md" IN_LIST targets)
+        message(FATAL_ERROR "the installed ${readme} does not point to both guides beside it: ${targets}")
+    endif()
 endforeach()
 
 # Run the packaged programs with only Windows on PATH.
