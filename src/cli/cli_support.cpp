@@ -1,5 +1,6 @@
 #include "cli/cli_support.h"
 
+#include "app/plain_words.h"
 #include "app/session.h"
 #include "common/utf8.h"
 
@@ -108,7 +109,10 @@ int report_failure(const Arguments& arguments, const Failure& failure)
     if (arguments.json) {
         print_json({{"error", failure.message}, {"exit_code", failure.code}});
     } else {
-        std::cerr << arguments.text.format("error: {}", arguments.text(failure.message)) << '\n';
+        // People read the message without the failure class that leads it
+        // in --json (decision 0017, amended 2026-10-27).
+        std::cerr << arguments.text.format("error: {}", arguments.text(app::without_failure_class(failure.message)))
+                  << '\n';
     }
     return failure.code;
 }

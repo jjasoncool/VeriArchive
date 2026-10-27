@@ -148,6 +148,7 @@ endif()
 add_library(veriarchive_app
     src/app/history.cpp
     src/app/local_time.cpp
+    src/app/plain_words.cpp
     src/app/progress_estimate.cpp
     src/app/unfinished_operations.cpp
     src/app/session.cpp
@@ -286,6 +287,7 @@ if(BUILD_TESTING)
         tests/unit/local_time_test.cpp
         tests/unit/progress_estimate_test.cpp
         tests/unit/manifest_test.cpp
+        tests/unit/plain_words_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
         tests/unit/vpd_test.cpp

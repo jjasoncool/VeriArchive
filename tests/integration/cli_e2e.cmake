@@ -713,14 +713,35 @@ if(NOT relocation_runs EQUAL 2 OR NOT first_relocation STREQUAL first_run OR NOT
     message(FATAL_ERROR "history --json of a relocated archive:\n${last_output}")
 endif()
 
-# Damage: one changed byte, one deleted file, one new file -> FAILED (exit 3).
+# Damage: one changed byte, one deleted file, one new file, and the empty
+# folder made a file (sample data) -> FAILED (exit 3). An item's detail is a
+# code in --json and plain words in text, in either language (decision 0017,
+# amended 2026-10-27).
 file(WRITE "${ROOT}/readme.txt" "hellp\n")
 file(REMOVE "${ROOT}/日本語/ファイル.txt")
 file(WRITE "${ROOT}/added.txt" "new\n")
+file(REMOVE_RECURSE "${ROOT}/empty")
+file(WRITE "${ROOT}/empty" "a file now (sample data)\n")
 run_cli("3" verify --full "${ROOT}" --json)
 string(JSON item_count LENGTH "${last_output}" items)
-if(NOT item_count EQUAL 3)
-    message(FATAL_ERROR "expected 3 reported items, got ${item_count}:\n${last_output}")
+set(type_change "")
+math(EXPR last_item "${item_count} - 1")
+foreach(index RANGE ${last_item})
+    string(JSON item_status GET "${last_output}" items ${index} status)
+    if(item_status STREQUAL "TypeChanged")
+        string(JSON type_change GET "${last_output}" items ${index} detail)
+    endif()
+endforeach()
+if(NOT item_count EQUAL 4 OR NOT type_change STREQUAL "d -> f")
+    message(FATAL_ERROR "expected 4 reported items, a folder made a file among them:\n${last_output}")
+endif()
+run_cli("3" --lang en verify --full "${ROOT}")
+string(FIND "${last_output}" "\n  TypeChanged  empty  (folder -> file)\n" type_change_words)
+string(FIND "${last_output}" "\n  Modified  readme.txt  (content differs)\n" content_words)
+run_cli("3" verify --full "${ROOT}")
+string(FIND "${last_output}" "\n  類型改變  empty  （資料夾 → 檔案）\n" type_change_chinese)
+if(type_change_words EQUAL -1 OR content_words EQUAL -1 OR type_change_chinese EQUAL -1)
+    message(FATAL_ERROR "the details of the damaged items in text:\n${last_output}")
 endif()
 
 # History is chained and intact (R-18); listing works. The check says what
@@ -965,11 +986,29 @@ run_cli("3" --lang en verify --full "${archive_uuid}" --json)
 set(failed_json "${last_output}")
 run_cli("3" verify --full "${archive_uuid}")
 set(failed_chinese "${last_output}")
+# The failure class in plain words in text, as it is in --json; and a
+# command's failure without the class that leads it in --json (decision
+# 0017, amended 2026-10-27).
+string(FIND "${failed_chinese}" "\n  失敗：清單檔不是記錄中的那一個\n" failure_words)
+run_cli("3" --lang en export "${archive_uuid}" --out "${WORK}/export-of-a-changed-manifest")
+string(FIND "${last_errors}" "error: the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: " export_text)
+string(FIND "${last_errors}" "ManifestHashMismatch" export_class)
+run_cli("3" --lang en export "${archive_uuid}" --out "${WORK}/export-of-a-changed-manifest" --json)
+string(JSON export_error GET "${last_output}" error)
+if(failure_words EQUAL -1 OR NOT export_text EQUAL 0 OR NOT export_class EQUAL -1
+        OR NOT export_error MATCHES "^ManifestHashMismatch: the manifest of revision 2 ")
+    message(FATAL_ERROR "a failure class in text and in --json:\n${failed_chinese}\n${last_errors}\n${export_error}")
+endif()
 run_cli("0;2" verify --full "${copy_uuid}")
 run_cli("0" archive show "${copy_prefix}")
 run_cli("0" history "${copy_prefix}")
 run_cli("0" history "${archive_prefix}" --json)
 set(history_json "${last_output}")
+run_cli("0" --lang en history "${archive_prefix}")
+if(NOT last_output MATCHES "  FULL VERIFY FAILED  r2  [0-9]+ bytes  the manifest is not the one recorded  [-0-9a-f]+\n"
+        OR last_output MATCHES "ManifestHashMismatch")
+    message(FATAL_ERROR "history of a run that failed on its manifest:\n${last_output}")
+endif()
 file(RENAME "${RECORDED}.kept" "${RECORDED}")
 set(changed_manifest "the manifest of revision 2 (manifests/${archive_uuid}/r0002.vam) has changed: its first line differs from what the repository recorded; put it back with `import <folder>/r0002.vam` from a backup of the repository, an export of revision 2, or the media copy in the archive's .veriarchive folder, where registration wrote one; if none of these holds it, register revision 3 from what the archive's root holds now with `register <root_path> --lost-manifest ${archive_uuid}`; if the device that held the archive is gone as well, retire the archive with `archive retire ${archive_uuid} --confirm`")
 set(changed_chinese "版次 2 的清單檔（manifests/${archive_uuid}/r0002.vam）已被變更：其第一行與儲存庫所記錄的不同；請以 `import <folder>/r0002.vam` 從儲存庫的備份、版次 2 的匯出檔，或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔；若這些都沒有，請以 `register <root_path> --lost-manifest ${archive_uuid}` 用封存根目錄目前的內容註冊版次 3；若存放此封存的裝置也已不在，請以 `archive retire ${archive_uuid} --confirm` 停用此封存")
@@ -1388,7 +1427,7 @@ if(NOT retire_asked MATCHES "^Lost manifest of ${gone_label} \\(${gone_uuid}\\),
         OR NOT retired_listed MATCHES "\n${gone_label}  ${gone_prefix}  r1  RETIRED\n"
         OR lost_line EQUAL -1 OR lost_line_chinese EQUAL -1
         OR NOT shown_status STREQUAL "RETIRED" OR NOT shown_lost
-        OR NOT retired_refused STREQUAL "error: a retired archive takes no new revisions (decision 0003)\n")
+        OR NOT retired_refused STREQUAL "error: a retired archive takes no new revisions\n")
     message(FATAL_ERROR "retiring an archive whose manifest is lost: asked r${retire_asked_revision} "
         "(${retire_asked_kind}), status ${retire_unchanged}; retired ${retired_status} (lost ${retired_lost}), "
         "shown ${shown_status} (lost ${shown_lost}), line ${lost_line} / ${lost_line_chinese}"
@@ -1450,8 +1489,8 @@ string(JSON behind_relocated GET "${last_output}" revision)
 set(behind_manifest "the manifest of revision 2 (manifests/${behind_uuid}/r0002.vam)")
 string(FIND "${behind_rebuilt}" "not in the index: " behind_not_indexed)
 string(FIND "${behind_stopped}" "error: the repository's index has no record of ${behind_manifest}; rebuild the index with `repo rebuild-index`\n" behind_stop_line)
-string(FIND "${behind_asked}" "\n  the repository's index has no record of ${behind_manifest}, which cannot be read: manifest body does not match its header (ManifestHashMismatch)\n" behind_asked_line)
-string(FIND "${behind_listed}" "\n    manifest lost: the repository's index has no record of ${behind_manifest}, which cannot be read: manifest body does not match its header (ManifestHashMismatch); put it back with `import <folder>/r0002.vam` from a backup of the repository, an export of revision 2, or the media copy in the archive's .veriarchive folder, where registration wrote one\n" behind_lost_line)
+string(FIND "${behind_asked}" "\n  the repository's index has no record of ${behind_manifest}, which cannot be read: manifest body does not match its header\n" behind_asked_line)
+string(FIND "${behind_listed}" "\n    manifest lost: the repository's index has no record of ${behind_manifest}, which cannot be read: manifest body does not match its header; put it back with `import <folder>/r0002.vam` from a backup of the repository, an export of revision 2, or the media copy in the archive's .veriarchive folder, where registration wrote one\n" behind_lost_line)
 if(behind_not_indexed EQUAL -1 OR behind_stop_line EQUAL -1 OR behind_asked_line EQUAL -1 OR NOT behind_retired_lost
         OR behind_lost_line EQUAL -1 OR NOT behind_relocated EQUAL 2)
     message(FATAL_ERROR "a retired archive whose lost manifest the index has no record of: rebuilt ${behind_not_indexed}, "
@@ -1558,7 +1597,7 @@ if(SQLITE3_PROGRAM)
     run_cli("0" archive abandon-registration "${older_prefix}" --confirm)
     if(NOT older_retired EQUAL 0 OR NOT older_state STREQUAL "archive_retired"
             OR NOT older_shown MATCHES "\n  Unfinished registration of revision 2 from [^\n]*; archive is retired; abandon it\n"
-            OR NOT older_resumed MATCHES "is retired and takes no new revisions [(]decision 0003[)]: abandon its unfinished registration")
+            OR NOT older_resumed MATCHES "is retired and takes no new revisions: abandon its unfinished registration")
         message(FATAL_ERROR "an older version's registration over the lost manifest of a retired archive: retired "
             "${older_retired}, state ${older_state}\n${older_shown}\n${older_resumed}")
     endif()

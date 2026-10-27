@@ -2264,7 +2264,7 @@ void leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost()
     const auto resumed = fixture.verify(va::app::verification_resume(*a_operation, va::Config{}));
     CHECK(resumed && resumed->archive_uuid == a->archive_uuid && resumed->resumed_from == a_run->run_id &&
           resumed->result == "PASSED_WITH_WARNINGS" &&
-          std::ranges::find(resumed->warnings, "identity: retired") != resumed->warnings.end());
+          std::ranges::find(resumed->warnings, "identity: the archive is retired") != resumed->warnings.end());
     CHECK(a_run->coverage_bytes >= 4000 && fixture.archive.bytes_read == 5000 - a_run->coverage_bytes);
     CHECK(listed() == std::vector<va::Uuid>{b->archive_uuid});
 }

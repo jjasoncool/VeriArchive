@@ -155,7 +155,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     }
     auto archive = **found;
     if (archive.status == "RETIRED") {
-        return fail(Kind::Refused, "a retired archive takes no new revisions (decision 0003)");
+        return fail(Kind::Refused, "a retired archive takes no new revisions");
     }
 
     const auto volume = services.media.volume_for_path(request.root);
@@ -194,8 +194,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                                  match.result == MatchResult::MatchWeak ||
                                  match.result == MatchResult::Migrated;
         if (same_volume && roots_overlap(candidate.root_subpath, *root_subpath)) {
-            return fail(Kind::Refused, "the new root overlaps archive " + candidate.archive_uuid +
-                                           " on the same volume (decision 0001)");
+            return fail(Kind::Refused,
+                "the new root overlaps archive " + candidate.archive_uuid + " on the same volume");
         }
     }
 

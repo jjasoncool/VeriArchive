@@ -217,7 +217,7 @@ void an_archive_whose_manifest_is_lost_is_retired_once_confirmed()
             return request;
         }());
         CHECK(!over_it && over_it.error().kind == va::RegisterFailure::Kind::Refused &&
-              over_it.error().message == "a retired archive takes no new revisions (decision 0003)");
+              over_it.error().message == "a retired archive takes no new revisions");
 
         fixture.archive.bytes_read = 0;
         const auto failed = fixture.verify(by_uuid);
@@ -449,7 +449,7 @@ void a_lost_manifest_behind_a_wrong_index_leaves_matching_once_retired()
                 line_1_says = "the repository's index has no record of " + manifest +
                               "; rebuild the index with `repo rebuild-index`";
                 whole_says = "the repository's index has no record of " + manifest +
-                             ", which cannot be read: manifest body does not match its header (ManifestHashMismatch)";
+                             ", which cannot be read: manifest body does not match its header";
             } else {
                 fixture.repository.execute(header_copy_changed.c_str());
                 line_1_says =

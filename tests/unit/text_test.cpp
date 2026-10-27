@@ -1,5 +1,6 @@
 #include "test_support.h"
 #include "app/history.h"
+#include "app/plain_words.h"
 #include "app/text.h"
 #include "app/unfinished_operations.h"
 #include "app/verify_report.h"
@@ -224,14 +225,13 @@ void translation_tests()
     // A template that starts with literal text wins over a longer one that
     // starts with a value, so the context is translated and the platform error
     // inside it too.
-    CHECK(chinese("cannot scan the root: FindFirstFileExW failed (Win32 error 5)") ==
-          "無法掃描根目錄：FindFirstFileExW 失敗（Win32 錯誤 5）");
-    CHECK(chinese("RepositoryError: CreateFileW failed (Win32 error 2)") ==
-          "儲存庫錯誤：CreateFileW 失敗（Win32 錯誤 2）");
-    CHECK(chinese("scan: FindFirstFileExW failed (Win32 error 5)") ==
-          "掃描：FindFirstFileExW 失敗（Win32 錯誤 5）");
-    CHECK(chinese("scan: ReadFile failed (Win32 error 23)") ==
-          "掃描：ReadFile 失敗（Win32 錯誤 23）");
+    CHECK(chinese("cannot scan the root: access denied (FindFirstFileExW, Windows error 5)") ==
+          "無法掃描根目錄：存取被拒（FindFirstFileExW，Windows 錯誤 5）");
+    CHECK(chinese("not found (CreateFileW, Windows error 2)") == "找不到（CreateFileW，Windows 錯誤 2）");
+    CHECK(chinese("scan: access denied (FindFirstFileExW, Windows error 5)") ==
+          "掃描：存取被拒（FindFirstFileExW，Windows 錯誤 5）");
+    CHECK(chinese("scan: the device reported an error (ReadFile, Windows error 23)") ==
+          "掃描：裝置回報錯誤（ReadFile，Windows 錯誤 23）");
     CHECK(chinese("manifest: open failed: No such file or directory") ==
           "清單檔：open 失敗：找不到檔案或資料夾");
     CHECK(chinese("scan: opendir failed: Permission denied") ==
@@ -240,7 +240,7 @@ void translation_tests()
     // Engine warnings whose cause is an engine message or code.
     CHECK(chinese("manifest: the manifest differs from the repository record") ==
           "清單檔：清單檔與儲存庫的紀錄不符");
-    CHECK(chinese("identity: volume-label-differs") == "媒體身分：磁碟區標籤不同");
+    CHECK(chinese("identity: the volume label differs from the one registered") == "媒體身分：磁碟區標籤與註冊時不同");
     CHECK(chinese("12 entries carry portability warnings") == "12 個項目帶有可攜性警告");
     // §A6, R-42: a verification of a revision whose manifest records names
     // that collide by case or by Unicode normalisation says so.
@@ -369,11 +369,10 @@ void translation_tests()
     CHECK(chinese("cannot read manifest " + uuid + "/r0003.vam: invalid manifest header: key 'format' not found") ==
           "無法讀取清單檔 " + uuid + "/r0003.vam：清單檔標頭無效：找不到欄位「format」");
     // The entries read again give other bytes than the body validated.
-    CHECK(chinese("cannot read manifest " + uuid + "/r0004.vam: the manifest changed while it was read "
-                  "(ManifestHashMismatch)") ==
-          "無法讀取清單檔 " + uuid + "/r0004.vam：清單檔在讀取期間被變更（清單檔雜湊不符）");
-    CHECK(chinese("cannot list the manifests of archive " + uuid + ": FindFirstFileExW failed (Win32 error 5)") ==
-          "無法列出封存 " + uuid + " 的清單檔：FindFirstFileExW 失敗（Win32 錯誤 5）");
+    CHECK(chinese("cannot read manifest " + uuid + "/r0004.vam: the manifest changed while it was read") ==
+          "無法讀取清單檔 " + uuid + "/r0004.vam：清單檔在讀取期間被變更");
+    CHECK(chinese("cannot list the manifests of archive " + uuid + ": access denied (FindFirstFileExW, Windows error 5)") ==
+          "無法列出封存 " + uuid + " 的清單檔：存取被拒（FindFirstFileExW，Windows 錯誤 5）");
     CHECK(chinese.format("skipped: {}", chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest")) ==
           "已略過：無法讀取清單檔 " + uuid + "/r0001.vam：清單檔是空的");
     CHECK(chinese.format("unfinished registrations whose saved progress was kept: {}", 2) ==
@@ -525,8 +524,9 @@ void translation_tests()
           "封存 " + uuid + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2；未匯入任何內容（請以 "
           "`register Z:\\範例 --resume` 完成該註冊，或以 `archive abandon-registration " + uuid +
               "` 放棄它後再匯入一次）");
-    CHECK(chinese("ManifestHashMismatch: the manifest changed while it was imported; nothing was imported") ==
-          "清單檔雜湊不符：清單檔在匯入期間被變更；未匯入任何內容");
+    CHECK(chinese(std::string(va::app::without_failure_class(
+              "ManifestHashMismatch: the manifest changed while it was imported; nothing was imported"))) ==
+          "清單檔在匯入期間被變更；未匯入任何內容");
     // An import that puts back the manifest recorded, or finds its record
     // changed meanwhile (decision 0028).
     CHECK(chinese.format("Restored the manifest of {} ({}) revision {}: the file is the one the repository recorded.",
@@ -575,22 +575,22 @@ void translation_tests()
                       " \"Y:\\範例 SAMPLE\" --resume`";
     const auto kept_chinese =
         "；搬移保留其已儲存的進度：請以 `archive relocate " + uuid + " \"Y:\\範例 SAMPLE\" --resume` 繼續";
-    CHECK(chinese("error: cannot record the relocation: MoveFileExW failed (Win32 error 5)" + kept) ==
-          "錯誤：無法記錄搬移：MoveFileExW 失敗（Win32 錯誤 5）" + kept_chinese);
+    CHECK(chinese("error: cannot record the relocation: access denied (MoveFileExW, Windows error 5)" + kept) ==
+          "錯誤：無法記錄搬移：存取被拒（MoveFileExW，Windows 錯誤 5）" + kept_chinese);
     CHECK(chinese("cannot record the relocation: cannot execute SQL: database is locked" + kept) ==
           "無法記錄搬移：無法執行 SQL：資料庫已被鎖定" + kept_chinese);
-    CHECK(chinese("cannot scan the new root: FindFirstFileExW failed (Win32 error 5)" + kept) ==
-          "無法掃描新根目錄：FindFirstFileExW 失敗（Win32 錯誤 5）" + kept_chinese);
+    CHECK(chinese("cannot scan the new root: access denied (FindFirstFileExW, Windows error 5)" + kept) ==
+          "無法掃描新根目錄：存取被拒（FindFirstFileExW，Windows 錯誤 5）" + kept_chinese);
     CHECK(chinese("cannot write the manifest: open failed: Permission denied" + kept) ==
           "無法寫入清單檔：open 失敗：權限不足" + kept_chinese);
     CHECK(chinese("cannot write the manifest: open failed: Permission denied") == "無法寫入清單檔：open 失敗：權限不足");
-    CHECK(english("cannot record the relocation: MoveFileExW failed (Win32 error 5)" + kept) ==
-          "cannot record the relocation: MoveFileExW failed (Win32 error 5)" + kept);
+    CHECK(english("cannot record the relocation: access denied (MoveFileExW, Windows error 5)" + kept) ==
+          "cannot record the relocation: access denied (MoveFileExW, Windows error 5)" + kept);
     CHECK(english("the new carrier does not hold the recorded content; nothing was changed, but the relocation's "
-                  "saved progress could not be removed: CreateFileW failed (Win32 error 5); abandon the relocation "
+                  "saved progress could not be removed: access denied (CreateFileW, Windows error 5); abandon the relocation "
                   "with `archive abandon-relocation " + uuid + "` before relocating again") ==
           "the new carrier does not hold the recorded content; nothing was changed, but the relocation's saved "
-          "progress could not be removed: CreateFileW failed (Win32 error 5); abandon the relocation with `archive "
+          "progress could not be removed: access denied (CreateFileW, Windows error 5); abandon the relocation with `archive "
           "abandon-relocation " + uuid + "` before relocating again");
 
     // A root that matches several archives (§B10): select one by its uuid,
@@ -627,12 +627,13 @@ void translation_tests()
     }
     CHECK(chinese("inside a directory unreadable in B") == "位於 B 註冊時無法讀取的資料夾內");
     CHECK(chinese("unreadable in both archives") == "兩個封存註冊時都無法讀取");
-    // Failures: the CLI puts the failure class first, the GUI shows the message.
-    CHECK(chinese("error: ManifestHashMismatch: cannot read the manifest of ARCH-0002 revision 2: "
-                  "manifest body does not match its header (ManifestHashMismatch)") ==
-          "錯誤：清單檔雜湊不符：無法讀取 ARCH-0002 版次 2 的清單檔：清單檔主體與其標頭不符（清單檔雜湊不符）");
-    CHECK(chinese("error: RepositoryError: archive " + uuid + " has no revision yet") ==
-          "錯誤：儲存庫錯誤：封存 " + uuid + " 尚無版次");
+    // Failures: --json puts the failure class first; people read the message
+    // without it, and the class in plain words (decision 0017).
+    CHECK(chinese("error: cannot read the manifest of ARCH-0002 revision 2: manifest body does not match its header") ==
+          "錯誤：無法讀取 ARCH-0002 版次 2 的清單檔：清單檔主體與其標頭不符");
+    CHECK(chinese("error: archive " + uuid + " has no revision yet") == "錯誤：封存 " + uuid + " 尚無版次");
+    CHECK(chinese.format("Failure: {}", chinese(va::app::failure_class_words("ManifestHashMismatch"))) ==
+          "失敗：清單檔不是記錄中的那一個");
     CHECK(chinese("error: the comparison was cancelled") == "錯誤：比較已取消");
     CHECK(chinese.format("Not compared: {}",
               chinese("cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded")) ==
@@ -669,18 +670,18 @@ void translation_tests()
                                  uuid + "` 用封存根目錄目前的內容註冊版次 3" + retire_chinese;
     CHECK(chinese("the manifest of revision 2 (" + manifest + ") is missing" + restore) ==
           "版次 2 的清單檔（" + manifest + "）已遺失" + restore_chinese);
-    CHECK(chinese("error: the manifest of revision 2 (" + manifest + ") cannot be read: CreateFileW failed (Win32 "
-                  "error 5)" + restore) ==
-          "錯誤：無法讀取版次 2 的清單檔（" + manifest + "）：CreateFileW 失敗（Win32 錯誤 5）" + restore_chinese);
+    CHECK(chinese("error: the manifest of revision 2 (" + manifest + ") cannot be read: access denied (CreateFileW, "
+                  "Windows error 5)" + restore) ==
+          "錯誤：無法讀取版次 2 的清單檔（" + manifest + "）：存取被拒（CreateFileW，Windows 錯誤 5）" + restore_chinese);
     CHECK(chinese("manifest: the manifest of revision 2 (" + manifest +
                   ") has changed: its first line differs from what the repository recorded" + restore) ==
           "清單檔：版次 2 的清單檔（" + manifest + "）已被變更：其第一行與儲存庫所記錄的不同" + restore_chinese);
     CHECK(chinese("warning: manifest: the manifest of revision 2 (" + manifest +
                   ") has changed: its body does not match its header" + restore) ==
           "警告：清單檔：版次 2 的清單檔（" + manifest + "）已被變更：其主體與標頭不符" + restore_chinese);
-    CHECK(chinese("ManifestHashMismatch: cannot read the manifest of ARCH-0002 revision 2: the manifest of revision "
+    CHECK(chinese("cannot read the manifest of ARCH-0002 revision 2: the manifest of revision "
                   "2 (" + manifest + ") has changed: it gave other bytes when it was read again" + restore) ==
-          "清單檔雜湊不符：無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 的清單檔（" + manifest +
+          "無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 的清單檔（" + manifest +
               "）已被變更：再次讀取時得到不同的內容" + restore_chinese);
     // A verification by root stops naming the archive that may be at the root
     // (decision 0028): what is wrong with its manifest, then to verify it by
@@ -703,9 +704,9 @@ void translation_tests()
     CHECK(chinese("error: " + may_be + "the manifest of revision 2 (" + manifest + ") is missing" + record_it +
                   restore_it) ==
           "錯誤：" + may_be_chinese + "版次 2 的清單檔（" + manifest + "）已遺失" + record_it_chinese + restore_it_chinese);
-    CHECK(chinese(may_be + "the manifest of revision 2 (" + manifest + ") cannot be read: CreateFileW failed (Win32 "
-                  "error 5)" + record_it + restore_it) ==
-          may_be_chinese + "無法讀取版次 2 的清單檔（" + manifest + "）：CreateFileW 失敗（Win32 錯誤 5）" +
+    CHECK(chinese(may_be + "the manifest of revision 2 (" + manifest + ") cannot be read: access denied (CreateFileW, "
+                  "Windows error 5)" + record_it + restore_it) ==
+          may_be_chinese + "無法讀取版次 2 的清單檔（" + manifest + "）：存取被拒（CreateFileW，Windows 錯誤 5）" +
               record_it_chinese + restore_it_chinese);
     CHECK(chinese(may_be + "the manifest of revision 2 (" + manifest +
                   ") has changed: its first line differs from what the repository recorded" + record_it + restore_it) ==
@@ -727,17 +728,17 @@ void translation_tests()
           "問題：" + no_record_chinese + "，而該清單檔已遺失" + restore_chinese);
     CHECK(chinese("manifest: " + no_record + ", which cannot be read: header does not match its file name" + restore) ==
           "清單檔：" + no_record_chinese + "，而且無法讀取該清單檔：標頭與其檔名不符" + restore_chinese);
-    CHECK(chinese(no_record + ", which cannot be read: manifest body does not match its header (ManifestHashMismatch)" +
+    CHECK(chinese(no_record + ", which cannot be read: manifest body does not match its header" +
                   restore) ==
-          no_record_chinese + "，而且無法讀取該清單檔：清單檔主體與其標頭不符（清單檔雜湊不符）" + restore_chinese);
+          no_record_chinese + "，而且無法讀取該清單檔：清單檔主體與其標頭不符" + restore_chinese);
     CHECK(chinese("error: " + may_be + no_record + record_it + "rebuild the index with `repo rebuild-index`") ==
           "錯誤：" + may_be_chinese + no_record_chinese + record_it_chinese + "以 `repo rebuild-index` 重建索引");
     // Put back, the manifest is recorded by the import: no rebuild follows.
     CHECK(chinese(may_be + no_record + ", which is missing" + record_it + restore_it) ==
           may_be_chinese + no_record_chinese + "，而該清單檔已遺失" + record_it_chinese + restore_it_chinese);
-    CHECK(chinese(may_be + no_record + ", which cannot be read: CreateFileW failed (Win32 error 5)" + record_it +
+    CHECK(chinese(may_be + no_record + ", which cannot be read: access denied (CreateFileW, Windows error 5)" + record_it +
                   restore_it) ==
-          may_be_chinese + no_record_chinese + "，而且無法讀取該清單檔：CreateFileW 失敗（Win32 錯誤 5）" +
+          may_be_chinese + no_record_chinese + "，而且無法讀取該清單檔：存取被拒（CreateFileW，Windows 錯誤 5）" +
               record_it_chinese + restore_it_chinese);
     // Each revision whose manifest `repo rebuild-index` could not read, by
     // what became of its record (decision 0028), the archive's words carried
@@ -747,9 +748,9 @@ void translation_tests()
               chinese("the manifest of revision 2 (" + manifest + ") is missing")) ==
           "保留原紀錄：ARCH-0007（" + uuid + "）：版次 2 的清單檔（" + manifest + "）已遺失");
     CHECK(chinese("kept as recorded: ARCH-0007 (" + uuid + "): the manifest of revision 2 (" + manifest +
-                  ") cannot be read: manifest body does not match its header (ManifestHashMismatch)") ==
+                  ") cannot be read: manifest body does not match its header") ==
           "保留原紀錄：ARCH-0007（" + uuid + "）：無法讀取版次 2 的清單檔（" + manifest +
-              "）：清單檔主體與其標頭不符（清單檔雜湊不符）");
+              "）：清單檔主體與其標頭不符");
     CHECK(chinese("left out of the index: ARCH-0007 (" + uuid + "): the manifest of revision 1 (" + r1 +
                   ") is missing") ==
           "已從索引移除：ARCH-0007（" + uuid + "）：版次 1 的清單檔（" + r1 + "）已遺失");
@@ -768,9 +769,9 @@ void translation_tests()
                                           "`repo rebuild-index` 將版次 1 從索引移除";
     CHECK(chinese("problem: the manifest of revision 1 (" + r1 + ") is missing" + earlier_put_back) ==
           "問題：版次 1 的清單檔（" + r1 + "）已遺失" + earlier_put_back_chinese);
-    CHECK(chinese("problem: the manifest of revision 1 (" + r1 + ") cannot be read: CreateFileW failed (Win32 error 5)" +
+    CHECK(chinese("problem: the manifest of revision 1 (" + r1 + ") cannot be read: access denied (CreateFileW, Windows error 5)" +
                   earlier_put_back) ==
-          "問題：無法讀取版次 1 的清單檔（" + r1 + "）：CreateFileW 失敗（Win32 錯誤 5）" + earlier_put_back_chinese);
+          "問題：無法讀取版次 1 的清單檔（" + r1 + "）：存取被拒（CreateFileW，Windows 錯誤 5）" + earlier_put_back_chinese);
     CHECK(chinese("problem: the manifest of revision 1 (" + r1 +
                   ") has changed: its first line differs from what the repository recorded" + earlier_put_back) ==
           "問題：版次 1 的清單檔（" + r1 + "）已被變更：其第一行與儲存庫所記錄的不同" + earlier_put_back_chinese);
@@ -802,9 +803,8 @@ void translation_tests()
           "錯誤：此根目錄的媒體副本中有封存 " + uuid +
               " 版次 2 的清單檔：請以 `import K:\\SAMPLE\\.veriarchive\\r0002.vam` 放回該清單檔");
     CHECK(chinese("error: the root overlaps the root of archive " + uuid +
-                  ", whose latest manifest records this volume's filesystem id and device (decision 0001)") ==
-          "錯誤：根目錄與封存 " + uuid + " 的根目錄重疊，而該封存最新的清單檔所記錄的正是此磁碟區的檔案系統 UUID 與裝置"
-          "（決策紀錄 0001）");
+                  ", whose latest manifest records this volume's filesystem id and device") ==
+          "錯誤：根目錄與封存 " + uuid + " 的根目錄重疊，而該封存最新的清單檔所記錄的正是此磁碟區的檔案系統 UUID 與裝置");
     // An archive whose root the root given overlaps on a volume that may be a
     // clone of this one, named before the operator confirms; the match code
     // translated before it is put in.
@@ -882,12 +882,12 @@ void translation_tests()
     CHECK(chinese("error: archive " + uuid + " now has revision 3, not revision 2; nothing was changed (run the command "
                   "again)") ==
           "錯誤：封存 " + uuid + " 現在的版次是 3，而不是版次 2；未做任何變更（請再執行一次此命令）");
-    CHECK(chinese("error: archive " + uuid + " is retired and takes no new revisions (decision 0003): abandon its "
+    CHECK(chinese("error: archive " + uuid + " is retired and takes no new revisions: abandon its "
                   "unfinished registration with `archive abandon-registration " + uuid + "`") ==
-          "錯誤：封存 " + uuid + " 已停用，不再接受新的版次（決策紀錄 0003）：請以 `archive abandon-registration " + uuid +
+          "錯誤：封存 " + uuid + " 已停用，不再接受新的版次：請以 `archive abandon-registration " + uuid +
               "` 放棄它未完成的註冊");
-    CHECK(chinese("error: a retired archive takes no new revisions (decision 0003)") ==
-          "錯誤：已停用的封存不再接受新的版次（決策紀錄 0003）");
+    CHECK(chinese("error: a retired archive takes no new revisions") ==
+          "錯誤：已停用的封存不再接受新的版次");
     const std::string retired_put_back = "; put it back with `import <folder>/r0002.vam` from a backup of the "
                                          "repository, an export of revision 2, or the media copy in the archive's "
                                          ".veriarchive folder, where registration wrote one";
@@ -895,9 +895,9 @@ void translation_tests()
                                                  "或封存 .veriarchive 資料夾中註冊時寫入的媒體副本放回該清單檔";
     CHECK(chinese("manifest lost: the manifest of revision 2 (" + manifest + ") is missing" + retired_put_back) ==
           "清單檔無法取回：版次 2 的清單檔（" + manifest + "）已遺失" + retired_put_back_chinese);
-    CHECK(chinese("manifest lost: the manifest of revision 2 (" + manifest + ") cannot be read: CreateFileW failed "
-                  "(Win32 error 5)" + retired_put_back) ==
-          "清單檔無法取回：無法讀取版次 2 的清單檔（" + manifest + "）：CreateFileW 失敗（Win32 錯誤 5）" +
+    CHECK(chinese("manifest lost: the manifest of revision 2 (" + manifest + ") cannot be read: access denied (CreateFileW, "
+                  "Windows error 5)" + retired_put_back) ==
+          "清單檔無法取回：無法讀取版次 2 的清單檔（" + manifest + "）：存取被拒（CreateFileW，Windows 錯誤 5）" +
               retired_put_back_chinese);
     CHECK(chinese("warning: manifest: the manifest of revision 2 (" + manifest +
                   ") has changed: its first line differs from what the repository recorded" + retired_put_back) ==
@@ -928,9 +928,9 @@ void translation_tests()
     CHECK(chinese("Media: not read, as the manifest of this revision cannot be used") ==
           "媒體：未讀取，因為這個版次的清單檔無法使用");
     // Wording fixes (findings 27, 29, 30, 31, 32).
-    CHECK(chinese("warning: identity: retired") == "警告：媒體身分：封存已停用");
+    CHECK(chinese("warning: identity: the archive is retired") == "警告：媒體身分：封存已停用");
     CHECK(chinese("RETIRED") == "已停用");
-    CHECK(chinese("l -> f") == "連結 → 檔案");
+    CHECK(chinese(va::app::item_detail_words("l -> f")) == "連結 → 檔案");
     CHECK(chinese.format("files: {}  empty directories: {}  links: {}  hashed bytes: {}", 2, 1, 0, 12) ==
           "檔案：2  空資料夾：1  連結：0  已計算雜湊位元組：12");
     CHECK(chinese("warning: the media holds revision 2, newer than the repository's 1: "

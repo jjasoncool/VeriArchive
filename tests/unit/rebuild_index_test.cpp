@@ -80,11 +80,11 @@ void rebuild_keeps_database_facts()
         const auto& kept = damaged->revisions_kept.front();
         CHECK(kept.archive_uuid == first->archive_uuid && kept.label == "ARCH-0001" && kept.revision == 1 &&
               kept.manifest == "manifests/" + first->archive_uuid + "/r0001.vam" &&
-              kept.cause == "manifest body does not match its header (ManifestHashMismatch)");
+              kept.cause == "manifest body does not match its header");
     }
     if (damaged && damaged->skipped.size() == 1) {
         CHECK(damaged->skipped.front() == "cannot read manifest " + first->archive_uuid +
-            "/r0001.vam: manifest body does not match its header (ManifestHashMismatch)");
+            "/r0001.vam: manifest body does not match its header");
     }
     const auto still = fixture.store.revisions(first->archive_uuid);
     CHECK(still && still->size() == 1 && still->front().header_blake3 == (*revisions)[0].header_blake3);
@@ -423,15 +423,14 @@ void an_archive_is_at_the_latest_manifest_its_folder_names()
         const auto& not_indexed = report->revisions_not_indexed.front();
         CHECK(not_indexed.archive_uuid == archive_uuid && not_indexed.revision == 2 &&
               not_indexed.manifest == "manifests/" + archive_uuid + "/r0002.vam" &&
-              not_indexed.cause == "manifest body does not match its header (ManifestHashMismatch)");
+              not_indexed.cause == "manifest body does not match its header");
     }
     auto archive = fixture.store.find_archive(archive_uuid);
     CHECK(archive && *archive && (*archive)->current_revision == 2);
     const auto no_record = "the repository's index has no record of the manifest of revision 2 (manifests/" +
                            archive_uuid + "/r0002.vam)";
     const auto cannot_be_read = no_record +
-                                ", which cannot be read: manifest body does not match its header "
-                                "(ManifestHashMismatch)" +
+                                ", which cannot be read: manifest body does not match its header" +
                                 test::put_back(archive_uuid, 2);
     // The rebuild skipped the manifest and marked the archive: the list reads
     // it whole, as the rebuild did and as its verification does.

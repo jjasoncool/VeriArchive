@@ -24,8 +24,8 @@ std::string lowercase(std::string_view text)
 // A catalog prepared for lookups: exact messages in a hash map, and templates
 // (messages with "{}") split into their literal parts. Templates that start
 // with literal text are tried before templates that start with a value, so
-// "RepositoryError: {}" wraps "CreateFileW failed (Win32 error 2)" instead of
-// "{} failed (Win32 error {})" taking "RepositoryError: CreateFileW" as its
+// "cannot scan the root: {}" wraps "opendir failed: Permission denied"
+// instead of "{} failed: {}" taking "cannot scan the root: opendir" as its
 // first value. Within each group the longest template goes first, so the most
 // specific one wins.
 struct PreparedCatalog {
@@ -76,10 +76,10 @@ PreparedCatalog prepare(std::span<const CatalogEntry> entries)
                 }
             }
         }
-        // Platform errors start with the name of the call that failed
-        // ("CreateFileW failed (Win32 error 5)", "open failed: Permission denied").
-        // They are the usual cause, so they may match one although they start
-        // with a value.
+        // Linux's platform errors start with the name of the call that failed
+        // ("open failed: Permission denied"), Windows' with what went wrong
+        // ("access denied (CreateFileW, Windows error 5)"). They are the usual
+        // cause, so they may match one although Linux's start with a value.
         pattern.may_match_a_cause = anchored(pattern) || entry.english.starts_with("{} failed");
         catalog.patterns.push_back(std::move(pattern));
     }
@@ -228,10 +228,11 @@ std::string Text::operator()(std::string_view english) const
     return translate(english, 0);
 }
 
-// Engine errors wrap their cause: "cannot scan the root: FindFirstFileExW failed
-// (Win32 error 5)". A template marked Match::Cause translates its cause (the
-// value after ": ", usually the last) as a message of its own; all other values
-// (paths, labels, uuids, numbers) are carried over unchanged. Inside a cause
+// Engine errors wrap their cause: "cannot scan the root: access denied
+// (FindFirstFileExW, Windows error 5)". A template marked Match::Cause
+// translates its cause (the value after ": ", usually the last) as a message
+// of its own; all other values (paths, labels, uuids, numbers) are carried
+// over unchanged. Inside a cause
 // (depth > 0) only exact messages, templates that start with literal text, and
 // platform errors may match: any other template that starts with a value
 // matches every text with the same ending, which is too loose for a piece of

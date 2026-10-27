@@ -3,7 +3,9 @@
 // (R-21) and the report states which guarantee applies (R-02).
 #include "cli/commands.h"
 
+#include "app/plain_words.h"
 #include "app/verify_report.h"
+
 #include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/engine/verify_engine.h"
@@ -59,7 +61,7 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
         std::cout << '\n';
     }
     for (const auto& failure : outcome.failure_classes) {
-        std::cout << "  " << text.format("failure: {}", text(failure)) << '\n';
+        std::cout << "  " << text.format("failure: {}", text(app::failure_class_words(failure))) << '\n';
     }
     for (const auto& warning : outcome.warnings) {
         std::cout << "  " << text.format("warning: {}", text(warning)) << '\n';
@@ -69,7 +71,7 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
     }
     for (const auto& item : outcome.items) {
         std::cout << "  " << text(item.status) << "  " << item.path.p
-                  << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail)))
+                  << (item.detail.empty() ? "" : "  " + text.parenthesized(text(app::item_detail_words(item.detail))))
                   << '\n';
     }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::CommandLine)) {

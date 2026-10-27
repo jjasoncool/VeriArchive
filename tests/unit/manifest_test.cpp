@@ -457,7 +457,7 @@ void entries_are_read_from_the_body_validated()
         CHECK(second && *second && (**second).path.p == "b.txt");
         const auto end = reader->next();
         CHECK(!end && end.error().kind == va::ManifestFailure::Kind::BodyMismatch &&
-              end.error().message == "the manifest changed while it was read (ManifestHashMismatch)");
+              end.error().message == "the manifest changed while it was read");
         const auto again = reader->next();
         CHECK(!again && again.error().kind == va::ManifestFailure::Kind::BodyMismatch);
     }
@@ -492,7 +492,7 @@ void entries_are_read_from_the_body_validated()
         }
         CHECK(other_line.differed());
         CHECK(failure && failure->kind == va::ManifestFailure::Kind::BodyMismatch &&
-              failure->message == "the manifest changed while it was read (ManifestHashMismatch)");
+              failure->message == "the manifest changed while it was read");
         const auto again = opened->next();
         CHECK(!again && again.error().kind == va::ManifestFailure::Kind::BodyMismatch);
     }

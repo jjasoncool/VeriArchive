@@ -21,7 +21,7 @@ ManifestFailure malformed(std::string message)
 // The entries were read from other bytes than the body validated (R-62).
 ManifestFailure changed_while_read()
 {
-    return {ManifestFailure::Kind::BodyMismatch, "the manifest changed while it was read (ManifestHashMismatch)"};
+    return {ManifestFailure::Kind::BodyMismatch, "the manifest changed while it was read"};
 }
 
 } // namespace
@@ -128,7 +128,7 @@ std::expected<ManifestReader, ManifestFailure> ManifestReader::open(
     if (length != reader.header_.body_length || lines != reader.header_.body_lines ||
         body_hash.finish_hex() != reader.header_.body_blake3) {
         return std::unexpected(ManifestFailure{ManifestFailure::Kind::BodyMismatch,
-            "manifest body does not match its header (ManifestHashMismatch)"});
+            "manifest body does not match its header"});
     }
 
     reader.offset_ = body_start;

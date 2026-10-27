@@ -4,31 +4,13 @@
 
 #include "app/history.h"
 #include "app/local_time.h"
+#include "app/plain_words.h"
 
 #include <algorithm>
 #include <vector>
 
 namespace va::gui {
 namespace {
-
-// "ManifestHashMismatch,MediaIdentityMismatch" with each failure class translated.
-std::string failure_classes_text(const app::Text& text, const std::string& failure_classes)
-{
-    if (failure_classes.empty()) {
-        return failure_classes;
-    }
-    std::string result;
-    std::size_t start = 0;
-    for (;;) {
-        const auto end = failure_classes.find(',', start);
-        result += text(failure_classes.substr(start, end == std::string::npos ? end : end - start));
-        if (end == std::string::npos) {
-            return result;
-        }
-        result += ',';
-        start = end + 1;
-    }
-}
 
 // Shows `result` below the buttons and keeps it, so a language change can
 // show it again in the new language. Also where a History handler shows an
@@ -101,7 +83,7 @@ void show_runs(GuiState& state)
         const auto& run = (*runs)[index];
         const std::string cells[] = {app::local_time(run.finished, text), text(run.mode), text(run.result),
             "r" + std::to_string(run.revision), format_bytes(run.coverage_bytes.value_or(0)),
-            failure_classes_text(text, run.failure_classes), run.run_id, notes[index]};
+            app::failure_classes_words(text, run.failure_classes), run.run_id, notes[index]};
         for (int column = 0; column < columns; ++column) {
             gtk_grid_attach(GTK_GRID(view.grid), make_label(cells[column], true), column, row, 1, 1);
         }

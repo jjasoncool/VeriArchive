@@ -36,5 +36,6 @@ int main()
     retire_archive_tests();
     typed_path_tests();
     interrupt_tests();
+    plain_words_tests();
     return test_failures == 0 ? 0 : 1;
 }

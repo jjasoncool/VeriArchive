@@ -201,6 +201,38 @@ std::expected<std::string, IoError> relocation_root_argument(ArchiveStore& store
     return shell_argument(root->get<std::string>());
 }
 
+// What identity matching noted of the media, in plain words for the warning
+// that says it (decision 0017, amended 2026-10-27); `identity.details` in
+// --json keeps the codes.
+std::string identity_detail_words(const std::string& detail)
+{
+    if (detail == "volume-label-differs") {
+        return "the volume label differs from the one registered";
+    }
+    if (detail == "capacity-differs") {
+        return "the capacity differs from the one registered";
+    }
+    if (detail == "filesystem-type-differs") {
+        return "the filesystem type differs from the one registered";
+    }
+    if (detail == "model-differs") {
+        return "the device model differs from the one registered";
+    }
+    if (detail == "device-replaced") {
+        return "the device was replaced";
+    }
+    if (detail == "filesystem-id-unavailable") {
+        return "the filesystem id cannot be read";
+    }
+    if (detail == "retired") {
+        return "the archive is retired"; // the archive, not its identity
+    }
+    if (detail == "identity-file-copied") {
+        return "the identity file was copied from other media";
+    }
+    return detail;
+}
+
 std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, const std::string& run_id)
 {
     const auto setting = store.setting(run_setting(run_id));
@@ -479,7 +511,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         (void)record_evidence(identity.archives.front(), "");
         return stop(VerifyStop::Kind::Decision,
             "PREVIOUS_CARRIER: this media held an earlier revision of archive " +
-                identity.archives.front() + " before it was relocated; it is not verified (decision 0004)",
+                identity.archives.front() + " before it was relocated; it is not verified",
             identity);
     default:
         break;
@@ -545,7 +577,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         if (detail == "filesystem-id-unavailable" && identity.result == MatchResult::MatchWeak) {
             continue; // said by the MATCH_WEAK line below
         }
-        outcome.warnings.push_back("identity: " + detail);
+        outcome.warnings.push_back("identity: " + identity_detail_words(detail));
     }
     if (identity.result == MatchResult::MatchWeak) {
         outcome.warnings.push_back(no_filesystem_id

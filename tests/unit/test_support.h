@@ -46,3 +46,4 @@ void abandon_registration_tests();
 void retire_archive_tests();
 void typed_path_tests();
 void interrupt_tests();
+void plain_words_tests();

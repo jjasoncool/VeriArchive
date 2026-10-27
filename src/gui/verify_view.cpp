@@ -3,6 +3,7 @@
 // resume. The result always carries its mode (R-21) and the V1 guarantee (R-02).
 #include "gui/gui_app.h"
 
+#include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "app/verify_report.h"
 #include "common/utf8.h"
@@ -41,7 +42,7 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
         body += "\n";
     }
     for (const auto& failure : outcome.failure_classes) {
-        body += text.format("Failure: {}", text(failure)) + "\n";
+        body += text.format("Failure: {}", text(app::failure_class_words(failure))) + "\n";
     }
     for (const auto& warning : outcome.warnings) {
         body += text.format("Warning: {}", text(warning)) + "\n";
@@ -53,7 +54,8 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
         body += "\n";
         for (const auto& item : outcome.items) {
             body += text(item.status) + "  " + item.path.p +
-                    (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail))) + "\n";
+                    (item.detail.empty() ? "" : "  " + text.parenthesized(text(app::item_detail_words(item.detail)))) +
+                    "\n";
         }
     }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::Window)) {

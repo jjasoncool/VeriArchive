@@ -365,13 +365,13 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
         if (unicode_fold(candidate.root_subpath) != unicode_fold(root_subpath)) {
             return fail(RegisterFailure::Kind::Refused,
                 "the root overlaps registered archive " + describe(candidate) +
-                    "; archive roots on one volume may not contain each other (decision 0001)");
+                    "; archive roots on one volume may not contain each other");
         }
         if (previous_carrier) {
             if (!request.force_new_archive) {
                 return fail(RegisterFailure::Kind::Refused,
                     "this media is an earlier carrier of archive " + describe(candidate) +
-                        "; pass --force-new-archive to register it separately (decision 0004)");
+                        "; pass --force-new-archive to register it separately");
             }
             continue;
         }
@@ -387,7 +387,7 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
         if (request.new_revision) {
             if (candidate.retired) {
                 return fail(RegisterFailure::Kind::Refused,
-                    "archive " + describe(candidate) + " is retired and takes no new revisions (decision 0003)");
+                    "archive " + describe(candidate) + " is retired and takes no new revisions");
             }
             if (target) {
                 return fail(RegisterFailure::Kind::Refused,
@@ -397,7 +397,7 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
         } else if (!request.force_new_archive) {
             return fail(RegisterFailure::Kind::Refused,
                 "already registered as archive " + describe(candidate) +
-                    "; pass --new-revision to re-baseline it or --force-new-archive (R-97)");
+                    "; pass --new-revision to re-baseline it or --force-new-archive");
         }
     }
     if (request.new_revision && !target) {
@@ -409,7 +409,7 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
 // A retired archive takes no new revision (decision 0003), not even in a
 // registration over its lost manifest (decision 0028, point 9), in a
 // relocation's words.
-constexpr const char* retired_takes_no_revision = "a retired archive takes no new revisions (decision 0003)";
+constexpr const char* retired_takes_no_revision = "a retired archive takes no new revisions";
 
 // The archive named for a registration over its lost manifest (decision 0028,
 // point 8), what is wrong with the manifest of its revision, the archives
@@ -559,7 +559,7 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
         } else if (!overlapping) {
             overlapping = RegisterFailure{Kind::Refused,
                 "the root overlaps the root of archive " + candidate.archive_uuid +
-                    ", whose latest manifest records this volume's filesystem id and device (decision 0001)"};
+                    ", whose latest manifest records this volume's filesystem id and device"};
         }
     }
     // Twins at one folder write one identity file (R-89), the last one's: one
@@ -736,7 +736,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 }
                 if (*archive && (*archive)->status == "RETIRED") {
                     refused = RegisterFailure{Kind::Refused,
-                        "archive " + plan.archive_uuid + " is retired and takes no new revisions (decision 0003): "
+                        "archive " + plan.archive_uuid + " is retired and takes no new revisions: "
                         "abandon its unfinished registration with `archive abandon-registration " +
                             plan.archive_uuid + "`"};
                     store.rollback();

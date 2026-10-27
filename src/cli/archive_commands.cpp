@@ -8,6 +8,7 @@
 
 #include "app/history.h"
 #include "app/local_time.h"
+#include "app/plain_words.h"
 #include "app/unfinished_operations.h"
 
 #include "common/utf8.h"
@@ -50,24 +51,6 @@ std::string last_verify_line(const app::Text& text, const std::optional<VerifyRu
         line = text.format("Last FULL verify: {} on {}", text(run->result), app::local_time(run->finished, text));
     }
     return overdue ? line + "  " + text("OVERDUE") : line;
-}
-
-// "ManifestHashMismatch,MediaIdentityMismatch" with each failure class translated.
-std::string failure_classes_text(const app::Text& text, std::string_view classes)
-{
-    std::string result;
-    for (std::size_t start = 0; start <= classes.size();) {
-        auto end = classes.find(',', start);
-        if (end == std::string_view::npos) {
-            end = classes.size();
-        }
-        if (start > 0) {
-            result += ',';
-        }
-        result += text(classes.substr(start, end - start));
-        start = end + 1;
-    }
-    return result;
 }
 
 nlohmann::json run_json(const std::optional<VerifyRunRecord>& run)
@@ -602,7 +585,8 @@ void print_comparison(const app::Text& text, const ArchiveComparison& comparison
         // An alternate data stream (V1.1) is written "file:stream", as Windows writes it.
         std::cout << "  " << text(difference.status) << "  " << difference.path
                   << (difference.stream.empty() ? "" : ":" + difference.stream)
-                  << (difference.detail.empty() ? "" : "  " + text.parenthesized(text(difference.detail)))
+                  << (difference.detail.empty() ? ""
+                                                 : "  " + text.parenthesized(text(app::item_detail_words(difference.detail))))
                   << '\n';
     }
     std::cout << "  " << text(compare_scope) << '\n';
@@ -901,7 +885,9 @@ int relocate(const Arguments& arguments, Opened& opened)
             std::cout << text.format("RELOCATION REFUSED: {}", text(outcome.error().message)) << '\n';
             for (const auto& item : outcome.error().items) {
                 std::cout << "  " << text(item.status) << "  " << item.path.p
-                          << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail))) << '\n';
+                          << (item.detail.empty() ? ""
+                                                  : "  " + text.parenthesized(text(app::item_detail_words(item.detail))))
+                          << '\n';
             }
             return exit_code::failed;
         }
@@ -929,7 +915,8 @@ int relocate(const Arguments& arguments, Opened& opened)
         }
         for (const auto& item : outcome->items) {
             std::cout << "  " << text(item.status) << "  " << item.path.p
-                      << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail)))
+                      << (item.detail.empty() ? ""
+                                              : "  " + text.parenthesized(text(app::item_detail_words(item.detail))))
                       << '\n';
         }
     }
@@ -1048,7 +1035,7 @@ int history_command(const Arguments& arguments)
         std::cout << "  "
                   << text.format("{}  {} VERIFY {}  r{}  {} bytes", app::local_time(run.finished, text),
                          text(run.mode), text(run.result), run.revision, run.coverage_bytes.value_or(0))
-                  << (run.failure_classes.empty() ? "" : "  " + failure_classes_text(text, run.failure_classes))
+                  << (run.failure_classes.empty() ? "" : "  " + app::failure_classes_words(text, run.failure_classes))
                   << "  " << run.run_id << (note.empty() ? "" : "  " + note) << '\n';
     }
     return exit_code::passed;

@@ -6,6 +6,7 @@
 #include "gui/gui_app.h"
 
 #include "app/local_time.h"
+#include "app/plain_words.h"
 #include "core/engine/compare_archives.h"
 #include "platform/file_system.h"
 
@@ -57,7 +58,9 @@ std::string report(const app::Text& text, const Shown& shown)
             // "path:stream" names an alternate data stream, as Windows writes it.
             body += text(difference.status) + "  " + difference.path +
                     (difference.stream.empty() ? "" : ":" + difference.stream) +
-                    (difference.detail.empty() ? "" : "  " + text.parenthesized(text(difference.detail))) + "\n";
+                    (difference.detail.empty() ? ""
+                                               : "  " + text.parenthesized(text(app::item_detail_words(difference.detail)))) +
+                    "\n";
         }
         if (shown.differences > comparison.differences.size()) {
             body += text.format("... and {} more differences, not listed here",
@@ -74,7 +77,7 @@ std::string failure_report(const app::Text& text, const CompareFailure& failure)
     std::string body = text.format("Not compared: {}", text(failure.message)) + "\n";
     // Cancelling is the user's choice, not a fault of an archive or the repository.
     if (failure.failure_class != "Cancelled") {
-        body += text.format("Failure: {}", text(failure.failure_class)) + "\n";
+        body += text.format("Failure: {}", text(app::failure_class_words(failure.failure_class))) + "\n";
     }
     return body;
 }

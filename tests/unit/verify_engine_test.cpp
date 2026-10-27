@@ -2382,7 +2382,21 @@ void unreadable_filesystem_id_warns()
     CHECK(outcome.identity.result == va::MatchResult::MatchWeak);
     CHECK(std::ranges::count(outcome.warnings,
               "identity: the filesystem id cannot be read; the volume was recognised by its device (MATCH_WEAK)") == 1);
+    CHECK(std::ranges::count(outcome.warnings, "identity: the filesystem id cannot be read") == 0);
     CHECK(std::ranges::count(outcome.warnings, "identity: filesystem-id-unavailable") == 0);
+}
+
+// What matching noted of the media is a warning in plain words, while the
+// identity's details keep their codes (decision 0017, amended 2026-10-27).
+void identity_details_warn_in_plain_words()
+{
+    Registered fixture;
+    fixture.media.volume.volume_label = "RENAMED SAMPLE";
+    const auto outcome = fixture.verify_ok();
+    CHECK(outcome.result == "PASSED_WITH_WARNINGS");
+    CHECK(std::ranges::count(outcome.identity.details, "volume-label-differs") == 1);
+    CHECK(std::ranges::count(outcome.warnings, "identity: the volume label differs from the one registered") == 1);
+    CHECK(std::ranges::count(outcome.warnings, "identity: volume-label-differs") == 0);
 }
 
 void verify_engine_tests()
@@ -2402,6 +2416,7 @@ void verify_engine_tests()
     tampered_manifest_fails();
     identity_outcomes();
     unreadable_filesystem_id_warns();
+    identity_details_warn_in_plain_words();
     verify_by_archive_uuid();
     unrepresentable_names_warn();
     a_name_registered_on_this_system_that_is_gone_is_missing();

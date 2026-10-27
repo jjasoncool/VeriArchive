@@ -2649,7 +2649,7 @@ void a_registration_over_a_manifest_that_is_not_lost_is_refused()
 std::string overlaps_the_root_of(const va::Uuid& other)
 {
     return "the root overlaps the root of archive " + other +
-           ", whose latest manifest records this volume's filesystem id and device (decision 0001)";
+           ", whose latest manifest records this volume's filesystem id and device";
 }
 
 // Decision 0028, point 8: the root of a registration over a lost manifest is
@@ -3096,7 +3096,7 @@ void a_retired_archive_takes_no_registration_over_its_lost_manifest()
             CHECK(fixture.store.update_archive(**archive));
         }
     };
-    const std::string retired_refusal = "a retired archive takes no new revisions (decision 0003)";
+    const std::string retired_refusal = "a retired archive takes no new revisions";
     {
         Fixture fixture;
         const auto archive_uuid = archive_a_registered_twice(fixture);
@@ -3146,7 +3146,7 @@ void a_retired_archive_takes_no_registration_over_its_lost_manifest()
         const auto refused = fixture.run(resume);
         CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
               refused.error().message == "archive " + archive_uuid +
-                                             " is retired and takes no new revisions (decision 0003): abandon its "
+                                             " is retired and takes no new revisions: abandon its "
                                              "unfinished registration with `archive abandon-registration " +
                                              archive_uuid + "`");
         if (refused) {
@@ -3237,7 +3237,7 @@ void an_older_versions_plan_that_can_no_longer_finish_is_refused_unasked()
         const auto refused = fixture.run(resume);
         CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
               refused.error().message == "archive " + archive_uuid +
-                                             " is retired and takes no new revisions (decision 0003): abandon its "
+                                             " is retired and takes no new revisions: abandon its "
                                              "unfinished registration with `archive abandon-registration " +
                                              archive_uuid + "`" &&
               !refused.error().older_version);

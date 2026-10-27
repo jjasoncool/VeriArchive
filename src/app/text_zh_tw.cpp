@@ -46,12 +46,16 @@ constexpr CatalogEntry entries[] = {
     {"media", "媒體錯誤"},
     {"other", "其他錯誤"},
 
-    // Run-level failure classes.
-    {"ManifestHashMismatch", "清單檔雜湊不符"},
-    {"ManifestRevisionRollback", "清單檔版次倒退"},
-    {"MediaIdentityMismatch", "媒體身分不符"},
-    {"FilesystemAccessError", "檔案系統存取錯誤"},
-    {"RepositoryError", "儲存庫錯誤"},
+    // Run-level failure classes in plain words (app/plain_words.h); --json
+    // keeps the classes.
+    {"the media is not the one registered", "媒體不是已註冊的那一個"},
+    {"the media matches more than one archive", "媒體符合多個封存"},
+    {"the manifest's signature does not verify", "清單檔的簽章驗證失敗"},
+    {"the manifest is not the one recorded", "清單檔不是記錄中的那一個"},
+    {"a revision older than one already known", "版次比已知的版次舊"},
+    {"the record of changes on the volume was interrupted", "磁碟區的變更紀錄中斷了"},
+    {"files could not be read", "有檔案無法讀取"},
+    {"the repository could not be read or written", "無法讀寫儲存庫"},
 
     // Media identity results.
     {"MATCH", "相符"},
@@ -699,21 +703,21 @@ constexpr CatalogEntry entries[] = {
     // Engine and repository messages
     // src/core/engine/register_engine.cpp
     {"the root overlaps registered archive {} (volume root); "
-        "archive roots on one volume may not contain each other (decision 0001)",
+        "archive roots on one volume may not contain each other",
         "根目錄與已註冊的封存 {}（磁碟區根目錄）重疊；"
-        "同一磁碟區上的封存根目錄不得互相包含（決策紀錄 0001）"},
+        "同一磁碟區上的封存根目錄不得互相包含"},
     {"the root overlaps registered archive {} (root \"{}\"); "
-        "archive roots on one volume may not contain each other (decision 0001)",
+        "archive roots on one volume may not contain each other",
         "根目錄與已註冊的封存 {}（根目錄「{}」）重疊；"
-        "同一磁碟區上的封存根目錄不得互相包含（決策紀錄 0001）"},
+        "同一磁碟區上的封存根目錄不得互相包含"},
     {"this media is an earlier carrier of archive {} (volume root); "
-        "pass --force-new-archive to register it separately (decision 0004)",
+        "pass --force-new-archive to register it separately",
         "此媒體是封存 {}（磁碟區根目錄）先前的載體；若要另行註冊，"
-        "請加上 --force-new-archive（決策紀錄 0004）"},
+        "請加上 --force-new-archive"},
     {"this media is an earlier carrier of archive {} (root \"{}\"); "
-        "pass --force-new-archive to register it separately (decision 0004)",
+        "pass --force-new-archive to register it separately",
         "此媒體是封存 {}（根目錄「{}」）先前的載體；若要另行註冊，"
-        "請加上 --force-new-archive（決策紀錄 0004）"},
+        "請加上 --force-new-archive"},
     {"this filesystem belongs to archive {} (volume root) but the device differs (MIGRATED); "
         "use `archive relocate`, or pass --force-new-archive",
         "此檔案系統屬於封存 {}（磁碟區根目錄），但裝置不同（已遷移）；請使用 `archive relocate`，"
@@ -722,20 +726,20 @@ constexpr CatalogEntry entries[] = {
         "use `archive relocate`, or pass --force-new-archive",
         "此檔案系統屬於封存 {}（根目錄「{}」），但裝置不同（已遷移）；請使用 `archive relocate`，"
         "或加上 --force-new-archive"},
-    {"archive {} (volume root) is retired and takes no new revisions (decision 0003)",
-        "封存 {}（磁碟區根目錄）已停用，不再接受新的版次（決策紀錄 0003）"},
-    {"archive {} (root \"{}\") is retired and takes no new revisions (decision 0003)",
-        "封存 {}（根目錄「{}」）已停用，不再接受新的版次（決策紀錄 0003）"},
+    {"archive {} (volume root) is retired and takes no new revisions",
+        "封存 {}（磁碟區根目錄）已停用，不再接受新的版次"},
+    {"archive {} (root \"{}\") is retired and takes no new revisions",
+        "封存 {}（根目錄「{}」）已停用，不再接受新的版次"},
     {"several archives match this root (AMBIGUOUS); resolve the clone first",
         "有多個封存符合此根目錄（無法確定）；請先處理複製的媒體"},
     {"already registered as archive {} (volume root); "
-        "pass --new-revision to re-baseline it or --force-new-archive (R-97)",
+        "pass --new-revision to re-baseline it or --force-new-archive",
         "已註冊為封存 {}（磁碟區根目錄）；請加上 --new-revision 重新建立基準，"
-        "或加上 --force-new-archive（R-97）"},
+        "或加上 --force-new-archive"},
     {"already registered as archive {} (root \"{}\"); "
-        "pass --new-revision to re-baseline it or --force-new-archive (R-97)",
+        "pass --new-revision to re-baseline it or --force-new-archive",
         "已註冊為封存 {}（根目錄「{}」）；請加上 --new-revision 重新建立基準，"
-        "或加上 --force-new-archive（R-97）"},
+        "或加上 --force-new-archive"},
     {"--new-revision: no registered archive at this root",
         "--new-revision：此根目錄沒有已註冊的封存"},
     {"labels have the form ARCH-NNNN", "標籤的格式為 ARCH-NNNN"},
@@ -807,9 +811,9 @@ constexpr CatalogEntry entries[] = {
     // A retired archive takes no new revision, not even over its lost manifest
     // (decision 0028, point 9): a registration of it that an older version
     // began waits to be abandoned.
-    {"archive {} is retired and takes no new revisions (decision 0003): abandon its unfinished registration with "
+    {"archive {} is retired and takes no new revisions: abandon its unfinished registration with "
         "`archive abandon-registration {}`",
-        "封存 {} 已停用，不再接受新的版次（決策紀錄 0003）：請以 `archive abandon-registration {}` 放棄它未完成的註冊"},
+        "封存 {} 已停用，不再接受新的版次：請以 `archive abandon-registration {}` 放棄它未完成的註冊"},
     {"the manifest of revision {} of archive {} can be used: register its next revision with `register <root_path> "
         "--new-revision`",
         "封存 {1} 版次 {0} 的清單檔可以使用：請以 `register <root_path> --new-revision` 註冊它的下一個版次"},
@@ -821,9 +825,8 @@ constexpr CatalogEntry entries[] = {
         "此根目錄的身分檔案（.veriarchive/identity.json）指向封存 {}，而不是封存 {}"},
     {"the media copy at this root holds the manifest of revision {} of archive {}: put it back with `import {}`",
         "此根目錄的媒體副本中有封存 {1} 版次 {0} 的清單檔：請以 `import {2}` 放回該清單檔"},
-    {"the root overlaps the root of archive {}, whose latest manifest records this volume's filesystem id and device "
-        "(decision 0001)",
-        "根目錄與封存 {} 的根目錄重疊，而該封存最新的清單檔所記錄的正是此磁碟區的檔案系統 UUID 與裝置（決策紀錄 0001）"},
+    {"the root overlaps the root of archive {}, whose latest manifest records this volume's filesystem id and device",
+        "根目錄與封存 {} 的根目錄重疊，而該封存最新的清單檔所記錄的正是此磁碟區的檔案系統 UUID 與裝置"},
     // src/cli/register_commands.cpp: an archive whose root the root of a
     // registration over a lost manifest overlaps on a volume that may be a
     // clone of this one (decision 0028, point 8); the match code is translated
@@ -921,8 +924,8 @@ constexpr CatalogEntry entries[] = {
         "confirm with `archive relocate {} <root_path>`",
         "已遷移：檔案系統符合封存 {}，但裝置不同；請以 `archive relocate {} <root_path>` 確認"},
     {"PREVIOUS_CARRIER: this media held an earlier revision of archive {} before it was "
-        "relocated; it is not verified (decision 0004)",
-        "先前的載體：此媒體在封存 {} 搬移前存放其較早的版次；不會驗證此媒體（決策紀錄 0004）"},
+        "relocated; it is not verified",
+        "先前的載體：此媒體在封存 {} 搬移前存放其較早的版次；不會驗證此媒體"},
     {"the matched archive is missing from the database", "資料庫中找不到相符的封存"},
     {"run {} cannot be resumed: the media identity or the archive revision changed since it "
         "started; run a new verification",
@@ -971,29 +974,30 @@ constexpr CatalogEntry entries[] = {
     {"Unreadable(permission)", "無法讀取（權限不足）"},
     {"Unreadable(media)", "無法讀取（媒體錯誤）"},
     {"Unreadable(other)", "無法讀取（其他錯誤）"},
-    {"mtime", "修改時間"},
-    {"mode", "權限模式"},
-    {"attrs", "檔案屬性"},
-    {"mtime,mode", "修改時間、權限模式"},
-    {"mtime,attrs", "修改時間、檔案屬性"},
-    {"mode,attrs", "權限模式、檔案屬性"},
-    {"mtime,mode,attrs", "修改時間、權限模式、檔案屬性"},
-    {"link-target-translated", "連結目標已被轉換"},
+    // An item's detail in plain words (app/plain_words.h); --json keeps the codes.
+    {"modification time", "修改時間"},
+    {"permissions", "權限模式"},
+    {"attributes", "檔案屬性"},
+    {"modification time, permissions", "修改時間、權限模式"},
+    {"modification time, attributes", "修改時間、檔案屬性"},
+    {"permissions, attributes", "權限模式、檔案屬性"},
+    {"modification time, permissions, attributes", "修改時間、權限模式、檔案屬性"},
+    {"link target converted by this system", "連結目標已被轉換"},
     {"link target differs", "連結目標不同"},
     {"a mount point now covers this path", "此路徑現在被掛載點覆蓋"},
     {"another volume is mounted here; it is not part of the archive", "這裡掛載了另一個磁碟區；它不屬於這個封存"},
     {"directory {} cannot be listed", "無法列出資料夾 {} 的內容"},
     {"name cannot exist on {}", "此名稱無法存在於 {}"},
-    {"name cannot exist on windows", "此名稱無法存在於 Windows"},
-    {"name cannot exist on linux", "此名稱無法存在於 Linux"},
+    {"name cannot exist on Windows", "此名稱無法存在於 Windows"},
+    {"name cannot exist on Linux", "此名稱無法存在於 Linux"},
     {"inside a directory unreadable at registration", "位於註冊時無法讀取的資料夾內"},
-    {"f -> d", "檔案 → 資料夾"},
-    {"f -> l", "檔案 → 連結"},
-    {"d -> f", "資料夾 → 檔案"},
-    {"d -> l", "資料夾 → 連結"},
-    {"l -> f", "連結 → 檔案"},
-    {"l -> d", "連結 → 資料夾"},
-    {"known-since-registration", "註冊時即無法讀取"},
+    {"file -> folder", "檔案 → 資料夾"},
+    {"file -> link", "檔案 → 連結"},
+    {"folder -> file", "資料夾 → 檔案"},
+    {"folder -> link", "資料夾 → 連結"},
+    {"link -> file", "連結 → 檔案"},
+    {"link -> folder", "連結 → 資料夾"},
+    {"unreadable since registration", "註冊時即無法讀取"},
     {"readable now, unreadable at registration", "現在可讀取，註冊時無法讀取"},
     {"size differs", "大小不同"},
     {"content differs", "內容不同"},
@@ -1016,15 +1020,10 @@ constexpr CatalogEntry entries[] = {
     {"inside a directory unreadable in A", "位於 A 註冊時無法讀取的資料夾內"},
     {"inside a directory unreadable in B", "位於 B 註冊時無法讀取的資料夾內"},
     // src/core/engine/relocate_engine.cpp
-    {"a retired archive takes no new revisions (decision 0003)",
-        "已停用的封存不再接受新的版次（決策紀錄 0003）"},
+    {"a retired archive takes no new revisions", "已停用的封存不再接受新的版次"},
     {"cannot identify the volume of the new root: {}", "無法識別新根目錄所在的磁碟區：{}",
         Match::Cause},
-    {"the new root overlaps archive {} on the same volume (decision 0001)",
-        "新根目錄與同一磁碟區上的封存 {} 重疊（決策紀錄 0001）"},
-    {"ManifestHashMismatch: {}", "清單檔雜湊不符：{}", Match::Cause},
-    {"ManifestRevisionRollback: {}", "清單檔版次倒退：{}", Match::Cause},
-    {"RepositoryError: {}", "儲存庫錯誤：{}", Match::Cause},
+    {"the new root overlaps archive {} on the same volume", "新根目錄與同一磁碟區上的封存 {} 重疊"},
     {"relocation was interrupted; nothing was changed", "搬移已中斷；未做任何變更"},
     // A relocation resumes (decision 0026).
     {"relocation was interrupted; continue it with `archive relocate {} {} --resume`",
@@ -1397,9 +1396,8 @@ constexpr CatalogEntry entries[] = {
     {"manifest does not end with a newline", "清單檔未以換行字元結尾"},
     {"empty manifest", "清單檔是空的"},
     {"invalid manifest header: {}", "清單檔標頭無效：{}", Match::Cause},
-    {"manifest body does not match its header (ManifestHashMismatch)",
-        "清單檔主體與其標頭不符（清單檔雜湊不符）"},
-    {"the manifest changed while it was read (ManifestHashMismatch)", "清單檔在讀取期間被變更（清單檔雜湊不符）"},
+    {"manifest body does not match its header", "清單檔主體與其標頭不符"},
+    {"the manifest changed while it was read", "清單檔在讀取期間被變更"},
     {"invalid manifest entry: {}", "清單檔項目無效：{}", Match::Cause},
     {"manifest entries out of canonical order", "清單檔項目未依標準順序排列"},
     // nlohmann::json's sentences (common/json_error.h removes the library's tag),
@@ -1417,19 +1415,43 @@ constexpr CatalogEntry entries[] = {
     {"manifest entries out of canonical order at {}", "清單檔項目在 {} 處未依標準順序排列"},
     {"manifest body changed while writing", "清單檔主體在寫入期間發生變更"},
     // src/core/identity/matcher.cpp
-    {"volume-label-differs", "磁碟區標籤不同"},
-    {"capacity-differs", "容量不同"},
-    {"filesystem-type-differs", "檔案系統類型不同"},
-    {"model-differs", "型號不同"},
-    {"device-replaced", "裝置已更換"},
-    {"filesystem-id-unavailable", "讀不到檔案系統 UUID"},
-    // Shown as "identity: retired": the archive is retired, not the identity.
-    {"retired", "封存已停用"},
-    {"identity-file-copied", "身分檔案是從其他媒體複製而來"},
+    // What matching noted, in plain words in the warning "identity: ..."
+    // (src/core/engine/verify_engine.cpp); --json keeps the codes.
+    {"the volume label differs from the one registered", "磁碟區標籤與註冊時不同"},
+    {"the capacity differs from the one registered", "容量與註冊時不同"},
+    {"the filesystem type differs from the one registered", "檔案系統類型與註冊時不同"},
+    {"the device model differs from the one registered", "裝置型號與註冊時不同"},
+    {"the device was replaced", "裝置已更換"},
+    {"the filesystem id cannot be read", "讀不到檔案系統 UUID"},
+    // Shown as "identity: the archive is retired": the archive, not its identity.
+    {"the archive is retired", "封存已停用"},
+    {"the identity file was copied from other media", "身分檔案是從其他媒體複製而來"},
     // src/core/hash/hashers.cpp
     {"cannot initialise SHA-256", "無法初始化 SHA-256"},
-    // src/platform/windows/win_util.cpp
-    {"{} failed (Win32 error {})", "{} 失敗（Win32 錯誤 {}）"},
+    // src/platform/windows/win_util.cpp: what went wrong in plain words, then
+    // the call and Windows' number (decision 0017, amended 2026-10-27).
+    {"not found ({}, Windows error {})", "找不到（{}，Windows 錯誤 {}）"},
+    {"access denied ({}, Windows error {})", "存取被拒（{}，Windows 錯誤 {}）"},
+    {"no such drive ({}, Windows error {})", "沒有這個磁碟機代號（{}，Windows 錯誤 {}）"},
+    {"the media is write-protected ({}, Windows error {})", "媒體已防寫（{}，Windows 錯誤 {}）"},
+    {"the device is not ready ({}, Windows error {})", "裝置尚未就緒（{}，Windows 錯誤 {}）"},
+    {"the device reported an error ({}, Windows error {})", "裝置回報錯誤（{}，Windows 錯誤 {}）"},
+    {"damaged and unreadable ({}, Windows error {})", "已損毀而無法讀取（{}，Windows 錯誤 {}）"},
+    {"in use by another program ({}, Windows error {})", "正由其他程式使用中（{}，Windows 錯誤 {}）"},
+    {"locked by another program ({}, Windows error {})", "已被其他程式鎖定（{}，Windows 錯誤 {}）"},
+    {"the volume is full ({}, Windows error {})", "磁碟區已滿（{}，Windows 錯誤 {}）"},
+    {"network path not found ({}, Windows error {})", "找不到網路路徑（{}，Windows 錯誤 {}）"},
+    {"already exists ({}, Windows error {})", "已經存在（{}，Windows 錯誤 {}）"},
+    {"the name is not valid ({}, Windows error {})", "名稱無效（{}，Windows 錯誤 {}）"},
+    {"the name is too long ({}, Windows error {})", "名稱過長（{}，Windows 錯誤 {}）"},
+    {"not a folder ({}, Windows error {})", "不是資料夾（{}，Windows 錯誤 {}）"},
+    {"the folder is not empty ({}, Windows error {})", "資料夾不是空的（{}，Windows 錯誤 {}）"},
+    {"the device is not attached ({}, Windows error {})", "裝置未連接（{}，Windows 錯誤 {}）"},
+    {"not permitted for this user ({}, Windows error {})", "此使用者沒有權限（{}，Windows 錯誤 {}）"},
+    {"no answer in time ({}, Windows error {})", "未能及時回應（{}，Windows 錯誤 {}）"},
+    {"not supported ({}, Windows error {})", "不支援（{}，Windows 錯誤 {}）"},
+    {"cancelled ({}, Windows error {})", "已取消（{}，Windows 錯誤 {}）"},
+    {"Windows error {} ({})", "Windows 錯誤 {}（{}）"},
     // src/platform/windows/platform_services_win.cpp
     {"GetModuleFileNameW failed", "GetModuleFileNameW 失敗"},
     {"USERPROFILE is unavailable", "無法取得 USERPROFILE"},
