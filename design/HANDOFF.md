@@ -228,6 +228,8 @@ struct MediaEvidence {                   // observed at register / verify time
 
 ## B2. Path and filename rules
 
+> Amended by `design/decisions/0008-link-target-canonical-form.md`: R-44 holds only where another OS registered the revision (`created_by.os`); on the OS that registered it, a recorded entry not found now is `Missing`.
+
 Manifest paths (`ArchivePath`, `common/archive_path.*`) are relative to `archive_root`.
 
 - R-40 Separator is `/`. On Windows both `\` and `/` in native names are separators. On Linux `\` is an ordinary character and MUST NOT be translated.

@@ -267,6 +267,7 @@ Item statuses:
 | MetadataMismatch | same content, different modification time (a warning by default); with "Strict metadata" or `--strict-metadata` mode and attributes are compared too, and a difference fails the run |
 | TypeChanged | for example a file became a folder, or a folder became a file or a link; what such a folder holds is listed beside it, as New where the folder is new, as Missing where it went |
 | Unbaselined | unreadable at registration, so there is no hash to compare. When everything else matched, the report suggests registering a new revision, which takes a baseline for it (`register <root> --new-revision`, or "New revision of the archive registered at this folder or volume" in the Register Archive view) |
+| Unrepresentable | the name cannot exist on this operating system, and the archive was registered on another one (for example a name with `?`, registered on Linux and verified on Windows): a warning. Verified on the system that registered the archive, such an entry that is gone is Missing |
 
 ### Resuming an interrupted run
 

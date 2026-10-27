@@ -319,7 +319,8 @@ void verify_by_archive_uuid()
     CHECK(outcome && outcome->result == "PASSED");
 }
 
-// R-44: a name that cannot exist on Windows is not reported as Missing.
+// R-44: a name that cannot exist on Windows, registered on Linux, is not
+// reported as Missing.
 void unrepresentable_names_warn()
 {
     EngineFixture fixture;
@@ -333,6 +334,32 @@ void unrepresentable_names_warn()
     const auto outcome = fixture.verify(fixture.archive.root());
     CHECK(outcome && outcome->result == "PASSED_WITH_WARNINGS");
     CHECK(outcome && status_of(*outcome, "what?.txt") == "Unrepresentable");
+}
+
+// R-44 holds only where another system registered the revision (decision
+// 0008): on the system that registered it, a name that cannot be created
+// there existed all the same (Windows reads names from NTFS that it lets no
+// program create, such as a reserved name or a name ending in a dot or a
+// space, as Linux drivers write them), so a recorded entry that is gone is
+// Missing and the run fails. Sample names.
+void a_name_registered_on_this_system_that_is_gone_is_missing()
+{
+    EngineFixture fixture; // registered and verified on Windows
+    const std::vector<std::string> names{"AUX.SAMPLE.txt", "SAMPLE-trailing-dot.", "SAMPLE-trailing-space "};
+    for (const auto& name : names) {
+        CHECK(!va::representable_on_windows(name));
+        fixture.archive.add_file(name, "sample");
+    }
+    fixture.archive.add_file("SAMPLE-kept.txt", "kept");
+    CHECK(fixture.register_root(fixture.archive.root()).has_value());
+    for (const auto& name : names) {
+        fixture.archive.remove(name);
+    }
+    const auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "FAILED" && outcome->items.size() == names.size());
+    for (const auto& name : names) {
+        CHECK(outcome && status_of(*outcome, name) == "Missing");
+    }
 }
 
 // Decision 0008: absolute targets may be translated across OSes.
@@ -1868,6 +1895,7 @@ void verify_engine_tests()
     unreadable_filesystem_id_warns();
     verify_by_archive_uuid();
     unrepresentable_names_warn();
+    a_name_registered_on_this_system_that_is_gone_is_missing();
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
     a_device_that_goes_away_leaves_the_run_incomplete();

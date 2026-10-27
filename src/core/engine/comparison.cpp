@@ -168,6 +168,8 @@ ComparisonResult compare_with_manifest(
     for (const auto& mount_point : scanned->skipped_mount_points) {
         mount_points_now.insert(mount_point.p);
     }
+    // The revision was registered on the system that verifies it (created_by.os).
+    const bool registered_here = input.header->os == input.host_os;
     // A directory with contents is no entry (R-49): it shows only through its
     // descendants, in the manifest and in the scan alike (item_rules.h).
     const auto recorded_folder = [&](const ArchivePath& path) {
@@ -193,10 +195,14 @@ ComparisonResult compare_with_manifest(
         } else if (const auto dir = ancestor_in(entry.path.p, unreadable_dirs_now)) {
             classify.add(entry, unreadable_status(unreadable_dirs_now.at(*dir)),
                 "directory " + *dir + " cannot be listed", Severity::Failure);
-        } else if ((input.host_os == "windows" && !representable_on_windows(entry.path.p)) ||
-                   (!entry.path.enc.empty() && !archive_path_to_native(entry.path))) {
+        } else if (!registered_here &&
+                   ((input.host_os == "windows" && !representable_on_windows(entry.path.p)) ||
+                       (!entry.path.enc.empty() && !archive_path_to_native(entry.path)))) {
+            // R-44, only where another system registered the revision: on the
+            // one that did, the name existed there (Windows reads names from
+            // NTFS that it lets no program create), so it is Missing.
             classify.add(entry, "Unrepresentable", "name cannot exist on " + input.host_os,
-                Severity::Warning); // R-44
+                Severity::Warning);
         } else {
             classify.add(entry, "Missing", "", Severity::Failure);
         }

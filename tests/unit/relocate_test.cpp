@@ -619,7 +619,9 @@ void an_unrepresentable_name_marks_the_relocation_at_once()
     fixture.media.extra_volumes.push_back(second);
     fixture.archive.add_file("old/what?.txt", "a name from another system (sample data)");
     fixture.archive.add_file("old/z.txt", "z");
+    fixture.host.os = "linux"; // registered there (R-44 holds across systems only)
     const auto registered = fixture.register_root(fixture.archive.root() / "old");
+    fixture.host.os = "windows";
     CHECK(registered.has_value());
     if (!registered) {
         return;
