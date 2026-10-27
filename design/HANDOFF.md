@@ -310,7 +310,7 @@ line 2..N   body   — one canonical JSON object per line: entries (sorted per R
 
 - R-64 Keys are emitted in the fixed order given in §B4.3 / §B4.4 (not alphabetical); no whitespace; integers as plain decimal; strings escape only `"`, `\`, and U+0000–U+001F (always as `\uXXXX`, including newline and tab); all other characters as raw UTF-8; hashes lowercase hex; booleans `true`/`false`; absent optional fields are omitted, never `null`.
 - R-65 The writer is a small in-house emitter. Parsing MAY use nlohmann/json.
-- R-66 Golden test: the same fixture tree registered on Windows and on Linux MUST produce byte-identical `.vam` files after a test helper blanks `created`, `created_by`, `identity`, `root_hint`. Golden fixtures use relative links only (decision 0008); the cross-OS comparison also blanks `mode` and `attrs` (decision 0015).
+- R-66 Golden test: the same fixture tree registered on Windows and on Linux MUST produce byte-identical `.vam` files after a test helper blanks `created`, `created_by`, `identity`, `root_hint`. Golden fixtures use relative links only (decision 0008); the cross-OS comparison also blanks `mode` and `attrs`, and `archive_uuid` and the body's `blake3` and `length` (decision 0015).
 
 ### B4.3 Header (line 1; shown wrapped, real header is one line)
 

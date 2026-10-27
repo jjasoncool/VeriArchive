@@ -1638,4 +1638,7 @@ else()
 endif()
 set(GLOBAL --config "${WORK}/config.json")
 
+# R-66: a fixture tree registered on this OS gives the golden manifest.
+include("${CMAKE_CURRENT_LIST_DIR}/golden_tree.cmake")
+
 message(STATUS "veriarchive-cli end-to-end test passed")
