@@ -19,6 +19,8 @@ enum class ReportedIn { CommandLine, Window };
 // --new-revision`, or the new revision box of Register Archive), the root
 // the run read named. Nothing for any other run: after a FAILED one, a new
 // revision would take entries that differ from the baseline for good ones.
+// Nothing for a retired archive either (its identity details "retired"),
+// which takes no new revision (decision 0003).
 std::optional<std::string> unbaselined_advice(const Text& text, const VerifyOutcome& outcome, ReportedIn where);
 
 } // namespace va::app

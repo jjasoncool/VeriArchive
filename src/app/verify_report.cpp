@@ -2,12 +2,19 @@
 
 #include "common/utf8.h"
 
+#include <algorithm>
+
 namespace va::app {
 
 std::optional<std::string> unbaselined_advice(const Text& text, const VerifyOutcome& outcome, ReportedIn where)
 {
     const auto unbaselined = outcome.counts.find("Unbaselined");
     if (unbaselined == outcome.counts.end() || unbaselined->second == 0 || outcome.result != "PASSED_WITH_WARNINGS") {
+        return std::nullopt;
+    }
+    // A retired archive takes no new revision (decision 0003): registering
+    // one would be refused.
+    if (std::ranges::find(outcome.identity.details, "retired") != outcome.identity.details.end()) {
         return std::nullopt;
     }
     const auto root = path_to_utf8(outcome.root);

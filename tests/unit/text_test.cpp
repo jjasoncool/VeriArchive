@@ -955,7 +955,8 @@ void format_fallback_tests()
 // named on the command line with the root the run read, in the window as the
 // Register Archive view's box, in either language. Nothing for a run that
 // FAILED, whose entries that differ a new revision would take for good ones,
-// nor for one without such entries. (A sample run.)
+// nor for one without such entries, nor for a retired archive, which takes
+// no new revision. (A sample run.)
 void unbaselined_advice_tests()
 {
     using va::app::ReportedIn;
@@ -989,6 +990,10 @@ void unbaselined_advice_tests()
     auto without = outcome;
     without.counts.erase("Unbaselined");
     CHECK(!va::app::unbaselined_advice(english, without, ReportedIn::Window));
+    auto retired = outcome;
+    retired.identity.details = {"retired"};
+    CHECK(!va::app::unbaselined_advice(english, retired, ReportedIn::CommandLine));
+    CHECK(!va::app::unbaselined_advice(chinese, retired, ReportedIn::Window));
 }
 
 } // namespace

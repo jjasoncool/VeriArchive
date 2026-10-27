@@ -130,7 +130,7 @@ Every result is prefixed by its mode. Only `FULL VERIFY PASSED` means "100 % of 
 
 ### Item status
 
-> Amended by `design/decisions/0010-unreadable-entries-at-registration.md`: adds `Unbaselined`; maps unreadable entries to run results (newly unreadable → `FAILED`; unreadable since registration → at most `PASSED_WITH_WARNINGS`); `Unreadable(removed)` is never reported: a device that disappears ends the run `INCOMPLETE`; a run with `Unbaselined` items whose content otherwise matched says that registering a new revision takes a baseline for them.
+> Amended by `design/decisions/0010-unreadable-entries-at-registration.md`: adds `Unbaselined`; maps unreadable entries to run results (newly unreadable → `FAILED`; unreadable since registration → at most `PASSED_WITH_WARNINGS`); `Unreadable(removed)` is never reported: a device that disappears ends the run `INCOMPLETE`; a run with `Unbaselined` items whose content otherwise matched says that registering a new revision takes a baseline for them, unless the archive is retired.
 > Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: `Unreadable(removed)` is never produced: a device that went away or stopped answering makes the run `INCOMPLETE` and no item. A `SkippedMountPoint` where the revision records nothing at or below the mount point is listed and changes no result (operator, 2026-10-27; decision 0009 describes both forms).
 
 `Verified`, `Modified`, `Missing`, `New`, `Unreadable(permission|media|removed|other)`, `MetadataMismatch`, `Unrepresentable`, `TypeChanged`, `SkippedMountPoint`.
