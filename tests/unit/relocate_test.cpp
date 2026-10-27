@@ -4,6 +4,7 @@
 #include "manifest_samples.h"
 
 #include "app/history.h"
+#include "app/relocation_report.h"
 #include "app/unfinished_operations.h"
 #include "common/shell_argument.h"
 #include "common/time.h"
@@ -12,6 +13,7 @@
 #include "core/engine/comparison.h"
 #include "core/engine/abandon_relocation.h"
 #include "core/engine/heartbeat.h"
+#include "core/engine/rebuild_index.h"
 #include "core/engine/registration_attempt.h"
 #include "core/engine/relocate_engine.h"
 #include "core/hash/hashers.h"
@@ -2811,10 +2813,11 @@ void an_unchunked_revision_is_relocated_unchunked()
     CHECK(fixture.repository.query("SELECT COUNT(*) FROM chunks") == "0");
 }
 
-// A relocation compares whole files (decision 0032, point 5), and its read
-// gives no chunk hashes: a copy whose content differs in one chunk (sample
-// data) is refused as Modified, its content differing, with no chunk named.
-void a_relocation_compares_whole_files()
+// A relocation compares by chunk, as a FULL verify does (decision 0032), from
+// the read that hashes each file whole: a copy whose content differs in one
+// chunk (sample data) is refused, the file Modified, naming that chunk of how
+// many and the byte where it begins; each file is read once (by bytes).
+void a_relocation_compares_by_chunk()
 {
     ChunkedRelocation fixture;
     if (!fixture.register_old()) {
@@ -2823,6 +2826,7 @@ void a_relocation_compares_whole_files()
     fixture.copy_to_new_disk();
     auto& copied = fixture.archive.node("new/big1.bin").content;
     copied[test_chunk_size + 10] = static_cast<char>(copied[test_chunk_size + 10] ^ 0x01);
+    fixture.archive.bytes_read = 0;
     const auto relocated = fixture.relocate();
     CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Differs);
     if (relocated) {
@@ -2830,7 +2834,211 @@ void a_relocation_compares_whole_files()
     }
     const auto& items = relocated.error().items;
     CHECK(items.size() == 1 && items.front().path.p == "big1.bin" && items.front().status == "Modified" &&
-          items.front().detail == "content differs" && items.front().differing_chunks.empty());
+          items.front().detail == "content differs: chunk 1 of 3 differs, from byte 65,536" &&
+          items.front().differing_chunks == std::vector<std::uint64_t>{1} && items.front().chunks == 3 &&
+          items.front().first_differing_offset == test_chunk_size);
+    if (!items.empty() && items.front().detail != "content differs: chunk 1 of 3 differs, from byte 65,536") {
+        std::cerr << "  detail: " << items.front().detail << '\n';
+    }
+    std::uint64_t copied_bytes = 0;
+    for (const auto& [name, content] : fixture.files) {
+        copied_bytes += content.size();
+    }
+    CHECK(fixture.archive.bytes_read == copied_bytes);
+}
+
+// Writes revision 1 of `fixture`'s archive again with its entry of `p` as
+// `edit` makes it, and rebuilds the index from it: a manifest valid in
+// itself, its body hash and Merkle root those of what it holds, but written
+// wrong, as by a fault of the computer that registered it (sample data).
+void write_old_wrong(ChunkedRelocation& fixture, const std::string& p, const std::function<void(va::Entry&)>& edit)
+{
+    auto loaded = va::load_recorded_manifest(
+        fixture.store, *fixture.repository.files, fixture.repository.context.repo, fixture.archive_uuid, 1);
+    CHECK(loaded.has_value());
+    if (!loaded) {
+        return;
+    }
+    for (auto& entry : loaded->entries) {
+        if (entry.path.p == p) {
+            edit(entry);
+        }
+    }
+    const auto path = va::manifest_path(fixture.repository.context.repo.manifests(), fixture.archive_uuid, 1);
+    va::ManifestWriter writer(*fixture.repository.writer, *fixture.repository.files, path, loaded->header.chunk_size);
+    for (const auto& entry : loaded->entries) {
+        CHECK(writer.add(entry).has_value());
+    }
+    auto written = writer.finish(loaded->header);
+    CHECK(written && written->file->commit());
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo,
+        test::not_cancelled(), test::no_progress());
+    CHECK(rebuilt && rebuilt->revisions == 1 && rebuilt->skipped.empty());
+}
+
+// The warning of a FULL verify for big1.bin, whose whole-file `hash` (BLAKE3
+// or SHA-256) cannot be relied on while each of its 3 chunks matches
+// (decision 0032).
+std::string unreliable_file_hash(const std::string& hash)
+{
+    return "the whole-file " + hash + " hash of big1.bin cannot be relied on: it does not match, while each of the "
+           "file's 3 chunks matches its chunk hash; the file is fine, and a new revision fixes it";
+}
+
+// The warning of a FULL verify for big2.bin, whose chunk 1 recorded does not
+// match while the whole file matches its hashes (decision 0032).
+const std::string unreliable_chunk_hash = "the chunk hashes of big2.bin cannot be relied on: chunk 1 of 3 does not "
+                                          "match, while the whole file matches its hashes; the file is fine, and a "
+                                          "new revision fixes them";
+
+// A relocation accepts what a FULL verify accepts (decision 0032): big1.bin,
+// whose chunks all match while its whole-file BLAKE3 recorded does not, and
+// big2.bin, whose content matches both its file hashes while its chunk 1
+// recorded does not, are Verified, each with the warning a FULL verify gives,
+// which makes the relocation PASSED_WITH_WARNINGS, as its FULL verification
+// in the history says; each file is read once. They are carried as every
+// entry is (decision 0004): with revision 1's hashes, those that cannot be
+// relied on included, so that revision 2 keeps revision 1's Merkle root and a
+// FULL verify of it warns again (sample data: revision 1 written again with
+// those hashes wrong).
+void a_relocation_accepts_what_a_full_verify_accepts()
+{
+    ChunkedRelocation fixture;
+    if (!fixture.register_old()) {
+        return;
+    }
+    const auto wrong_b3 = va::blake3_hex("not big1.bin (sample data)");
+    const auto wrong_chunk = va::blake3_hex("not chunk 1 of big2.bin (sample data)");
+    write_old_wrong(fixture, "big1.bin", [&](va::Entry& entry) { entry.b3 = wrong_b3; });
+    write_old_wrong(fixture, "big2.bin", [&](va::Entry& entry) { entry.chunks.at(1) = wrong_chunk; });
+    fixture.copy_to_new_disk();
+    fixture.archive.bytes_read = 0;
+    const auto relocated = fixture.relocate();
+    const std::vector<std::string> warnings{unreliable_file_hash("BLAKE3"), unreliable_chunk_hash};
+    CHECK(relocated && relocated->revision == 2 && relocated->result == "PASSED_WITH_WARNINGS" &&
+          relocated->items.empty() && relocated->warnings == warnings);
+    if (!relocated) {
+        std::cerr << "  " << relocated.error().message << '\n';
+        for (const auto& item : relocated.error().items) {
+            std::cerr << "  " << item.status << "  " << item.path.p << "  " << item.detail << '\n';
+        }
+        return;
+    }
+    if (relocated->warnings != warnings) {
+        for (const auto& warning : relocated->warnings) {
+            std::cerr << "  warning: " << warning << '\n';
+        }
+    }
+    std::uint64_t copied_bytes = 0;
+    for (const auto& [name, content] : fixture.files) {
+        copied_bytes += content.size();
+    }
+    CHECK(fixture.archive.bytes_read == copied_bytes);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->back().revision == 2 && runs->back().result == "PASSED_WITH_WARNINGS");
+
+    const auto [before_header, before] = fixture.manifest(1);
+    const auto [after_header, after] = fixture.manifest(2);
+    CHECK(after.contains("big1.bin") && after.at("big1.bin").b3 == wrong_b3 &&
+          after.at("big1.bin").sha256 == before.at("big1.bin").sha256 &&
+          after.at("big1.bin").chunks == before.at("big1.bin").chunks);
+    CHECK(after.contains("big2.bin") && after.at("big2.bin").chunks == before.at("big2.bin").chunks &&
+          after.at("big2.bin").chunks.at(1) == wrong_chunk && after.at("big2.bin").b3 == before.at("big2.bin").b3);
+    CHECK(after_header.merkle_root == before_header.merkle_root && fixture.merkle_root_recorded(2) == after_header.merkle_root);
+    CHECK(fixture.indexed_chunks(2) == chunks_of(after));
+
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->revision == 2 && verified->result == "PASSED_WITH_WARNINGS" &&
+          verified->warnings == warnings);
+}
+
+// R-104 with decision 0032: a relocation checkpoints a file only once its
+// content matched by file and by chunk, as a FULL verify does, so that the
+// resume of one interrupted after big1.bin, whose whole-file SHA-256 cannot
+// be relied on (the new disk gone at big3.bin), reads it again, and only it
+// and the files not reached (by bytes), and warns again (sample data).
+void a_resumed_relocation_warns_again()
+{
+    ChunkedRelocation fixture;
+    if (!fixture.register_old()) {
+        return;
+    }
+    write_old_wrong(fixture, "big1.bin", [&](va::Entry& entry) {
+        entry.sha256 = va::sha256_hex("not big1.bin (sample data)");
+    });
+    fixture.copy_to_new_disk();
+    fixture.archive.node("new/big3.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.relocate();
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete);
+    fixture.archive.node("new/big3.bin").open_error.reset();
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(true);
+    CHECK(resumed && resumed->resumed && resumed->revision == 2 && resumed->result == "PASSED_WITH_WARNINGS" &&
+          resumed->warnings == std::vector<std::string>{unreliable_file_hash("SHA-256")});
+    if (!resumed) {
+        std::cerr << "  " << resumed.error().message << '\n';
+        return;
+    }
+    CHECK(fixture.archive.bytes_read ==
+          fixture.files["big1.bin"].size() + fixture.files["big3.bin"].size() + fixture.files["small.txt"].size());
+}
+
+// What `archive relocate` gives (decision 0032), through the app's functions
+// that the command line calls: the relocation's report with its warning, in
+// English and Traditional Chinese, and --json with it; and the refusal of a
+// new carrier that differs, with each entry's detail, here the chunk that
+// differs (sample data).
+void what_the_command_line_says_of_a_relocation()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    {
+        ChunkedRelocation fixture;
+        if (!fixture.register_old()) {
+            return;
+        }
+        write_old_wrong(fixture, "big1.bin", [&](va::Entry& entry) {
+            entry.b3 = va::blake3_hex("not big1.bin (sample data)");
+        });
+        fixture.copy_to_new_disk();
+        const auto relocated = fixture.relocate();
+        CHECK(relocated.has_value());
+        if (!relocated) {
+            return;
+        }
+        const auto& uuid = relocated->archive_uuid;
+        const auto& run = relocated->run_id;
+        const auto label = relocated->label;
+        CHECK(va::app::relocation_report(english, *relocated, "K:/SAMPLE") ==
+              "Relocated " + label + " (" + uuid + ") to K:/SAMPLE as revision 2\n  FULL VERIFY PASSED_WITH_WARNINGS "
+              "of the new carrier (run " + run + ")\n  warning: " + unreliable_file_hash("BLAKE3") + "\n");
+        CHECK(va::app::relocation_report(chinese, *relocated, "K:/SAMPLE") ==
+              "已將 " + label + "（" + uuid + "）搬移至 K:/SAMPLE，成為版次 2\n  新載體的完整驗證：通過（有警告）（執行 " + run +
+                  "）\n  警告：big1.bin 的整個檔案 BLAKE3 雜湊不可靠：它不符，但檔案的 3 個區塊都與各自的區塊雜湊相符；"
+                  "檔案本身沒有問題，建立新版次即可修正\n");
+        const nlohmann::json expected{{"archive_uuid", uuid}, {"revision", 2}, {"result", "PASSED_WITH_WARNINGS"},
+            {"run_id", run}, {"manifest", va::path_to_utf8(relocated->manifest)}, {"counts", relocated->counts},
+            {"warnings", {unreliable_file_hash("BLAKE3")}}, {"resumed", false}};
+        CHECK(va::app::relocation_json(*relocated) == expected);
+    }
+    ChunkedRelocation fixture;
+    if (!fixture.register_old()) {
+        return;
+    }
+    fixture.copy_to_new_disk();
+    auto& copied = fixture.archive.node("new/big1.bin").content;
+    copied[test_chunk_size + 10] = static_cast<char>(copied[test_chunk_size + 10] ^ 0x01);
+    const auto refused = fixture.relocate();
+    CHECK(!refused && refused.error().kind == va::RelocateFailure::Kind::Differs);
+    if (refused) {
+        return;
+    }
+    CHECK(va::app::relocation_refusal(english, refused.error()) ==
+          "RELOCATION REFUSED: " + differs_message() +
+              "\n  Modified  big1.bin  (content differs: chunk 1 of 3 differs, from byte 65,536)\n");
+    CHECK(va::app::relocation_refusal(chinese, refused.error()) ==
+          "拒絕搬移：新載體上的內容與記錄不符；未做任何變更：請從封存的載體重新複製到新載體，再重新搬移\n"
+          "  已修改  big1.bin  （內容不同：共 3 個區塊，其中區塊 1 不同，從位元組 65,536 開始）\n");
 }
 
 // Decision 0008: a link whose absolute target a driver translated is carried
@@ -2921,6 +3129,9 @@ void relocate_tests()
     a_relocation_carries_chunk_lines();
     a_resumed_relocation_carries_chunk_lines_of_earlier_attempts();
     an_unchunked_revision_is_relocated_unchunked();
-    a_relocation_compares_whole_files();
+    a_relocation_compares_by_chunk();
+    a_relocation_accepts_what_a_full_verify_accepts();
+    a_resumed_relocation_warns_again();
+    what_the_command_line_says_of_a_relocation();
     a_translated_link_changes_the_merkle_root();
 }

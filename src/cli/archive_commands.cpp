@@ -12,6 +12,7 @@
 #include "app/history.h"
 #include "app/local_time.h"
 #include "app/plain_words.h"
+#include "app/relocation_report.h"
 #include "app/unfinished_operations.h"
 
 #include "common/utf8.h"
@@ -1021,8 +1022,9 @@ int relocate(const Arguments& arguments, Opened& opened)
     const auto& text = arguments.text;
     if (!outcome) {
         // A new carrier that differs (decision 0004): each entry that
-        // differs, in text with its detail as a verification lists it, and
-        // in --json as a verification's `items`.
+        // differs, in text with its detail as a verification lists it, which
+        // names the chunks of a file that differ (decision 0032), and in
+        // --json as a verification's `items`.
         if (outcome.error().kind == RelocateFailure::Kind::Differs) {
             if (arguments.json) {
                 auto items = nlohmann::json::array();
@@ -1033,13 +1035,7 @@ int relocate(const Arguments& arguments, Opened& opened)
                     {"items", std::move(items)}});
                 return exit_code::failed;
             }
-            std::cout << text.format("RELOCATION REFUSED: {}", text(outcome.error().message)) << '\n';
-            for (const auto& item : outcome.error().items) {
-                std::cout << "  " << text(item.status) << "  " << item.path.p
-                          << (item.detail.empty() ? ""
-                                                  : "  " + text.parenthesized(text(app::item_detail_words(item.detail))))
-                          << '\n';
-            }
+            std::cout << app::relocation_refusal(text, outcome.error());
             return exit_code::failed;
         }
         const auto kind = outcome.error().kind;
@@ -1050,26 +1046,9 @@ int relocate(const Arguments& arguments, Opened& opened)
         return report_failure(arguments, {code, outcome.error().message});
     }
     if (arguments.json) {
-        print_json({{"archive_uuid", outcome->archive_uuid}, {"revision", outcome->revision},
-            {"result", outcome->result}, {"run_id", outcome->run_id}, {"warnings", outcome->warnings},
-            {"manifest", path_to_utf8(outcome->manifest)}, {"counts", outcome->counts},
-            {"resumed", outcome->resumed}});
+        print_json(app::relocation_json(*outcome));
     } else {
-        std::cout << text.format("Relocated {} ({}) to {} as revision {}", outcome->label, outcome->archive_uuid,
-                         path_to_utf8(request.root), outcome->revision)
-                  << "\n  "
-                  << text.format("FULL VERIFY {} of the new carrier (run {})", text(outcome->result),
-                         outcome->run_id)
-                  << '\n';
-        for (const auto& warning : outcome->warnings) {
-            std::cout << "  " << text.format("warning: {}", text(warning)) << '\n';
-        }
-        for (const auto& item : outcome->items) {
-            std::cout << "  " << text(item.status) << "  " << item.path.p
-                      << (item.detail.empty() ? ""
-                                              : "  " + text.parenthesized(text(app::item_detail_words(item.detail))))
-                      << '\n';
-        }
+        std::cout << app::relocation_report(text, *outcome, path_to_utf8(request.root));
     }
     return outcome->result == "PASSED" ? exit_code::passed : exit_code::passed_with_warnings;
 }

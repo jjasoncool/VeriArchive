@@ -677,7 +677,9 @@ endif()
 run_cli("0;2" archive relocate "${moving_prefix}" "${MOVE_TO}" --resume --json)
 string(JSON resumed GET "${last_output}" resumed)
 string(JSON relocated_revision GET "${last_output}" revision)
-if(NOT resumed OR NOT relocated_revision EQUAL 2)
+# The warnings of its FULL verification, as a FULL verify gives them (decision 0032): none here.
+string(JSON relocation_warnings LENGTH "${last_output}" warnings)
+if(NOT resumed OR NOT relocated_revision EQUAL 2 OR NOT relocation_warnings EQUAL 0)
     message(FATAL_ERROR "relocate --resume:\n${last_output}")
 endif()
 run_cli("0" archive show "${moving_prefix}" --json)
@@ -766,6 +768,16 @@ string(JSON second_from GET "${last_output}" runs 1 relocation from_revision)
 if(NOT relocation_runs EQUAL 2 OR NOT first_relocation STREQUAL first_run OR NOT first_from EQUAL 1
         OR first_attempt OR NOT second_from EQUAL 2)
     message(FATAL_ERROR "history --json of a relocated archive:\n${last_output}")
+endif()
+# A copy that differs is refused (exit 3), each entry that differs named with
+# its detail, as a FULL verify names it (decision 0032): one byte of a.txt
+# changed (sample data).
+set(MOVE_DAMAGED "${WORK}/move-damaged")
+file(COPY "${MOVE_FROM}/" DESTINATION "${MOVE_DAMAGED}")
+file(WRITE "${MOVE_DAMAGED}/a.txt" "relocation sample A\n")
+run_cli("3" --lang en archive relocate "${moving_prefix}" "${MOVE_DAMAGED}")
+if(NOT last_output MATCHES "^RELOCATION REFUSED: the new carrier does not hold the recorded content; [^\n]+\n  Modified  a\\.txt  \\(content differs\\)\n$")
+    message(FATAL_ERROR "relocate to a copy that differs:\n${last_output}")
 endif()
 
 # Damage: one changed byte, one deleted file, one new file, and the empty

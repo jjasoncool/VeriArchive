@@ -157,6 +157,7 @@ add_library(veriarchive_app
     src/app/local_time.cpp
     src/app/plain_words.cpp
     src/app/progress_estimate.cpp
+    src/app/relocation_report.cpp
     src/app/unfinished_operations.cpp
     src/app/session.cpp
     src/app/text.cpp

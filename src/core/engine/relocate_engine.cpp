@@ -475,6 +475,15 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     input.host_os = services.host.os;
     input.header = &manifest->header;
     input.recorded = &manifest->entries;
+    // By chunk as well, as a FULL verify compares (decision 0032), from the
+    // read that hashes each file whole (R-101), at rN's chunk size: a file
+    // whose content differs names the chunks that differ, and one whose
+    // chunks all match while a file hash does not, or whose content matches
+    // its file hashes while a chunk hash does not, is Verified with a warning
+    // of the run, as a FULL verify accepts it, and carried with rN's hashes as
+    // every entry is (decision 0004). A revision without a chunk size does no
+    // chunk work.
+    input.compare_chunks = true;
     input.content_verified = std::move(content_verified);
     // R-104: the matched entries are saved every 1000 entries or 60 seconds.
     // Each checkpoint looks first, in its own transaction, whether the
@@ -741,10 +750,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     outcome.label = archive.label;
     outcome.revision = creates;
     // §A6, R-42 (decision 0013): the portability warnings that the new
-    // revision records, as every FULL verification of it reports them.
+    // revision records, as every FULL verification of it reports them; and a
+    // file whose hash cannot be relied on (decision 0032), as in a FULL
+    // verify. Either makes the run pass with warnings.
     if (records_name_collisions(comparison.current_entries)) {
         outcome.warnings.push_back(name_collision_warning);
     }
+    outcome.warnings.insert(outcome.warnings.end(), comparison.warnings.begin(), comparison.warnings.end());
     outcome.result = comparison.warning || !outcome.warnings.empty() ? "PASSED_WITH_WARNINGS" : "PASSED";
     outcome.run_id = run_id;
     outcome.counts = comparison.counts;
