@@ -169,8 +169,12 @@ void collect_disks(const std::filesystem::path& block, std::vector<std::filesyst
                 container = "md";
             }
         }
-        for (const auto& slave : std::filesystem::directory_iterator(slaves, error)) {
-            collect_disks(std::filesystem::canonical(slave.path(), error), disks, container,
+        // increment(error), never operator++, which throws on a read error:
+        // no exception leaves the platform layer (CLAUDE.md rule 6).
+        for (std::filesystem::directory_iterator slave(slaves, error), end; !error && slave != end;
+             slave.increment(error)) {
+            std::error_code canonical_error;
+            collect_disks(std::filesystem::canonical(slave->path(), canonical_error), disks, container,
                 depth + 1);
         }
         return;
@@ -252,10 +256,12 @@ std::string find_link_name(const std::filesystem::path& directory, const std::st
     if (error) {
         return {};
     }
-    for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
+    // increment(error), never operator++, which throws on a read error.
+    for (std::filesystem::directory_iterator entry(directory, error), end; !error && entry != end;
+         entry.increment(error)) {
         std::error_code link_error;
-        if (std::filesystem::canonical(entry.path(), link_error) == target && !link_error) {
-            return entry.path().filename().native();
+        if (std::filesystem::canonical(entry->path(), link_error) == target && !link_error) {
+            return entry->path().filename().native();
         }
     }
     return {};
