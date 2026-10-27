@@ -14,9 +14,14 @@ namespace va {
 // Windows in double quotes, which the command prompt and PowerShell both take,
 // with the backslashes it ends with doubled ("\\?\Volume{...}\\"), as the
 // program's argument reader would otherwise take the last one with the
-// closing quote as a quote of the path; on Linux in single quotes, inside
-// which a shell reads nothing but the quote itself, written '\''. Empty text
-// is an empty argument in quotes.
+// closing quote as a quote of the path; but where it holds a character that
+// PowerShell reads within double quotes (`$`, a backtick, a typographic
+// double quote), in single quotes, which PowerShell reads as written, a
+// quote of its own (' or a typographic single quote) written twice: no form
+// is read alike by both shells there, and PowerShell is Windows' own (the
+// command prompt takes single quotes as part of the path). On Linux in single
+// quotes, inside which a shell reads nothing but the quote itself, written
+// '\''. Empty text is an empty argument in quotes.
 std::string shell_argument(std::string_view text);
 
 } // namespace va

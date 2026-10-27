@@ -178,8 +178,9 @@ void roots_that_are_no_folder_are_not_taken()
 // A root that a message names in a command to type back (decision 0022,
 // amended 2026-10-27): as it is where no shell reads anything in it, else in
 // quotes, double on Windows, with the backslash before the closing quote
-// doubled so that it stays a backslash, single on Linux, where a quote of its
-// own is written '\''.
+// doubled so that it stays a backslash, but single where PowerShell would read
+// a character within double quotes, single on Linux, where a quote of its own
+// is written '\''.
 void roots_are_named_as_they_are_typed_in_a_command()
 {
     CHECK(va::shell_argument(R"(K:\)") == R"(K:\)");
@@ -192,6 +193,14 @@ void roots_are_named_as_they_are_typed_in_a_command()
         CHECK(va::shell_argument(R"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)") ==
               R"("\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\\")");
         CHECK(va::shell_argument("") == R"("")");
+        // Characters PowerShell reads within double quotes: in single quotes,
+        // a single quote of its own written twice.
+        CHECK(va::shell_argument(R"(K:\Price $5 SAMPLE)") == R"('K:\Price $5 SAMPLE')");
+        CHECK(va::shell_argument(R"(K:\a`b SAMPLE)") == R"('K:\a`b SAMPLE')");
+        CHECK(va::shell_argument("K:\\Jan's $HOME") == "'K:\\Jan''s $HOME'");
+        CHECK(va::shell_argument("K:\\Jan\u2019s $sample") == "'K:\\Jan\u2019\u2019s $sample'");
+        CHECK(va::shell_argument("K:\\\u201cbest\u201d SAMPLE") == "'K:\\\u201cbest\u201d SAMPLE'");
+        CHECK(va::shell_argument("K:\\Jan\u2019s SAMPLE") == "\"K:\\Jan\u2019s SAMPLE\"");
     } else {
         CHECK(va::shell_argument("/media/sample/範例 SAMPLE") == "'/media/sample/範例 SAMPLE'");
         CHECK(va::shell_argument("/media/sample/Jan's $HOME") == R"('/media/sample/Jan'\''s $HOME')");
