@@ -13,19 +13,28 @@
 # extraction, which keeps each file's time. Links are left out: a relative
 # symbolic link needs elevation or developer mode on Windows, and absolute
 # ones are not part of a golden tree (decision 0008).
+#
+# A text file is written with LF line ends on every OS: file(WRITE) writes
+# each LF as CR LF on Windows and as LF on Linux, which would give each OS
+# its own sizes and hashes; file(CONFIGURE) writes LF everywhere (the texts
+# hold no "@"). It ends every text with a line end, so content without one,
+# which file(WRITE) writes as it is on every OS, is written with file(WRITE).
+function(golden_text_file path text)
+    file(CONFIGURE OUTPUT "${path}" CONTENT "${text}" @ONLY NEWLINE_STYLE UNIX)
+endfunction()
 set(golden_staging "${WORK}/golden-tree-staging")
 set(golden_tree "${WORK}/golden-tree")
 file(REMOVE_RECURSE "${golden_staging}" "${golden_tree}")
-file(WRITE "${golden_staging}/readme-SAMPLE.txt" "VeriArchive golden tree of R-66 (sample data).\n")
+golden_text_file("${golden_staging}/readme-SAMPLE.txt" "VeriArchive golden tree of R-66 (sample data).\n")
 file(WRITE "${golden_staging}/empty-SAMPLE.bin" "")
-file(WRITE "${golden_staging}/cjk/data.txt" "中文內容（範例）\n")
+golden_text_file("${golden_staging}/cjk/data.txt" "中文內容（範例）\n")
 file(WRITE "${golden_staging}/emoji/nested/deep-SAMPLE.bin" "0123456789")
 file(MAKE_DIRECTORY "${golden_staging}/empty-folder-SAMPLE")
 # The default exclusions match at the root only (R-54): these two folders
 # are left out, the one below the root is kept.
-file(WRITE "${golden_staging}/$RECYCLE.BIN/excluded-SAMPLE.txt" "left out at the root\n")
-file(WRITE "${golden_staging}/.Trash-1000/excluded-SAMPLE.txt" "left out at the root\n")
-file(WRITE "${golden_staging}/nested/$RECYCLE.BIN/kept-SAMPLE.txt" "kept below the root\n")
+golden_text_file("${golden_staging}/$RECYCLE.BIN/excluded-SAMPLE.txt" "left out at the root\n")
+golden_text_file("${golden_staging}/.Trash-1000/excluded-SAMPLE.txt" "left out at the root\n")
+golden_text_file("${golden_staging}/nested/$RECYCLE.BIN/kept-SAMPLE.txt" "kept below the root\n")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${WORK}/golden-tree.tar" --format=pax
         "--mtime=2026-01-02 03:04:05 UTC" .
     WORKING_DIRECTORY "${golden_staging}" RESULT_VARIABLE packed)
