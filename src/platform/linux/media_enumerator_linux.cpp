@@ -399,12 +399,15 @@ VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
 // are reported, so matching is at best MATCH_WEAK. A container that does not
 // show a volume's device node also lands here, whatever the filesystem; for
 // xfs and others the id then follows the device number (decision 0021).
-// FUSE and NFS report zero, so all of them read as one id.
+// FUSE and NFS report zero, so all of them read as one id. The format is the
+// one the mount's type names, and unknown (empty) for a FUSE type, which
+// names a program, as a mount of ntfs-3g whose device node the container
+// hides is "fuseblk" (decision 0006).
 VolumeInfo describe_virtual_mount(const linux_mounts::Mount& mount)
 {
     VolumeInfo volume;
     volume.mount_point = mount.mount_point;
-    volume.filesystem_type = normalise_filesystem_type(mount.filesystem_type);
+    volume.filesystem_type = filesystem_format_of_mount_type(mount.filesystem_type);
     volume.driver = fuse_driver(volume.filesystem_type, mount.filesystem_type); // decision 0006
     volume.read_only = has_option(mount.options, "ro");
     if (const auto status = filesystem_status(mount.mount_point)) {

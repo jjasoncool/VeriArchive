@@ -344,6 +344,16 @@ void fuse_mounts_name_their_program_not_the_format()
     CHECK(va::fuse_driver("", "fuseblk") == "fuseblk");
     CHECK(va::fuse_driver("", "fuse.sample-fs") == "sample-fs");
     CHECK(va::fuse_driver("ntfs", "ntfs3").empty() && va::fuse_driver("exfat", "exfat").empty());
+    // A mount whose device cannot be read takes its format from its type,
+    // never from a FUSE type, which names the program.
+    CHECK(va::filesystem_format_of_mount_type("ntfs3") == "ntfs" &&
+          va::filesystem_format_of_mount_type("fuse.exfat") == "exfat" &&
+          va::filesystem_format_of_mount_type("ext4") == "ext4" &&
+          va::filesystem_format_of_mount_type("zfs") == "zfs");
+    CHECK(va::filesystem_format_of_mount_type("fuseblk").empty() &&
+          va::filesystem_format_of_mount_type("fuse.sshfs").empty() &&
+          va::filesystem_format_of_mount_type("fuseblk.ntfs-3g").empty() &&
+          va::filesystem_format_of_mount_type("FUSEBLK").empty());
 
     std::string ntfs(512, '\0');
     ntfs.replace(3, 8, "NTFS    ");

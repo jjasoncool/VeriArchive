@@ -51,6 +51,12 @@ bool is_fuse_mount_type(std::string_view mount_type)
            mount_type.starts_with("fuseblk.");
 }
 
+std::string filesystem_format_of_mount_type(std::string_view mount_type)
+{
+    auto format = normalise_filesystem_type(mount_type);
+    return is_fuse_mount_type(format) ? std::string{} : format;
+}
+
 std::string fuse_driver(std::string_view filesystem_type, std::string_view mount_type)
 {
     if (!is_fuse_mount_type(mount_type)) {

@@ -22,6 +22,12 @@ struct FilesystemId {
 // "fuse.<name>"): such a type names the program, never an on-disk format.
 bool is_fuse_mount_type(std::string_view mount_type);
 
+// Decision 0006: the on-disk format that a Linux mount's type names, for a
+// mount whose device cannot be read: the type normalised ("ntfs3" -> "ntfs",
+// "fuse.exfat" -> "exfat"), or empty for a FUSE type such as "fuseblk",
+// which names the program that serves the mount, never its format.
+std::string filesystem_format_of_mount_type(std::string_view mount_type);
+
 // Decision 0006: the program that serves a FUSE mount of a volume whose
 // on-disk format is `filesystem_type` (normalised), for the note of a
 // verification report: "ntfs-3g" for NTFS, "exfat-fuse" for exFAT, otherwise
