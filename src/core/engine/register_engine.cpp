@@ -9,6 +9,7 @@
 #include "core/engine/recorded_manifest.h"
 #include "core/engine/registration_attempt.h"
 #include "core/engine/transfer.h"
+#include "core/engine/volume_watch.h"
 #include "core/identity/volume_json.h"
 #include "core/write_file.h"
 #include "core/manifest/manifest_reader.h"
@@ -1066,7 +1067,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     }
 
     // Scan, then hash every readable file not already hashed before an interruption.
+    // Decision 0034: what cannot be read is recorded unreadable (decision
+    // 0010) only while the volume is still attached at the root; a device
+    // that went away interrupts the registration instead, resumable.
+    VolumeWatch watch(services.media, request.root, *volume);
     ScanOptions scan_options;
+    scan_options.volume_attached = [&watch] { return watch.still_attached(); };
     auto scanned = scan_tree(services.archive_files, request.root, scan_options, cancel, heartbeat);
     if (!scanned) {
         const auto kind = scanned.error().kind;
@@ -1195,7 +1201,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         [&](HashResult&& result) {
             auto& entry = scanned->entries[result.id].entry;
             if (result.error) {
-                if (result.error->kind == IoErrorKind::DeviceRemoved) {
+                if (result.error->kind == IoErrorKind::DeviceRemoved || !watch.still_attached()) {
                     device_removed = true;
                     return false;
                 }

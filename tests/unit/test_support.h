@@ -18,6 +18,7 @@ void repository_tests();
 void config_tests();
 void file_writer_tests();
 void platform_tests();
+void platform_error_tests();
 void unicode_tests();
 void identity_tests();
 void displayed_identity_tests();

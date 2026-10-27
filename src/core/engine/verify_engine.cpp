@@ -7,6 +7,7 @@
 #include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/engine/relocate_engine.h"
+#include "core/engine/volume_watch.h"
 #include "core/identity/volume_json.h"
 #include "core/manifest/manifest_reader.h"
 #include "core/manifest/manifest_writer.h"
@@ -583,10 +584,18 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             }
             return true;
         };
+        // Decision 0034: a read error is the entry's only while the volume is
+        // still attached at the root.
+        VolumeWatch watch(services.media, located->root, located->volume);
+        input.volume_attached = [&watch] { return watch.still_attached(); };
         comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
         if (!comparison.scan_error.empty()) {
             outcome.failure_classes.push_back("FilesystemAccessError");
             outcome.warnings.push_back("scan: " + comparison.scan_error);
+        }
+        if (comparison.volume_gone) {
+            outcome.warnings.push_back("the device that holds the archive went away while it was read (unplugged, "
+                                       "or no longer answering); attach it again, then resume this run");
         }
         outcome.counts = comparison.counts;
         outcome.items = comparison.items;

@@ -30,11 +30,19 @@ IoError error_from_win32(DWORD code, std::string operation)
     case ERROR_DEVICE_HARDWARE_ERROR:
         kind = IoErrorKind::MediaError;
         break;
+    // The device or its volume is gone (decision 0034): removed, switched
+    // off, or dismounted under the open file (ERROR_FILE_INVALID), or its
+    // medium taken out or changed. A removal also shows as an I/O error or
+    // as "not found"; for those the engines look the volume up again.
     case ERROR_NOT_READY:
     case ERROR_DEVICE_NOT_CONNECTED:
     case ERROR_DEV_NOT_EXIST:
     case ERROR_DEVICE_REMOVED:
     case ERROR_NO_SUCH_DEVICE:
+    case ERROR_MEDIA_CHANGED:
+    case ERROR_NO_MEDIA_IN_DRIVE:
+    case ERROR_UNRECOGNIZED_VOLUME:
+    case ERROR_FILE_INVALID:
         kind = IoErrorKind::DeviceRemoved;
         break;
     case ERROR_SEM_TIMEOUT:

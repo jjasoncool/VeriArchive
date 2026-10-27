@@ -83,6 +83,7 @@ add_library(veriarchive_core
     src/core/engine/sha256sums.cpp
     src/core/engine/transfer.cpp
     src/core/engine/verify_engine.cpp
+    src/core/engine/volume_watch.cpp
     src/core/hash/hash_pipeline.cpp
     src/core/hash/hashers.cpp
     src/core/identity/filesystem_id.cpp
@@ -296,6 +297,12 @@ if(BUILD_TESTING)
         tests/unit/text_test.cpp
         tests/unit/transfer_test.cpp
         tests/unit/typed_path_test.cpp)
+    # The platform layer's own names for failed calls (Win32 errors, errno).
+    if(WIN32)
+        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_win.cpp)
+    elseif(UNIX AND NOT APPLE)
+        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_linux.cpp)
+    endif()
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform VeriArchive::app)
     target_compile_definitions(veriarchive_tests PRIVATE

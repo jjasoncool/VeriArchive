@@ -23,10 +23,17 @@ IoError error_from_errno(int code, std::string operation)
     case EUCLEAN:
         kind = IoErrorKind::MediaError;
         break;
+    // The device or its filesystem is gone (decision 0034): ENOLINK when the
+    // link to the device was cut (a USB disk pulled out), ENOTCONN when the
+    // FUSE program that served the mount has ended (ntfs-3g after its device
+    // went away). A pulled disk gives EIO as often: for that, and for "not
+    // found", the engines look the volume up again.
     case ENODEV:
     case ENXIO:
     case ENOMEDIUM:
     case ESHUTDOWN:
+    case ENOLINK:
+    case ENOTCONN:
         kind = IoErrorKind::DeviceRemoved;
         break;
     case ETIMEDOUT:

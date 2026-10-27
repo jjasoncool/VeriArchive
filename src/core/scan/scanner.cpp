@@ -86,7 +86,7 @@ public:
     {
         const auto listing = files_.list(root_);
         if (!listing) {
-            return std::unexpected(listing.error());
+            return std::unexpected(removal(listing.error()).value_or(listing.error()));
         }
         if (auto walked = walk_children({}, *listing); !walked) {
             return std::unexpected(walked.error());
@@ -150,7 +150,9 @@ private:
             entry.attrs = child.attrs;
             if (child.type == EntryType::Link) {
                 entry.type = 'l';
-                record_link(child_relative, entry);
+                if (auto recorded = record_link(child_relative, entry); !recorded) {
+                    return std::unexpected(recorded.error());
+                }
             } else {
                 entry.type = 'f';
                 entry.size = child.size;
@@ -172,8 +174,8 @@ private:
         directory_entry.type = 'd';
         const auto listing = files_.list(root_ / relative);
         if (!listing) {
-            if (listing.error().kind == IoErrorKind::DeviceRemoved) {
-                return std::unexpected(listing.error());
+            if (auto removed = removal(listing.error())) {
+                return std::unexpected(std::move(*removed));
             }
             directory_entry.unreadable = unreadable_reason(listing.error());
             add(directory_entry, root_ / relative);
@@ -190,12 +192,16 @@ private:
         return *count;
     }
 
-    void record_link(const std::filesystem::path& relative, Entry& entry)
+    // Fails only when the device went away (removal).
+    std::expected<void, IoError> record_link(const std::filesystem::path& relative, Entry& entry)
     {
         const auto target = files_.read_link(root_ / relative);
         if (!target) {
+            if (auto removed = removal(target.error())) {
+                return std::unexpected(std::move(*removed));
+            }
             entry.unreadable = unreadable_reason(target.error());
-            return;
+            return {};
         }
         entry.size = target->size();
         entry.b3 = blake3_hex(*target);
@@ -203,6 +209,22 @@ private:
         if (is_absolute_link_target(*target)) {
             entry.warn.push_back("link-absolute");
         }
+        return {};
+    }
+
+    // Decision 0034: `error`, from reading the tree, as the error of a device
+    // that went away, when it is one or the volume of the root is gone by
+    // now; nothing when the error is the entry's own.
+    std::optional<IoError> removal(const IoError& error) const
+    {
+        if (error.kind == IoErrorKind::DeviceRemoved) {
+            return error;
+        }
+        if (error.kind != IoErrorKind::Cancelled && options_.volume_attached && !options_.volume_attached()) {
+            return IoError{IoErrorKind::DeviceRemoved, error.native_code,
+                "the volume of the root is no longer attached (" + error.message + ")"};
+        }
+        return std::nullopt;
     }
 
     void add(Entry entry, std::filesystem::path native)

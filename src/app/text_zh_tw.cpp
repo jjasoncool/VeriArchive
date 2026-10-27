@@ -857,6 +857,10 @@ constexpr CatalogEntry entries[] = {
     {"identity: the filesystem id cannot be read; the volume was recognised by its device (MATCH_WEAK)",
         "媒體身分：讀不到檔案系統 UUID，改以硬碟序號和容量辨識（弱相符）"},
     {"scan: {}", "掃描：{}", Match::Cause},
+    // A device that went away while it was read (decision 0034).
+    {"the device that holds the archive went away while it was read (unplugged, or no longer answering); attach it "
+        "again, then resume this run",
+        "存放此封存的裝置在讀取期間離開了（被拔除，或不再回應）；請重新連接它，再繼續這次執行"},
     {"verification finished as PASSED but could not be recorded: {}",
         "驗證結果為通過，但無法記錄：{}",
         Match::Cause},

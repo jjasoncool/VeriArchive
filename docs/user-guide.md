@@ -277,6 +277,8 @@ An interrupted verification ends INCOMPLETE and can be continued; files already 
 
 If more than one attached volume holds the archive, as a device and a sector-by-sector clone of it do, a resume by the archive's uuid cannot tell which one the run read: it stops (exit code 12) and names them, with the root the run read. Resume it at the root on the volume it read with `veriarchive-cli verify --full <root> --resume <RUN_ID>`, or detach the other volumes and resume it again.
 
+A device that is unplugged, switched off or stops answering during a verification ends it INCOMPLETE, not FAILED: before VeriArchive reports a file as unreadable, it checks that the volume is still attached, so a device that went away is not taken for damage, and the result says what happened. Attach the device again and resume the run as above; what was verified is not read again. A registration and a relocation stop the same way and are resumed the same way: a registration with `register <root> --resume` or "Resume" in the Archive List, a relocation with `archive relocate <uuid> <root> --resume`.
+
 ### When VeriArchive needs your decision (exit code 12)
 
 | Message | Situation | What to do |

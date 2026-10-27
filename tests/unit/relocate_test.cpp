@@ -105,7 +105,7 @@ struct RelocationFixture : test::EngineFixture {
     std::expected<va::RelocateOutcome, va::RelocateFailure> relocate(
         const std::filesystem::path& root, bool resume = false)
     {
-        va::RelocateServices services{archive, *repository.files, *repository.writer, media, store,
+        va::RelocateServices services{archive_files(), *repository.files, *repository.writer, media, store,
             repository.context.repo, repository.context.repository_uuid, host, processes};
         va::RelocateRequest request{archive_uuid, root, std::nullopt, resume};
         return va::relocate_archive(services, request, cancel, progress);
@@ -819,6 +819,49 @@ void a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable()
     const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
     CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id && resumed->result == "PASSED");
     CHECK(fixture.archive.bytes_read == sample_bytes - (sample_photo_bytes - p119_bytes));
+}
+
+// Decision 0034: the new carrier's device goes away halfway through the
+// relocation, its reads failing only with I/O errors, as Linux gives for a USB
+// disk pulled out: the volume of the new root is looked up again before the
+// entry is classified, and it is gone. The attempt is interrupted, not a
+// carrier that differs, and its INCOMPLETE run lists no entry as unreadable;
+// the relocation keeps the 20 photos that matched. Attached again, the resume
+// reads only the rest and records revision 2. Sample data.
+void a_new_carrier_that_goes_away_leaves_the_relocation_resumable()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    test::RemovableDevice device(fixture.archive);
+    device.file = "v120.bin";
+    device.at_offset = 100;
+    device.on_removed = [&fixture] {
+        fixture.media.error = va::IoError{va::IoErrorKind::NotFound, 2, "no volume at the root (sample)"};
+    };
+    fixture.media_files = &device;
+    const auto interrupted = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
+          interrupted.error().items.empty() &&
+          interrupted.error().message == "relocation was interrupted; continue it with `archive relocate " +
+                                             fixture.archive_uuid + " <root_path> --resume`");
+    const auto record = fixture.record();
+    CHECK(record.is_object() && record.contains("stopped") && !record.contains("differs"));
+    const auto run_id = record.is_object() ? record.value("run_id", std::string{}) : std::string{};
+    const auto saved = fixture.saved(run_id);
+    CHECK(saved.files == 20 && saved.bytes == sample_photo_bytes);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->front().result == "INCOMPLETE");
+    if (runs && runs->size() == 1) {
+        const auto items = fixture.store.verify_items(runs->front().run_id);
+        CHECK(items && items->empty());
+    }
+
+    device.attach_again();
+    fixture.media.error.reset();
+    fixture.archive.bytes_read = 0;
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(resumed && resumed->revision == 2 && resumed->run_id == run_id && resumed->result == "PASSED");
+    CHECK(fixture.archive.bytes_read == sample_bytes - sample_photo_bytes);
 }
 
 // Decision 0010: entries unreadable at registration travel unchanged.
@@ -2454,6 +2497,7 @@ void relocate_tests()
     a_relocation_interrupted_after_its_copy_differed_ends();
     an_unreadable_entry_ends_the_relocation_once_everything_was_read();
     a_read_that_fails_as_the_disk_drops_off_leaves_the_relocation_resumable();
+    a_new_carrier_that_goes_away_leaves_the_relocation_resumable();
     known_unreadable_entries_are_carried();
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();

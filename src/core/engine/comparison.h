@@ -36,10 +36,16 @@ struct ComparisonInput {
     // run (content_failure): a relocation marks its record as soon as the new
     // carrier is known not to hold the recorded content (decision 0026).
     std::function<void(const VerifyItemRecord& item, bool fails)> on_item;
+    // Asked when an entry cannot be read, before it is classified (decision
+    // 0034): false once the volume of the root is gone, which makes the
+    // comparison incomplete (volume_gone) instead of the entry Unreadable.
+    // Unset, the volume counts as attached.
+    std::function<bool()> volume_attached;
 };
 
 struct ComparisonResult {
     bool incomplete = false;                // cancelled or the device disappeared
+    bool volume_gone = false;               // incomplete because the device disappeared (decision 0034)
     bool content_failure = false;           // an item status that fails the run
     bool warning = false;                   // an item status that caps the run at warnings
     std::string scan_error;                 // root could not be scanned (FilesystemAccessError)

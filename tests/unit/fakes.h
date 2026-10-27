@@ -6,6 +6,7 @@
 #include "core/interfaces.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -432,6 +433,116 @@ private:
     std::function<void()> hook_;
     int nth_;
     int opened_ = 0;
+};
+
+// A device that goes away while it is read (decision 0034, sample data):
+// everything passes to `inner` until the device goes away, then every
+// listing, opening, read and link fails with `error`, by default an I/O
+// error, as Linux gives (EIO) for the files of a USB disk pulled out: an
+// error that by itself says nothing of a removal. The device goes away when
+// the file named `file` is opened for the `nth` time (with `at_offset`: when
+// a read of that file reaches the offset), or when the directory named
+// `directory` is listed; then `on_removed` runs, which lets a test make the
+// media enumerator find no volume at the root any more. attach_again() puts
+// the device back, as plugging it in again does.
+class RemovableDevice final : public va::IFileSystemAccess {
+public:
+    explicit RemovableDevice(va::IFileSystemAccess& inner) : inner_(inner) {}
+
+    std::string file;                        // goes away at this file's opening (or read)
+    int nth = 1;
+    std::optional<std::uint64_t> at_offset;  // at a read that reaches this offset, not at the opening
+    std::string directory;                   // goes away when this directory is listed
+    va::IoError error{va::IoErrorKind::MediaError, 5, "Input/output error (sample)"};
+    std::function<void()> on_removed;
+    // Set after on_removed has run: a reader thread that sees it set also
+    // sees what on_removed changed.
+    std::atomic_bool removed{false};
+
+    void attach_again()
+    {
+        removed = false;
+        file.clear();
+        directory.clear();
+        at_offset.reset();
+        opened_ = 0;
+    }
+
+    std::expected<std::vector<va::DirEntry>, va::IoError> list(const std::filesystem::path& listed) override
+    {
+        if (!removed && !directory.empty() && va::path_to_utf8(listed.filename()) == directory) {
+            remove();
+        }
+        if (removed) {
+            return std::unexpected(error);
+        }
+        return inner_.list(listed);
+    }
+    std::expected<std::unique_ptr<va::IByteSource>, va::IoError> open(
+        const std::filesystem::path& opened, va::ReadOptions options) override
+    {
+        const bool watched = !removed && !file.empty() && va::path_to_utf8(opened.filename()) == file &&
+                             ++opened_ == nth;
+        if (watched && !at_offset) {
+            remove();
+        }
+        if (removed) {
+            return std::unexpected(error);
+        }
+        auto source = inner_.open(opened, options);
+        if (!source || !watched) {
+            return source;
+        }
+        return std::make_unique<Source>(std::move(*source), *this);
+    }
+    std::expected<std::string, va::IoError> read_link(const std::filesystem::path& link) override
+    {
+        if (removed) {
+            return std::unexpected(error);
+        }
+        return inner_.read_link(link);
+    }
+    std::expected<void, va::IoError> drop_cache(const std::filesystem::path& dropped) override
+    {
+        return inner_.drop_cache(dropped);
+    }
+
+private:
+    // The watched file, which takes the device away when a read reaches `at_offset`.
+    class Source final : public va::IByteSource {
+    public:
+        Source(std::unique_ptr<va::IByteSource> inner, RemovableDevice& device)
+            : inner_(std::move(inner)), device_(device)
+        {
+        }
+        std::expected<std::size_t, va::IoError> read(std::uint64_t offset, std::span<std::byte> output) override
+        {
+            if (!device_.removed && device_.at_offset && offset + output.size() > *device_.at_offset) {
+                device_.remove();
+            }
+            if (device_.removed) {
+                return std::unexpected(device_.error);
+            }
+            return inner_->read(offset, output);
+        }
+        std::uint64_t size() const override { return inner_->size(); }
+        std::size_t alignment() const override { return inner_->alignment(); }
+
+    private:
+        std::unique_ptr<va::IByteSource> inner_;
+        RemovableDevice& device_;
+    };
+
+    void remove()
+    {
+        if (on_removed) {
+            on_removed();
+        }
+        removed = true;
+    }
+
+    va::IFileSystemAccess& inner_;
+    std::atomic_int opened_{0};
 };
 
 // Passes everything to `inner`, except that the `nth` opening of a file named

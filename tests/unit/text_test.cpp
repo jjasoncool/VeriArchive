@@ -240,6 +240,10 @@ void translation_tests()
           "清單檔：清單檔與儲存庫的紀錄不符");
     CHECK(chinese("identity: volume-label-differs") == "媒體身分：磁碟區標籤不同");
     CHECK(chinese("12 entries carry portability warnings") == "12 個項目帶有可攜性警告");
+    // Decision 0034: an INCOMPLETE run whose device went away says so.
+    CHECK(chinese("the device that holds the archive went away while it was read (unplugged, or no longer "
+                  "answering); attach it again, then resume this run") ==
+          "存放此封存的裝置在讀取期間離開了（被拔除，或不再回應）；請重新連接它，再繼續這次執行");
 
     // Only Match::Cause templates translate their last value: a path the user
     // typed is shown as typed, even when it looks like a message.

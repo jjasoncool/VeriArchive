@@ -6,6 +6,7 @@
 #include "core/manifest/entry.h"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -28,11 +29,17 @@ struct ScanResult {
 
 struct ScanOptions {
     std::vector<std::string> exclusions = default_exclusions();
+    // Asked when a directory or a link cannot be read, before it is recorded
+    // as unreadable (decision 0034): false once the volume of the root is
+    // gone, which ends the scan with DeviceRemoved instead. Unset, the
+    // volume counts as attached.
+    std::function<bool()> volume_attached;
 };
 
-// Fails only when the root itself cannot be listed, the device disappears, or
-// the scan is cancelled; every other problem becomes an unreadable entry
-// (R-10, decisions 0010 and 0014).
+// Fails only when the root itself cannot be listed, the device disappears
+// (an error of a removed device, or any error once volume_attached says the
+// volume is gone), or the scan is cancelled; every other problem becomes an
+// unreadable entry (R-10, decisions 0010 and 0014).
 std::expected<ScanResult, IoError> scan_tree(
     IFileSystemAccess& files,
     const std::filesystem::path& root,

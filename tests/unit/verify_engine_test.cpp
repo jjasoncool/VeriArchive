@@ -10,6 +10,7 @@
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/engine/transfer.h"
+#include "core/engine/volume_watch.h"
 #include "core/hash/hashers.h"
 #include "core/manifest/manifest_writer.h"
 
@@ -163,6 +164,8 @@ void items_are_in_canonical_order()
         "a.txt Modified", "m/b.txt MetadataMismatch", "n.txt New", "z.txt Missing"}));
 }
 
+// The media enumerator still finds the volume at the root, so these read
+// errors are the entries' own (decision 0034).
 void unreadable_files_fail_with_their_reason()
 {
     Registered fixture;
@@ -337,6 +340,93 @@ void interrupted_run_resumes_without_rehashing()
     const auto again = fixture.verify(request);
     CHECK(!again && again.error().kind == va::VerifyStop::Kind::NotFound &&
           again.error().message == "run " + interrupted->run_id + " is not an interrupted run");
+}
+
+// What an INCOMPLETE run whose device went away says (decision 0034).
+const std::string device_went_away = "the device that holds the archive went away while it was read (unplugged, or no "
+                                     "longer answering); attach it again, then resume this run";
+
+// Decision 0034: a device that goes away during a FULL verification ends it
+// INCOMPLETE and resumable, never FAILED with Unreadable items, also where its
+// reads fail only with I/O errors (as Linux gives for a USB disk pulled out):
+// the volume is looked up again before such an entry is classified, and it is
+// gone. At the first file, as it is opened, and at a later file, halfway
+// through its read; and while the folders are scanned. Attached again, the
+// run's resume reads only what it had not verified. A read error while the
+// device stays attached stays Unreadable(media)
+// (unreadable_files_fail_with_their_reason). Sample data.
+void a_device_that_goes_away_leaves_the_run_incomplete()
+{
+    for (const int at_file : {0, 1, 5}) { // 0: while scanning
+        EngineFixture fixture;
+        for (int index = 1; index <= 8; ++index) {
+            fixture.archive.add_file(std::format("SAMPLE-dir/SAMPLE-{}.bin", index),
+                std::string(1000, static_cast<char>('a' + index)));
+        }
+        CHECK(fixture.register_root(fixture.archive.root()).has_value());
+
+        test::RemovableDevice device(fixture.archive);
+        if (at_file == 0) {
+            device.directory = "SAMPLE-dir";
+        } else {
+            device.file = std::format("SAMPLE-{}.bin", at_file);
+            if (at_file > 1) {
+                device.at_offset = 500;
+            }
+        }
+        device.on_removed = [&fixture] {
+            fixture.media.error = va::IoError{va::IoErrorKind::NotFound, 2, "no volume at the root (sample)"};
+        };
+        fixture.media_files = &device;
+        const auto interrupted = fixture.verify(fixture.archive.root());
+        CHECK(interrupted && interrupted->result == "INCOMPLETE" && interrupted->items.empty() &&
+              interrupted->failure_classes.empty() &&
+              interrupted->warnings == std::vector<std::string>{device_went_away});
+        const auto verified_before = static_cast<std::uint64_t>(std::max(0, at_file - 1)) * 1000;
+        CHECK(interrupted && interrupted->coverage_bytes == verified_before);
+        if (!interrupted) {
+            continue;
+        }
+
+        device.attach_again();
+        fixture.media.error.reset();
+        fixture.archive.bytes_read = 0;
+        va::VerifyRequest request;
+        request.root = fixture.archive.root();
+        request.resume_run = interrupted->run_id;
+        const auto resumed = fixture.verify(request);
+        CHECK(resumed && resumed->result == "PASSED" && resumed->counts.at("Verified") == 8);
+        CHECK(fixture.archive.bytes_read == 8000 - verified_before);
+    }
+}
+
+// Decision 0034: whether the volume an operation began with is still the one
+// at its root: the same filesystem id and the same devices. What may read
+// otherwise while it stays attached does not count; a lookup that finds the
+// device without its names, or the volume without its devices or its full
+// id, is a volume gone. (Sample volumes.)
+void a_volume_is_the_same_while_its_ids_and_devices_are()
+{
+    const auto before = test::fake_volume("/vol");
+    auto renamed = before;
+    renamed.volume_label = "SAMPLE-RENAMED";
+    renamed.capacity_bytes += 4096;
+    renamed.devices.front().capacity_bytes += 4096;
+    renamed.devices.front().rotational.reset();
+    CHECK(va::same_volume(before, renamed));
+    auto other = before;
+    other.filesystem_uuid = "9999888877776666";
+    CHECK(!va::same_volume(before, other));
+    auto short_id_only = before;
+    short_id_only.filesystem_uuid.clear();
+    CHECK(!va::same_volume(before, short_id_only));
+    auto without_devices = before;
+    without_devices.devices.clear();
+    CHECK(!va::same_volume(before, without_devices));
+    auto nameless = before;
+    nameless.devices.front().model.clear();
+    nameless.devices.front().serial.clear();
+    CHECK(!va::same_volume(before, nameless));
 }
 
 void resume_refused_after_new_revision()
@@ -1725,6 +1815,8 @@ void verify_engine_tests()
     unrepresentable_names_warn();
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
+    a_device_that_goes_away_leaves_the_run_incomplete();
+    a_volume_is_the_same_while_its_ids_and_devices_are();
     resume_refused_after_new_revision();
     a_resume_by_uuid_stops_where_several_volumes_hold_the_archive();
     clones_registered_as_two_archives_say_to_detach_the_other_volumes();

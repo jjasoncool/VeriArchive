@@ -148,6 +148,9 @@ struct EngineFixture {
     va::HostInfo host{"windows", "test-host", "0.1.0"};
     FakeMediaWriter media_writer{archive};
     FakeProcessTable processes;  // the engines run in its `self` (decision 0024)
+    // How the engines read the media: through `archive` itself unless a test
+    // puts a view of it here, such as a device that goes away (RemovableDevice).
+    va::IFileSystemAccess* media_files = nullptr;
 
     // An archive volume whose root, and mount point, is `root`.
     explicit EngineFixture(std::filesystem::path root = "/vol") : archive(std::move(root))
@@ -155,9 +158,11 @@ struct EngineFixture {
         media.volume = fake_volume(archive.root());
     }
 
+    va::IFileSystemAccess& archive_files() { return media_files ? *media_files : archive; }
+
     std::expected<va::RegisterOutcome, va::RegisterFailure> register_root(va::RegisterRequest request)
     {
-        va::RegisterServices services{archive, *repository.files, *repository.writer, media_writer, media,
+        va::RegisterServices services{archive_files(), *repository.files, *repository.writer, media_writer, media,
             store, repository.context.repo, host, processes};
         return va::register_archive(services, request, cancel, progress);
     }
@@ -171,7 +176,7 @@ struct EngineFixture {
 
     std::expected<va::VerifyOutcome, va::VerifyStop> verify(va::VerifyRequest request)
     {
-        va::VerifyServices services{archive, *repository.files, media, store, repository.context.repo,
+        va::VerifyServices services{archive_files(), *repository.files, media, store, repository.context.repo,
             repository.context.repository_uuid, host};
         return va::verify_full(services, request, cancel, progress);
     }

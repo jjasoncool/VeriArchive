@@ -136,11 +136,13 @@ ComparisonResult compare_with_manifest(
     const auto& recorded = *input.recorded;
     ScanOptions scan_options;
     scan_options.exclusions = input.header->exclusions;
+    scan_options.volume_attached = input.volume_attached;
     auto scanned = scan_tree(files, input.root, scan_options, cancel, progress);
     if (!scanned) {
         const auto kind = scanned.error().kind;
         if (kind == IoErrorKind::Cancelled || kind == IoErrorKind::DeviceRemoved) {
             result.incomplete = true;
+            result.volume_gone = kind == IoErrorKind::DeviceRemoved;
         } else {
             result.scan_error = scanned.error().message;
         }
@@ -282,8 +284,13 @@ ComparisonResult compare_with_manifest(
         const auto& is = to_hash[hash.id].second->entry;
         const bool known = !was.unreadable.empty(); // decision 0010
         if (hash.error) {
-            if (hash.error->kind == IoErrorKind::DeviceRemoved) {
+            // Decision 0034: a read that failed because the device went away
+            // says nothing of the entry. The volume is looked up again before
+            // the entry is classified; gone, the comparison stops, resumable.
+            if (hash.error->kind == IoErrorKind::DeviceRemoved ||
+                (input.volume_attached && !input.volume_attached())) {
                 result.incomplete = true;
+                result.volume_gone = true;
                 return false;
             }
             classify.add(was, unreadable_status(unreadable_reason(*hash.error)),

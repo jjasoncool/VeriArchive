@@ -8,6 +8,7 @@ int main()
     config_tests();
     file_writer_tests();
     platform_tests();
+    platform_error_tests();
     unicode_tests();
     identity_tests();
     displayed_identity_tests();

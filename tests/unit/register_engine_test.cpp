@@ -308,6 +308,52 @@ void interrupted_registration_resumes()
     CHECK(verified && verified->result == "PASSED");
 }
 
+// Decision 0034: a device that goes away during a registration interrupts it
+// (REGISTRATION_INCOMPLETE, resumable), also where its reads fail only with
+// I/O errors, as Linux gives for a USB disk pulled out: the volume is looked
+// up again, and it is gone, so no file is recorded unreadable for it and no
+// revision is recorded. The same while the folders are scanned. Attached
+// again, the resume reads only the files not hashed before, and records
+// every file with its hashes. Sample data.
+void a_device_that_goes_away_interrupts_the_registration()
+{
+    for (const bool while_scanning : {false, true}) {
+        Fixture fixture;
+        for (int index = 1; index <= 6; ++index) {
+            fixture.archive.add_file(std::format("SAMPLE-dir/SAMPLE-{}.bin", index),
+                std::string(1000, static_cast<char>('a' + index)));
+        }
+        test::RemovableDevice device(fixture.archive);
+        if (while_scanning) {
+            device.directory = "SAMPLE-dir";
+        } else {
+            device.file = "SAMPLE-4.bin";
+            device.at_offset = 500;
+        }
+        device.on_removed = [&fixture] {
+            fixture.media.error = va::IoError{va::IoErrorKind::NotFound, 2, "no volume at the root (sample)"};
+        };
+        fixture.media_files = &device;
+        const auto interrupted = fixture.run(at("/vol"));
+        CHECK(!interrupted && interrupted.error().kind == va::RegisterFailure::Kind::Incomplete);
+        const auto archives = fixture.store.archives();
+        CHECK(archives && archives->size() == 1 && archives->front().status == "REGISTRATION_INCOMPLETE" &&
+              archives->front().current_revision == 0);
+
+        device.attach_again();
+        fixture.media.error.reset();
+        fixture.archive.bytes_read = 0;
+        auto request = at("/vol");
+        request.resume = true;
+        const auto resumed = fixture.run(request);
+        CHECK(resumed && resumed->revision == 1 && resumed->counts.files == 6 && resumed->unreadable.empty());
+        // Only what was not hashed before the device went away is read again.
+        CHECK(fixture.archive.bytes_read == (while_scanning ? 6000u : 3000u));
+        const auto verified = fixture.verify(fixture.archive.root());
+        CHECK(verified && verified->result == "PASSED");
+    }
+}
+
 // A root typed with separators at its end, as shells complete a folder name,
 // is the folder before them; a root keeps its own. A backslash separates only
 // on Windows (R-40).
@@ -3164,6 +3210,7 @@ void register_engine_tests()
     unreadable_files_are_recorded();
     retired_archive_takes_no_revision();
     interrupted_registration_resumes();
+    a_device_that_goes_away_interrupts_the_registration();
     trailing_separators_leave_the_folder();
     a_plan_recorded_with_a_trailing_separator_is_found();
     media_copy_is_written_and_checked();
