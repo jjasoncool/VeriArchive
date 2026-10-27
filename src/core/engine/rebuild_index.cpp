@@ -130,7 +130,8 @@ std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSy
             FoundRevision item;
             item.header = reader->header();
             item.record = {archive_uuid, revision, "manifests/" + archive_uuid + "/" + name, reader->header_line(),
-                reader->header_blake3(), reader->header().body_blake3, "", reader->header().created};
+                reader->header_blake3(), reader->header().body_blake3, "", reader->header().created,
+                merkle_root_of(reader->header())};
             // A manifest whose entries cannot all be read is skipped, never
             // indexed with only the entries before the bad line.
             std::optional<std::string> entry_error;
@@ -369,8 +370,8 @@ std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSy
                 if (auto inserted = store.insert_revision(found_revision.record); !inserted) {
                     return inserted;
                 }
-                if (auto indexed =
-                        store.insert_file_rows(archive_uuid, found_revision.record.revision, found_revision.entries);
+                if (auto indexed = store.insert_file_rows(archive_uuid, found_revision.record.revision,
+                        found_revision.entries, found_revision.header.chunk_size);
                     !indexed) {
                     return indexed;
                 }

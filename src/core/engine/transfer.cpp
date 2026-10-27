@@ -481,11 +481,12 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
         }
         RevisionRecord revision{uuid, header.revision,
             "manifests/" + uuid + "/" + path_to_utf8(destination.filename()), reader->header_line(),
-            reader->header_blake3(), header.body_blake3, path_to_utf8(manifest), header.created};
+            reader->header_blake3(), header.body_blake3, path_to_utf8(manifest), header.created,
+            merkle_root_of(header)};
         if (auto inserted = store.insert_revision(revision); !inserted) {
             return inserted;
         }
-        if (auto indexed = store.insert_file_rows(uuid, header.revision, entries); !indexed) {
+        if (auto indexed = store.insert_file_rows(uuid, header.revision, entries, header.chunk_size); !indexed) {
             return indexed;
         }
         // Named last. V1.1 stages the signature file (rNNNN.vam.sig, R-63)

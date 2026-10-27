@@ -860,11 +860,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             return updated;
         }
         RevisionRecord revision{uuid, creates, "manifests/" + uuid + "/" + path_to_utf8(outcome.manifest.filename()),
-            written->header_line, written->header_blake3, written->header.body_blake3, "", header.created};
+            written->header_line, written->header_blake3, written->header.body_blake3, "", header.created,
+            merkle_root_of(written->header)};
         if (auto inserted = store.insert_revision(revision); !inserted) {
             return inserted;
         }
-        if (auto indexed = store.insert_file_rows(uuid, creates, comparison.current_entries); !indexed) {
+        if (auto indexed = store.insert_file_rows(uuid, creates, comparison.current_entries, 0); !indexed) {
             return indexed;
         }
         EvidenceRecord evidence_record{uuid, outcome.run_id, evidence.seen_at, volume_to_json_text(*volume),

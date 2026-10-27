@@ -89,6 +89,11 @@ struct ManifestHeader {
     std::uint64_t body_lines = 0;
 };
 
+// The Merkle root of the manifest with `header`: its merkle_root when its
+// chunk size is not 0, nothing (empty) otherwise, as a reader then ignores
+// merkle_root (decision 0031). What the index records (decision 0032).
+std::string merkle_root_of(const ManifestHeader& header);
+
 // Canonical JSON for one header line / entry line / chunk line, without the
 // trailing '\n'.
 std::string header_to_json(const ManifestHeader& header);

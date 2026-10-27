@@ -12,10 +12,44 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <iterator>
+#include <optional>
 #include <sqlite3.h>
 
 namespace va {
 namespace {
+
+// The schema version this program creates and opens (§B8). Version 2 has the
+// tables of version 1 (V1), which created chunks and
+// archive_revisions.merkle_root and left them empty; version 2 fills them
+// (decision 0032).
+constexpr int schema_version = 2;
+
+// R-92: forward-only migrations, each keyed by the version it upgrades and run
+// in the transaction that raises the version by one.
+struct Migration {
+    int from;
+    const char* sql;
+};
+// 1 -> 2 adds nothing: every table and column is there. The version is raised
+// so that a V1 program, which neither writes nor removes chunk rows and whose
+// relocation drops chunk lines (decision 0031), refuses the repository from
+// then on ("unsupported repository schema").
+constexpr Migration migrations[] = {{1, ""}};
+
+// The tables of §B8, each with the schema version that first has it. A
+// database of a version holds all of that version's tables: this program, and
+// V1 before it, create all of them in one transaction (initialise_database),
+// and a migration adds its tables in the transaction that raises the version.
+struct RequiredTable {
+    const char* name;
+    int since;
+};
+constexpr RequiredTable required_tables[] = {
+    {"archives", 1}, {"archive_revisions", 1}, {"media_evidence", 1}, {"files", 1}, {"chunks", 1},
+    {"verify_runs", 1}, {"verify_items", 1}, {"verify_progress", 1}, {"history_checkpoints", 1},
+    {"trusted_keys", 1}, {"settings", 1},
+};
 
 // No SQLite result code: database_state tells SQLite's own codes apart
 // (SQLITE_CORRUPT is 11, the exit code these errors once carried).
@@ -204,6 +238,96 @@ std::filesystem::path pin_value(const std::filesystem::path& root,
     // Forward slashes ("repositories/main"), which Windows and Linux both read,
     // so one portable folder can serve the builds for both.
     return std::filesystem::path(relative.generic_u8string());
+}
+
+// The version in schema_version, or nothing when it cannot be read (a
+// database without VeriArchive's tables, a damaged or locked one), which
+// validate_schema reports in its own words.
+std::optional<int> read_schema_version(const repository_detail::SqliteDatabase& database)
+{
+    auto version = database.prepare("SELECT version FROM schema_version");
+    if (!version) {
+        return std::nullopt;
+    }
+    const auto row = version->step();
+    if (!row || !*row) {
+        return std::nullopt;
+    }
+    return sqlite3_column_int(version->get(), 0);
+}
+
+// Whether migrations lead from `version` to schema_version, one step at a time.
+bool upgradable(int version)
+{
+    for (int at = version; at < schema_version; ++at) {
+        if (std::none_of(std::begin(migrations), std::end(migrations),
+                [&](const Migration& step) { return step.from == at; })) {
+            return false;
+        }
+    }
+    return version < schema_version;
+}
+
+// Brings the database of a repository of an older schema version to
+// schema_version (R-92) in one write transaction, so that a crash leaves the
+// old version or the new one. The version is read first without the write
+// lock, which an operation of another process may hold for long: a
+// repository at this version, at a later one, or one that cannot be read is
+// left as it is, for validate_schema to judge.
+std::expected<void, IoError> migrate_schema(const RepositoryLayout& layout)
+{
+    {
+        auto database = repository_detail::SqliteDatabase::open(layout.database(), true);
+        if (!database) {
+            return {};
+        }
+        const auto version = read_schema_version(*database);
+        if (!version || *version >= schema_version) {
+            return {};
+        }
+    }
+    auto database = repository_detail::SqliteDatabase::open(layout.database());
+    if (!database) {
+        return std::unexpected(database.error());
+    }
+    const auto failed = [](const IoError& error) {
+        return std::unexpected(repository_error("cannot upgrade the repository database to schema version " +
+                                                std::to_string(schema_version) + ": " + error.message));
+    };
+    if (auto begun = database->execute("PRAGMA busy_timeout=5000; BEGIN IMMEDIATE;"); !begun) {
+        return failed(begun.error());
+    }
+    const auto upgraded = [&]() -> std::expected<void, IoError> {
+        // Again under the lock: another process may have upgraded it meanwhile.
+        const auto version = read_schema_version(*database);
+        if (!version) {
+            return std::unexpected(repository_error("cannot inspect repository schema"));
+        }
+        for (int at = *version; at < schema_version; ++at) {
+            const auto* migration =
+                std::find_if(std::begin(migrations), std::end(migrations), [&](const Migration& step) {
+                    return step.from == at;
+                });
+            if (migration == std::end(migrations)) {
+                return {}; // a version no migration starts from: validate_schema refuses it
+            }
+            if (*migration->sql != '\0') {
+                if (auto migrated = database->execute(migration->sql); !migrated) {
+                    return migrated;
+                }
+            }
+            if (auto raised = database->execute("UPDATE schema_version SET version = " + std::to_string(at + 1));
+                !raised) {
+                return raised;
+            }
+        }
+        return database->execute("COMMIT;");
+    }();
+    if (!upgraded) {
+        (void)database->execute("ROLLBACK;");
+        return failed(upgraded.error());
+    }
+    return {};
 }
 
 std::expected<bool, IoError> table_exists(
@@ -429,7 +553,9 @@ std::expected<void, IoError> open_repository(AppContext& context)
     }
     // A database that `repo rebuild-index` makes again, or one that it made
     // and has not filled, says so, in every command and in `repo init`
-    // (decision 0036); any other failure keeps SQLite's own reason.
+    // (decision 0036); any other failure keeps SQLite's own reason. Only a
+    // database that can be used is upgraded (decision 0032): one of an older
+    // version is usable where it holds every table of its version.
     const auto state = database_state(context.repo);
     if (!state) {
         return std::unexpected(state.error());
@@ -437,14 +563,28 @@ std::expected<void, IoError> open_repository(AppContext& context)
     if (*state != DatabaseState::Usable) {
         return std::unexpected(repository_error(unusable_database_message(context.repo, *state)));
     }
+    if (auto migrated = migrate_schema(context.repo); !migrated) {
+        return migrated;
+    }
+    if (auto result = validate_schema(context.repo); !result) {
+        return result;
+    }
     context.repository_uuid = *uuid;
     return {};
 }
 
 namespace {
 
-// The schema of this version (validate_schema), read through `database`.
-std::expected<void, IoError> check_schema(const repository_detail::SqliteDatabase& database)
+// Which schema versions check_schema takes: this program's alone, as the
+// database must be once open_repository has upgraded it (validate_schema); or
+// also an older one that migrations lead from, which opening the repository
+// upgrades (database_state, decision 0032).
+enum class SchemaVersions { Current, CurrentOrUpgradable };
+
+// The schema of this version, or of an older one where `versions` takes it,
+// read through `database`, with every table of its version.
+std::expected<void, IoError> check_schema(
+    const repository_detail::SqliteDatabase& database, SchemaVersions versions)
 {
     auto version = database.prepare("SELECT version FROM schema_version");
     // A locked, damaged or unreadable database is not an unsupported schema:
@@ -461,21 +601,25 @@ std::expected<void, IoError> check_schema(const repository_detail::SqliteDatabas
     if (!row) {
         return std::unexpected(row.error());
     }
-    if (!*row || sqlite3_column_int(version->get(), 0) != 1) {
+    if (!*row) {
+        return std::unexpected(repository_error("unsupported repository schema"));
+    }
+    // Another version's schema, such as a later program's, is no state of
+    // the database: nothing replaces or upgrades it (decisions 0032, 0036).
+    const int found = sqlite3_column_int(version->get(), 0);
+    if (found != schema_version && (versions == SchemaVersions::Current || !upgradable(found))) {
         return std::unexpected(repository_error("unsupported repository schema"));
     }
 
-    constexpr std::array required_tables{
-        "archives", "archive_revisions", "media_evidence", "files", "chunks",
-        "verify_runs", "verify_items", "verify_progress", "history_checkpoints",
-        "trusted_keys", "settings",
-    };
-
-    // A database of this version's schema that lacks one of its tables is
-    // damaged (decision 0036): this version made all of them in one
-    // transaction (initialise_database).
-    for (const char* table : required_tables) {
-        auto exists = table_exists(database, table);
+    // A database of a schema version that lacks one of that version's tables
+    // is damaged (decision 0036): a program made all of them in one
+    // transaction (initialise_database), and a migration adds its own in the
+    // transaction that raises the version.
+    for (const auto& table : required_tables) {
+        if (table.since > found) {
+            continue;
+        }
+        auto exists = table_exists(database, table.name);
         if (!exists) {
             return std::unexpected(exists.error());
         }
@@ -551,7 +695,7 @@ std::expected<DatabaseState, IoError> state_at(const std::filesystem::path& file
             return DatabaseState::Empty;
         }
     }
-    if (auto valid = check_schema(*database); !valid) {
+    if (auto valid = check_schema(*database, SchemaVersions::CurrentOrUpgradable); !valid) {
         return told(valid.error());
     }
     // Every page, its first row "ok" where none is damaged: a damaged page of
@@ -785,6 +929,18 @@ std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebui
         if (auto replaced = replace_database(layout, *state); !replaced) {
             return std::unexpected(replaced.error());
         }
+    } else {
+        // A database of an older schema version, also one that a rebuild of
+        // an earlier version made again, is upgraded as opening the
+        // repository upgrades it, so that the rebuild fills an index of this
+        // version (decision 0032). A database made again now has this
+        // version's schema.
+        if (auto migrated = migrate_schema(layout); !migrated) {
+            return std::unexpected(migrated.error());
+        }
+        if (auto valid = validate_schema(layout); !valid) {
+            return std::unexpected(valid.error());
+        }
     }
     return marked_replacement(layout);
 }
@@ -833,7 +989,7 @@ std::expected<void, IoError> validate_schema(const RepositoryLayout& layout)
     if (!database) {
         return std::unexpected(database.error());
     }
-    return check_schema(*database);
+    return check_schema(*database, SchemaVersions::Current);
 }
 
 } // namespace va

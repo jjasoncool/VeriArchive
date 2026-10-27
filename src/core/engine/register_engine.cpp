@@ -1212,7 +1212,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 if (auto deleted = store.delete_file_rows(plan.archive_uuid, plan.revision, stale); !deleted) {
                     return deleted;
                 }
-                return store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint);
+                return store.upsert_file_rows(plan.archive_uuid, plan.revision, checkpoint, 0);
             })) {
             checkpoint.clear();
             stale.clear();
@@ -1405,7 +1405,8 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         const auto relative = outcome.manifest.lexically_relative(services.layout.root);
         RevisionRecord revision{plan.archive_uuid, plan.revision, path_to_utf8(relative),
-            written->header_line, written->header_blake3, written->header.body_blake3, "", header.created};
+            written->header_line, written->header_blake3, written->header.body_blake3, "", header.created,
+            merkle_root_of(written->header)};
         std::replace(revision.manifest_relpath.begin(), revision.manifest_relpath.end(), '\\', '/');
         if (auto inserted = store.insert_revision(revision); !inserted) {
             return inserted;
@@ -1413,7 +1414,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         if (auto cleared = store.delete_file_rows(plan.archive_uuid, plan.revision); !cleared) {
             return cleared;
         }
-        if (auto indexed = store.insert_file_rows(plan.archive_uuid, plan.revision, entries); !indexed) {
+        if (auto indexed = store.insert_file_rows(plan.archive_uuid, plan.revision, entries, 0); !indexed) {
             return indexed;
         }
         // A registration over a lost manifest matched nothing: the archive's

@@ -75,6 +75,7 @@ void chunked_manifests_import_and_load()
         test::sample_file("big.bin", test::patterned(2 * chunk_size + 7, 1), chunk_size),
         test::sample_file("small.txt", "small", chunk_size)};
     const auto good = outside / "r0001.vam";
+    std::string merkle_root;
     {
         va::ManifestWriter manifest(writer, files, good, chunk_size);
         for (const auto& entry : entries) {
@@ -82,7 +83,9 @@ void chunked_manifests_import_and_load()
         }
         auto written = manifest.finish(header);
         CHECK(written && written->file->commit());
+        merkle_root = written ? written->header.merkle_root : std::string{};
     }
+    CHECK(merkle_root.size() == 64);
 
     // The same manifest with one chunk hash changed and a header that
     // describes its body: only the Merkle root disagrees.
@@ -111,6 +114,16 @@ void chunked_manifests_import_and_load()
     const auto imported =
         va::import_manifest(store, files, writer, layout, good, false, test::not_cancelled(), test::no_progress());
     CHECK(imported && imported->new_archive && imported->revision == 1);
+    // The index holds the chunk hashes it read and the Merkle root (decision 0032).
+    const auto rows = store.file_rows(header.archive_uuid, 1);
+    CHECK(rows && rows->size() == 2);
+    if (rows && rows->size() == 2) {
+        CHECK(rows->front().path.p == "big.bin" && rows->front().chunks == entries[0].chunks);
+        CHECK(rows->back().chunks.empty());
+    }
+    const auto recorded_revisions = store.revisions(header.archive_uuid);
+    CHECK(recorded_revisions && recorded_revisions->size() == 1 &&
+          recorded_revisions->front().merkle_root == merkle_root);
     const auto loaded = va::load_recorded_manifest(store, files, layout, header.archive_uuid, 1);
     CHECK(loaded && loaded->header.chunk_size == chunk_size && loaded->entries.size() == 2);
     if (loaded && loaded->entries.size() == 2) {
@@ -127,7 +140,7 @@ void chunked_manifests_import_and_load()
     std::ofstream(va::manifest_path(layout.manifests(), header.archive_uuid, 2), std::ios::binary) << second;
     const auto recorded = va::header_from_json(nlohmann::json::parse(line));
     CHECK(store.insert_revision({header.archive_uuid, 2, "manifests/" + header.archive_uuid + "/r0002.vam", line,
-        va::blake3_hex(line), recorded.body_blake3, "", header.created}));
+        va::blake3_hex(line), recorded.body_blake3, "", header.created, recorded.merkle_root}));
     const auto mismatched = va::load_recorded_manifest(store, files, layout, header.archive_uuid, 2);
     CHECK(!mismatched && mismatched.error().failure_class == "ManifestHashMismatch");
 
@@ -182,6 +195,22 @@ void merkle_root_is_ignored_without_a_chunk_size(const std::filesystem::path& ex
     // As verification, registration and relocation do.
     const auto candidates = va::load_candidates(store, *target.files, layout);
     CHECK(candidates && candidates->size() == 1);
+
+    // Nor is a merkle_root string there a Merkle root: the index records
+    // none (decision 0032).
+    parts.merkle_root_json = "\"" + va::blake3_hex("no root (sample)") + "\"";
+    test::TestRepository other;
+    auto other_store = other.store();
+    const auto with_string = other.context.repo.root.parent_path() / "string-root" / exported.filename();
+    std::filesystem::create_directories(with_string.parent_path());
+    std::ofstream(with_string, std::ios::binary) << test::assemble_manifest(parts);
+    const auto imported_string =
+        va::import_manifest(other_store, *other.files, *other.writer, other.context.repo, with_string, false,
+            test::not_cancelled(), test::no_progress());
+    CHECK(imported_string.has_value());
+    const auto recorded = other_store.revisions(imported_string ? imported_string->archive_uuid : "");
+    CHECK(recorded && recorded->size() == 1 && recorded->front().merkle_root.empty());
+    CHECK(other.query("SELECT COUNT(*) FROM archive_revisions WHERE merkle_root IS NULL") == "1");
 }
 
 // M4: export -> import round trip, duplicate detection, rollback protection.
@@ -484,7 +513,7 @@ void an_import_leaves_a_registration_its_saved_files()
     hashed.size = 26;
     hashed.b3 = va::blake3_hex("a, hashed by the registration (sample data)");
     hashed.sha256 = va::sha256_hex("a, hashed by the registration (sample data)");
-    CHECK(store.upsert_file_rows(sample_uuid, 2, {hashed}));
+    CHECK(store.upsert_file_rows(sample_uuid, 2, {hashed}, 0));
 
     const auto r2 = sample_manifest(repository, exports_of(repository, "r2"), 2, "host");
     const auto refused = import(repository, store, r2);
@@ -573,7 +602,7 @@ void an_import_removes_what_can_no_longer_finish()
     left_behind.path.p = "left behind.txt";
     left_behind.size = 1;
     left_behind.b3 = va::blake3_hex("x");
-    CHECK(store.upsert_file_rows(sample_uuid, 3, {left_behind}));
+    CHECK(store.upsert_file_rows(sample_uuid, 3, {left_behind}, 0));
     const auto r3 = sample_manifest(repository, exports_of(repository, "r3"), 3, "host");
     const auto third = import(repository, store, r3);
     CHECK(third && third->revision == 3);

@@ -375,6 +375,10 @@ void translation_tests()
           "清單檔項目無效：sha256 不是 64 個小寫十六進位數字");
     CHECK(chinese("cannot write the manifest: chunk hashes of big.bin: 2 given, 3 expected") ==
           "無法寫入清單檔：big.bin 的區塊雜湊：提供 2 個，應為 3 個");
+    // The index of chunk hashes (decision 0032).
+    CHECK(chinese("cannot upgrade the repository database to schema version 2: cannot execute SQL: database is "
+                  "locked") == "無法將儲存庫資料庫升級到結構描述版本 2：無法執行 SQL：資料庫已被鎖定");
+    CHECK(chinese("chunk hashes of big.bin: 2 given, 3 expected") == "big.bin 的區塊雜湊：提供 2 個，應為 3 個");
     // Rebuild-index skipped lines.
     const std::string uuid = "0b6c8ad6-2a51-4d8e-9a6a-0f1c2d3e4f50";
     CHECK(chinese("cannot read manifest " + uuid + "/r0001.vam: empty manifest") ==

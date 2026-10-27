@@ -1,13 +1,17 @@
 #include "test_support.h"
 
 #include "engine_fixture.h"
+#include "manifest_samples.h"
 
 #include "common/utf8.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/relocate_engine.h"
+#include "core/engine/transfer.h"
 #include "core/repository/repository.h"
 #include "core/hash/hashers.h"
+#include "core/manifest/manifest_writer.h"
+#include "core/scan/scanner.h"
 
 #include <nlohmann/json.hpp>
 
@@ -1419,6 +1423,72 @@ void damage_beyond_the_first_page_is_named_and_made_again()
     fixture.store = fixture.repository.store();
 }
 
+// Decision 0032: rebuild-index indexes the chunk lines and the Merkle root of
+// every manifest it reads, as an import does: a damaged index gets them back.
+// A registration's saved progress keeps its files' chunk rows with them;
+// chunk rows that no manifest and no plan names go (sample data).
+void rebuild_restores_chunk_rows_and_merkle_roots()
+{
+    constexpr std::uint64_t chunk_size = 64 * 1024;
+    test::TestRepository repository;
+    auto store = repository.store();
+    const auto& layout = repository.context.repo;
+    const std::string imported_uuid = "c0ffee00-0000-4000-8000-000000000038";
+    const std::string saving_uuid = "c0ffee00-0000-4000-8000-000000000039";
+    const std::string stray_uuid = "c0ffee00-0000-4000-8000-00000000003a";
+
+    va::ManifestHeader header;
+    header.archive_uuid = imported_uuid;
+    header.label = "ARCH-0001";
+    header.revision = 1;
+    header.created = "2026-10-16T00:00:00Z";
+    header.app_version = "0.1.0";
+    header.os = "windows";
+    header.host = "test-host";
+    header.exclusions = va::default_exclusions();
+    const auto big = test::sample_file("big.bin", test::patterned(2 * chunk_size + 7, 3), chunk_size);
+    const auto source = layout.root.parent_path() / "sample-manifest" / "r0001.vam";
+    std::filesystem::create_directories(source.parent_path());
+    std::string merkle_root;
+    {
+        va::ManifestWriter manifest(*repository.writer, *repository.files, source, chunk_size);
+        CHECK(manifest.add(big));
+        auto written = manifest.finish(header);
+        CHECK(written && written->file->commit());
+        merkle_root = written ? written->header.merkle_root : std::string{};
+    }
+    CHECK(va::import_manifest(store, *repository.files, *repository.writer, layout, source, false,
+        test::not_cancelled(), test::no_progress())
+              .has_value());
+
+    // An unfinished registration that saved a large file, and chunk rows of
+    // no manifest and no plan.
+    const nlohmann::json plan{{"archive_uuid", saving_uuid}, {"revision", 1}, {"label", "ARCH-0002"},
+        {"created", "2026-10-16T01:00:00Z"}, {"new_archive", true}, {"root", "Z:\\sample"},
+        {"chunk_size", chunk_size}};
+    CHECK(store.set_setting("registration:" + saving_uuid, plan.dump()));
+    const auto saved = test::sample_file("saved.bin", test::patterned(chunk_size + 1, 4), chunk_size);
+    CHECK(store.upsert_file_rows(saving_uuid, 1, {saved}, chunk_size));
+    repository.execute(("INSERT INTO chunks(archive_uuid, revision, path, idx, offset, length, b3) VALUES('" +
+                        stray_uuid + "', 7, 'stray.bin', 0, 0, 1, 'x')")
+                           .c_str());
+    // The index loses the chunk rows and the Merkle root of the manifest.
+    repository.execute(("DELETE FROM chunks WHERE archive_uuid = '" + imported_uuid +
+                        "'; UPDATE archive_revisions SET merkle_root = NULL")
+                           .c_str());
+
+    const auto report = va::rebuild_index(store, *repository.files, layout, test::not_cancelled(), test::no_progress());
+    CHECK(report && report->revisions == 1 && report->skipped.empty() && report->saved_progress_kept == 1);
+    const auto rows = store.file_rows(imported_uuid, 1);
+    CHECK(rows && rows->size() == 1 && rows->front().chunks == big.chunks && big.chunks.size() == 3);
+    const auto revisions = store.revisions(imported_uuid);
+    CHECK(revisions && revisions->size() == 1 && revisions->front().merkle_root == merkle_root &&
+          merkle_root.size() == 64);
+    const auto kept = store.file_rows(saving_uuid, 1);
+    CHECK(kept && kept->size() == 1 && kept->front().chunks == saved.chunks && saved.chunks.size() == 2);
+    CHECK(repository.query("SELECT COUNT(*) FROM chunks WHERE archive_uuid = '" + stray_uuid + "'") == "0");
+}
+
 } // namespace
 
 void rebuild_index_tests()
@@ -1439,4 +1509,5 @@ void rebuild_index_tests()
     the_history_keeps_an_archive_from_an_earlier_revision();
     a_manifest_without_a_record_is_read_to_its_last_entry();
     a_recorded_manifest_that_the_rebuild_skipped_is_listed_with_its_entry();
+    rebuild_restores_chunk_rows_and_merkle_roots();
 }

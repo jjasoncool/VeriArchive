@@ -1862,7 +1862,7 @@ void the_heartbeat_writes_only_its_own_relocation()
 
     CHECK(store.set_setting(key, mine.dump()));
     CHECK(store.insert_revision(
-        {uuid, 2, "manifests/" + uuid + "/r0002.vam", "{}", "h", "b", "", "2026-10-16T01:00:00Z"}));
+        {uuid, 2, "manifests/" + uuid + "/r0002.vam", "{}", "h", "b", "", "2026-10-16T01:00:00Z", ""}));
     heartbeat.stop();
     CHECK(store.setting(key).value_or("") == mine.dump());
 }
@@ -1982,7 +1982,7 @@ void a_relocation_replaces_rows_that_no_plan_names()
     left_behind.path.p = "left behind.txt";
     left_behind.size = 1;
     left_behind.b3 = va::blake3_hex("x");
-    CHECK(fixture.store.upsert_file_rows(fixture.archive_uuid, 2, {changed, left_behind}));
+    CHECK(fixture.store.upsert_file_rows(fixture.archive_uuid, 2, {changed, left_behind}, 0));
     const auto key = "registration:" + fixture.archive_uuid;
     const nlohmann::json other_revision{{"archive_uuid", fixture.archive_uuid}, {"revision", 3},
         {"label", "ARCH-0001"}, {"created", "2026-10-16T03:00:00Z"}, {"new_archive", false},
@@ -2140,7 +2140,8 @@ void a_relocation_waits_for_the_write_lock(WhileWaiting what)
             CHECK(store.begin());
             if (what == WhileWaiting::OtherRecordsIt) {
                 CHECK(store.insert_revision({fixture.archive_uuid, 2,
-                    "manifests/" + fixture.archive_uuid + "/r0002.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z"}));
+                    "manifests/" + fixture.archive_uuid + "/r0002.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z",
+                    ""}));
             }
             held.release();
             std::this_thread::sleep_for(std::chrono::milliseconds(freed ? 1500 : 400));

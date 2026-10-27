@@ -1,5 +1,5 @@
 CREATE TABLE schema_version (version INTEGER NOT NULL);
-INSERT INTO schema_version VALUES (1);
+INSERT INTO schema_version VALUES (2);
 CREATE TABLE archives (archive_uuid TEXT PRIMARY KEY,label TEXT NOT NULL,created TEXT NOT NULL,current_revision INTEGER NOT NULL,status TEXT NOT NULL,root_subpath TEXT NOT NULL DEFAULT '',notes TEXT);
 CREATE INDEX archives_label ON archives(label);
 CREATE TABLE archive_revisions (archive_uuid TEXT NOT NULL,revision INTEGER NOT NULL,manifest_relpath TEXT NOT NULL,header_json TEXT NOT NULL,header_blake3 TEXT NOT NULL,body_blake3 TEXT NOT NULL,merkle_root TEXT,signed INTEGER NOT NULL DEFAULT 0,key_id TEXT,imported_from TEXT,created TEXT NOT NULL,PRIMARY KEY(archive_uuid,revision));

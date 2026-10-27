@@ -953,7 +953,7 @@ void heartbeat_of_a_plan_stops_once_its_revision_is_recorded()
     CHECK(va::parse_timestamp(beaten.value("updated", std::string{})).has_value());
 
     // Another attempt records revision 1, and the next registration writes its plan.
-    CHECK(store.insert_revision({"u", 1, "manifests/u/r0001.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z"}));
+    CHECK(store.insert_revision({"u", 1, "manifests/u/r0001.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z", ""}));
     const std::string next_plan = R"({"archive_uuid":"u","revision":2,"created":"2026-10-15T02:00:00Z"})";
     CHECK(store.set_setting(key, next_plan));
     heartbeat.on_progress({});
@@ -1339,7 +1339,7 @@ void a_resume_of_a_recorded_revision_reads_nothing()
     const auto archive_uuid = interrupted_sample_registration(fixture);
     // Recorded by another operation, which left the plan (sample data).
     CHECK(fixture.store.insert_revision(
-        {archive_uuid, 1, "manifests/" + archive_uuid + "/r0001.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z"}));
+        {archive_uuid, 1, "manifests/" + archive_uuid + "/r0001.vam", "{}", "h", "b", "", "2026-10-15T01:00:00Z", ""}));
     CHECK(!fixture.store.setting("registration:" + archive_uuid).value_or("").empty());
     fixture.archive.bytes_read = 0;
     auto request = at("/vol");
@@ -1735,7 +1735,7 @@ void a_resume_of_an_older_versions_plan_asks_for_confirmation()
         const auto archive_uuid = interrupted_sample_registration(fixture);
         as_an_older_version_wrote_it(fixture, archive_uuid);
         CHECK(fixture.store.insert_revision({archive_uuid, 1, "manifests/" + archive_uuid + "/r0001.vam", "{}", "h",
-            "b", "", "2026-10-15T01:00:00Z"}));
+            "b", "", "2026-10-15T01:00:00Z", ""}));
         auto request = at("/vol");
         request.resume = true;
         const auto resumed = fixture.run(request);

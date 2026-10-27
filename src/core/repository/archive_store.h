@@ -41,6 +41,8 @@ struct RevisionRecord {
     std::string body_blake3;
     std::string imported_from;
     Timestamp created;
+    std::string merkle_root;            // the Merkle root its header gives (merkle_root_of); empty
+                                        // (NULL) for a manifest without a chunk size (decision 0032)
 };
 
 struct EvidenceRecord {
@@ -313,17 +315,25 @@ public:
 
     std::expected<void, IoError> insert_evidence(const EvidenceRecord& evidence);
 
-    // Rebuildable index of manifest entries (files table, R-80).
-    std::expected<void, IoError> insert_file_rows(
-        const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
+    // Rebuildable index of manifest entries (files table, R-80). A file's
+    // chunk hashes (Entry::chunks) go with its row, as rows of the chunks
+    // table (decision 0032): `chunk_size` is the manifest's chunk size, and
+    // every file that has chunk lines at it must carry all of its chunk
+    // hashes, and no other entry any (decision 0031); otherwise nothing is
+    // written. Whatever removes a file's row removes its chunk rows too.
+    std::expected<void, IoError> insert_file_rows(const Uuid& archive_uuid, std::uint32_t revision,
+        const std::vector<Entry>& entries, std::uint64_t chunk_size);
     std::expected<void, IoError> delete_file_rows(const Uuid& archive_uuid, std::uint32_t revision);
     // Registration checkpoints (R-104): hashed entries of an unfinished revision.
-    std::expected<void, IoError> upsert_file_rows(
-        const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
+    std::expected<void, IoError> upsert_file_rows(const Uuid& archive_uuid, std::uint32_t revision,
+        const std::vector<Entry>& entries, std::uint64_t chunk_size);
     // Deletes the rows of these entries only (path, raw and stream), such as
     // checkpoints a resumed registration does not reuse.
     std::expected<void, IoError> delete_file_rows(
         const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries);
+    // The entries indexed under this revision, each file with the chunk hashes
+    // of its chunk rows in idx order. A file whose chunk rows do not run from
+    // idx 0 without a gap gets none: it is taken for a file without them.
     std::expected<std::vector<Entry>, IoError> file_rows(const Uuid& archive_uuid, std::uint32_t revision);
     // True when the files table holds a row under this revision of the
     // archive: its index once the revision is recorded, before that the
@@ -333,11 +343,12 @@ public:
     // revision is recorded, the files a registration creating it has hashed
     // and saved (its checkpoints).
     std::expected<CheckpointCount, IoError> file_row_count(const Uuid& archive_uuid, std::uint32_t revision);
-    // Empties the rebuildable index tables (archive_revisions, files) for
-    // rebuild-index, except the record of each revision in `kept` (archive,
-    // revision) with its rows in files, whose manifest rebuild-index could
-    // not read (decision 0028), and the rows in files of `saved_progress`:
-    // the saved progress of unfinished registrations (decision 0026).
+    // Empties the rebuildable index tables (archive_revisions, files, chunks)
+    // for rebuild-index, except the record of each revision in `kept` (archive,
+    // revision) with its rows in files and chunks, whose manifest rebuild-index
+    // could not read (decision 0028), and the rows in files and chunks of
+    // `saved_progress`: the saved progress of unfinished registrations
+    // (decisions 0026, 0032).
     std::expected<void, IoError> clear_index(const std::set<std::pair<Uuid, std::uint32_t>>& kept = {},
         const std::set<std::pair<Uuid, std::uint32_t>>& saved_progress = {});
 
@@ -459,7 +470,7 @@ public:
 private:
     explicit ArchiveStore(repository_detail::SqliteDatabase database);
     std::expected<void, IoError> write_file_rows(const char* verb, const Uuid& archive_uuid,
-        std::uint32_t revision, const std::vector<Entry>& entries);
+        std::uint32_t revision, const std::vector<Entry>& entries, std::uint64_t chunk_size);
     repository_detail::SqliteDatabase database_;
 };
 

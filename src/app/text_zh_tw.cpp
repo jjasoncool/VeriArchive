@@ -1400,6 +1400,9 @@ constexpr CatalogEntry entries[] = {
     {"the repository's database {} is not a file", "儲存庫的資料庫 {} 不是檔案"},
     {"cannot put the repository's database aside: {}: {}", "無法將儲存庫的資料庫移到一旁：{}：{}", Match::Cause},
     {"unsupported or incomplete repository schema", "不支援或不完整的儲存庫結構描述"},
+    // Decision 0032: a repository of an older schema version is upgraded when opened.
+    {"cannot upgrade the repository database to schema version {}: {}", "無法將儲存庫資料庫升級到結構描述版本 {}：{}",
+        Match::Cause},
     // src/core/repository/sqlite_raii.cpp
     {"unknown SQLite error", "未知的 SQLite 錯誤"},
     {"cannot open repository database: {}", "無法開啟儲存庫資料庫：{}", Match::Cause},

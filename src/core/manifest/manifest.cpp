@@ -101,6 +101,11 @@ bool add_merkle_leaves(MerkleTreeBuilder& tree, const Entry& entry, std::uint64_
     return tree.add_hex(entry.b3);
 }
 
+std::string merkle_root_of(const ManifestHeader& header)
+{
+    return header.chunk_size > 0 ? header.merkle_root : std::string{};
+}
+
 // Key order is fixed by §B4.3 (copy_of: decision 0005).
 std::string header_to_json(const ManifestHeader& header)
 {

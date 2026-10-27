@@ -397,7 +397,7 @@ void a_registration_resumed_by_an_older_version_runs()
     entry.path.p = "older-version";
     entry.size = 5000;
     entry.b3 = "b3";
-    CHECK(fixture.store.upsert_file_rows(archive_uuid, 1, {entry}));
+    CHECK(fixture.store.upsert_file_rows(archive_uuid, 1, {entry}, 0));
     CHECK(poll(65s) == OperationState::Running);
     CHECK(describe_operation(english, watches.front(), start + 65s, now + 65s).state == "running");
     CHECK(!watches.front().operation().recorded_stopped && !watches.front().operation().updated);
@@ -485,7 +485,7 @@ void shows_only_the_record_state_when_not_counted()
     hashed.path.p = "a.txt";
     hashed.size = 100;
     hashed.b3 = "b3";
-    CHECK(store.upsert_file_rows(archive_uuid, 1, {hashed}));
+    CHECK(store.upsert_file_rows(archive_uuid, 1, {hashed}, 0));
     const auto read = va::app::read_unfinished_operations(repository.context.repo);
     CHECK(read && read->operations.size() == 1 && !read->archives_mark.empty());
     if (read && read->operations.size() == 1) {

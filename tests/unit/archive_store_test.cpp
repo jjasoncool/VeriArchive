@@ -48,7 +48,7 @@ void archives_revisions_and_labels()
     CHECK(store->archives() && store->archives()->size() == 1);
 
     va::RevisionRecord revision{archive.archive_uuid, 1, "manifests/x/r0001.vam", "{}", "h", "b", "",
-        "2026-10-08T00:00:00Z"};
+        "2026-10-08T00:00:00Z", ""};
     CHECK(store->insert_revision(revision));
     revision.revision = 2;
     CHECK(store->insert_revision(revision));
@@ -59,7 +59,7 @@ void archives_revisions_and_labels()
     entry.path.p = "a.txt";
     entry.size = 5;
     entry.b3 = "b3";
-    CHECK(store->insert_file_rows(archive.archive_uuid, 1, {entry}));
+    CHECK(store->insert_file_rows(archive.archive_uuid, 1, {entry}, 0));
     CHECK(store->insert_evidence({archive.archive_uuid, "", "2026-10-08T00:00:00Z", "{}", "MATCH", ""}));
 }
 
@@ -186,10 +186,10 @@ void pending_registrations_with_checkpoints()
     CHECK(store.set_setting("registration:broken", "not json"));
     CHECK(store.set_setting("registration:odd", R"({"archive_uuid":"x","revision":"1"})"));
 
-    CHECK(store.upsert_file_rows(whole, 1, {file_entry("a.mkv", 1000), file_entry("b.mkv", 2500)}));
-    CHECK(store.upsert_file_rows(folder, 3, {file_entry("c.jpg", 40)}));
+    CHECK(store.upsert_file_rows(whole, 1, {file_entry("a.mkv", 1000), file_entry("b.mkv", 2500)}, 0));
+    CHECK(store.upsert_file_rows(folder, 3, {file_entry("c.jpg", 40)}, 0));
     // The revision before, fully indexed: not part of the progress.
-    CHECK(store.insert_file_rows(folder, 2, {file_entry("old.jpg", 999)}));
+    CHECK(store.insert_file_rows(folder, 2, {file_entry("old.jpg", 999)}, 0));
 
     const auto pending = store.pending_registrations();
     CHECK(pending && pending->size() == 2);
@@ -225,12 +225,12 @@ void add_verified_archive(va::ArchiveStore& store, std::uint32_t revision = 1)
     CHECK(store.insert_archive({verified_archive, "ARCH-0007", "2026-10-08T00:00:00Z", revision, "REGISTERED", "", ""}));
     CHECK(store.insert_revision({verified_archive, 1, "manifests/x/r0001.vam",
         R"({"counts":{"files":3,"dirs":1,"links":0,"streams":1,"chunks":0,"bytes":650},"root_hint":"Z:\\範例"})",
-        "h", "b", "", "2026-10-08T00:00:00Z"}));
+        "h", "b", "", "2026-10-08T00:00:00Z", ""}));
     auto stream = file_entry("c.txt", 50);
     stream.type = 's';
     stream.stream = "Zone.Identifier";
     CHECK(store.insert_file_rows(verified_archive, 1,
-        {file_entry("a.txt", 100), file_entry("b.txt", 200), file_entry("c.txt", 300), stream}));
+        {file_entry("a.txt", 100), file_entry("b.txt", 200), file_entry("c.txt", 300), stream}, 0));
 }
 
 // The setting a verification of the sample archive's revision 1 leaves.
@@ -604,13 +604,14 @@ void archive_list_mark_follows_the_archives()
     CHECK(!changed());
 
     CHECK(store.set_setting("registration:" + archive_uuid, R"({"archive_uuid":")" + archive_uuid + R"("})"));
-    CHECK(store.upsert_file_rows(archive_uuid, 1, {file_entry("a.txt", 1)}));
+    CHECK(store.upsert_file_rows(archive_uuid, 1, {file_entry("a.txt", 1)}, 0));
     CHECK(store.set_setting("run:run-1", "{}"));
     CHECK(store.add_progress("run-1", {va::entry_key(file_entry("a.txt", 1))}));
     CHECK(!changed());
 
     // Recorded: the revision, then the archive at it.
-    CHECK(store.insert_revision({archive_uuid, 1, "manifests/x/r0001.vam", "{}", "h", "b", "", "2026-10-15T02:00:00Z"}));
+    CHECK(store.insert_revision(
+        {archive_uuid, 1, "manifests/x/r0001.vam", "{}", "h", "b", "", "2026-10-15T02:00:00Z", ""}));
     CHECK(changed());
     archive.current_revision = 1;
     archive.status = "REGISTERED";
@@ -712,7 +713,7 @@ void reads_without_write_ahead_log()
     CHECK(store.add_progress("run-1", {va::entry_key(file_entry("a.txt", 0))}));
     CHECK(store.set_setting("registration:" + verified_archive,
         R"({"archive_uuid":")" + verified_archive + R"(","revision":2,"created":"2026-10-15T01:00:00Z"})"));
-    CHECK(store.upsert_file_rows(verified_archive, 2, {file_entry("new.txt", 40)}));
+    CHECK(store.upsert_file_rows(verified_archive, 2, {file_entry("new.txt", 40)}, 0));
     auto watching = va::ArchiveStore::open_read_only(repository.context.repo);
     CHECK(watching.has_value());
     if (watching) {
@@ -746,7 +747,7 @@ void failed_write_transaction_is_rolled_back()
             return written;
         }
         // The same file twice: the primary key refuses the second.
-        return store.insert_file_rows(archive_uuid, 1, {file_entry("a", 1), file_entry("a", 1)});
+        return store.insert_file_rows(archive_uuid, 1, {file_entry("a", 1), file_entry("a", 1)}, 0);
     });
     CHECK(!failed);
     CHECK(store.setting("checkpoint") == std::string{});
@@ -781,7 +782,7 @@ void later_revision_of_an_archive()
     const va::Uuid uuid = "c0ffee00-0000-4000-8000-000000000030";
     const auto record_revision = [&](std::uint32_t revision) {
         CHECK(store.insert_revision({uuid, revision, "manifests/" + uuid + "/r000" + std::to_string(revision) + ".vam",
-            "{}", "h", "b", "", "2026-10-16T01:00:00Z"}));
+            "{}", "h", "b", "", "2026-10-16T01:00:00Z", ""}));
         CHECK(store.update_archive({uuid, "ARCH-0030", "2026-10-16T00:00:00Z", revision, "REGISTERED", "", ""}));
     };
     const auto later = [&](const va::Uuid& archive_uuid, std::uint32_t made_for) {
@@ -829,6 +830,167 @@ void automatic_labels_skip_the_labels_in_use()
     CHECK(store->next_label() == "ARCH-0008");
 }
 
+// ---- Chunk hashes in the index (decision 0032) -----------------------------
+
+constexpr std::uint64_t test_chunk_size = 64 * 1024;
+
+// A file of `size` bytes as an index row, with `chunks` chunk hashes made up
+// from `seed` (sample data: the store keeps them as given).
+va::Entry chunked_entry(std::string path, std::uint64_t size, std::size_t chunks, const std::string& seed)
+{
+    auto entry = file_entry(std::move(path), size);
+    entry.b3 = va::blake3_hex(seed);
+    for (std::size_t idx = 0; idx < chunks; ++idx) {
+        entry.chunks.push_back(va::blake3_hex(seed + "/" + std::to_string(idx)));
+    }
+    return entry;
+}
+
+std::string chunk_rows(const TestRepository& repository, const std::string& where)
+{
+    return repository.query("SELECT COUNT(*) FROM chunks WHERE " + where);
+}
+
+// A file's chunk hashes are indexed with its row, one row per chunk with its
+// offset and length, and read back with it in idx order; every way that
+// removes a file's row removes its chunk rows, and no other file's.
+void chunk_rows_go_with_their_files()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const std::string archive_uuid = "c0ffee00-0000-4000-8000-000000000032";
+    const auto big = chunked_entry("video/big.bin", 2 * test_chunk_size + 7, 3, "big");
+    const auto other = chunked_entry("video/other.bin", test_chunk_size + 1, 2, "other");
+    auto small = file_entry("small.txt", 5);
+    small.b3 = va::blake3_hex("small");
+    va::Entry folder;
+    folder.type = 'd';
+    folder.path.p = "empty";
+    CHECK(store.insert_file_rows(archive_uuid, 1, {folder, small, big, other}, test_chunk_size));
+    CHECK(chunk_rows(repository, "revision = 1") == "5");
+    CHECK(repository.query("SELECT group_concat(idx || ':' || offset || ':' || length || ':' || b3, ' ') FROM "
+                           "(SELECT * FROM chunks WHERE path = 'video/big.bin' ORDER BY idx)") ==
+          "0:0:65536:" + big.chunks[0] + " 1:65536:65536:" + big.chunks[1] + " 2:131072:7:" + big.chunks[2]);
+    CHECK(repository.query("SELECT COUNT(*) FROM chunks WHERE stream = '' AND raw_hex = '' AND "
+                           "last_verified_at IS NULL") == "5");
+    auto rows = store.file_rows(archive_uuid, 1);
+    CHECK(rows && rows->size() == 4);
+    if (rows && rows->size() == 4) {
+        for (const auto& row : *rows) {
+            const auto& expected = row.path.p == big.path.p ? big.chunks
+                                   : row.path.p == other.path.p ? other.chunks
+                                                                : std::vector<std::string>{};
+            CHECK(row.chunks == expected);
+        }
+    }
+
+    // A checkpoint again: the rows are replaced, not added.
+    auto changed = big;
+    changed.chunks[1] = va::blake3_hex("changed");
+    CHECK(store.upsert_file_rows(archive_uuid, 1, {changed}, test_chunk_size));
+    CHECK(chunk_rows(repository, "revision = 1") == "5");
+    CHECK(chunk_rows(repository, "idx = 1 AND b3 = '" + changed.chunks[1] + "'") == "1");
+
+    // A file whose chunk rows do not run from idx 0 without a gap is read
+    // back without chunk hashes, as one that needs reading again.
+    repository.execute("DELETE FROM chunks WHERE path = 'video/big.bin' AND idx = 1");
+    rows = store.file_rows(archive_uuid, 1);
+    CHECK(rows && rows->size() == 4);
+    for (const auto& row : rows.value_or(std::vector<va::Entry>{})) {
+        if (row.path.p == big.path.p) {
+            CHECK(row.chunks.empty());
+        }
+        if (row.path.p == other.path.p) {
+            CHECK(row.chunks == other.chunks);
+        }
+    }
+
+    // Deleting rows by entry takes their chunk rows, and leaves the others.
+    CHECK(store.insert_file_rows(archive_uuid, 2, {big}, test_chunk_size));
+    CHECK(store.delete_file_rows(archive_uuid, 1, std::vector<va::Entry>{big}));
+    CHECK(chunk_rows(repository, "revision = 1 AND path = 'video/big.bin'") == "0");
+    CHECK(chunk_rows(repository, "revision = 1 AND path = 'video/other.bin'") == "2");
+    CHECK(chunk_rows(repository, "revision = 2") == "3");
+    // By revision: every row of it, of that revision only.
+    CHECK(store.delete_file_rows(archive_uuid, 1));
+    CHECK(chunk_rows(repository, "revision = 1") == "0");
+    CHECK(chunk_rows(repository, "revision = 2") == "3");
+}
+
+// The chunk hashes of exactly the files that have chunk lines at the chunk
+// size, all of them (decision 0031), or nothing is written.
+void chunk_rows_fit_their_files()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const std::string archive_uuid = "c0ffee00-0000-4000-8000-000000000033";
+    const auto big = chunked_entry("big.bin", 2 * test_chunk_size + 7, 3, "big");
+    auto short_of_one = big;
+    short_of_one.chunks.pop_back();
+    const auto small_with_chunks = chunked_entry("small.bin", test_chunk_size, 1, "small");
+    auto big_without = big;
+    big_without.chunks.clear();
+    const auto refused = [&](const std::vector<va::Entry>& entries, std::uint64_t chunk_size,
+                             const std::string& message) {
+        const auto written = store.insert_file_rows(archive_uuid, 1, entries, chunk_size);
+        CHECK(!written && written.error().message == message);
+        CHECK(repository.query("SELECT COUNT(*) FROM files") == "0");
+        CHECK(chunk_rows(repository, "1") == "0");
+    };
+    refused({short_of_one}, test_chunk_size, "chunk hashes of big.bin: 2 given, 3 expected");
+    refused({small_with_chunks}, test_chunk_size, "chunk hashes of small.bin: 1 given, 0 expected");
+    refused({file_entry("a.txt", 1), big_without}, test_chunk_size, "chunk hashes of big.bin: 0 given, 3 expected");
+    refused({big}, 0, "chunk hashes of big.bin: 3 given, 0 expected");
+    refused({file_entry("a.txt", 1)}, 1000, "chunk_size 1000 is not 0 or a multiple of 65536 up to 1073741824");
+    CHECK(store.upsert_file_rows(archive_uuid, 1, {big_without}, 0));
+}
+
+// archive_revisions.merkle_root holds the revision's Merkle root, and NULL
+// for a revision without one (a manifest without a chunk size).
+void merkle_roots_are_recorded()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const std::string archive_uuid = "c0ffee00-0000-4000-8000-000000000034";
+    const auto root = va::blake3_hex("root");
+    CHECK(store.insert_revision(
+        {archive_uuid, 1, "manifests/x/r0001.vam", "{}", "h", "b", "", "2026-10-16T00:00:00Z", ""}));
+    CHECK(store.insert_revision(
+        {archive_uuid, 2, "manifests/x/r0002.vam", "{}", "h", "b", "", "2026-10-16T00:00:00Z", root}));
+    const auto revisions = store.revisions(archive_uuid);
+    CHECK(revisions && revisions->size() == 2);
+    if (revisions && revisions->size() == 2) {
+        CHECK(revisions->front().merkle_root.empty() && revisions->back().merkle_root == root);
+    }
+    CHECK(repository.query("SELECT COUNT(*) FROM archive_revisions WHERE merkle_root IS NULL") == "1");
+}
+
+// rebuild-index empties chunks with the rest of the index, except the rows
+// of the revisions it keeps: a registration's saved progress (decision 0026),
+// and a revision whose record it keeps, its manifest unread (decision 0028).
+void clear_index_empties_chunks()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const std::string kept = "c0ffee00-0000-4000-8000-000000000035";
+    const std::string gone = "c0ffee00-0000-4000-8000-000000000036";
+    const auto big = chunked_entry("big.bin", 2 * test_chunk_size, 2, "big");
+    CHECK(store.insert_file_rows(kept, 2, {big}, test_chunk_size));
+    CHECK(store.insert_file_rows(gone, 1, {big}, test_chunk_size));
+    // Chunk rows without a file row of their own (sample data).
+    repository.execute("INSERT INTO chunks(archive_uuid, revision, path, idx, offset, length, b3) VALUES("
+                       "'c0ffee00-0000-4000-8000-000000000037', 1, 'lost.bin', 0, 0, 1, 'x')");
+    CHECK(store.clear_index({}, {{kept, 2}}));
+    CHECK(chunk_rows(repository, "archive_uuid = '" + kept + "'") == "2");
+    CHECK(chunk_rows(repository, "archive_uuid <> '" + kept + "'") == "0");
+    CHECK(store.insert_file_rows(gone, 1, {big}, test_chunk_size));
+    CHECK(store.clear_index({{gone, 1}}));
+    CHECK(chunk_rows(repository, "archive_uuid = '" + gone + "'") == "2");
+    CHECK(chunk_rows(repository, "archive_uuid <> '" + gone + "'") == "0");
+    CHECK(store.clear_index());
+    CHECK(chunk_rows(repository, "1") == "0");
+}
+
 } // namespace
 
 void archive_store_tests()
@@ -850,4 +1012,8 @@ void archive_store_tests()
     failed_write_transaction_is_rolled_back();
     update_setting_never_creates();
     later_revision_of_an_archive();
+    chunk_rows_go_with_their_files();
+    chunk_rows_fit_their_files();
+    merkle_roots_are_recorded();
+    clear_index_empties_chunks();
 }

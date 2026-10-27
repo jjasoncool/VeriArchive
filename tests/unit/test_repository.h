@@ -57,6 +57,27 @@ struct TestRepository {
         CHECK(sqlite3_exec(database, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
         sqlite3_close(database);
     }
+
+    // The first column of the first row of `sql` as text, read through a
+    // connection of its own ("" for NULL, "-" when there is no row).
+    std::string query(const std::string& sql) const
+    {
+        sqlite3* database = nullptr;
+        const auto name = context.repo.database().u8string();
+        std::string result = "-";
+        if (sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY,
+                nullptr) == SQLITE_OK) {
+            sqlite3_stmt* statement = nullptr;
+            CHECK(sqlite3_prepare_v2(database, sql.c_str(), -1, &statement, nullptr) == SQLITE_OK);
+            if (statement && sqlite3_step(statement) == SQLITE_ROW) {
+                const auto* text = sqlite3_column_text(statement, 0);
+                result = text ? reinterpret_cast<const char*>(text) : "";
+            }
+            sqlite3_finalize(statement);
+        }
+        sqlite3_close(database);
+        return result;
+    }
 };
 
 } // namespace test

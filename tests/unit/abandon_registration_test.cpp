@@ -453,7 +453,7 @@ void abandoning_leaves_a_recorded_revision_alone()
     const auto archive_uuid = interrupted_first_registration(fixture);
     // Recorded by another operation, which left the plan (sample data).
     CHECK(fixture.store.insert_revision({archive_uuid, 1, "manifests/" + archive_uuid + "/r0001.vam", "{}", "h", "b",
-        "", "2026-10-15T01:00:00Z"}));
+        "", "2026-10-15T01:00:00Z", ""}));
     const auto before = rows_of(fixture.repository);
     va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
     const auto abandoned = va::abandon_registration(services, {archive_uuid, std::nullopt, std::nullopt});
@@ -537,7 +537,7 @@ void an_archive_with_a_revision_is_never_removed()
             held == Held::RecordSaysRevision ? 1u : 0u, status, "", ""}));
         if (held == Held::Revision) {
             CHECK(fixture.store.insert_revision({archive_uuid, 1, "manifests/" + archive_uuid + "/r0001.vam", "{}",
-                "h", "b", "", "2026-10-16T01:00:00Z"}));
+                "h", "b", "", "2026-10-16T01:00:00Z", ""}));
         } else if (held == Held::Verification) {
             va::VerifyRunRecord run;
             run.run_id = "c0ffee00-0000-4000-8000-0000000000ff";

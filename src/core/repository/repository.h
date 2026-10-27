@@ -44,10 +44,15 @@ std::expected<AppContext, IoError> resolve_repository(
 // a crash at any step completes the repository, and pins one that is
 // complete but was never pinned (decision 0011).
 std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer);
-// Reads repository.json and checks the database's schema. A database that is
-// missing, empty, not a database or damaged, or one that a rebuild made again
-// and did not fill (database_state), fails with a message that names `repo
-// rebuild-index` (decision 0036); any other failure keeps SQLite's own reason.
+// Opens an existing repository: reads repository.json and checks the
+// database's schema. A database that is missing, empty, not a database or
+// damaged, or one that a rebuild made again and did not fill
+// (database_state), fails with a message that names `repo rebuild-index`
+// (decision 0036); any other failure keeps SQLite's own reason. A database
+// that can be used, at an older schema version (V1's, version 1), is then
+// raised to this program's, in one write transaction (R-92, decision 0032);
+// one of a version this program does not know is refused ("unsupported
+// repository schema") and left as it is.
 std::expected<void, IoError> open_repository(AppContext& context);
 // R-83 step 5, for the pinned repository only (decision 0037): when
 // repository.json's uuid differs from the one recorded in the config, sets
@@ -69,8 +74,11 @@ std::expected<void, IoError> validate_schema(const RepositoryLayout& layout);
 // database is Unfilled, every command names the rebuild for it, and the next
 // rebuild names the database put aside again. A rebuild that stopped between
 // moving the database aside and putting the new one in place left its new
-// one beside it, which is taken up. The repository keeps its uuid. Gives the
-// mark's database put aside, made now or by a rebuild that did not finish;
+// one beside it, which is taken up. A database that can be used, or that a
+// rebuild made again, at an older schema version is raised to this
+// program's, as open_repository raises it, so that the rebuild fills an
+// index of this version (decision 0032). The repository keeps its uuid. Gives
+// the mark's database put aside, made now or by a rebuild that did not finish;
 // nothing where the database can be used and holds no mark; an error, with
 // nothing moved, where it cannot be read for another reason (database_state).
 std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(AppContext& context);

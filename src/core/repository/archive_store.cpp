@@ -3,6 +3,7 @@
 #include "common/canonical_json.h"
 #include "common/time.h"
 #include "core/hash/hashers.h"
+#include "core/manifest/manifest.h"
 
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
@@ -155,6 +156,7 @@ RevisionRecord read_revision(const SqliteStatement& row)
     revision.body_blake3 = row.text(5);
     revision.imported_from = row.text(6);
     revision.created = row.text(7);
+    revision.merkle_root = row.text(8);
     return revision;
 }
 
@@ -677,7 +679,7 @@ std::expected<void, IoError> ArchiveStore::insert_revision(const RevisionRecord&
     auto statement = database_.prepare(
         "INSERT INTO archive_revisions(archive_uuid, revision, manifest_relpath, header_json, "
         "header_blake3, body_blake3, merkle_root, signed, key_id, imported_from, created) "
-        "VALUES(?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)");
+        "VALUES(?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)");
     if (!statement) {
         return std::unexpected(statement.error());
     }
@@ -687,8 +689,9 @@ std::expected<void, IoError> ArchiveStore::insert_revision(const RevisionRecord&
         .bind(4, revision.header_json)
         .bind(5, revision.header_blake3)
         .bind(6, revision.body_blake3);
-    bind_optional_text(*statement, 7, revision.imported_from);
-    statement->bind(8, revision.created);
+    bind_optional_text(*statement, 7, revision.merkle_root);
+    bind_optional_text(*statement, 8, revision.imported_from);
+    statement->bind(9, revision.created);
     return statement->run();
 }
 
@@ -728,7 +731,7 @@ std::expected<std::vector<RevisionRecord>, IoError> ArchiveStore::revisions(cons
 {
     auto statement = database_.prepare(
         "SELECT archive_uuid, revision, manifest_relpath, header_json, header_blake3, "
-        "body_blake3, imported_from, created FROM archive_revisions WHERE archive_uuid = ? "
+        "body_blake3, imported_from, created, merkle_root FROM archive_revisions WHERE archive_uuid = ? "
         "ORDER BY revision");
     if (!statement) {
         return std::unexpected(statement.error());
@@ -789,16 +792,16 @@ std::expected<void, IoError> ArchiveStore::insert_evidence(const EvidenceRecord&
     return statement->run();
 }
 
-std::expected<void, IoError> ArchiveStore::insert_file_rows(
-    const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
+std::expected<void, IoError> ArchiveStore::insert_file_rows(const Uuid& archive_uuid, std::uint32_t revision,
+    const std::vector<Entry>& entries, std::uint64_t chunk_size)
 {
-    return write_file_rows("INSERT", archive_uuid, revision, entries);
+    return write_file_rows("INSERT", archive_uuid, revision, entries, chunk_size);
 }
 
-std::expected<void, IoError> ArchiveStore::upsert_file_rows(
-    const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
+std::expected<void, IoError> ArchiveStore::upsert_file_rows(const Uuid& archive_uuid, std::uint32_t revision,
+    const std::vector<Entry>& entries, std::uint64_t chunk_size)
 {
-    return write_file_rows("INSERT OR REPLACE", archive_uuid, revision, entries);
+    return write_file_rows("INSERT OR REPLACE", archive_uuid, revision, entries, chunk_size);
 }
 
 std::expected<std::vector<Entry>, IoError> ArchiveStore::file_rows(
@@ -818,7 +821,7 @@ std::expected<std::vector<Entry>, IoError> ArchiveStore::file_rows(
             return std::unexpected(row.error());
         }
         if (!*row) {
-            return entries;
+            break;
         }
         Entry entry;
         entry.path.p = statement->text(0);
@@ -836,6 +839,47 @@ std::expected<std::vector<Entry>, IoError> ArchiveStore::file_rows(
         entry.sha256 = statement->text(7);
         entries.push_back(std::move(entry));
     }
+    // Each file's chunk hashes, from its chunk rows in idx order (decision
+    // 0032). A file whose rows do not run from idx 0 without a gap gets none.
+    auto chunks = database_.prepare(
+        "SELECT path, raw_hex, stream, idx, b3 FROM chunks WHERE archive_uuid = ? AND revision = ? "
+        "ORDER BY path, raw_hex, stream, idx");
+    if (!chunks) {
+        return std::unexpected(chunks.error());
+    }
+    chunks->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision));
+    std::map<std::string, std::size_t> by_key;
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        by_key.emplace(entry_key(entries[index]), index);
+    }
+    std::set<std::size_t> broken;
+    for (;;) {
+        const auto row = chunks->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            break;
+        }
+        Entry owner;
+        owner.path.p = chunks->text(0);
+        owner.path.raw = chunks->text(1);
+        owner.stream = chunks->text(2);
+        const auto found = by_key.find(entry_key(owner));
+        if (found == by_key.end()) {
+            continue; // no file row of its own
+        }
+        auto& file = entries[found->second];
+        if (chunks->integer(3) == static_cast<std::int64_t>(file.chunks.size())) {
+            file.chunks.push_back(chunks->text(4));
+        } else {
+            broken.insert(found->second);
+        }
+    }
+    for (const auto index : broken) {
+        entries[index].chunks.clear();
+    }
+    return entries;
 }
 
 std::expected<bool, IoError> ArchiveStore::has_file_rows(const Uuid& archive_uuid, std::uint32_t revision)
@@ -864,13 +908,32 @@ std::expected<CheckpointCount, IoError> ArchiveStore::file_row_count(const Uuid&
 }
 
 std::expected<void, IoError> ArchiveStore::write_file_rows(const char* verb,
-    const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
+    const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries, std::uint64_t chunk_size)
 {
+    // The chunk hashes of exactly the files that have chunk lines at this
+    // chunk size, all of them (decision 0031), checked before anything is
+    // written: the index never holds part of a file's chunks.
+    if (!valid_chunk_size(chunk_size)) {
+        return std::unexpected(IoError{IoErrorKind::Other, 0, invalid_chunk_size(chunk_size)});
+    }
+    for (const auto& entry : entries) {
+        const auto expected = has_chunk_lines(entry, chunk_size) ? chunk_line_count(*entry.size, chunk_size) : 0;
+        if (entry.chunks.size() != expected) {
+            return std::unexpected(IoError{IoErrorKind::Other, 0,
+                std::format("chunk hashes of {}: {} given, {} expected", entry.path.p, entry.chunks.size(), expected)});
+        }
+    }
     auto statement = database_.prepare(std::string(verb) +
         " INTO files(archive_uuid, revision, path, raw_hex, stream, type, size, mtime_ns, "
         "b3, sha256, flags) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     if (!statement) {
         return std::unexpected(statement.error());
+    }
+    auto chunk_statement = database_.prepare(std::string(verb) +
+        " INTO chunks(archive_uuid, revision, path, raw_hex, stream, idx, offset, length, b3) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    if (!chunk_statement) {
+        return std::unexpected(chunk_statement.error());
     }
     for (const auto& entry : entries) {
         statement->bind(1, archive_uuid)
@@ -895,36 +958,63 @@ std::expected<void, IoError> ArchiveStore::write_file_rows(const char* verb,
         if (auto inserted = statement->run(); !inserted) {
             return inserted;
         }
+        for (std::uint64_t idx = 0; idx < entry.chunks.size(); ++idx) {
+            const auto chunk = chunk_of(entry.path.p, *entry.size, idx, chunk_size);
+            chunk_statement->bind(1, archive_uuid)
+                .bind(2, static_cast<std::int64_t>(revision))
+                .bind(3, entry.path.p)
+                .bind(4, entry.path.raw)
+                .bind(5, entry.stream)
+                .bind(6, as_int(idx))
+                .bind(7, as_int(chunk.offset))
+                .bind(8, as_int(chunk.length))
+                .bind(9, entry.chunks[idx]);
+            if (auto inserted = chunk_statement->run(); !inserted) {
+                return inserted;
+            }
+        }
     }
     return {};
 }
 
 std::expected<void, IoError> ArchiveStore::delete_file_rows(const Uuid& archive_uuid, std::uint32_t revision)
 {
-    auto statement = database_.prepare("DELETE FROM files WHERE archive_uuid = ? AND revision = ?");
-    if (!statement) {
-        return std::unexpected(statement.error());
+    // The files' chunk rows go with them (decision 0032).
+    for (const char* table : {"files", "chunks"}) {
+        auto statement =
+            database_.prepare(std::string("DELETE FROM ") + table + " WHERE archive_uuid = ? AND revision = ?");
+        if (!statement) {
+            return std::unexpected(statement.error());
+        }
+        if (auto deleted = statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision)).run();
+            !deleted) {
+            return deleted;
+        }
     }
-    return statement->bind(1, archive_uuid).bind(2, static_cast<std::int64_t>(revision)).run();
+    return {};
 }
 
 std::expected<void, IoError> ArchiveStore::delete_file_rows(
     const Uuid& archive_uuid, std::uint32_t revision, const std::vector<Entry>& entries)
 {
-    // By the primary key, one row each.
-    auto statement = database_.prepare(
-        "DELETE FROM files WHERE archive_uuid = ? AND revision = ? AND path = ? AND raw_hex = ? AND stream = ?");
-    if (!statement) {
-        return std::unexpected(statement.error());
-    }
-    for (const auto& entry : entries) {
-        statement->bind(1, archive_uuid)
-            .bind(2, static_cast<std::int64_t>(revision))
-            .bind(3, entry.path.p)
-            .bind(4, entry.path.raw)
-            .bind(5, entry.stream);
-        if (auto deleted = statement->run(); !deleted) {
-            return deleted;
+    // By the primary key: one row each, and each file's chunk rows with it
+    // (decision 0032).
+    for (const char* table : {"files", "chunks"}) {
+        auto statement = database_.prepare(std::string("DELETE FROM ") + table +
+                                           " WHERE archive_uuid = ? AND revision = ? AND path = ? AND raw_hex = ? "
+                                           "AND stream = ?");
+        if (!statement) {
+            return std::unexpected(statement.error());
+        }
+        for (const auto& entry : entries) {
+            statement->bind(1, archive_uuid)
+                .bind(2, static_cast<std::int64_t>(revision))
+                .bind(3, entry.path.p)
+                .bind(4, entry.path.raw)
+                .bind(5, entry.stream);
+            if (auto deleted = statement->run(); !deleted) {
+                return deleted;
+            }
         }
     }
     return {};
@@ -934,7 +1024,7 @@ std::expected<void, IoError> ArchiveStore::clear_index(const std::set<std::pair<
     const std::set<std::pair<Uuid, std::uint32_t>>& saved_progress)
 {
     if (kept.empty() && saved_progress.empty()) {
-        return database_.execute("DELETE FROM files; DELETE FROM archive_revisions;");
+        return database_.execute("DELETE FROM files; DELETE FROM chunks; DELETE FROM archive_revisions;");
     }
     // The revisions (archive, revision) that the query `sql` gives, read
     // through the table's primary key to the end before the first delete.
@@ -958,8 +1048,8 @@ std::expected<void, IoError> ArchiveStore::clear_index(const std::set<std::pair<
         held->reset();
         return revisions;
     };
-    // The records of the revisions kept stay, with their rows of files;
-    // every other record goes.
+    // The records of the revisions kept stay, with their rows of files and
+    // chunks; every other record goes.
     const auto recorded = revisions_in("SELECT archive_uuid, revision FROM archive_revisions");
     if (!recorded) {
         return std::unexpected(recorded.error());
@@ -977,7 +1067,10 @@ std::expected<void, IoError> ArchiveStore::clear_index(const std::set<std::pair<
             return removed;
         }
     }
-    const auto indexed = revisions_in("SELECT DISTINCT archive_uuid, revision FROM files");
+    // Every revision the files and chunks tables hold rows of; the rows of
+    // each that is not kept go, its chunk rows with them (delete_file_rows).
+    const auto indexed =
+        revisions_in("SELECT archive_uuid, revision FROM files UNION SELECT archive_uuid, revision FROM chunks");
     if (!indexed) {
         return std::unexpected(indexed.error());
     }
