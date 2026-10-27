@@ -14,8 +14,15 @@ struct AppContext {
     RepositoryLayout repo;
     std::string repo_selected_by;
     std::string repository_uuid;
-    // Non-empty when the opened repository's uuid differs from the uuid recorded
-    // in the config (R-83 step 5); the user interface shows a warning.
+    // Set by resolve_repository when `repo init` pins RepositoryRoot (§B7.4
+    // step 3, or `repo init --repository P` with nothing pinned): only then
+    // does initialise_repository write the pin, with the repository's uuid as
+    // the pin's record, into the config file (decision 0037).
+    bool pins_repository = false;
+    // Non-empty when the pinned repository's uuid differs from the uuid
+    // recorded in the config (R-83 step 5, decision 0037); the user interface
+    // shows a warning. A repository chosen with --repository or
+    // VERIARCHIVE_REPOSITORY is never compared with that record.
     std::string previous_repository_uuid;
 };
 

@@ -42,9 +42,11 @@ std::expected<AppContext, IoError> resolve_repository(
 // config pin. Re-running after a crash at any step completes the repository.
 std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer);
 std::expected<void, IoError> open_repository(AppContext& context);
-// R-83 step 5: when repository.json's uuid differs from the one recorded in the
-// config, sets context.previous_repository_uuid (the caller warns) and records
-// the new uuid in the existing config file.
+// R-83 step 5, for the pinned repository only (decision 0037): when
+// repository.json's uuid differs from the one recorded in the config, sets
+// context.previous_repository_uuid (the caller warns) and records the new uuid
+// in the existing config file. A repository chosen with --repository or
+// VERIARCHIVE_REPOSITORY is neither compared nor recorded.
 std::expected<void, IoError> record_repository_uuid(AppContext& context, IFileWriter& writer);
 std::expected<void, IoError> validate_schema(const RepositoryLayout& layout);
 

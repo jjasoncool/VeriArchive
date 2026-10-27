@@ -708,6 +708,16 @@ set(GLOBAL --config "${WORK}/config2.json")
 run_cli("0" --repository "${WORK}/repo2" repo init)
 run_cli("0" import "${WORK}/export/r0001.vam")
 run_cli("0" import "${WORK}/export/r0001.vam")
+# Decision 0037: a repository named with --repository for one command leaves
+# the pin's record of the uuid alone, so the next plain command on the pinned
+# repository warns of nothing.
+set(GLOBAL --config "${WORK}/config.json")
+run_cli("0" --repository "${WORK}/repo2" archive list)
+run_cli("0" --lang en repo info)
+if(NOT last_errors STREQUAL "")
+    message(FATAL_ERROR "a command on another repository changed what the pinned one says:\n${last_errors}")
+endif()
+set(GLOBAL --config "${WORK}/config2.json")
 
 # An import leaves the revision to an unfinished registration of it that has
 # saved files (decision 0030). The first repository records revision 2 of the

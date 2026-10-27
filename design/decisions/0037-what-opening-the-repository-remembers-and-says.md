@@ -1,0 +1,30 @@
+---
+status: accepted
+date: 2026-10-27
+amends: HANDOFF §B7.4 (R-83 step 5: only the pinned repository's uuid is compared with the config's record and written into it)
+---
+
+# What opening the repository remembers and says
+
+Every command, and the GUI when it starts, opens the repository as §B7.4 says: the one named with `--repository` or `VERIARCHIVE_REPOSITORY` (explicit), else the one pinned in the config file, else, on first use, a new one that `repo init` pins. R-83 step 5 then compares the opened repository's uuid with the config's `last_repository_uuid`, warns where they differ, and records the new uuid.
+
+That comparison was made for every repository opened, also one named for a single command. The user guide's own example, an import into another repository (`--repository <other> repo init`, then `import`), wrote the other repository's uuid into the pin's record, even with a read-only command such as `--repository <other> archive list`; the next plain command, on the pinned repository, then warned "repository_uuid changed from ... to ...; recorded the new uuid", and so did every switch back and forth. `repo init --repository P` beside an existing pin created P and wrote P's uuid into the config file the same way, although it left the pin as it was. The warning was true to the letter of step 5 and false to its purpose: it is meant to tell that the repository behind the pin has been replaced (another copy of the folder, a repository restored from an older backup, a disk swapped), and here nothing had been replaced.
+
+## Decision
+
+1. **The record belongs to the pin.** R-83 step 5 applies to the pinned repository only (`repo_selected_by` is `pinned`): where its `repository.json` names another uuid than the config's `last_repository_uuid`, the program warns and records the new uuid, as before. A repository chosen with `--repository` or `VERIARCHIVE_REPOSITORY` is never compared with that record and never written into it, whatever the command, so using one once leaves the next command on the pinned repository without a warning. An init that pins a repository (the first use, or `repo init --repository P` while nothing is pinned) writes the pin and, as its record, the new repository's uuid, as before; `repo init --repository P` beside an existing pin creates P and leaves the config file as it is.
+
+## Why
+
+The record says which repository the pin last led to. Only opening the repository through the pin can tell that what the pin leads to has changed; a repository named for one command says nothing about it, and writing its uuid into the record made the record wrong for the next plain command. Leaving the record alone keeps the warning for the case it was made for: the folder behind the pin replaced by another repository.
+
+Rejected alternatives:
+
+- Keeping one record per repository (a list of uuids): the warning would then say only that a repository is new to this config file, which it cannot know usefully for a folder named on the command line; the pin is the one place whose content is expected to stay the same.
+- Warning for an explicit repository without recording its uuid: every command with `--repository` would warn, about a repository the operator named on purpose.
+
+## Consequences
+
+- `--repository` and `VERIARCHIVE_REPOSITORY` no longer write the config file at all: neither the record nor, as before, the pin.
+- The user guide's example of an import into another repository names that repository with `--repository`, which it lacked, and works without a later warning.
+- Tests: a repository created and opened with `--repository` beside a pinned one leaves the config file byte for byte as it was and gives no warning, nor does the pinned repository opened plainly afterwards; one named by `VERIARCHIVE_REPOSITORY` the same; the pinned repository whose uuid changed still warns and is recorded (R-83 step 5); the CLI end to end: a plain `repo info` after a command on another repository named with `--repository` prints no warning. A mutation check removed each rule in turn (the comparison made for the pinned repository alone; the config written by an init only where it pins), and each removal failed the test meant for it.

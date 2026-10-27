@@ -290,6 +290,7 @@ std::expected<AppContext, IoError> resolve_repository(
             context.config_file = options.executable_dir / "config.json";
         }
         context.config.repository = pin_value(context.repo.root, context.config_file.parent_path());
+        context.pins_repository = true;
     }
     return context;
 }
@@ -309,8 +310,12 @@ std::expected<void, IoError> initialise_repository(AppContext& context, IFileWri
         return result;
     }
 
-    context.config.last_repository_uuid = context.repository_uuid;
-    if (context.config.repository) {
+    // Only an init that pins the repository writes the config file: the pin,
+    // and its record of the repository's uuid (R-83 step 5). `repo init
+    // --repository P` beside an existing pin leaves that pin and its record
+    // as they are (decision 0037).
+    if (context.pins_repository) {
+        context.config.last_repository_uuid = context.repository_uuid;
         std::error_code error;
         std::filesystem::create_directories(context.config_file.parent_path(), error);
         if (auto pinned = write_file_atomically(
@@ -338,7 +343,12 @@ std::expected<void, IoError> open_repository(AppContext& context)
 
 std::expected<void, IoError> record_repository_uuid(AppContext& context, IFileWriter& writer)
 {
-    if (context.config.last_repository_uuid == context.repository_uuid) {
+    // The record belongs to the pin (decision 0037): a repository chosen for
+    // a command with --repository or VERIARCHIVE_REPOSITORY is never compared
+    // with it, nor written into it, so using one once does not make the next
+    // command on the pinned repository warn. An init that pins writes the
+    // record with the pin (initialise_repository).
+    if (context.repo_selected_by != "pinned" || context.config.last_repository_uuid == context.repository_uuid) {
         return {};
     }
     if (!context.config.last_repository_uuid.empty()) {

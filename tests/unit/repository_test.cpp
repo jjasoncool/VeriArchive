@@ -262,6 +262,74 @@ void changed_repository_uuid_is_reported_and_recorded()
     CHECK(saved && *saved && (*saved)->last_repository_uuid == actual_uuid);
 }
 
+// The whole content of `file`, byte for byte.
+std::string file_bytes(const std::filesystem::path& file)
+{
+    std::ifstream input(file, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+// Decision 0037: R-83 step 5 belongs to the pin. A repository created and
+// opened with --repository beside the pinned one, or named by
+// VERIARCHIVE_REPOSITORY, is never compared with the pin's record of the uuid
+// nor written into it: no warning, the config file unchanged byte for byte,
+// and the pinned repository opened plainly afterwards gives no warning either.
+void explicit_repository_leaves_the_pins_record()
+{
+    TemporaryDirectory temporary("explicit-record");
+    auto options = make_options(temporary.path());
+    const auto writer = va::platform::make_file_writer();
+    auto pinned = va::resolve_repository(options, always_writable_local);
+    CHECK(pinned && pinned->pins_repository && va::initialise_repository(*pinned, *writer));
+    if (!pinned) {
+        return;
+    }
+    const auto config_before = file_bytes(pinned->config_file);
+    CHECK(config_before.find(pinned->repository_uuid) != std::string::npos);
+
+    // `repo init --repository <other>` while a repository is pinned: created,
+    // not pinned, and the config file left as it was.
+    auto explicit_options = options;
+    explicit_options.explicit_repository = temporary.path() / "other-SAMPLE";
+    auto created = va::resolve_repository(explicit_options, always_writable_local);
+    CHECK(created && created->repo_selected_by == "explicit" && !created->pins_repository);
+    if (!created) {
+        return;
+    }
+    CHECK(va::initialise_repository(*created, *writer));
+    CHECK(va::record_repository_uuid(*created, *writer));
+    CHECK(created->previous_repository_uuid.empty());
+    CHECK(created->repository_uuid != pinned->repository_uuid);
+    CHECK(file_bytes(pinned->config_file) == config_before);
+
+    // Opened again for a command, by --repository and by VERIARCHIVE_REPOSITORY.
+    explicit_options.initialise = false;
+    auto environment_options = options;
+    environment_options.initialise = false;
+    environment_options.environment_repository = explicit_options.explicit_repository;
+    for (const auto* chosen : {&explicit_options, &environment_options}) {
+        auto opened = va::resolve_repository(*chosen, always_writable_local);
+        CHECK(opened && opened->repo_selected_by == "explicit" && va::open_repository(*opened));
+        if (!opened) {
+            continue;
+        }
+        CHECK(va::record_repository_uuid(*opened, *writer));
+        CHECK(opened->previous_repository_uuid.empty());
+        CHECK(file_bytes(pinned->config_file) == config_before);
+    }
+
+    // The next plain command opens the pinned repository without a warning.
+    options.initialise = false;
+    auto plain = va::resolve_repository(options, always_writable_local);
+    CHECK(plain && plain->repo_selected_by == "pinned" && va::open_repository(*plain));
+    if (!plain) {
+        return;
+    }
+    CHECK(va::record_repository_uuid(*plain, *writer));
+    CHECK(plain->previous_repository_uuid.empty());
+    CHECK(file_bytes(pinned->config_file) == config_before);
+}
+
 // R-84: relative locations resolve against the executable directory, never the
 // process working directory. The test moves the working directory elsewhere.
 void relative_paths_ignore_working_directory()
@@ -473,6 +541,7 @@ void repository_tests()
     explicit_init_creates_and_pins_repository();
     malformed_repository_uuid_is_rejected();
     changed_repository_uuid_is_reported_and_recorded();
+    explicit_repository_leaves_the_pins_record();
     relative_paths_ignore_working_directory();
     network_repository_is_rejected_by_default();
     unwritable_executable_directory_falls_back_to_home();

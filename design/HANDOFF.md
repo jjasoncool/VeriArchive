@@ -448,6 +448,7 @@ struct AppContext {                 // built once in the composition root, passe
 ### B7.4 RepositoryRoot resolution (authoritative, R-83)
 
 > Amended by `design/decisions/0019-relative-repository-pin.md`: step 2 resolves a relative pin against the folder of the config file that holds it; step 3 chooses the config file first and writes a RepositoryRoot inside that file's folder relative to it, with forward slashes (a portable first run pins `"data"`), any other RepositoryRoot absolute as before; pins already written are never rewritten. R-84 is unchanged for `--repository` and `VERIARCHIVE_REPOSITORY`.
+> Amended by `design/decisions/0037-what-opening-the-repository-remembers-and-says.md`: step 5 applies to the pinned repository only: a repository chosen with `--repository` or `VERIARCHIVE_REPOSITORY` is neither compared with `last_repository_uuid` nor written into it, and `repo init --repository P` beside an existing pin creates P and leaves the config file as it is.
 
 ```text
 1. if --repository <path> or VERIARCHIVE_REPOSITORY is set:
