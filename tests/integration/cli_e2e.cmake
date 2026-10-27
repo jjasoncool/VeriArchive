@@ -142,8 +142,36 @@ if(NOT last_errors MATCHES "選項 --label 需要一個值")
 endif()
 # A path the user typed is shown as typed, even when it looks like a status word.
 run_cli("10" register Missing)
-if(NOT last_errors MATCHES "不是資料夾：Missing")
+if(NOT last_errors MATCHES "找不到資料夾或磁碟區 Missing")
     message(FATAL_ERROR "a typed path was translated:\n${last_errors}")
+endif()
+# Decision 0029, point 7: `verify --full` takes an archive's uuid, a folder or
+# volume that is there, or the start of an archive's uuid (8 characters or
+# more); anything else is a folder or volume that was not found (exit 10), in
+# either language, never "not a registered archive". Where no volume is
+# attached as the drive letter typed (Windows; K:, a sample letter, where no
+# volume has it), it says to check that the device is attached.
+run_cli("10" --lang en verify --full "${WORK}/no-such-folder-SAMPLE")
+if(NOT last_errors STREQUAL "error: the folder or volume ${WORK}/no-such-folder-SAMPLE was not found\n")
+    message(FATAL_ERROR "verify of a folder that is not there:\n${last_errors}")
+endif()
+run_cli("10" verify --full abcdef12)
+if(NOT last_errors MATCHES "錯誤：找不到資料夾或磁碟區 abcdef12\n$")
+    message(FATAL_ERROR "verify of the start of no archive's uuid:\n${last_errors}")
+endif()
+string(SUBSTRING "${archive_uuid}" 0 8 uuid_start)
+run_cli("0;2" verify --full "${uuid_start}" --json)
+string(JSON start_verified GET "${last_output}" archive_uuid)
+if(NOT start_verified STREQUAL archive_uuid)
+    message(FATAL_ERROR "verify --full of the start of an archive's uuid:\n${last_output}")
+endif()
+if(CMAKE_HOST_WIN32 AND NOT EXISTS "K:/")
+    run_cli("10" --lang en verify --full [[K:\SAMPLE]])
+    if(NOT last_errors STREQUAL "error: the folder or volume K:\\SAMPLE was not found: no volume is attached as K:; check that the device that holds it is attached\n")
+        message(FATAL_ERROR "verify on a drive letter that no volume has:\n${last_errors}")
+    endif()
+elseif(CMAKE_HOST_WIN32)
+    message(STATUS "drive letter probe skipped: a volume is attached as K:")
 endif()
 # Decision 0029, point 6: a root that holds the repository, or lies inside it,
 # is refused before anything is read (exit 10), in either language, and
@@ -165,8 +193,8 @@ if(repository_held EQUAL -1 OR repository_held_why EQUAL -1 OR repository_inside
 endif()
 # A new root of a relocation that is no folder is a usage error too, named as typed.
 run_cli("10" --lang en archive relocate "${archive_uuid}" Missing)
-if(NOT last_errors STREQUAL "error: not a directory: Missing\n")
-    message(FATAL_ERROR "relocate to a root that is no folder:\n${last_errors}")
+if(NOT last_errors STREQUAL "error: the folder or volume Missing was not found\n")
+    message(FATAL_ERROR "relocate to a root that is not there:\n${last_errors}")
 endif()
 # Decision 0029 (Windows): a root on a network share, or one written in the
 # \\?\ form, is refused by register, verify and relocate before anything of

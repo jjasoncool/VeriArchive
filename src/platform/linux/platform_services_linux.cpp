@@ -109,6 +109,25 @@ RootKind archive_root_kind(const std::filesystem::path& root)
                : RootKind::Usable;
 }
 
+// Linux has no drive letters: a root is a folder, something else, missing,
+// or not told (access denied, say), which the volume lookup then reports.
+RootPresence root_presence(const std::filesystem::path& root)
+{
+    std::error_code error;
+    const auto status = std::filesystem::status(root, error);
+    switch (status.type()) {
+    case std::filesystem::file_type::directory:
+        return RootPresence::Folder;
+    case std::filesystem::file_type::not_found:
+        return RootPresence::Missing;
+    case std::filesystem::file_type::none:
+    case std::filesystem::file_type::unknown:
+        return RootPresence::Unknown;
+    default:
+        return error ? RootPresence::Unknown : RootPresence::NotAFolder;
+    }
+}
+
 bool is_directory(const std::filesystem::path& path)
 {
     std::error_code error;

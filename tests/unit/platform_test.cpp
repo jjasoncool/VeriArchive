@@ -135,6 +135,41 @@ void windows_roots_on_shares_are_told()
     CHECK(kind(LR"(\\?\UNCLE\SAMPLE)") == RootKind::DevicePath); // a name that only starts with UNC
 }
 
+// Decision 0029, point 7: why a root that Windows did not find is not there
+// (sample data: K: and X: are letters that no volume has, Y: a fixed volume,
+// Z: a card reader without its card). A drive letter that no volume has, in
+// either case, and a drive without its medium, are not attached; a folder
+// not found on a volume, and a GUID path not found, are missing; access
+// denied is not told. Only a drive letter at the start is asked about.
+// Plain C++, so it is tested on every OS although only Windows uses it.
+void windows_roots_that_are_not_there_are_told()
+{
+    using va::platform::RootPresence;
+    constexpr unsigned long path_not_found = 3;
+    constexpr unsigned long not_ready = 21;
+    constexpr unsigned long access_denied = 5;
+    std::vector<std::wstring> asked;
+    const auto absent = [&asked](std::wstring_view root, unsigned long error) {
+        return va::platform::windows::absent_root(root, error, [&asked](std::wstring_view drive) -> unsigned {
+            asked.emplace_back(drive);
+            return drive == L"Y:" ? 3u : drive == L"Z:" ? 2u : va::platform::windows::drive_no_root_dir;
+        });
+    };
+    CHECK(absent(LR"(K:\SAMPLE)", path_not_found) == RootPresence::NotAttached);
+    CHECK(absent(L"x:", path_not_found) == RootPresence::NotAttached);
+    CHECK(absent(L"X:/SAMPLE/photos", path_not_found) == RootPresence::NotAttached);
+    CHECK(absent(LR"(Z:\)", not_ready) == RootPresence::NotAttached);
+    CHECK(absent(LR"(Y:\SAMPLE-missing)", path_not_found) == RootPresence::Missing);
+    CHECK(absent(LR"(Y:\SAMPLE-denied)", access_denied) == RootPresence::Unknown);
+    CHECK((asked == std::vector<std::wstring>{L"K:", L"X:", L"X:", L"Z:", L"Y:", L"Y:"}));
+    asked.clear();
+    CHECK(absent(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\SAMPLE)", path_not_found) ==
+          RootPresence::Missing);
+    CHECK(absent(LR"(\\?\Volume{c0ffee00-0000-4000-8000-000000000001}\)", not_ready) == RootPresence::Missing);
+    CHECK(absent(L"KSAMPLE", path_not_found) == RootPresence::Missing);
+    CHECK(asked.empty());
+}
+
 // Decision 0029, point 3: a volume's GUID path in the \\?\ form, as mountvol
 // lists it, the only name of a volume that has no drive letter or folder
 // path, is taken, also for a folder below it, "Volume" and the GUID in any
@@ -453,6 +488,7 @@ void process_table_tells_running_from_ended()
 
 void platform_tests()
 {
+    windows_roots_that_are_not_there_are_told();
     process_table_tells_running_from_ended();
     media_enumeration_identifies_local_volume();
     mountinfo_is_parsed();

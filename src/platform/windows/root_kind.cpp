@@ -74,6 +74,35 @@ bool names_volume_guid(std::wstring_view path)
     return true;
 }
 
+RootPresence absent_root(std::wstring_view root, unsigned long error, const DriveTypeQuery& drive_type)
+{
+    // Win32 error codes, as winerror.h gives them.
+    constexpr unsigned long file_not_found = 2;
+    constexpr unsigned long path_not_found = 3;
+    constexpr unsigned long invalid_drive = 15;
+    constexpr unsigned long not_ready = 21;
+    constexpr unsigned long invalid_name = 123;
+    constexpr unsigned long bad_pathname = 161;
+    const bool drive_letter =
+        root.size() >= 2 && is_letter(root[0]) && root[1] == L':' && (root.size() == 2 || is_separator(root[2]));
+    if (drive_letter) {
+        if (drive_type(std::wstring{upper(root[0]), L':'}) == drive_no_root_dir || error == not_ready) {
+            return RootPresence::NotAttached;
+        }
+    }
+    switch (error) {
+    case file_not_found:
+    case path_not_found:
+    case invalid_drive:
+    case not_ready:
+    case invalid_name:
+    case bad_pathname:
+        return RootPresence::Missing;
+    default:
+        return RootPresence::Unknown;
+    }
+}
+
 RootKind root_kind(std::wstring_view root, const NetworkDriveQuery& network_drive)
 {
     const bool two_separators = root.size() >= 2 && is_separator(root[0]) && is_separator(root[1]);

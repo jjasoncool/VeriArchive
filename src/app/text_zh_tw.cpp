@@ -220,6 +220,11 @@ constexpr CatalogEntry entries[] = {
     {"run the command again with --confirm to resume it", "若要繼續，請加上 --confirm 再執行一次"},
     {"--io takes hdd or ssd", "--io 只接受 hdd 或 ssd"},
     {"not a directory: {}", "不是資料夾：{}"},
+    // A root that is not there (decision 0029, point 7), named as typed.
+    {"the folder or volume {} was not found", "找不到資料夾或磁碟區 {}"},
+    {"the folder or volume {} was not found: no volume is attached as {}; check that the device that holds it is "
+        "attached",
+        "找不到資料夾或磁碟區 {}：目前沒有磁碟區連接為 {}；請確認存放它的裝置已連接"},
     // A root refused before anything of it is read (decision 0029), from src/app/typed_path.cpp; the
     // command line and the GUI show it.
     {"the archive root is on a network share; VeriArchive registers and verifies folders on volumes attached "

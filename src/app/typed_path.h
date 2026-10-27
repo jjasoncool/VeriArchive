@@ -42,13 +42,22 @@ std::filesystem::path typed_root(std::string_view text);
 // root that VeriArchive finds itself (an archive verified by its uuid).
 std::optional<std::string> root_refusal(const std::filesystem::path& root);
 
-// Why the root of `register` or `archive relocate`, made by typed_root from
-// `typed`, is not taken, before anything of it is read: refused
-// (root_refusal), or no folder, "not a directory: <typed>", the root named as
-// it was typed. Nothing when it is taken. The command line asks it of the
-// root of both commands, and the Archive List's Resume of a stopped
-// registration of the root its plan names, as `register <root> --resume`
-// asks it (decision 0022, point 7).
+// Why a root made by typed_root from `typed` is not there, before anything
+// of it is read (decision 0029, point 7): "the folder or volume <typed> was
+// not found", and on Windows, where nothing is attached as its drive letter,
+// "...: no volume is attached as K:; check that the device that holds it is
+// attached". Nothing when it is there, or when that cannot be told (the
+// volume lookup reports it then).
+std::optional<std::string> root_absent(const std::filesystem::path& root, std::string_view typed);
+
+// Why the root of `register`, `archive relocate` or `verify --full`, made by
+// typed_root from `typed`, is not taken, before anything of it is read:
+// refused (root_refusal), not there (root_absent), or no folder, "not a
+// directory: <typed>", the root named as it was typed. Nothing when it is
+// taken. The command line asks it of the root of these commands, the GUI of
+// the root of Register Archive and Verify Archive, and the Archive List's
+// Resume of a stopped registration of the root its plan names, as `register
+// <root> --resume` asks it (decision 0022, point 7).
 std::optional<std::string> root_not_taken(const std::filesystem::path& root, std::string_view typed);
 
 } // namespace va::app

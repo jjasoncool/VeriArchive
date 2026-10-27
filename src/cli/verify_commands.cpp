@@ -11,7 +11,9 @@
 #include "platform/interrupt.h"
 #include "platform/media_enumerator.h"
 
+#include <algorithm>
 #include <iostream>
+#include <vector>
 
 namespace va::cli {
 namespace {
@@ -135,11 +137,36 @@ int verify_command(const Arguments& arguments)
             "[--resume RUN_ID]"});
     }
 
+    // Decision 0029, point 7: an archive's uuid; a folder or volume that is
+    // there; the start of an archive's uuid (8 characters or more), as the
+    // other archive commands take it; otherwise the folder or volume was not
+    // found (exit 10), never "not a registered archive".
     VerifyRequest request;
-    if (is_canonical_uuid(arguments.words[1])) {
-        request.archive_uuid = arguments.words[1];
+    const auto& word = arguments.words[1];
+    std::optional<std::string> absent;  // the word names no root that is there: why, for when it names no archive
+    if (is_canonical_uuid(word)) {
+        request.archive_uuid = word;
     } else {
-        request.root = app::typed_root(arguments.words[1]);
+        const auto root = app::typed_root(word);
+        // Decision 0029: a root on a network share, or one written in the
+        // \\?\ form, is refused before anything of it is read.
+        if (const auto refusal = app::root_refusal(root)) {
+            return report_failure(arguments, {exit_code::usage, *refusal});
+        }
+        absent = app::root_absent(root, word);
+        const bool like_a_uuid = word.size() >= 8 && std::ranges::all_of(word, [](char character) {
+            return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') ||
+                   (character >= 'A' && character <= 'F') || character == '-';
+        });
+        if (absent && !like_a_uuid) {
+            return report_failure(arguments, {exit_code::usage, *absent});
+        }
+        if (!absent) {
+            if (const auto problem = app::root_not_taken(root, word)) {
+                return report_failure(arguments, {exit_code::usage, *problem});
+            }
+            request.root = root;
+        }
     }
     request.strict_metadata = arguments.has("--strict-metadata");
     request.resume_run = arguments.value("--resume");
@@ -148,13 +175,6 @@ int verify_command(const Arguments& arguments)
             return report_failure(arguments, {exit_code::usage, "--io takes hdd or ssd"});
         }
         request.rotational = *io == "hdd";
-    }
-    // Decision 0029: a root on a network share, or written in the \\?\ form,
-    // is refused before anything of it is read.
-    if (request.root) {
-        if (const auto refusal = app::root_refusal(*request.root)) {
-            return report_failure(arguments, {exit_code::usage, *refusal});
-        }
     }
 
     auto session = open_session(arguments, false);
@@ -169,6 +189,26 @@ int verify_command(const Arguments& arguments)
     auto store = ArchiveStore::open(session->context.repo);
     if (!store) {
         return report_failure(arguments, {exit_code::repository, store.error().message});
+    }
+    // The start of an archive's uuid, where no root is there by that name.
+    if (absent) {
+        const auto archives = store->archives();
+        if (!archives) {
+            return report_failure(arguments, {exit_code::repository, archives.error().message});
+        }
+        std::vector<Uuid> named;
+        for (const auto& archive : *archives) {
+            if (names_archive(archive.archive_uuid, word)) {
+                named.push_back(archive.archive_uuid);
+            }
+        }
+        if (named.empty()) {
+            return report_failure(arguments, {exit_code::usage, *absent});
+        }
+        if (named.size() > 1) {
+            return report_failure(arguments, {exit_code::usage, "several archives start with " + word});
+        }
+        request.archive_uuid = named.front();
     }
     const auto archive_files = platform::make_file_system_access();
     const auto repository_files = platform::make_file_system_access();

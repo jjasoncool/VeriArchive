@@ -144,6 +144,24 @@ RootKind archive_root_kind(const std::filesystem::path& root)
     });
 }
 
+RootPresence root_presence(const std::filesystem::path& root)
+{
+    if (platform::is_directory(root)) {
+        return RootPresence::Folder;
+    }
+    const auto name = windows::long_path(root.native());
+    if (GetFileAttributesW(name.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return RootPresence::NotAFolder;
+    }
+    const auto error = GetLastError();
+    // GetDriveTypeW tells a letter that no volume has (DRIVE_NO_ROOT_DIR),
+    // unprivileged (R-09).
+    return windows::absent_root(root.native(), error, [](std::wstring_view drive) {
+        const std::wstring drive_root = std::wstring(drive) + L"\\";
+        return static_cast<unsigned>(GetDriveTypeW(drive_root.c_str()));
+    });
+}
+
 bool is_directory(const std::filesystem::path& path)
 {
     auto name = windows::long_path(path.native());

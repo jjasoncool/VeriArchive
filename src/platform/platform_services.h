@@ -52,6 +52,14 @@ enum class RootKind {
 // be told is Usable: its volume lookup then says what is wrong.
 RootKind archive_root_kind(const std::filesystem::path& root);
 
+// Whether a root the operator gave is there (decision 0029, point 7), asked
+// before anything of it is read: a folder; something that is no folder; not
+// found; on Windows, not found as nothing is attached as its drive letter
+// (or the drive has no medium in it); or not told (access denied, say),
+// which the volume lookup then reports.
+enum class RootPresence { Folder, NotAFolder, Missing, NotAttached, Unknown };
+RootPresence root_presence(const std::filesystem::path& root);
+
 // Whether `path` is a folder, as the root of a registration or relocation
 // must be (app::root_not_taken). On Windows asked of GetFileAttributesW in
 // the \\?\ form (R-23), which takes a volume's GUID path ("\\?\Volume{...}\")

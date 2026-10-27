@@ -137,7 +137,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
             // \\?\ form, is refused before anything of it is read, and a
             // resumed one that is no folder too, as on the command line. Asked
             // here, off the window's thread: on Linux it reads the root's filesystem.
-            if (auto refusal = typed ? app::root_not_taken(request.root, *typed) : app::root_refusal(request.root)) {
+            if (auto refusal = app::root_not_taken(request.root, typed ? *typed : path_to_utf8(request.root))) {
                 return [refusal = std::move(*refusal)](const app::Text& text) {
                     return text.format("Not registered: {}", text(refusal));
                 };

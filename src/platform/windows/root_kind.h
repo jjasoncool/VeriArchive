@@ -47,4 +47,20 @@ inline constexpr std::size_t volume_guid_name_length = 7 + 36 + 1;
 // share that does not answer is refused at once.
 RootKind root_kind(std::wstring_view root, const NetworkDriveQuery& network_drive);
 
+// The type GetDriveTypeW reports for the drive letter `drive` ("K:") as
+// "K:\"; drive_no_root_dir where no volume has that letter.
+using DriveTypeQuery = std::function<unsigned(std::wstring_view drive)>;
+inline constexpr unsigned drive_no_root_dir = 1;  // DRIVE_NO_ROOT_DIR
+
+// Why `root`, which GetFileAttributesW did not find (`error`, its Win32
+// error), is not there (decision 0029, point 7): NotAttached where it starts
+// with a drive letter that no volume has (`drive_type` gives
+// drive_no_root_dir), or one whose drive has no medium in it
+// (ERROR_NOT_READY, an empty card reader); Missing where it is not found
+// (ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_INVALID_DRIVE,
+// ERROR_INVALID_NAME, ERROR_BAD_PATHNAME); otherwise Unknown, which the
+// volume lookup reports. `drive_type` is asked only about a drive letter at
+// the start.
+RootPresence absent_root(std::wstring_view root, unsigned long error, const DriveTypeQuery& drive_type);
+
 } // namespace va::platform::windows

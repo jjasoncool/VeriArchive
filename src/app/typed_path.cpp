@@ -88,10 +88,35 @@ std::optional<std::string> root_refusal(const std::filesystem::path& root)
     return std::nullopt;
 }
 
+std::optional<std::string> root_absent(const std::filesystem::path& root, std::string_view typed)
+{
+    switch (platform::root_presence(root)) {
+    case platform::RootPresence::Missing:
+        return "the folder or volume " + std::string(typed) + " was not found";
+    case platform::RootPresence::NotAttached: {
+        // Only a root that starts with a drive letter is not attached.
+        auto drive = path_to_utf8(root).substr(0, 2);
+        if (drive[0] >= 'a' && drive[0] <= 'z') {
+            drive[0] = static_cast<char>(drive[0] - 'a' + 'A');
+        }
+        return "the folder or volume " + std::string(typed) + " was not found: no volume is attached as " + drive +
+               "; check that the device that holds it is attached";
+    }
+    case platform::RootPresence::Folder:
+    case platform::RootPresence::NotAFolder:
+    case platform::RootPresence::Unknown:
+        break;
+    }
+    return std::nullopt;
+}
+
 std::optional<std::string> root_not_taken(const std::filesystem::path& root, std::string_view typed)
 {
     if (auto refusal = root_refusal(root)) {
         return refusal;
+    }
+    if (auto absent = root_absent(root, typed)) {
+        return absent;
     }
     // Asked of the platform: the C++ library cannot tell that a volume's GUID
     // path is a folder (decision 0029, point 3).

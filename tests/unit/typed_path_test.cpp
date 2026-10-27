@@ -136,12 +136,13 @@ void roots_on_shares_are_refused()
     }
 }
 
-// The root of `register` and `archive relocate`, and the root that Resume in
-// the Archive List takes from a registration's plan (decision 0022, point 7),
-// is taken only when it is a folder and not refused: one that is no folder,
-// or that is missing, says so, naming the root as it was typed, in either
-// language; a refused one says why it is refused. (Sample names, in a folder
-// of their own in the temporary folder.)
+// The root of `register`, `archive relocate` and `verify --full`, and the
+// root that Resume in the Archive List takes from a registration's plan
+// (decision 0022, point 7), is taken only when it is a folder and not
+// refused: one that is missing says that the folder or volume was not found
+// (decision 0029, point 7), one that is no folder says so, each naming the
+// root as it was typed, in either language; a refused one says why it is
+// refused. (Sample names, in a folder of their own in the temporary folder.)
 void roots_that_are_no_folder_are_not_taken()
 {
     const va::app::Text chinese(va::app::Language::TraditionalChinese);
@@ -151,10 +152,17 @@ void roots_that_are_no_folder_are_not_taken()
     std::ofstream(folder / "SAMPLE.txt") << "sample data\n";
     CHECK(!va::app::root_not_taken(va::app::typed_root(va::path_to_utf8(folder)), va::path_to_utf8(folder)));
     const auto missing = va::app::root_not_taken(folder / "SAMPLE-missing", "SAMPLE-missing/");
-    CHECK(missing && *missing == "not a directory: SAMPLE-missing/");
-    CHECK(missing && chinese(*missing) == "不是資料夾：SAMPLE-missing/");
+    CHECK(missing && *missing == "the folder or volume SAMPLE-missing/ was not found");
+    CHECK(missing && chinese(*missing) == "找不到資料夾或磁碟區 SAMPLE-missing/");
+    CHECK(va::app::root_absent(folder / "SAMPLE-missing", "SAMPLE-missing/") == missing);
+    CHECK(va::app::root_absent(folder / "SAMPLE-missing" / "below", "x") ==
+          "the folder or volume x was not found");
+    CHECK(!va::app::root_absent(folder, "folder") && !va::app::root_absent(folder / "SAMPLE.txt", "file"));
     const auto file = va::app::root_not_taken(folder / "SAMPLE.txt", "SAMPLE.txt");
     CHECK(file && *file == "not a directory: SAMPLE.txt");
+    CHECK(chinese("the folder or volume K:\\SAMPLE was not found: no volume is attached as K:; check that the device "
+                  "that holds it is attached") ==
+          "找不到資料夾或磁碟區 K:\\SAMPLE：目前沒有磁碟區連接為 K:；請確認存放它的裝置已連接");
     if (std::filesystem::path::preferred_separator == '\\') {
         const auto share = va::app::root_not_taken(
             va::app::typed_root(R"(\\sample-server\sample-share)"), R"(\\sample-server\sample-share)");

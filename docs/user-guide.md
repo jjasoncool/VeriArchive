@@ -208,7 +208,7 @@ veriarchive-cli archive compare <uuid> <uuid>     # do two archives hold the sam
 
 An interrupted `archive relocate` keeps what it has matched and is listed with the unfinished operations: continue it with `archive relocate <uuid> <root> --resume`, or give it up with `archive abandon-relocation <uuid> --confirm`. A relocation that finds an entry on the new carrier that differs from the archive, such as a modified or missing file, ends instead, also when it is interrupted after that, and its saved progress is removed: copy again, and the next relocation reads the whole new carrier. An entry that cannot be read ends it only once everything else has been read; if the new carrier is unplugged before that, the relocation is interrupted, and its resume reads that entry again. If the saved progress of a relocation that ended cannot be removed, the relocation stays listed as "new carrier differs; abandon it": abandon it, then relocate again.
 
-`archive show`, `retire`, `relocate`, `compare`, `history`, `export` and `export-sha256sums` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
+`archive show`, `retire`, `relocate`, `compare`, `history`, `export`, `export-sha256sums` and `verify --full` accept the first 8 or more characters of a uuid, as long as no other archive starts with them.
 
 ## Verifying an archive
 
@@ -228,7 +228,7 @@ veriarchive-cli verify --full E:\
 veriarchive-cli verify --full 46d4c696-4999-4c7d-80eb-b626da614e77
 ```
 
-With a uuid, VeriArchive finds the archive on the attached disks. If more than one attached volume holds it, as a device and a sector-by-sector clone of it do, it does not choose one: it stops (exit code 12) and names their folders. Verify one of them by its folder, or detach the other volumes and verify it again.
+With a uuid, or its first 8 or more characters, VeriArchive finds the archive on the attached disks. If more than one attached volume holds it, as a device and a sector-by-sector clone of it do, it does not choose one: it stops (exit code 12) and names their folders. Verify one of them by its folder, or detach the other volumes and verify it again. A folder or volume that is not there, and that is no archive's uuid either, is reported as not found (exit code 10); where no volume is attached as its drive letter, the message asks you to check that the device that holds it is attached.
 
 ### Reading the result
 

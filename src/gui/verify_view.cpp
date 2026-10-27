@@ -164,7 +164,7 @@ void run_verification(GuiState& state, VerifyRequest request)
             // \\?\ form, is refused before anything of it is read. Asked here,
             // off the window's thread: on Linux it reads the root's filesystem.
             if (request.root) {
-                if (auto refusal = app::root_refusal(*request.root)) {
+                if (auto refusal = app::root_not_taken(*request.root, path_to_utf8(*request.root))) {
                     return [refusal = std::move(*refusal)](const app::Text& text) {
                         return text.format("Not verified: {}", text(refusal));
                     };
