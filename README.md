@@ -45,7 +45,7 @@ Release presets are `windows-ucrt64-release` and `linux-release`. CI runs on Git
 ### Windows package
 
 A self-contained Windows build (programs, every DLL they need, GTK resources and the licenses of
-all bundled libraries) runs on machines without MSYS2:
+every library they use, bundled or compiled in) runs on machines without MSYS2:
 
 ```sh
 cmake --preset windows-ucrt64-release

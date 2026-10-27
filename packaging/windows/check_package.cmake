@@ -80,6 +80,10 @@ foreach(required
         "share/licenses/THIRD-PARTY.txt"
         "share/licenses/gtk4"
         "share/licenses/glib2"
+        "share/licenses/nlohmann-json/LICENSE.MIT"
+        "share/licenses/blake3/LICENSE_CC0"
+        "share/licenses/blake3/LICENSE_A2"
+        "share/licenses/blake3/LICENSE_A2LLVM"
         "share/locale/zh_TW/LC_MESSAGES/gtk40.mo"
         "share/doc/VeriArchive/NOTICE.txt"
         "share/doc/VeriArchive/README.md"
@@ -88,6 +92,15 @@ foreach(required
         "share/doc/VeriArchive/user-guide.zh-TW.md")
     if(NOT EXISTS "${PREFIX}/${required}")
         message(FATAL_ERROR "missing from the package: ${required}")
+    endif()
+endforeach()
+# NOTICE.txt names the code compiled into the programs and where its licenses
+# are (decision 0038).
+file(READ "${PREFIX}/share/doc/VeriArchive/NOTICE.txt" notice)
+foreach(named "nlohmann/json" "share\\licenses\\nlohmann-json\\LICENSE.MIT" "BLAKE3" "share\\licenses\\blake3\\")
+    string(FIND "${notice}" "${named}" found)
+    if(found EQUAL -1)
+        message(FATAL_ERROR "NOTICE.txt does not name ${named}")
     endif()
 endforeach()
 

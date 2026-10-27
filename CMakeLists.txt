@@ -216,6 +216,11 @@ install(FILES docs/user-guide.md docs/user-guide.zh-TW.md
     DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
 # The guides show their screenshots from images/ beside them.
 install(DIRECTORY docs/images DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
+# The licenses of the code compiled into the programs (decision 0038):
+# nlohmann/json (MIT) and BLAKE3 (CC0 1.0, or Apache 2.0 with or without the
+# LLVM exceptions). packaging/licenses holds the texts of the versions fetched
+# above, 3.12.0 and 1.8.2; a new version brings its own.
+install(DIRECTORY packaging/licenses/ DESTINATION share/licenses COMPONENT VeriArchive)
 if(WIN32)
     get_filename_component(VERIARCHIVE_MINGW_PREFIX "${CMAKE_CXX_COMPILER}" DIRECTORY)
     get_filename_component(VERIARCHIVE_MINGW_PREFIX "${VERIARCHIVE_MINGW_PREFIX}" DIRECTORY)

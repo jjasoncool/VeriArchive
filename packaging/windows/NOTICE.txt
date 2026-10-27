@@ -14,3 +14,12 @@ share\licenses\THIRD-PARTY.txt lists every bundled DLL and the MSYS2 package it 
 share\licenses\<package>\ holds that package's license. The libraries are unmodified builds from
 the MSYS2 project (https://packages.msys2.org), where their source code is available. Under the
 LGPL you may replace any of these DLLs with a compatible build of your own.
+
+Compiled into the programs
+--------------------------
+Two more libraries are compiled into bin\veriarchive-cli.exe and bin\veriarchive-gui.exe:
+- nlohmann/json (https://github.com/nlohmann/json), copyright Niels Lohmann, under the MIT
+  License: share\licenses\nlohmann-json\LICENSE.MIT
+- the BLAKE3 C implementation (https://github.com/BLAKE3-team/BLAKE3), released into the public
+  domain with CC0 1.0 and, at your choice, also licensed under the Apache License 2.0, with or
+  without the LLVM exceptions: share\licenses\blake3\
