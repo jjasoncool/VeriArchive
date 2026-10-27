@@ -224,7 +224,7 @@ inline void import_later_revision(
     const auto written = writer.finish(header);
     CHECK(written && written->file->commit().has_value());
     const auto imported = va::import_manifest(
-        store, *fixture.repository.files, *fixture.repository.writer, fixture.repository.context.repo, path, false);
+        store, *fixture.repository.files, *fixture.repository.writer, fixture.repository.context.repo, path, false, test::not_cancelled(), test::no_progress());
     CHECK(imported && imported->revision == revision && !imported->new_archive);
     if (!imported) {
         std::cerr << "  import of revision " << revision << ": " << imported.error().message << '\n';

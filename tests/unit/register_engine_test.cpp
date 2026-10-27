@@ -2447,7 +2447,7 @@ void a_registration_over_a_lost_manifest_registers_the_next_revision()
             bytes[bytes.size() - 5] ^= 0x01;
             std::ofstream(second, std::ios::binary | std::ios::trunc) << bytes;
             kind = va::UnusableManifest::Kind::Changed;
-            const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+            const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
             CHECK(rebuilt && rebuilt->revisions_kept.size() == 1);
             CHECK(!fixture.store.setting(va::skipped_manifest_key(archive_uuid)).value_or("").empty());
         }
@@ -2711,7 +2711,7 @@ void a_registration_over_a_lost_manifest_needs_the_archives_own_root()
     fixture.repository.execute("DELETE FROM archive_revisions WHERE revision = 2; DELETE FROM files WHERE revision = 2");
     refused("/vol/a", import_it);
     const auto imported = va::import_manifest(fixture.store, fixture.archive, *fixture.repository.writer, layout, copy,
-        false);
+        false, test::not_cancelled(), test::no_progress());
     CHECK(imported && imported->revision == 2 && !imported->already_present);
     refused("/vol/a", "the manifest of revision 2 of archive " + archive_uuid +
                           " can be used: register its next revision with `register <root_path> --new-revision`");

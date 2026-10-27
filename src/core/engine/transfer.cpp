@@ -23,6 +23,12 @@ std::unexpected<ImportFailure> refuse(std::string message)
     return std::unexpected(ImportFailure{"", std::move(message), ImportFailure::Kind::Refused});
 }
 
+std::unexpected<ImportFailure> cancelled_import()
+{
+    return std::unexpected(
+        ImportFailure{"", "the import was cancelled; nothing was imported", ImportFailure::Kind::Cancelled});
+}
+
 // A read of the source that gives other bytes than the one validated: its
 // entries, or the copy (decision 0030).
 constexpr const char* changed_while_imported = "the manifest changed while it was imported; nothing was imported";
@@ -51,7 +57,7 @@ std::string rollback_message(std::uint32_t revision, std::uint32_t highest)
 // read of removable media that differs, is not staged.
 std::expected<std::unique_ptr<IOutputFile>, ImportFailure> stage_manifest(IFileSystemAccess& files,
     IFileWriter& writer, const std::filesystem::path& source, const std::filesystem::path& destination,
-    const std::string& header_line, const ManifestHeader& header)
+    const std::string& header_line, const ManifestHeader& header, CancelToken& cancel, IProgressSink& progress)
 {
     auto input = files.open(source, ReadOptions{false, true});
     if (!input) {
@@ -66,7 +72,11 @@ std::expected<std::unique_ptr<IOutputFile>, ImportFailure> stage_manifest(IFileS
     Blake3Hasher body_hash;
     std::uint64_t body_length = 0;
     std::vector<std::byte> buffer(1 << 20);
+    Progress copied{0, (*input)->size(), 0, 0, ""};
     for (std::uint64_t offset = 0;;) {
+        if (cancel.cancelled()) {
+            return cancelled_import(); // the copy goes with `output`
+        }
         const auto count = (*input)->read(offset, buffer);
         if (!count) {
             return fail("RepositoryError", count.error().message);
@@ -86,6 +96,8 @@ std::expected<std::unique_ptr<IOutputFile>, ImportFailure> stage_manifest(IFileS
             return fail("RepositoryError", written.error().message);
         }
         offset += *count;
+        copied.bytes_done = offset;
+        progress.on_progress(copied);
     }
     if (first_line != header_line + '\n' || body_length != header.body_length ||
         body_hash.finish_hex() != header.body_blake3) {
@@ -120,20 +132,21 @@ bool is_the_one_recorded(const RevisionRecord& record, const ManifestReader& rea
 // index stay as they are.
 std::expected<ImportResult, ImportFailure> restore_manifest(ArchiveStore& store, IFileSystemAccess& files,
     IFileWriter& writer, const std::filesystem::path& source, const std::filesystem::path& destination,
-    const RevisionRecord& record, const ManifestReader& reader, ImportResult result)
+    const RevisionRecord& record, const ManifestReader& reader, ImportResult result, CancelToken& cancel,
+    IProgressSink& progress)
 {
     std::error_code error;
     std::filesystem::create_directories(destination.parent_path(), error);
-    auto staged = stage_manifest(files, writer, source, destination, reader.header_line(), reader.header());
+    auto staged =
+        stage_manifest(files, writer, source, destination, reader.header_line(), reader.header(), cancel, progress);
     if (!staged) {
         return std::unexpected(staged.error());
     }
     bool changed = false; // the record is gone, or names another line 1, by now
     const auto named = [&]() -> std::expected<void, IoError> {
         // As an import's record: another operation's record of a large
-        // archive holds the write lock for seconds.
-        const CancelToken not_cancelled;
-        if (auto begun = store.begin_waiting(record_lock_wait, not_cancelled); !begun) {
+        // archive holds the write lock for seconds; a cancel ends the wait.
+        if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
             return begun;
         }
         const auto now = store.revision(record.archive_uuid, record.revision);
@@ -151,6 +164,9 @@ std::expected<ImportResult, ImportFailure> restore_manifest(ArchiveStore& store,
     }();
     if (!named) {
         store.rollback(); // the staged copy goes with `staged`
+        if (cancel.cancelled()) {
+            return cancelled_import();
+        }
         if (changed) {
             return refuse("the repository's record of revision " + std::to_string(record.revision) +
                           " of archive " + record.archive_uuid +
@@ -205,18 +221,20 @@ std::expected<void, IoError> copy_file(IFileSystemAccess& files, IFileWriter& wr
     return (*output)->commit();
 }
 
-std::expected<ExportResult, std::string> export_archive(ArchiveStore& store,
+std::expected<ExportResult, ExportFailure> export_archive(ArchiveStore& store,
     IFileSystemAccess& repository_files, IFileWriter& writer, const RepositoryLayout& layout,
-    const Uuid& archive_uuid, const std::filesystem::path& out_directory)
+    const Uuid& archive_uuid, const std::filesystem::path& out_directory, CancelToken& cancel,
+    IProgressSink& progress)
 {
+    const auto failed = [](std::string message) { return std::unexpected(ExportFailure{std::move(message)}); };
     const auto archive = store.find_archive(archive_uuid);
     if (!archive || !*archive) {
-        return std::unexpected("no archive " + archive_uuid);
+        return failed("no archive " + archive_uuid);
     }
     const auto revision = (*archive)->current_revision;
     const auto manifest = load_recorded_manifest(store, repository_files, layout, archive_uuid, revision);
     if (!manifest) {
-        return std::unexpected(manifest.error().failure_class + ": " + manifest.error().message);
+        return failed(manifest.error().failure_class + ": " + manifest.error().message);
     }
 
     std::error_code error;
@@ -224,22 +242,53 @@ std::expected<ExportResult, std::string> export_archive(ArchiveStore& store,
     ExportResult result;
     const auto source = manifest_path(layout.manifests(), archive_uuid, revision);
     result.manifest = out_directory / source.filename();
-    if (auto copied = copy_file(repository_files, writer, source, result.manifest); !copied) {
-        return std::unexpected(copied.error().message);
+    // Copied piece by piece, with its progress, as a cancel stops it: its
+    // copy is named only once complete (IOutputFile::commit), and goes
+    // otherwise (R-94).
+    auto input = repository_files.open(source, ReadOptions{false, true});
+    if (!input) {
+        return failed(input.error().message);
+    }
+    auto output = writer.create(result.manifest);
+    if (!output) {
+        return failed(output.error().message);
+    }
+    std::vector<std::byte> buffer(1 << 20);
+    Progress copied{0, (*input)->size(), 0, 0, ""};
+    for (std::uint64_t offset = 0;;) {
+        if (cancel.cancelled()) {
+            return std::unexpected(ExportFailure{"the export was cancelled; nothing was written", true});
+        }
+        const auto count = (*input)->read(offset, buffer);
+        if (!count) {
+            return failed(count.error().message);
+        }
+        if (*count == 0) {
+            break;
+        }
+        if (auto written = (*output)->write(std::span(buffer.data(), *count)); !written) {
+            return failed(written.error().message);
+        }
+        offset += *count;
+        copied.bytes_done = offset;
+        progress.on_progress(copied);
+    }
+    if (auto committed = (*output)->commit(); !committed) {
+        return failed(committed.error().message);
     }
 
     result.identity = out_directory / "identity.json";
     const auto identity = identity_file_json(archive_uuid, (*archive)->label, revision,
         manifest->header.root_subpath, (*archive)->created);
     if (auto written = write_file_atomically(writer, result.identity, identity); !written) {
-        return std::unexpected(written.error().message);
+        return failed(written.error().message);
     }
     return result;
 }
 
 std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     IFileSystemAccess& files, IFileWriter& writer, const RepositoryLayout& layout,
-    const std::filesystem::path& manifest, bool force_rollback)
+    const std::filesystem::path& manifest, bool force_rollback, CancelToken& cancel, IProgressSink& progress)
 {
     auto reader = ManifestReader::open(files, manifest);
     if (!reader) {
@@ -280,7 +329,7 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
             return fail("ManifestHashMismatch",
                 "revision " + std::to_string(header.revision) + " is already known with different bytes");
         }
-        return restore_manifest(store, files, writer, manifest, destination, *same, *reader, result);
+        return restore_manifest(store, files, writer, manifest, destination, *same, *reader, result, cancel, progress);
     }
 
     // R-15: never go back to an older revision without an explicit override.
@@ -294,7 +343,11 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     // which the reader checks at the end of the body, as the copy below is
     // checked (decision 0030).
     std::vector<Entry> entries;
+    Progress read{0, 0, 0, header.body_lines, ""};
     for (;;) {
+        if (cancel.cancelled()) {
+            return cancelled_import();
+        }
         auto next = reader->next();
         if (!next) {
             if (next.error().kind == ManifestFailure::Kind::BodyMismatch) {
@@ -306,13 +359,18 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
             break;
         }
         entries.push_back(std::move(**next));
+        // Every 1000 entries, and at the last one.
+        if (++read.items_done % 1000 == 0 || read.items_done == read.items_total) {
+            progress.on_progress(read);
+        }
     }
 
     // Copied and flushed without a lock, which takes a while for a large
     // manifest; not at its name yet.
     std::error_code error;
     std::filesystem::create_directories(destination.parent_path(), error);
-    auto staged = stage_manifest(files, writer, manifest, destination, reader->header_line(), header);
+    auto staged =
+        stage_manifest(files, writer, manifest, destination, reader->header_line(), header, cancel, progress);
     if (!staged) {
         return std::unexpected(staged.error());
     }
@@ -329,10 +387,12 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     const auto recorded = [&]() -> std::expected<void, IoError> {
         // Another operation's record of a large archive holds the write lock
         // for seconds: this one waits for it, and then finds the revision
-        // recorded rather than the database locked. An import cannot be
-        // cancelled while it waits (Ctrl+C ends the process).
-        const CancelToken not_cancelled;
-        if (auto begun = store.begin_waiting(record_lock_wait, not_cancelled); !begun) {
+        // recorded rather than the database locked. A cancel ends the wait
+        // (R-94): nothing is recorded, and the staged copy goes.
+        if (auto begun = store.begin_waiting(record_lock_wait, cancel); !begun) {
+            if (cancel.cancelled()) {
+                return begun;
+            }
             // Locked for longer still: whoever held the lock may have
             // recorded the revision.
             if (const auto taken = store.revision_recorded(uuid, header.revision); taken && *taken) {
@@ -437,6 +497,9 @@ std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     }();
     if (!recorded) {
         store.rollback(); // the staged copy goes with `staged`
+        if (cancel.cancelled()) {
+            return cancelled_import();
+        }
         if (lost) {
             return refuse("revision " + std::to_string(header.revision) + " of archive " + uuid +
                           " was recorded by another operation while this import ran; nothing was imported "

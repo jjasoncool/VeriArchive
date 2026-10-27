@@ -36,10 +36,25 @@ std::optional<std::uint32_t> revision_from_name(const std::string& name)
     }
 }
 
+// A manifest that the rebuild reads: its archive, its file and the revision
+// its file name names.
+struct ManifestFile {
+    Uuid archive_uuid;
+    std::filesystem::path path;
+    std::string name;              // "r0002.vam"
+    std::uint32_t revision = 0;
+    std::uint64_t size = 0;        // as listed, for the progress
+};
+
+IoError cancelled_rebuild()
+{
+    return {IoErrorKind::Cancelled, 0, "the rebuild of the index was cancelled; the index was left as it was"};
+}
+
 } // namespace
 
-std::expected<RebuildReport, IoError> rebuild_index(
-    ArchiveStore& store, IFileSystemAccess& repository_files, const RepositoryLayout& layout)
+std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, CancelToken& cancel, IProgressSink& progress)
 {
     RebuildReport report;
     std::map<Uuid, std::vector<FoundRevision>> found;
@@ -51,6 +66,9 @@ std::expected<RebuildReport, IoError> rebuild_index(
     if (!archives) {
         return std::unexpected(archives.error());
     }
+    // Every manifest first, so the progress knows how many there are and
+    // their bytes (R-94).
+    std::vector<ManifestFile> manifests;
     for (const auto& directory : *archives) {
         const auto archive_uuid = path_to_utf8(directory.native_name);
         if (directory.type != EntryType::Directory || !is_canonical_uuid(archive_uuid)) {
@@ -67,37 +85,59 @@ std::expected<RebuildReport, IoError> rebuild_index(
         }
         for (const auto& file : *files) {
             const auto name = path_to_utf8(file.native_name);
-            const auto revision = revision_from_name(name);
-            if (!revision) {
-                continue;
+            if (const auto revision = revision_from_name(name)) {
+                manifests.push_back({archive_uuid, layout.manifests() / directory.native_name / file.native_name, name,
+                    *revision, file.size});
             }
-            const auto path = layout.manifests() / directory.native_name / file.native_name;
-            const auto cannot_read = "cannot read manifest " + archive_uuid + "/" + name + ": ";
-            const auto skip = [&](const std::string& cause) {
-                report.skipped.push_back(cannot_read + cause);
-                // Revisions start at 1 (§B4.3): "r0000.vam" names none.
-                if (*revision > 0) {
-                    unread[archive_uuid][*revision] = cause;
-                }
-            };
-            auto reader = ManifestReader::open(repository_files, path);
+        }
+    }
+    Progress state{0, 0, 0, manifests.size(), ""};
+    for (const auto& manifest : manifests) {
+        state.bytes_total += manifest.size;
+    }
+    progress.on_progress(state);
+
+    for (const auto& manifest : manifests) {
+        // Asked before each manifest: a cancel that came with a report reads
+        // no further manifest (R-94).
+        if (cancel.cancelled()) {
+            return std::unexpected(cancelled_rebuild());
+        }
+        const auto& archive_uuid = manifest.archive_uuid;
+        const auto& name = manifest.name;
+        const auto revision = manifest.revision;
+        state.current_item = "manifests/" + archive_uuid + "/" + name;
+        const auto cannot_read = "cannot read manifest " + archive_uuid + "/" + name + ": ";
+        const auto skip = [&](const std::string& cause) {
+            report.skipped.push_back(cannot_read + cause);
+            // Revisions start at 1 (§B4.3): "r0000.vam" names none.
+            if (revision > 0) {
+                unread[archive_uuid][revision] = cause;
+            }
+        };
+        // Reads the manifest; false where a cancel came while it read the
+        // entries, which are then not taken.
+        const auto read = [&]() -> bool {
+            auto reader = ManifestReader::open(repository_files, manifest.path);
             if (!reader) {
                 skip(reader.error().message);
-                continue;
+                return true;
             }
-            if (reader->header().archive_uuid != archive_uuid || reader->header().revision != *revision) {
+            if (reader->header().archive_uuid != archive_uuid || reader->header().revision != revision) {
                 skip("header does not match its file name");
-                continue;
+                return true;
             }
             FoundRevision item;
             item.header = reader->header();
-            item.record = {archive_uuid, *revision, "manifests/" + archive_uuid + "/" + name,
-                reader->header_line(), reader->header_blake3(), reader->header().body_blake3, "",
-                reader->header().created};
+            item.record = {archive_uuid, revision, "manifests/" + archive_uuid + "/" + name, reader->header_line(),
+                reader->header_blake3(), reader->header().body_blake3, "", reader->header().created};
             // A manifest whose entries cannot all be read is skipped, never
             // indexed with only the entries before the bad line.
             std::optional<std::string> entry_error;
             for (;;) {
+                if (cancel.cancelled()) {
+                    return false;
+                }
                 auto next = reader->next();
                 if (!next) {
                     entry_error = next.error().message;
@@ -107,13 +147,25 @@ std::expected<RebuildReport, IoError> rebuild_index(
                     break;
                 }
                 item.entries.push_back(std::move(**next));
+                // A report every 1000 entries too: a manifest of millions
+                // of entries takes a while, and a cancel stops in it.
+                if (item.entries.size() % 1000 == 0) {
+                    progress.on_progress(state);
+                }
             }
             if (entry_error) {
                 skip(*entry_error);
-                continue;
+                return true;
             }
             found[archive_uuid].push_back(std::move(item));
+            return true;
+        };
+        if (!read()) {
+            return std::unexpected(cancelled_rebuild());
         }
+        ++state.items_done;
+        state.bytes_done += manifest.size;
+        progress.on_progress(state);
     }
 
     if (auto begun = store.begin(); !begun) {
@@ -282,6 +334,10 @@ std::expected<RebuildReport, IoError> rebuild_index(
             return cleared;
         }
         for (const auto& [archive_uuid, revision] : latest) {
+            // Rolled back below: a cancelled rebuild changes nothing (R-94).
+            if (cancel.cancelled()) {
+                return std::unexpected(cancelled_rebuild());
+            }
             auto read = found.find(archive_uuid);
             std::vector<FoundRevision>* revisions = read == found.end() ? nullptr : &read->second;
             const auto record = existing.find(archive_uuid);

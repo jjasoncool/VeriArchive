@@ -275,7 +275,7 @@ void an_archive_whose_manifest_changed_only_in_its_body_is_retired_at_once()
     const auto c = fixture.register_root(fixture.archive.root() / "c");
     CHECK(c && c->revision == 1);
 
-    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
     CHECK(rebuilt && rebuilt->revisions_kept.size() == 1);
     const auto shown = listed(fixture, archive_uuid);
     CHECK(shown && shown->manifest_lost && shown->unusable_manifest &&
@@ -312,7 +312,7 @@ void a_retired_archive_whose_manifest_is_lost_owns_no_root()
     const auto& layout = fixture.repository.context.repo;
     const auto exports = layout.root.parent_path() / "SAMPLE-export";
     const auto exported = va::export_archive(fixture.store, *fixture.repository.files, *fixture.repository.writer,
-        layout, a->archive_uuid, exports);
+        layout, a->archive_uuid, exports, test::not_cancelled(), test::no_progress());
     CHECK(exported.has_value());
     const auto path = va::manifest_path(layout.manifests(), a->archive_uuid, 1);
     std::filesystem::remove(path);
@@ -371,14 +371,14 @@ void a_retired_archive_whose_manifest_is_lost_owns_no_root()
           index_stops.error().message.contains("rebuild the index with `repo rebuild-index`"));
     const auto shown = listed(fixture, b->archive_uuid);
     CHECK(shown && shown->unusable_manifest && !shown->manifest_lost);
-    CHECK(va::rebuild_index(fixture.store, *fixture.repository.files, layout).has_value());
+    CHECK(va::rebuild_index(fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress()).has_value());
     const auto d = fixture.register_root(fixture.archive.root() / "d");
     CHECK(d && d->revision == 1);
 
     // A's manifest put back: A is recognised again, at the folder that was
     // registered as a new archive meanwhile, which both archives match now.
     const auto imported = va::import_manifest(fixture.store, *fixture.repository.files, *fixture.repository.writer,
-        layout, exports / "r0001.vam", false);
+        layout, exports / "r0001.vam", false, test::not_cancelled(), test::no_progress());
     CHECK(imported && imported->restored);
     const auto a_listed = listed(fixture, a->archive_uuid);
     CHECK(a_listed && a_listed->header && !a_listed->unusable_manifest && !a_listed->manifest_lost &&
@@ -508,7 +508,7 @@ void a_lost_manifest_behind_a_wrong_index_leaves_matching_once_retired()
         }
 
         // A rebuild skips the manifest and leaves the index as it was.
-        const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+        const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
         CHECK(rebuilt && rebuilt->revisions_kept.size() + rebuilt->revisions_not_indexed.size() == 1);
         const auto after = listed(fixture, archive_uuid);
         CHECK(after && after->manifest_lost && after->archive.current_revision == 2);

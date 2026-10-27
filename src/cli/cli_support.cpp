@@ -186,6 +186,12 @@ void CliProgress::on_progress(const Progress& progress)
     last_ = now;
     if (unit_ == ProgressUnit::entries) {
         write(text_.format("comparing: {}/{} entries", progress.items_done, progress.items_total));
+    } else if (unit_ == ProgressUnit::manifests) {
+        write(text_.format("reading manifests: {}/{}", progress.items_done, progress.items_total));
+    } else if (unit_ == ProgressUnit::manifest && progress.items_total > 0) {
+        write(text_.format("reading the manifest: {}/{} entries", progress.items_done, progress.items_total));
+    } else if (unit_ == ProgressUnit::manifest) {
+        write(text_.format("copying the manifest: {}", app::describe_progress(text_, estimate_)));
     } else if (progress.items_total == 0) {
         write(text_.format("scanning: {} entries", progress.items_done));
     } else {

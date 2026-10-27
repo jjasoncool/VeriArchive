@@ -96,9 +96,11 @@ HostInfo host_info();
 std::string program_version();
 
 // What a progress line counts: files read and hashed (register, verify,
-// relocate), or manifest entries compared (archive compare, which reads no
-// file content and so reports no bytes).
-enum class ProgressUnit { files, entries };
+// relocate), manifest entries compared (archive compare, which reads no
+// file content and so reports no bytes), manifests read (repo
+// rebuild-index), or one manifest's entries read and then its bytes copied
+// (import, export).
+enum class ProgressUnit { files, entries, manifests, manifest };
 
 // Progress on stderr, one line rewritten in place, at most five updates a
 // second besides the one that completes the count; silent in --json mode. Hashing shows the share done by bytes, the

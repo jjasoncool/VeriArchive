@@ -1587,7 +1587,7 @@ void an_index_that_differs_from_its_manifest_is_never_taken()
               loaded.error().unusable && loaded.error().unusable->kind == va::UnusableManifest::Kind::IndexDiffers);
 
         const auto rebuilt =
-            va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo);
+            va::rebuild_index(fixture.store, *fixture.repository.files, fixture.repository.context.repo, test::not_cancelled(), test::no_progress());
         CHECK(rebuilt && rebuilt->revisions == 1 && rebuilt->skipped.empty());
         const auto verified = fixture.verify(fixture.archive.root());
         CHECK(verified && verified->result == "PASSED" && verified->revision == 1);
@@ -1849,8 +1849,8 @@ void an_archive_at_a_revision_the_index_has_no_record_of()
         CHECK(!loaded && loaded.error().failure_class == "RepositoryError" && loaded.error().message == message &&
               loaded.error().unusable && loaded.error().unusable->kind == va::UnusableManifest::Kind::NotIndexed);
         const auto exported = va::export_archive(fixture.store, repository_files, *fixture.repository.writer, layout,
-            fixture.archive_uuid, layout.root.parent_path() / "export");
-        CHECK(!exported && exported.error() == "RepositoryError: " + message);
+            fixture.archive_uuid, layout.root.parent_path() / "export", test::not_cancelled(), test::no_progress());
+        CHECK(!exported && exported.error().message == "RepositoryError: " + message);
         const auto compared = va::compare_archives(fixture.store, repository_files, layout, fixture.archive_uuid,
             fixture.archive_uuid, fixture.cancel, fixture.progress);
         CHECK(!compared && compared.error().failure_class == "RepositoryError");
@@ -1865,7 +1865,7 @@ void an_archive_at_a_revision_the_index_has_no_record_of()
         if (what != Case::Readable) {
             write_bytes(second, kept);
         }
-        const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+        const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
         CHECK(rebuilt && rebuilt->skipped.empty() && rebuilt->revisions == 2 && rebuilt->revisions_kept.empty());
         const auto verified = fixture.verify(by_uuid);
         CHECK(verified && verified->result == "PASSED" && verified->revision == 2);
@@ -1917,11 +1917,11 @@ void an_unfinished_first_registration_is_no_manifest_that_cannot_be_used()
     CHECK(!loaded && loaded.error().failure_class == "RepositoryError" &&
           loaded.error().message == "revision 0 is not recorded" && !loaded.error().unusable);
     const auto exported = va::export_archive(fixture.store, *fixture.repository.files, *fixture.repository.writer,
-        layout, b_uuid, layout.root.parent_path() / "export-b");
-    const bool not_recorded = !exported && exported.error() == "RepositoryError: revision 0 is not recorded";
+        layout, b_uuid, layout.root.parent_path() / "export-b", test::not_cancelled(), test::no_progress());
+    const bool not_recorded = !exported && exported.error().message == "RepositoryError: revision 0 is not recorded";
     CHECK(not_recorded);
     if (!not_recorded && !exported) {
-        std::cerr << "  B exported: " << exported.error() << '\n';
+        std::cerr << "  B exported: " << exported.error().message << '\n';
     }
 }
 
@@ -2235,7 +2235,7 @@ void a_damaged_archive_stops_only_a_root_that_could_be_its()
 
     // A's manifest restored (and the index rebuilt): A's root verifies.
     write_bytes(path, kept);
-    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
     CHECK(rebuilt && rebuilt->skipped.empty() && rebuilt->revisions == 2);
     const auto a_verified = fixture.verify(fixture.archive.root() / "a");
     CHECK(a_verified && a_verified->archive_uuid == a->archive_uuid && a_verified->result == "PASSED");
@@ -2288,8 +2288,8 @@ void a_first_line_that_no_longer_parses_has_changed()
             fixture.archive_uuid, fixture.archive_uuid, fixture.cancel, fixture.progress);
         CHECK(!compared && compared.error().failure_class == "ManifestHashMismatch");
         const auto exported = va::export_archive(fixture.store, *fixture.repository.files,
-            *fixture.repository.writer, layout, fixture.archive_uuid, layout.root.parent_path() / "export");
-        CHECK(!exported && exported.error() == "ManifestHashMismatch: " + message);
+            *fixture.repository.writer, layout, fixture.archive_uuid, layout.root.parent_path() / "export", test::not_cancelled(), test::no_progress());
+        CHECK(!exported && exported.error().message == "ManifestHashMismatch: " + message);
         va::VerifyRequest by_uuid;
         by_uuid.archive_uuid = fixture.archive_uuid;
         const auto verified = fixture.verify(by_uuid);

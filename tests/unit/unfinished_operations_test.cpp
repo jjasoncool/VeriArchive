@@ -2239,7 +2239,7 @@ void leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost()
     }
     std::ofstream(b->manifest, std::ios::binary | std::ios::trunc) << bytes;
     CHECK(listed() == both);
-    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout);
+    const auto rebuilt = va::rebuild_index(fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
     CHECK(rebuilt && rebuilt->revisions_kept.size() == 1);
     CHECK(listed() == std::vector<va::Uuid>{a->archive_uuid});
 

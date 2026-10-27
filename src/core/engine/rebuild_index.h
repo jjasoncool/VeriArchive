@@ -55,7 +55,14 @@ struct RebuildReport {
     std::vector<std::string> skipped;
 };
 
-std::expected<RebuildReport, IoError> rebuild_index(
-    ArchiveStore& store, IFileSystemAccess& repository_files, const RepositoryLayout& layout);
+// R-94: `progress` counts the manifests read (items) and their bytes as
+// listed, naming each (current_item): one report before the first, one at
+// every 1000 entries read, and one after each. `cancel` is asked before each
+// manifest and entry, and between the archives written in the rebuild's one
+// transaction, which a cancelled rebuild rolls back: it changes nothing, and
+// fails with IoErrorKind::Cancelled ("the rebuild of the index was
+// cancelled; ...").
+std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, CancelToken& cancel, IProgressSink& progress);
 
 } // namespace va

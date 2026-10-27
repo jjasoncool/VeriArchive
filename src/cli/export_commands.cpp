@@ -15,6 +15,7 @@
 #include "core/engine/transfer.h"
 #include "core/write_file.h"
 #include "platform/file_system.h"
+#include "platform/interrupt.h"
 
 #include <iostream>
 
@@ -96,10 +97,16 @@ int export_command(const Arguments& arguments)
         return report_failure(arguments, archive_uuid.error());
     }
     const auto files = platform::make_file_system_access();
+    // R-94: its progress on stderr, and Ctrl+C stops it with nothing written.
+    CancelToken cancel;
+    platform::cancel_on_interrupt(cancel);
+    CliProgress progress(arguments, ProgressUnit::manifest);
     const auto exported = export_archive(*store, *files, *session->writer, session->context.repo,
-        *archive_uuid, app::typed_path(*out));
+        *archive_uuid, app::typed_path(*out), cancel, progress);
+    progress.finish();
     if (!exported) {
-        return report_failure(arguments, {exit_code::failed, exported.error()});
+        return report_failure(arguments,
+            {exported.error().cancelled ? exit_code::incomplete : exit_code::failed, exported.error().message});
     }
     if (arguments.json) {
         print_json({{"manifest", path_to_utf8(exported->manifest)},
@@ -129,9 +136,17 @@ int import_command(const Arguments& arguments)
         return report_failure(arguments, {exit_code::repository, store.error().message});
     }
     const auto files = platform::make_file_system_access();
+    // R-94: its progress on stderr, and Ctrl+C stops it with nothing imported.
+    CancelToken cancel;
+    platform::cancel_on_interrupt(cancel);
+    CliProgress progress(arguments, ProgressUnit::manifest);
     const auto imported = import_manifest(*store, *files, *session->writer, session->context.repo,
-        app::typed_path(arguments.words[1]), arguments.has("--force-rollback"));
+        app::typed_path(arguments.words[1]), arguments.has("--force-rollback"), cancel, progress);
+    progress.finish();
     if (!imported) {
+        if (imported.error().kind == ImportFailure::Kind::Cancelled) {
+            return report_failure(arguments, {exit_code::incomplete, imported.error().message});
+        }
         // Another operation recorded the revision meanwhile, or a registration
         // with saved files creates it: refused, as registration and relocation
         // refuse (decision 0030).

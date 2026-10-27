@@ -59,7 +59,7 @@ void export_import_round_trip()
     auto& writer = *source.repository.writer;
 
     const auto r1 = va::export_archive(source.store, files, writer, layout, first->archive_uuid,
-        out_directory(source, "export-r1"));
+        out_directory(source, "export-r1"), test::not_cancelled(), test::no_progress());
     CHECK(r1.has_value());
     CHECK(r1 && std::filesystem::exists(r1->identity));
 
@@ -69,7 +69,7 @@ void export_import_round_trip()
     source.archive.add_file("b.txt", "b");
     CHECK(source.register_root(rebaseline).has_value());
     const auto r2 = va::export_archive(source.store, files, writer, layout, first->archive_uuid,
-        out_directory(source, "export-r2"));
+        out_directory(source, "export-r2"), test::not_cancelled(), test::no_progress());
     CHECK(r2.has_value());
     if (!r1 || !r2) {
         return;
@@ -79,18 +79,18 @@ void export_import_round_trip()
     test::TestRepository target;
     auto store = target.store();
     const auto& target_layout = target.context.repo;
-    auto imported = va::import_manifest(store, *target.files, *target.writer, target_layout, r2->manifest, false);
+    auto imported = va::import_manifest(store, *target.files, *target.writer, target_layout, r2->manifest, false, test::not_cancelled(), test::no_progress());
     CHECK(imported && imported->new_archive && imported->revision == 2 && imported->label == "ARCH-0001");
     const auto archive = store.find_archive(first->archive_uuid);
     CHECK(archive && *archive && (*archive)->current_revision == 2);
 
-    imported = va::import_manifest(store, *target.files, *target.writer, target_layout, r2->manifest, false);
+    imported = va::import_manifest(store, *target.files, *target.writer, target_layout, r2->manifest, false, test::not_cancelled(), test::no_progress());
     CHECK(imported && imported->already_present);
 
     // R-15: an older revision is refused unless forced.
-    auto rollback = va::import_manifest(store, *target.files, *target.writer, target_layout, r1->manifest, false);
+    auto rollback = va::import_manifest(store, *target.files, *target.writer, target_layout, r1->manifest, false, test::not_cancelled(), test::no_progress());
     CHECK(!rollback && rollback.error().failure_class == "ManifestRevisionRollback");
-    rollback = va::import_manifest(store, *target.files, *target.writer, target_layout, r1->manifest, true);
+    rollback = va::import_manifest(store, *target.files, *target.writer, target_layout, r1->manifest, true, test::not_cancelled(), test::no_progress());
     CHECK(rollback && rollback->revision == 1);
     const auto kept = store.find_archive(first->archive_uuid);
     CHECK(kept && *kept && (*kept)->current_revision == 2);
@@ -100,7 +100,7 @@ void export_import_round_trip()
     bytes[bytes.size() - 4] ^= 0x01;
     const auto tampered = out_directory(source, "tampered.vam");
     std::ofstream(tampered, std::ios::binary) << bytes;
-    const auto rejected = va::import_manifest(store, *target.files, *target.writer, target_layout, tampered, false);
+    const auto rejected = va::import_manifest(store, *target.files, *target.writer, target_layout, tampered, false, test::not_cancelled(), test::no_progress());
     CHECK(!rejected && rejected.error().failure_class == "ManifestHashMismatch");
 }
 
@@ -166,7 +166,7 @@ std::expected<va::ImportResult, va::ImportFailure> import(test::TestRepository& 
     const std::filesystem::path& manifest, bool force_rollback = false)
 {
     return va::import_manifest(store, *repository.files, *repository.writer, repository.context.repo, manifest,
-        force_rollback);
+        force_rollback, test::not_cancelled(), test::no_progress());
 }
 
 // How an import that finds its revision recorded stops.
@@ -225,7 +225,7 @@ struct Import {
     void start()
     {
         thread = std::thread([this] {
-            outcome = va::import_manifest(store, *repository.files, writer, repository.context.repo, manifest, false);
+            outcome = va::import_manifest(store, *repository.files, writer, repository.context.repo, manifest, false, test::not_cancelled(), test::no_progress());
         });
     }
 
@@ -461,7 +461,7 @@ void an_import_checks_the_revision_in_its_record()
     });
     auto store = repository.store();
     const auto refused =
-        va::import_manifest(store, *repository.files, writer, repository.context.repo, r1, false);
+        va::import_manifest(store, *repository.files, writer, repository.context.repo, r1, false, test::not_cancelled(), test::no_progress());
     CHECK(newer && newer->revision == 2);
     CHECK(!refused && refused.error().kind == va::ImportFailure::Kind::Failed &&
           refused.error().failure_class == "ManifestRevisionRollback" &&
@@ -533,7 +533,7 @@ void an_import_copies_the_bytes_it_validated()
         });
         auto store = repository.store();
         const auto imported =
-            va::import_manifest(store, files, *repository.writer, repository.context.repo, manifest, false);
+            va::import_manifest(store, files, *repository.writer, repository.context.repo, manifest, false, test::not_cancelled(), test::no_progress());
         CHECK(!imported && imported.error().failure_class == "ManifestHashMismatch" &&
               imported.error().message == "the manifest changed while it was imported; nothing was imported");
         const auto archives = store.archives();
@@ -562,7 +562,7 @@ void an_import_indexes_the_entries_it_validated()
         test::SecondReadDiffers files(*repository.files, "r0001.vam", 1, bytes.find('\n') + 1, "\"b3\":\"" + b3, to);
         auto store = repository.store();
         const auto imported =
-            va::import_manifest(store, files, *repository.writer, repository.context.repo, manifest, false);
+            va::import_manifest(store, files, *repository.writer, repository.context.repo, manifest, false, test::not_cancelled(), test::no_progress());
         CHECK(files.differed());
         CHECK(!imported && imported.error().failure_class == "ManifestHashMismatch" &&
               imported.error().message == "the manifest changed while it was imported; nothing was imported");
@@ -581,6 +581,87 @@ void an_import_indexes_the_entries_it_validated()
     }
 }
 
+// R-94: export and import report their progress, and a cancel stops each
+// with nothing written. An export counts the manifest's bytes copied; one
+// cancelled at its first piece leaves neither the manifest nor
+// identity.json in the export's folder. An import counts the entries read,
+// then the bytes copied; one cancelled after reading the entries, and one
+// cancelled while it copies, record nothing and leave no copy in the
+// repository. Not cancelled, the import records the revision.
+void import_and_export_report_progress_and_stop_when_cancelled()
+{
+    test::EngineFixture source;
+    for (int index = 0; index < 1001; ++index) {
+        source.archive.add_file(std::format("sample-{:04}.txt", index), "sample");
+    }
+    const auto registered = source.register_root(source.archive.root());
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    const auto& layout = source.repository.context.repo;
+    auto& files = *source.repository.files;
+    auto& writer = *source.repository.writer;
+    const auto uuid = registered->archive_uuid;
+
+    va::CancelToken stop_export;
+    test::CancelAfter cancel_export(stop_export, 1);
+    const auto stopped = va::export_archive(source.store, files, writer, layout, uuid,
+        out_directory(source, "export-cancelled"), stop_export, cancel_export);
+    CHECK(!stopped && stopped.error().cancelled &&
+          stopped.error().message == "the export was cancelled; nothing was written");
+    CHECK(names_in(out_directory(source, "export-cancelled")).empty());
+
+    test::RecordedProgress exporting;
+    va::CancelToken not_cancelled;
+    const auto exported = va::export_archive(source.store, files, writer, layout, uuid,
+        out_directory(source, "export"), not_cancelled, exporting);
+    CHECK(exported.has_value());
+    if (!exported) {
+        return;
+    }
+    const auto size = std::filesystem::file_size(exported->manifest);
+    CHECK(!exporting.reports.empty() && exporting.reports.back().bytes_total == size &&
+          exporting.reports.back().bytes_done == size);
+
+    test::EngineFixture target;
+    auto& store = target.store;
+    const auto& target_layout = target.repository.context.repo;
+    const auto import = [&](va::CancelToken& cancel, va::IProgressSink& progress) {
+        return va::import_manifest(store, *target.repository.files, *target.repository.writer, target_layout,
+            exported->manifest, false, cancel, progress);
+    };
+    const auto nothing_recorded = [&] {
+        const auto known = store.revisions(uuid);
+        CHECK(known && known->empty());
+        CHECK(names_in(target_layout.manifests() / uuid).empty());
+    };
+    // 1001 entries read report at 1000 and at 1001; the copy then reports
+    // each piece. Cancelled at 1000 entries it reads no further, and at the
+    // copy's first piece it records nothing.
+    for (const std::size_t at : {std::size_t{1}, std::size_t{3}}) {
+        va::CancelToken stop;
+        test::CancelAfter cancel_import(stop, at);
+        const auto cancelled = import(stop, cancel_import);
+        CHECK(!cancelled && cancelled.error().kind == va::ImportFailure::Kind::Cancelled &&
+              cancelled.error().message == "the import was cancelled; nothing was imported");
+        CHECK(cancel_import.seen() == at);
+        nothing_recorded();
+    }
+
+    test::RecordedProgress importing;
+    va::CancelToken go_on;
+    const auto imported = import(go_on, importing);
+    CHECK(imported && imported->revision == 1 && imported->new_archive);
+    const auto entries_read = std::ranges::count_if(importing.reports, [](const va::Progress& report) {
+        return report.items_total == 1001 && report.bytes_total == 0;
+    });
+    const auto copied = std::ranges::find_if(importing.reports, [&](const va::Progress& report) {
+        return report.bytes_total == size && report.bytes_done == size;
+    });
+    CHECK(entries_read == 2 && copied != importing.reports.end());
+}
+
 } // namespace
 
 void transfer_tests()
@@ -594,4 +675,5 @@ void transfer_tests()
     an_import_checks_the_revision_in_its_record();
     an_import_copies_the_bytes_it_validated();
     an_import_indexes_the_entries_it_validated();
+    import_and_export_report_progress_and_stop_when_cancelled();
 }

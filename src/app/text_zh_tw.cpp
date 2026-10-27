@@ -108,6 +108,13 @@ constexpr CatalogEntry entries[] = {
     {"scanning: {} entries", "掃描中：{} 個項目"},
     {"hashing: {}", "計算雜湊中：{}", Match::FormatOnly},
     {"comparing: {}/{} entries", "比較中：{}/{} 個項目"},
+    // repo rebuild-index, import and export (R-94): their progress, and a cancel.
+    {"reading manifests: {}/{}", "讀取清單檔中：{}/{}"},
+    {"reading the manifest: {}/{} entries", "讀取清單檔中：{}/{} 個項目"},
+    {"copying the manifest: {}", "複製清單檔中：{}", Match::FormatOnly},
+    {"the rebuild of the index was cancelled; the index was left as it was", "重建索引已取消；索引維持原狀"},
+    {"the import was cancelled; nothing was imported", "匯入已取消；未匯入任何內容"},
+    {"the export was cancelled; nothing was written", "匯出已取消；未寫入任何內容"},
     // src/cli/repo_commands.cpp
     {"RepositoryRoot: {}", "儲存庫根目錄：{}"},
     {"repository_uuid: {}", "repository_uuid：{}"},

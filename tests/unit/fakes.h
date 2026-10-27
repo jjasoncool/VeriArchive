@@ -26,6 +26,47 @@ public:
     void on_progress(const va::Progress&) override {}
 };
 
+// For calls whose cancellation and progress a test does not look at (R-94):
+// a token nobody cancels, and a sink that shows nothing.
+inline va::CancelToken& not_cancelled()
+{
+    static va::CancelToken token;
+    return token;
+}
+
+inline va::IProgressSink& no_progress()
+{
+    static NullProgress sink;
+    return sink;
+}
+
+// The progress reports a test looks at, as an engine gave them.
+class RecordedProgress final : public va::IProgressSink {
+public:
+    void on_progress(const va::Progress& progress) override { reports.push_back(progress); }
+    std::vector<va::Progress> reports;
+};
+
+// A sink that cancels `token` at its `after`-th report, as Ctrl+C arrives
+// while an engine works (R-94); `seen()` tells whether the engine reported
+// on after that.
+class CancelAfter final : public va::IProgressSink {
+public:
+    CancelAfter(va::CancelToken& token, std::size_t after) : token_(token), after_(after) {}
+    void on_progress(const va::Progress&) override
+    {
+        if (++seen_ >= after_) {
+            token_.cancel();
+        }
+    }
+    std::size_t seen() const { return seen_; }
+
+private:
+    va::CancelToken& token_;
+    std::size_t after_;
+    std::size_t seen_ = 0;
+};
+
 // The processes of a computer, as a table the test fills (decision 0024):
 // `self` is the process the engines run in, `others` the other processes that
 // run. A process missing from both has ended. With `error`, finding a process

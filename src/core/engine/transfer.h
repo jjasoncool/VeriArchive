@@ -16,11 +16,19 @@ struct ExportResult {
     std::filesystem::path identity;
 };
 
+struct ExportFailure {
+    std::string message;
+    bool cancelled = false;  // nothing was written
+};
+
 // Fails with the manifest failure class when the stored manifest is not the one
-// the repository recorded.
-std::expected<ExportResult, std::string> export_archive(ArchiveStore& store,
+// the repository recorded. R-94: `progress` counts the manifest's bytes
+// copied; `cancel` is asked between the pieces copied, and a cancelled export
+// writes nothing (its copy, not yet at its name, goes).
+std::expected<ExportResult, ExportFailure> export_archive(ArchiveStore& store,
     IFileSystemAccess& repository_files, IFileWriter& writer, const RepositoryLayout& layout,
-    const Uuid& archive_uuid, const std::filesystem::path& out_directory);
+    const Uuid& archive_uuid, const std::filesystem::path& out_directory, CancelToken& cancel,
+    IProgressSink& progress);
 
 struct ImportResult {
     Uuid archive_uuid;
@@ -40,8 +48,9 @@ struct ImportFailure {
     // recorded its revision while this import ran, or an unfinished
     // registration with saved files creates it (decision 0030), or the record
     // of the revision whose manifest it restores changed meanwhile (decision
-    // 0028); nothing was imported (exit 12).
-    enum class Kind { Failed, Refused };
+    // 0028); nothing was imported (exit 12). Cancelled: by the operator
+    // (R-94), and nothing was imported.
+    enum class Kind { Failed, Refused, Cancelled };
     std::string failure_class;      // ManifestHashMismatch | ManifestRevisionRollback | RepositoryError; empty when refused
     std::string message;
     Kind kind = Kind::Failed;
@@ -61,9 +70,14 @@ struct ImportFailure {
 // is the one that line names, decision 0028): staged the same way, it is
 // named in a write transaction that finds the record still naming that line,
 // and nothing else changes. Any other file is a ManifestHashMismatch.
+//
+// R-94: `progress` counts the entries read (items), then the manifest's bytes
+// copied; `cancel` is asked between them, between the pieces copied and while
+// the record waits for the write lock. A cancelled import records nothing,
+// and its copy, not yet at its name, goes (Kind::Cancelled).
 std::expected<ImportResult, ImportFailure> import_manifest(ArchiveStore& store,
     IFileSystemAccess& files, IFileWriter& writer, const RepositoryLayout& layout,
-    const std::filesystem::path& manifest, bool force_rollback);
+    const std::filesystem::path& manifest, bool force_rollback, CancelToken& cancel, IProgressSink& progress);
 
 // identity.json (§B1.2 ArchiveIdentity), written by export and by the media copy (R-89).
 std::string identity_file_json(const Uuid& archive_uuid, const std::string& label,
