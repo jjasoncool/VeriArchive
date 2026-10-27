@@ -1,10 +1,12 @@
 # Package check for CTest (R-121): installs the build into a scratch prefix,
-# twice, and proves the result runs on a machine without MSYS2.
+# twice, and proves the result runs on a machine without MSYS2; then makes
+# the zip and unzips it into that prefix, as an update does (decision 0038).
 #   cmake -DBUILD_DIR=<build> -DPREFIX=<scratch> -DOBJDUMP=<objdump>
-#         -DMINGW_PREFIX=<e.g. C:/msys64/ucrt64> -P check_package.cmake
+#         -DMINGW_PREFIX=<e.g. C:/msys64/ucrt64> -DVERSION=<project version>
+#         -P check_package.cmake
 cmake_minimum_required(VERSION 3.28)
 
-foreach(variable BUILD_DIR PREFIX OBJDUMP MINGW_PREFIX)
+foreach(variable BUILD_DIR PREFIX OBJDUMP MINGW_PREFIX VERSION)
     if(NOT ${variable})
         message(FATAL_ERROR "${variable} must be set")
     endif()
@@ -134,4 +136,55 @@ elseif(EXISTS "${PREFIX}/bin/veriarchive-gui.exe")
         endif()
     endforeach()
 endif()
+
+# The zip (decision 0038), made as cpack makes it: its name carries the
+# version, and it holds no folder of its own, only bin, lib and share. So
+# unzipped into the program folder, a zip of any version replaces the
+# programs there. Here it is unzipped into the installed prefix, which by now
+# holds an older program, a config file and a repository (sample data): the
+# program is replaced, the config file and the repository are kept, and no
+# other folder appears.
+set(zip_folder "${PREFIX}-zip")
+file(REMOVE_RECURSE "${zip_folder}")
+execute_process(COMMAND "${CMAKE_CPACK_COMMAND}" -B "${zip_folder}"
+    WORKING_DIRECTORY "${BUILD_DIR}"
+    RESULT_VARIABLE packed OUTPUT_VARIABLE pack_output ERROR_VARIABLE pack_output)
+set(zip "${zip_folder}/VeriArchive-${VERSION}-windows-x86_64.zip")
+if(NOT packed EQUAL 0 OR NOT EXISTS "${zip}")
+    message(FATAL_ERROR "cpack did not make ${zip} (exit ${packed})\n${pack_output}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -E tar tf "${zip}"
+    RESULT_VARIABLE listed OUTPUT_VARIABLE zip_listing)
+string(STRIP "${zip_listing}" zip_listing)
+string(REPLACE ";" "\\;" zip_entries "${zip_listing}")
+string(REPLACE "\n" ";" zip_entries "${zip_entries}")
+if(NOT listed EQUAL 0 OR NOT "bin/veriarchive-cli.exe" IN_LIST zip_entries)
+    list(SUBLIST zip_entries 0 5 first_entries)
+    list(JOIN first_entries "\n" first_entries)
+    message(FATAL_ERROR "the zip does not hold bin/veriarchive-cli.exe at its root (exit ${listed}); it begins "
+        "with:\n${first_entries}")
+endif()
+foreach(entry IN LISTS zip_entries)
+    if(NOT entry MATCHES "^(bin|lib|share)(/|$)")
+        message(FATAL_ERROR "the zip holds ${entry} outside bin, lib and share: unzipped into the program "
+            "folder, a new version would not replace the programs there")
+    endif()
+endforeach()
+file(SHA256 "${PREFIX}/bin/veriarchive-cli.exe" packaged_cli)
+file(WRITE "${PREFIX}/bin/veriarchive-cli.exe" "an older version of the program (sample data)")
+set(sample_config "{\"repository\": \"data\", \"note\": \"sample config of the package test\"}\n")
+file(WRITE "${PREFIX}/bin/config.json" "${sample_config}")
+file(WRITE "${PREFIX}/bin/data/SAMPLE-repository.txt" "Sample data: stands for the folder's repository.\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E tar xf "${zip}"
+    WORKING_DIRECTORY "${PREFIX}" RESULT_VARIABLE unzipped)
+file(SHA256 "${PREFIX}/bin/veriarchive-cli.exe" updated_cli)
+file(READ "${PREFIX}/bin/config.json" kept_config)
+file(GLOB top_level RELATIVE "${PREFIX}" "${PREFIX}/*")
+if(NOT unzipped EQUAL 0 OR NOT updated_cli STREQUAL packaged_cli OR NOT kept_config STREQUAL sample_config
+        OR NOT EXISTS "${PREFIX}/bin/data/SAMPLE-repository.txt" OR NOT top_level STREQUAL "bin;lib;share")
+    message(FATAL_ERROR "unzipping the zip into the program folder (exit ${unzipped}) did not update it in "
+        "place: program replaced ${updated_cli} (expected ${packaged_cli}), folders ${top_level}, config:\n"
+        "${kept_config}")
+endif()
+file(REMOVE_RECURSE "${zip_folder}")
 message(STATUS "Windows package is self-contained: ${PREFIX}")

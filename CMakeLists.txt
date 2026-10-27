@@ -236,7 +236,11 @@ if(WIN32)
 else()
     set(CPACK_PACKAGE_FILE_NAME "VeriArchive-${PROJECT_VERSION}-linux-x86_64")
 endif()
-set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON) # zip and its top-level folder
+# The zip holds no top-level folder: bin, lib and share sit at its root, so
+# that unzipping a new version into the program folder replaces the programs
+# there whatever its version number; the zip's name keeps the version
+# (decision 0038).
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 # CPack installs this project's VeriArchive component alone (build folder,
 # project, component, subfolder). Its component mode would do the same, but
 # stages the files two folders deeper (<component>/<package file name>/),
@@ -313,13 +317,15 @@ if(BUILD_TESTING)
     endif()
     if(WIN32)
         # R-121: the installed package runs with only Windows on PATH, also
-        # after a second install over the first.
+        # after a second install over the first; its zip unzips into the
+        # program folder (decision 0038).
         add_test(NAME veriarchive_package
             COMMAND ${CMAKE_COMMAND}
                 -DBUILD_DIR=${CMAKE_BINARY_DIR}
                 -DPREFIX=${CMAKE_CURRENT_BINARY_DIR}/package-test
                 -DOBJDUMP=${VERIARCHIVE_OBJDUMP}
                 -DMINGW_PREFIX=${VERIARCHIVE_MINGW_PREFIX}
+                -DVERSION=${PROJECT_VERSION}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/check_package.cmake)
     endif()
     add_test(NAME veriarchive_cli_e2e

@@ -17,16 +17,16 @@ VeriArchive 為封存用的資料碟留下「完整性證據」，日後可以�
 
 VeriArchive 是免安裝的攜帶式程式：
 
-1. 把 `VeriArchive-<版本>-windows-x86_64.zip` 解壓縮到任何資料夾，例如 `D:\VeriArchive`。不需要安裝 MSYS2 或其他程式。
-2. 執行 `bin\veriarchive-gui.exe`。
+1. 先建立放程式的資料夾，例如 `D:\VeriArchive`，再把 `VeriArchive-<版本>-windows-x86_64.zip` 解壓縮到這個資料夾裡。不需要安裝 MSYS2 或其他程式。
+2. 執行這個資料夾裡的 `bin\veriarchive-gui.exe`（以上例來說是 `D:\VeriArchive\bin\veriarchive-gui.exe`）。
 
-zip 裡有：
+zip 裡沒有再包一層資料夾：它的 `bin`、`lib` 和 `share` 會直接放進解壓縮的目的資料夾。
 
 - `bin/veriarchive-gui.exe`：圖形介面
 - `bin/veriarchive-cli.exe`：命令列
-- `share/`：GTK 需要的圖示、設定與中文翻譯；`share/licenses/`：隨附函式庫的授權
+- `lib/` 與 `share/`：GTK 需要的圖片載入程式、圖示、設定與中文翻譯；`share/licenses/`：隨附函式庫的授權
 
-更新程式時，把新版 zip 解壓縮後**覆蓋**到同一個資料夾即可。zip 裡沒有 `bin\data` 和 `bin\config.json`，所以既有的紀錄不會被蓋掉。請不要先刪除舊的資料夾。
+更新程式時，先關閉 VeriArchive，再把新版 zip **解壓縮到同一個資料夾**（上例的 `D:\VeriArchive`），取代裡面原有的檔案。在檔案總管中：對 zip 按右鍵，選「解壓縮全部...」，目的地輸入程式資料夾，遇到詢問時選擇取代目的地中的檔案。檔案總管預設會另外建立一個以 zip 命名的新資料夾；解壓縮到那裡的程式找不到你的任何紀錄。zip 裡沒有 `bin\data` 和 `bin\config.json`，所以既有的紀錄不會被蓋掉。請不要先刪除舊的資料夾。
 
 ### 搬移程式資料夾
 

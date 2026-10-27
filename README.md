@@ -53,12 +53,14 @@ cmake --build --preset windows-ucrt64-release
 cd build/windows-ucrt64-release && cpack   # VeriArchive-<version>-windows-x86_64.zip
 ```
 
+The zip holds `bin`, `lib` and `share` at its root, with no folder of its own, so unzipping a new
+version into the program folder updates it whatever the version number (decision 0038).
 `cmake --install build/windows-ucrt64-release --prefix <folder> --component VeriArchive` installs
 the same tree into a folder. Installing into a folder that holds an earlier install updates it in
 place; files the install does not write, such as `bin/config.json` and the repository in
 `bin/data`, are left as they are. The `veriarchive_package` test checks that the installed tree
 runs with only Windows on `PATH` and never imports `msys-2.0.dll` (R-121), also after a second
-install over the first.
+install over the first, and that the zip unzips into an installed folder as such an update.
 
 ### Editor (clangd)
 
