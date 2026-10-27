@@ -227,8 +227,13 @@ int verify_command(const Arguments& arguments)
     const auto outcome = verify_full(services, request, cancel, progress);
     progress.finish();
     if (!outcome) {
+        // What the operator named is not there (decision 0029, point 7): an
+        // archive uuid that names no registered archive, an archive whose
+        // volume or folder is not attached, a run that is no interrupted
+        // run. A usage error (exit 10), as a folder that is not there.
         const auto code = outcome.error().kind == VerifyStop::Kind::Decision ? exit_code::identity_decision
-                                                                             : exit_code::repository;
+                          : outcome.error().kind == VerifyStop::Kind::NotFound ? exit_code::usage
+                                                                               : exit_code::repository;
         return report_failure(arguments, {code, outcome.error().message});
     }
     if (arguments.json) {

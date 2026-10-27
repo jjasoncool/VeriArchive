@@ -1309,6 +1309,35 @@ void archive_found_by_uuid_is_read_at_its_folder()
     }
 }
 
+// Decision 0029, point 7: an archive verified by its uuid whose volume is
+// attached but whose folder is not there (moved away, sample) stops as not
+// found, naming the folder, never as an archive that is not on any attached
+// volume; with its volume detached it is not on any attached volume.
+void an_archive_whose_folder_is_gone_is_not_found()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("photos/a.txt", "a (sample data)");
+    const auto registered = fixture.register_root(fixture.archive.root() / "photos");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    fixture.archive.remove("photos");
+    va::VerifyRequest by_uuid;
+    by_uuid.archive_uuid = registered->archive_uuid;
+    const auto gone = fixture.verify(by_uuid);
+    CHECK(!gone && gone.error().kind == va::VerifyStop::Kind::NotFound &&
+          gone.error().message == "the folder " + va::path_to_utf8(fixture.archive.root() / "photos") +
+                                      " of archive " + registered->archive_uuid +
+                                      " was not found: its volume is attached, but the folder is not there");
+    fixture.media.volume.filesystem_uuid = "c0ffee00-0000-4000-8000-00000000beef";
+    fixture.media.volume.filesystem_uuid_short.clear();
+    fixture.media.volume.devices.clear();
+    const auto detached = fixture.verify(by_uuid);
+    CHECK(!detached && detached.error().kind == va::VerifyStop::Kind::NotFound &&
+          detached.error().message == "archive " + registered->archive_uuid + " is not on any attached volume");
+}
+
 // Decision 0029, point 3: an archive on a volume that has no drive letter or
 // folder path, whose mount point Windows gives as its GUID path, registered
 // through that path as the user interfaces take it, and verified by its uuid.
@@ -2437,6 +2466,7 @@ void verify_engine_tests()
     clones_registered_as_two_archives_say_to_detach_the_other_volumes();
     run_record_says_where_and_how_much();
     archive_found_by_uuid_is_read_at_its_folder();
+    an_archive_whose_folder_is_gone_is_not_found();
     an_archive_on_a_volume_known_by_its_guid_path_verifies_by_uuid();
     an_index_that_differs_from_its_manifest_is_never_taken();
     a_manifest_that_is_not_the_one_recorded_stops_every_use_by_root();

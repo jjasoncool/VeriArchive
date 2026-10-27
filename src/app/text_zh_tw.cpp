@@ -903,6 +903,8 @@ constexpr CatalogEntry entries[] = {
     // src/core/engine/verify_engine.cpp
     {"cannot list volumes: {}", "無法列出磁碟區：{}", Match::Cause},
     {"archive {} is not on any attached volume", "封存 {} 不在任何已連接的磁碟區上"},
+    {"the folder {} of archive {} was not found: its volume is attached, but the folder is not there",
+        "找不到封存 {1} 的資料夾 {0}：它所在的磁碟區已連接，但資料夾不在那裡"},
     // A run resumed by its archive's uuid, whose archive more than one attached
     // volume holds (decision 0022, point 7): the roots are one value, quoted.
     {"AMBIGUOUS: archive {} is on more than one attached volume (cloned media): {}; run {} read \"{}\": resume it "

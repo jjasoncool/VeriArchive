@@ -114,6 +114,9 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
     }
     const auto& candidate = pool.front();
     std::vector<Located> holding;
+    // The archive's folder on a volume that matches it, where that folder is
+    // not there: the volume is attached, the folder was moved or renamed.
+    std::optional<std::filesystem::path> folder_gone;
     for (const auto& volume : *volumes) {
         const MediaEvidence evidence{current_timestamp(), volume, std::nullopt};
         const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
@@ -132,7 +135,15 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
             relative->empty() ? volume.mount_point : volume.mount_point / *relative);
         if (services.archive_files.list(root)) {
             holding.push_back(Located{root, volume, candidate.root_subpath});
+        } else if (!folder_gone) {
+            folder_gone = root;
         }
+    }
+    if (holding.empty() && folder_gone) {
+        return stop(VerifyStop::Kind::NotFound, "the folder " + path_to_utf8(*folder_gone) + " of archive " +
+                                                    candidate.archive_uuid +
+                                                    " was not found: its volume is attached, but the folder is "
+                                                    "not there");
     }
     if (holding.empty()) {
         return stop(VerifyStop::Kind::NotFound,

@@ -189,6 +189,12 @@ run_cli("10" verify --full abcdef12)
 if(NOT last_errors MATCHES "錯誤：找不到資料夾或磁碟區 abcdef12\n$")
     message(FATAL_ERROR "verify of the start of no archive's uuid:\n${last_errors}")
 endif()
+# A whole uuid that names no registered archive is not found either (exit 10),
+# as its first 8 characters are, never a repository error.
+run_cli("10" --lang en verify --full c0ffee00-0000-4000-8000-0000000000aa)
+if(NOT last_errors STREQUAL "error: no registered archive c0ffee00-0000-4000-8000-0000000000aa\n")
+    message(FATAL_ERROR "verify of a uuid that names no archive:\n${last_errors}")
+endif()
 string(SUBSTRING "${archive_uuid}" 0 8 uuid_start)
 run_cli("0;2" verify --full "${uuid_start}" --json)
 string(JSON start_verified GET "${last_output}" archive_uuid)
@@ -2081,6 +2087,25 @@ if(wal_said STREQUAL "" OR NOT wal_kept STREQUAL "sample journal, not SQLite's\n
         OR NOT wal_json_files MATCHES "veriarchive[.]db[.]damaged-[^\"]*-wal\"")
     message(FATAL_ERROR "a missing database with a file beside it: named '${wal_named}' (${wal_kept}); --json "
         "${wal_json_state} ${wal_json_moved} ${wal_json_files}\n${last_output}")
+endif()
+# An archive whose volume is attached but whose folder is gone (moved away,
+# sample) is not found, naming its folder (exit 10), in either language.
+set(GONE_FOLDER "${WORK}/folder-gone-sample")
+file(WRITE "${GONE_FOLDER}/a.txt" "folder gone sample\n")
+run_cli("0" register "${GONE_FOLDER}" --json)
+string(JSON gone_folder_uuid GET "${last_output}" archive_uuid)
+file(RENAME "${GONE_FOLDER}" "${GONE_FOLDER}-moved")
+file(TO_NATIVE_PATH "${GONE_FOLDER}" gone_folder_shown)
+run_cli("10" --lang en verify --full "${gone_folder_uuid}")
+set(gone_english "${last_errors}")
+run_cli("10" verify --full "${gone_folder_uuid}")
+set(gone_chinese "${last_errors}")
+file(RENAME "${GONE_FOLDER}-moved" "${GONE_FOLDER}")
+run_cli("0;2" verify --full "${gone_folder_uuid}")
+string(FIND "${gone_english}" "error: the folder ${gone_folder_shown} of archive ${gone_folder_uuid} was not found: its volume is attached, but the folder is not there\n" gone_said)
+string(FIND "${gone_chinese}" "錯誤：找不到封存 ${gone_folder_uuid} 的資料夾 ${gone_folder_shown}：它所在的磁碟區已連接，但資料夾不在那裡\n" gone_translated)
+if(gone_said EQUAL -1 OR gone_translated EQUAL -1)
+    message(FATAL_ERROR "verify of an archive whose folder is gone:\n${gone_english}\n${gone_chinese}")
 endif()
 set(GLOBAL --config "${WORK}/config.json")
 
