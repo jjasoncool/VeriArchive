@@ -74,8 +74,12 @@ struct Session {
 
 // Resolves and opens (or initialises) the repository per HANDOFF §B7.4;
 // `rebuild`: for repo rebuild-index, which makes a database that is missing,
-// empty, not a database or damaged again (decision 0036).
-std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise, bool rebuild = false);
+// empty, not a database or damaged again (decision 0036). Where the open fails
+// once it has resolved RepositoryRoot, `resolved`, when given, is set to it
+// (app::SessionFailure::repository), so that `repo info` names the copies of
+// its database kept before upgrades there (decision 0032).
+std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise, bool rebuild = false,
+    std::optional<RepositoryLayout>* resolved = nullptr);
 
 // A usage failure when the command received an option it does not accept.
 std::optional<Failure> check_options(const Arguments& arguments,

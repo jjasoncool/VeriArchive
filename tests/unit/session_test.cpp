@@ -161,6 +161,9 @@ void a_failed_open_still_says_where_the_copy_is()
     CHECK(failed.error().message.starts_with("cannot record repository_uuid in config: ") &&
           failed.error().notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 3, copy})});
     CHECK(std::filesystem::exists(copy));
+    CHECK(va::app::session_failure_in_window(va::app::Text{}, failed.error()) ==
+          failed.error().message + "\n\nNote: " + va::app::schema_upgrade_note({1, 3, copy}) +
+              "\n\nCopy of the database from before an upgrade: " + va::path_to_utf8(copy));
     const auto again = va::app::open_session(*options);
     CHECK(!again && again.error().message.starts_with("cannot record repository_uuid in config: ") &&
           again.error().notes.empty());
@@ -202,6 +205,79 @@ void settings_and_repo_info_say_where_the_copy_is()
     CHECK(va::app::copy_before_upgrade_lines(english, layout).empty());
 }
 
+// Settings and `repo info` name the copies of the database kept before an
+// upgrade also where the repository cannot be opened (decision 0032), as there
+// a copy is the way back: the failure carries the RepositoryRoot that the open
+// resolved, and a window gives why and a line per copy there, read from the
+// files each time it is worded. As on a database upgraded once, its copy kept,
+// and found damaged since (a table dropped: sample damage), which the open
+// refuses without upgrading or copying anything (decision 0036), in English
+// and in Traditional Chinese, and once the copy is removed; and on a database
+// that a later version upgraded (its schema version raised: sample data),
+// which this version refuses, beside the copy that the later version kept (a
+// sample file of its name), which this version can open. An open that
+// resolves no RepositoryRoot carries none, and a window gives why alone.
+void a_failed_open_names_the_copies_where_the_repository_is()
+{
+    SampleFolder folder("failed-open-copies");
+    const auto moment = moment_of_another_date();
+    const auto options = repository_of_version_1(folder, moment);
+    if (!options) {
+        return;
+    }
+    const auto root = options->repository->lexically_normal();
+    const auto copy = root / std::format("veriarchive-schema-1-before-upgrade-{:%F}.db",
+                                 va::app::local_date(moment, va::platform::utc_offset(moment)));
+    const auto copy_line = "Copy of the database from before an upgrade: " + va::path_to_utf8(copy);
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+
+    const auto upgraded = va::app::open_session(*options);
+    CHECK(upgraded && upgraded->notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 3, copy})});
+    run_sql(*options->repository, "DROP TABLE trusted_keys");
+    const auto damaged = "the repository's database " + va::path_to_utf8(root / "veriarchive.db") +
+                         " is damaged; make it again from the manifests with `repo rebuild-index`";
+    const auto again = va::app::open_session(*options);
+    CHECK(!again && again.error().message == damaged && again.error().notes.empty() && again.error().repository &&
+          again.error().repository->root == root);
+    if (again) {
+        return;
+    }
+    const auto in_english = va::app::session_failure_in_window(english, again.error());
+    CHECK(in_english == damaged + "\n\n" + copy_line);
+    if (in_english != damaged + "\n\n" + copy_line) {
+        std::cerr << "  worded: " << in_english << '\n';
+    }
+    CHECK(va::app::session_failure_in_window(chinese, again.error()) ==
+          "儲存庫的資料庫 " + va::path_to_utf8(root / "veriarchive.db") +
+              " 已損毀；請以 `repo rebuild-index` 從清單檔重新建立\n\n升級前的資料庫副本：" + va::path_to_utf8(copy));
+    std::filesystem::remove(copy);
+    CHECK(va::app::session_failure_in_window(english, again.error()) == damaged);
+
+    SampleFolder later_folder("later-version");
+    const auto later = later_folder.path() / "SAMPLE-repository";
+    const auto config = later_folder.path() / "config.json";
+    std::ofstream(config) << "{}\n";
+    CHECK(va::app::open_session({true, later, config, {}, false, moment}).has_value());
+    run_sql(later, "UPDATE schema_version SET version = 4");
+    const auto later_copy = later.lexically_normal() / "veriarchive-schema-3-before-upgrade-2026-10-17.db";
+    std::ofstream(later_copy, std::ios::binary) << "SAMPLE: the copy a later version kept (sample data)\n";
+    const auto refused = va::app::open_session({false, later, config, {}, false, moment});
+    CHECK(!refused && refused.error().message == "unsupported repository schema" &&
+          refused.error().repository && refused.error().repository->root == later.lexically_normal());
+    CHECK(!refused && va::app::session_failure_in_window(english, refused.error()) ==
+                          "unsupported repository schema\n\nCopy of the database from before an upgrade: " +
+                              va::path_to_utf8(later_copy));
+
+    auto elsewhere = *options;
+    elsewhere.repository = folder.path() / "SAMPLE-no-repository";
+    const auto unresolved = va::app::open_session(elsewhere);
+    CHECK(!unresolved && !unresolved.error().repository);
+    CHECK(!unresolved && va::app::session_failure_in_window(english, unresolved.error()) ==
+                             "the repository " + va::path_to_utf8(elsewhere.repository->lexically_normal()) +
+                                 " is unavailable or is not a VeriArchive repository");
+}
+
 // Whether a session's open will upgrade the database of the repository it
 // opens is known ahead, for the repository that open resolves (decision
 // 0032): the GUI shows its window with a notice before such an open. The
@@ -231,5 +307,6 @@ void session_tests()
     the_copy_before_an_upgrade_is_named_for_the_local_date();
     a_failed_open_still_says_where_the_copy_is();
     settings_and_repo_info_say_where_the_copy_is();
+    a_failed_open_names_the_copies_where_the_repository_is();
     an_upgrade_is_known_ahead_of_the_open();
 }

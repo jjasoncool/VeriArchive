@@ -1,7 +1,8 @@
 // `repo init | info | rebuild-index | verify-history`.
 // info shows the active RepositoryRoot, its uuid and how it was selected (R-85),
 // this program's version (decision 0037), and where each copy of its database
-// kept before an upgrade is (decision 0032).
+// kept before an upgrade is (decision 0032), also after its error where the
+// repository cannot be opened.
 #include "cli/commands.h"
 
 #include "app/history.h"
@@ -15,9 +16,22 @@
 #include "platform/interrupt.h"
 
 #include <iostream>
+#include <optional>
 
 namespace va::cli {
 namespace {
+
+// Where each copy of the database kept before an upgrade is in `layout`'s
+// RepositoryRoot, as `repo info --json` gives it: database_copies_before_upgrade
+// (decision 0032), an empty array where there is none.
+nlohmann::json copies_json(const RepositoryLayout& layout)
+{
+    auto copies = nlohmann::json::array();
+    for (const auto& copy : copies_before_upgrade(layout)) {
+        copies.push_back(path_to_utf8(copy));
+    }
+    return copies;
+}
 
 int info(const Arguments& arguments, const Session& session)
 {
@@ -26,17 +40,13 @@ int info(const Arguments& arguments, const Session& session)
     // as it is in RepositoryRoot (decision 0032), not only at the open that
     // made it: the files themselves say it.
     if (arguments.json) {
-        auto copies = nlohmann::json::array();
-        for (const auto& copy : copies_before_upgrade(context.repo)) {
-            copies.push_back(path_to_utf8(copy));
-        }
         print_json({
             {"repository_root", path_to_utf8(context.repo.root)},
             {"repository_uuid", context.repository_uuid},
             {"repo_selected_by", context.repo_selected_by},
             {"config_file", path_to_utf8(context.config_file)},
             {"app_version", program_version()},
-            {"database_copies_before_upgrade", copies},
+            {"database_copies_before_upgrade", copies_json(context.repo)},
         });
     } else {
         const auto& text = arguments.text;
@@ -51,6 +61,33 @@ int info(const Arguments& arguments, const Session& session)
         std::cout << text("Back up RepositoryRoot: losing it loses all verification history.") << '\n';
     }
     return exit_code::passed;
+}
+
+// `repo info` where the repository cannot be opened (decision 0032): its
+// error, then, where the open resolved RepositoryRoot (`repository`), where
+// each copy of the database kept before an upgrade is there, as `repo info`
+// names them where it opens: there a copy is the way back, as for a database
+// found incomplete once upgraded, or one that a later version upgraded. The
+// lines follow the error on stderr, as everything the failing open says, so
+// that a failure writes nothing to stdout; with --json the error object gives
+// the copies as database_copies_before_upgrade. An open that resolved no
+// RepositoryRoot fails with its error alone.
+int info_failure(const Arguments& arguments, const Failure& failure,
+    const std::optional<RepositoryLayout>& repository)
+{
+    if (!repository) {
+        return report_failure(arguments, failure);
+    }
+    if (arguments.json) {
+        print_json({{"error", failure.message}, {"exit_code", failure.code},
+            {"database_copies_before_upgrade", copies_json(*repository)}});
+        return failure.code;
+    }
+    report_failure(arguments, failure);
+    for (const auto& line : app::copy_before_upgrade_lines(arguments.text, *repository)) {
+        std::cerr << line << '\n';
+    }
+    return failure.code;
 }
 
 // R-18 / R-90: recompute the hash chain over every verification run.
@@ -287,9 +324,11 @@ int repo_command(const Arguments& arguments)
             "usage: repo init | info | rebuild-index | verify-history"});
     }
 
-    auto session = open_session(arguments, action == "init", action == "rebuild-index");
+    std::optional<RepositoryLayout> resolved;
+    auto session = open_session(arguments, action == "init", action == "rebuild-index", &resolved);
     if (!session) {
-        return report_failure(arguments, session.error());
+        return action == "info" ? info_failure(arguments, session.error(), resolved)
+                                : report_failure(arguments, session.error());
     }
     if (action == "rebuild-index") {
         return rebuild(arguments, *session);

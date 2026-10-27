@@ -2150,10 +2150,68 @@ if(SQLITE3)
                 "(schema version ${incomplete_version}, copies: ${incomplete_copies}):\n${last_errors}")
         endif()
     endforeach()
+    # Where the repository cannot be opened, `repo info` names the copies of
+    # its database kept before upgrades after its error, on stderr, as there a
+    # copy is the way back, and its --json error object gives them: here a
+    # database upgraded once, its copy kept, and found damaged since (a table
+    # dropped: sample damage).
+    set(DAMAGED "${WORK}/upgraded-damaged")
+    run_cli("0" --repository "${DAMAGED}" repo init)
+    execute_process(
+        COMMAND "${SQLITE3}" "${DAMAGED}/veriarchive.db"
+            "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1;"
+        RESULT_VARIABLE code
+        ERROR_VARIABLE errors)
+    if(NOT code EQUAL 0)
+        message(FATAL_ERROR "sqlite3 could not lower the sample repository to version 1:\n${errors}")
+    endif()
+    string(TIMESTAMP before_open "%Y-%m-%d")
+    run_cli("0" --repository "${DAMAGED}" --lang en repo info)
+    string(TIMESTAMP after_open "%Y-%m-%d")
+    execute_process(COMMAND "${SQLITE3}" "${DAMAGED}/veriarchive.db" "DROP TABLE trusted_keys;"
+        RESULT_VARIABLE code ERROR_VARIABLE errors)
+    if(NOT code EQUAL 0)
+        message(FATAL_ERROR "sqlite3 could not damage the sample repository:\n${errors}")
+    endif()
+    set(damaged_copy "veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db")
+    set(damaged_named "is damaged; make it again from the manifests with `repo rebuild-index`")
+    run_cli("11" --repository "${DAMAGED}" --lang en repo info)
+    if(NOT last_errors MATCHES "error: the repository's database [^\n]*veriarchive\\.db ${damaged_named}\nCopy of the database from before an upgrade: [^\n]*${damaged_copy}\n$"
+            OR last_errors MATCHES "note:" OR NOT last_output STREQUAL "")
+        message(FATAL_ERROR "repo info of an upgraded repository found damaged:\n${last_output}\n${last_errors}")
+    endif()
+    file(GLOB damaged_copies "${DAMAGED}/veriarchive-schema-1-before-upgrade-*.db")
+    run_cli("11" --repository "${DAMAGED}" repo info --json)
+    string(JSON failed_error GET "${last_output}" error)
+    string(JSON listed_copies LENGTH "${last_output}" database_copies_before_upgrade)
+    string(JSON listed_copy GET "${last_output}" database_copies_before_upgrade 0)
+    file(TO_CMAKE_PATH "${listed_copy}" listed_copy)
+    if(NOT failed_error MATCHES "${damaged_named}$" OR NOT listed_copies EQUAL 1
+            OR NOT listed_copy STREQUAL damaged_copies)
+        message(FATAL_ERROR "repo info --json of an upgraded repository found damaged: ${listed_copy}, not "
+            "${damaged_copies}\n${last_output}")
+    endif()
+    run_cli("11" --repository "${DAMAGED}" repo info)
+    if(NOT last_errors MATCHES "錯誤：儲存庫的資料庫 [^\n]*veriarchive\\.db 已損毀；請以 `repo rebuild-index` 從清單檔重新建立\n升級前的資料庫副本：[^\n]*${damaged_copy}\n$")
+        message(FATAL_ERROR "repo info of an upgraded repository found damaged, in Chinese:\n${last_errors}")
+    endif()
+    # Where no RepositoryRoot is resolved, there is no folder to name copies
+    # in: the error alone, and the --json error object as every command's.
+    run_cli("11" --repository "${WORK}/SAMPLE-no-repository" --lang en repo info)
+    if(NOT last_errors MATCHES "error: the repository [^\n]*SAMPLE-no-repository is unavailable or is not a VeriArchive repository\n$")
+        message(FATAL_ERROR "repo info of no repository:\n${last_errors}")
+    endif()
+    run_cli("11" --repository "${WORK}/SAMPLE-no-repository" repo info --json)
+    # ERROR_VARIABLE is NOTFOUND when the member is there.
+    string(JSON no_copies ERROR_VARIABLE without_copies GET "${last_output}" database_copies_before_upgrade)
+    if(NOT without_copies)
+        message(FATAL_ERROR "repo info --json of no repository:\n${last_output}")
+    endif()
     # Said also when the open fails after it upgraded the database, before the
     # error: on Windows, where a read-only file cannot be replaced, when the
     # config file cannot be written as the open records the uuid of the
-    # repository it pins (it records another repository's: sample data).
+    # repository it pins (it records another repository's: sample data); and
+    # `repo info` names the copy after its error.
     if(CMAKE_HOST_WIN32)
         set(LOCKED "${WORK}/older-locked")
         set(LOCKED_CONFIG "${WORK}/locked-config.json")
@@ -2181,7 +2239,8 @@ if(SQLITE3)
         string(TIMESTAMP after_open "%Y-%m-%d")
         file(CHMOD "${LOCKED_CONFIG}" PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
         set(GLOBAL --config "${WORK}/config.json")
-        if(NOT code EQUAL 11 OR NOT errors MATCHES "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db\nerror: cannot record repository_uuid in config: ")
+        set(locked_copy "veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db")
+        if(NOT code EQUAL 11 OR NOT errors MATCHES "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*${locked_copy}\nerror: cannot record repository_uuid in config: [^\n]*\nCopy of the database from before an upgrade: [^\n]*${locked_copy}\n$")
             message(FATAL_ERROR "an open that could not record the repository's uuid after the upgrade: exit ${code}\n${errors}")
         endif()
     endif()

@@ -16,20 +16,16 @@ namespace va::gui {
 namespace {
 
 // Why no repository is open, followed by what holds all the same: the
-// warnings, as running elevated may be why (R-12, decision 0037), and what
-// opening it did, said once: the upgrade of its database, and where the copy
-// from before it is (decision 0032). Worded in the language shown.
+// warnings, as running elevated may be why (R-12, decision 0037); what
+// opening it did, said once (the upgrade of its database, and where the copy
+// from before it is); and where each copy of its database kept before an
+// upgrade is in the RepositoryRoot that the open resolved, read again whenever
+// it is shown (decision 0032). Worded in the language shown, as
+// app::session_failure_in_window words it.
 Report session_failure(app::SessionFailure failure)
 {
     return [failure = std::move(failure)](const app::Text& text) {
-        auto shown = text(failure.message);
-        for (const auto& warning : failure.warnings) {
-            shown += "\n\n" + text.format("Warning: {}", text(warning));
-        }
-        for (const auto& note : failure.notes) {
-            shown += "\n\n" + text.format("Note: {}", text(note));
-        }
-        return shown;
+        return app::session_failure_in_window(text, failure);
     };
 }
 
@@ -363,8 +359,9 @@ bool open_with_upgrade_notice(GuiState& state, bool initialise)
                     // Nothing when the open threw: `report` says what.
                     auto& session = *opened;
                     if (!session || !*session) {
-                        // What opening it did all the same follows why: where
-                        // the copy is, when the open failed after the upgrade.
+                        // What opening it did all the same follows why (where
+                        // the copy is, when the open failed after the
+                        // upgrade), then where each copy is, as in Settings.
                         state.session.reset();
                         state.session_error = session ? session_failure(std::move(session->error())) : report;
                         show_failure(state.session_error);

@@ -46,6 +46,10 @@ void refresh_settings(GuiState& state)
     // show it (decision 0037), whether or not a repository is open.
     std::string info = text.format("Program version: {}", state.host.app_version) + "\n\n";
     if (!state.session) {
+        // Why, with what holds all the same and where each copy of the
+        // database kept before an upgrade is in the RepositoryRoot the open
+        // resolved, read again now (decision 0032): where the repository
+        // cannot be opened, a copy is the way back.
         info += text("No repository is open.") + "\n\n" + (state.session_error ? state.session_error(text) : "") +
                "\n\n" +
                text("On first use, initialise a repository: it is created next to the program "

@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <string_view>
 
 namespace va::app {
 namespace {
@@ -72,12 +73,14 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
     if (session_options.elevated ? session_options.elevated() : platform::process_is_elevated()) {
         warnings.emplace_back(running_elevated);
     }
-    const auto failed = [&](std::string message, std::vector<std::string> notes = {}) {
-        return std::unexpected(SessionFailure{std::move(message), warnings, std::move(notes)});
+    const auto failed = [&](std::string message, std::vector<std::string> notes = {},
+                            std::optional<RepositoryLayout> repository = std::nullopt) {
+        return std::unexpected(SessionFailure{std::move(message), warnings, std::move(notes), std::move(repository)});
     };
 
     auto context = resolved_repository(session_options);
     if (!context) {
+        // No RepositoryRoot resolved: no folder in which to name copies.
         return failed(std::move(context.error()));
     }
 
@@ -104,11 +107,13 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
     if (session.context.schema_upgrade) {
         session.notes.push_back(schema_upgrade_note(*session.context.schema_upgrade));
     }
+    // With the RepositoryRoot resolved, where the copies of its database kept
+    // before upgrades are named also when it cannot be opened (decision 0032).
     if (!opened) {
-        return failed(opened.error().message, session.notes);
+        return failed(opened.error().message, session.notes, session.context.repo);
     }
     if (auto recorded = record_repository_uuid(session.context, *session.writer); !recorded) {
-        return failed(recorded.error().message, session.notes);
+        return failed(recorded.error().message, session.notes, session.context.repo);
     }
     if (!session.context.previous_repository_uuid.empty()) {
         session.warnings.push_back("repository_uuid changed from " +
@@ -142,6 +147,27 @@ std::vector<std::string> copy_before_upgrade_lines(const Text& text, const Repos
         lines.push_back(text.format("Copy of the database from before an upgrade: {}", path_to_utf8(copy)));
     }
     return lines;
+}
+
+std::string session_failure_in_window(const Text& text, const SessionFailure& failure)
+{
+    auto shown = text(failure.message);
+    for (const auto& warning : failure.warnings) {
+        shown += "\n\n" + text.format("Warning: {}", text(warning));
+    }
+    for (const auto& note : failure.notes) {
+        shown += "\n\n" + text.format("Note: {}", text(note));
+    }
+    if (failure.repository) {
+        // One paragraph, a line per copy.
+        std::string_view separator = "\n\n";
+        for (const auto& line : copy_before_upgrade_lines(text, *failure.repository)) {
+            shown += separator;
+            shown += line;
+            separator = "\n";
+        }
+    }
+    return shown;
 }
 
 HostInfo host_info(std::string app_version)

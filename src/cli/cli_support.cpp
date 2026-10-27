@@ -80,7 +80,8 @@ Arguments parse_arguments(const std::vector<std::string>& raw, std::string& erro
     return arguments;
 }
 
-std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise, bool rebuild)
+std::expected<Session, Failure> open_session(
+    const Arguments& arguments, bool initialise, bool rebuild, std::optional<RepositoryLayout>* resolved)
 {
     // Said once, on the open that upgraded the database (decision 0032), also
     // when it then fails, before the error; on stderr, so --json output stays
@@ -98,6 +99,9 @@ std::expected<Session, Failure> open_session(const Arguments& arguments, bool in
     }
     if (!session) {
         print_notes(session.error().notes);
+        if (resolved) {
+            *resolved = session.error().repository;
+        }
         return std::unexpected(Failure{exit_code::repository, session.error().message});
     }
     print_notes(session->notes);

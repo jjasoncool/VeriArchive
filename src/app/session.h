@@ -56,6 +56,15 @@ struct SessionFailure {
     std::string message;
     std::vector<std::string> warnings;
     std::vector<std::string> notes;
+    // The RepositoryRoot that the open resolved before it failed, where it got
+    // that far: Settings and `repo info` name the copies of its database kept
+    // before upgrades there also when it cannot be opened (decision 0032), as
+    // where the open cannot write the config file as it records the pinned
+    // repository's uuid, or refuses a database that cannot be used or that a
+    // later version upgraded: there a copy is the way back.
+    // Nothing where the open resolved none, as for a repository that is not
+    // configured or is unavailable.
+    std::optional<RepositoryLayout> repository;
 };
 
 // Opens the repository, upgrading its database where it is of an older
@@ -88,6 +97,17 @@ std::string schema_upgrade_note(const SchemaUpgrade& upgrade);
 // the open that made it: "Copy of the database from before an upgrade: P",
 // one line per copy, in `text`'s language. Nothing where there is none.
 std::vector<std::string> copy_before_upgrade_lines(const Text& text, const RepositoryLayout& layout);
+
+// Why no repository is open, as a window says it (decision 0032): Settings
+// after "No repository is open.", and the window in place of its notice of an
+// upgrade. The failure's message, then each warning that holds all the same
+// ("Warning: ...", as running elevated, R-12), then each note of what the open
+// did all the same ("Note: ..."), then, where the open resolved a RepositoryRoot
+// (SessionFailure::repository), where each copy of its database kept before
+// an upgrade is (copy_before_upgrade_lines), read from the files each time it
+// is worded, as Settings names them while a repository is open. In `text`'s
+// language.
+std::string session_failure_in_window(const Text& text, const SessionFailure& failure);
 
 // Operating system, host name and version for manifests and history.
 HostInfo host_info(std::string app_version);
