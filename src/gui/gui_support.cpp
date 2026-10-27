@@ -62,12 +62,17 @@ GtkWidget* make_row_label(const std::string& text)
 GtkWidget* make_heading(const std::string& text)
 {
     GtkWidget* label = gtk_label_new(nullptr);
+    set_heading(label, text);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    return label;
+}
+
+void set_heading(GtkWidget* heading, const std::string& text)
+{
     gchar* escaped = g_markup_escape_text(text.c_str(), -1);
     const std::string markup = std::string("<b><big>") + escaped + "</big></b>";
     g_free(escaped);
-    gtk_label_set_markup(GTK_LABEL(label), markup.c_str());
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
-    return label;
+    gtk_label_set_markup(GTK_LABEL(heading), markup.c_str());
 }
 
 GtkWidget* make_text_view()

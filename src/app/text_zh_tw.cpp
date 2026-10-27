@@ -470,6 +470,12 @@ constexpr CatalogEntry entries[] = {
     {"Compare Archives", "比較封存"},
     {"Verification History", "驗證歷程"},
     {"Settings", "設定"},
+    // The window's notice while the open upgrades the repository database,
+    // in place of the views (decision 0032).
+    {"Upgrading the repository database...", "正在升級儲存庫資料庫……"},
+    {"VeriArchive first keeps a copy of the database from before the upgrade, beside it. For a large repository "
+        "this takes a while; the views open when it is done.",
+        "VeriArchive 會先在資料庫旁保留一份升級前的副本。儲存庫較大時，這需要一些時間；完成後就會顯示各頁。"},
     // src/gui/gui_support.cpp
     {"Scanning: {}", "掃描中：{}", Match::FormatOnly},
     {"Hashing: {}", "計算雜湊中：{}", Match::FormatOnly},

@@ -398,6 +398,13 @@ void translation_tests()
           "儲存庫資料庫從結構描述版本 2 升級到 3 之前，無法先在 K:/SAMPLE/data/veriarchive-schema-2-before-upgrade-"
           "2026-10-17.db 保留它的副本，因此儲存庫沒有升級：資料庫或磁碟已滿");
     CHECK(chinese("chunk hashes of big.bin: 2 given, 3 expected") == "big.bin 的區塊雜湊：提供 2 個，應為 3 個");
+    // The notice that the GUI's window shows in place of its views while the
+    // open upgrades the database (decision 0032).
+    CHECK(chinese("Upgrading the repository database...") == "正在升級儲存庫資料庫……");
+    CHECK(chinese("VeriArchive first keeps a copy of the database from before the upgrade, beside it. For a large "
+                  "repository this takes a while; the views open when it is done.") ==
+          "VeriArchive 會先在資料庫旁保留一份升級前的副本。儲存庫較大時，這需要一些時間；完成後就會顯示各頁。");
+    CHECK(english("Upgrading the repository database...") == "Upgrading the repository database...");
     // Each revision's chunks in archive show (decision 0032): the Merkle root is 總碼 there.
     CHECK(chinese.format("chunk size {}, {} chunks, Merkle root {}", "64 MiB", 160, "4f3f") ==
           "區塊大小 64 MiB，160 個區塊，總碼 4f3f");

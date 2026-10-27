@@ -77,6 +77,16 @@ struct UpgradeLockWait {
 // ("unsupported repository schema") and left as it is.
 std::expected<void, IoError> open_repository(
     AppContext& context, std::chrono::year_month_day today, const UpgradeLockWait& wait = {});
+// The schema version of the repository's database when the next open of it
+// (open_repository) would upgrade it to this program's, keeping a copy of it
+// first (decision 0032): read read only and without the write lock, as the
+// open reads it first, so it is known at once, also while another process
+// upgrades the database. Nothing for a database at this program's version,
+// at one no migration starts from, such as a later program's, one that
+// cannot be used, which the open refuses without upgrading it
+// (database_state, decision 0036), and one that cannot be read, which the
+// open itself judges.
+std::optional<int> schema_version_to_upgrade(const RepositoryLayout& layout);
 // R-83 step 5, for the pinned repository only (decision 0037): when
 // repository.json's uuid differs from the one recorded in the config, sets
 // context.previous_repository_uuid (the caller warns) and records the new uuid

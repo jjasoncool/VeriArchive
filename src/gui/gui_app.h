@@ -200,6 +200,18 @@ void lock_language(GuiState& state, bool locked);
 // Opens the repository (or initialises it on first run) and refreshes every view.
 void open_repository_session(GuiState& state, bool initialise);
 
+// Makes the open of open_repository_session(state, initialise) with the
+// window shown, when that open will upgrade the repository's database
+// (decision 0032): it keeps a copy of the database first, which takes a while
+// for a large repository, and an open while another process upgrades it waits
+// for that process. The window shows a notice in place of its views, with a
+// progress bar that moves, while the open runs on the job's thread; once it is
+// done, the window shows its views, Settings first, which says where the copy
+// is, or, in place of the notice, why no repository is open. Returns false,
+// having done nothing, when that open will not upgrade the database, while a
+// job runs, and in the screenshot mode, whose sample repository is new.
+bool open_with_upgrade_notice(GuiState& state, bool initialise);
+
 // Builds the window and shows it. With `smoke_test` nothing is shown: the
 // window is built, rebuilt in the other language and back (as a language
 // change does), and the program quits. With state.screenshot_folder set, the

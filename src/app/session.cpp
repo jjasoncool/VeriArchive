@@ -25,19 +25,13 @@ std::optional<std::string> elevated_warning()
     return std::nullopt;
 }
 
-std::expected<Session, SessionFailure> open_session(const SessionOptions& session_options)
-{
-    // R-12 first, also where no repository can be opened: running elevated
-    // may be the reason, as the home folder and the config file then resolve
-    // otherwise (decision 0037).
-    std::vector<std::string> warnings;
-    if (session_options.elevated ? session_options.elevated() : platform::process_is_elevated()) {
-        warnings.emplace_back(running_elevated);
-    }
-    const auto failed = [&](std::string message, std::vector<std::string> notes = {}) {
-        return std::unexpected(SessionFailure{std::move(message), warnings, std::move(notes)});
-    };
+namespace {
 
+// The repository that a session with these options opens (HANDOFF §B7.4),
+// resolved from the program's folder, the user config folder and home, the
+// options and VERIARCHIVE_REPOSITORY; or why it cannot be resolved.
+std::expected<AppContext, std::string> resolved_repository(const SessionOptions& session_options)
+{
     const auto executable = platform::executable_path();
     const auto config_directory = platform::user_config_dir();
     const auto home = platform::user_home();
@@ -45,7 +39,7 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
         const auto& error = !executable ? executable.error()
                             : !config_directory ? config_directory.error()
                                                 : home.error();
-        return failed(error.message);
+        return std::unexpected(error.message);
     }
 
     RepositoryOptions options;
@@ -62,7 +56,29 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
     const RepositoryProbes probes{platform::writable_directory, platform::network_filesystem};
     auto context = resolve_repository(options, probes);
     if (!context) {
-        return failed(context.error().message);
+        return std::unexpected(context.error().message);
+    }
+    return std::move(*context);
+}
+
+} // namespace
+
+std::expected<Session, SessionFailure> open_session(const SessionOptions& session_options)
+{
+    // R-12 first, also where no repository can be opened: running elevated
+    // may be the reason, as the home folder and the config file then resolve
+    // otherwise (decision 0037).
+    std::vector<std::string> warnings;
+    if (session_options.elevated ? session_options.elevated() : platform::process_is_elevated()) {
+        warnings.emplace_back(running_elevated);
+    }
+    const auto failed = [&](std::string message, std::vector<std::string> notes = {}) {
+        return std::unexpected(SessionFailure{std::move(message), warnings, std::move(notes)});
+    };
+
+    auto context = resolved_repository(session_options);
+    if (!context) {
+        return failed(std::move(context.error()));
     }
 
     Session session{std::move(*context), platform::make_file_writer(), warnings, {}, std::nullopt};
@@ -100,6 +116,15 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
                                    session.context.repository_uuid + "; recorded the new uuid");
     }
     return session;
+}
+
+std::optional<int> schema_upgrade_ahead(const SessionOptions& options)
+{
+    const auto context = resolved_repository(options);
+    if (!context) {
+        return std::nullopt;
+    }
+    return schema_version_to_upgrade(context->repo);
 }
 
 std::string schema_upgrade_note(const SchemaUpgrade& upgrade)

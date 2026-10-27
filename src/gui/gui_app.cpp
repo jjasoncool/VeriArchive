@@ -3,6 +3,9 @@
 #include "gui/gui_app.h"
 
 #include <exception>
+#include <expected>
+#include <memory>
+#include <optional>
 #include <string_view>
 
 // Last: on Windows libintl.h redefines printf and its relatives as macros,
@@ -261,9 +264,144 @@ void restore(GuiState& state, const Kept& kept)
 
 } // namespace
 
+namespace {
+
+// Whether the open of the repository that open_repository_session(state,
+// initialise) makes will upgrade its database (decision 0032), keeping a copy
+// of it first, or wait for another process that does: known at once, without
+// the write lock. When it cannot be told, the open goes as any open does.
+bool upgrade_ahead(bool initialise) noexcept
+{
+    try {
+        return app::schema_upgrade_ahead({initialise, std::nullopt, std::nullopt, {}, false, std::nullopt}).has_value();
+    } catch (const std::exception& error) {
+        log_failure(std::string("exception while looking for an upgrade of the repository database: ") +
+                    error.what());
+        return false;
+    }
+}
+
+// The notice that the window shows in place of its views while the open
+// upgrades the repository's database (decision 0032).
+struct UpgradeNotice {
+    GtkWidget* heading = nullptr;
+    GtkWidget* body = nullptr;
+    GtkWidget* bar = nullptr;
+};
+
+// What the timer that pulses the notice's progress bar holds: the bar, with a
+// reference of its own, until the open is done.
+struct Pulse {
+    GuiState* state;
+    GtkWidget* bar;
+};
+
+} // namespace
+
+bool open_with_upgrade_notice(GuiState& state, bool initialise)
+{
+    // The sample repository of the screenshots is new; and a job running
+    // already (none runs while no repository is open) keeps the open as it is.
+    if (state.screenshot_folder || state.job.running() || !upgrade_ahead(initialise)) {
+        return false;
+    }
+    const auto& text = state.text;
+    GtkWidget* views = gtk_window_get_child(state.window);
+    g_object_ref(views);  // kept while the notice takes their place
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    set_margins(box, 24);
+    UpgradeNotice notice;
+    notice.heading = make_heading(text("Upgrading the repository database..."));
+    notice.body = make_label(text("VeriArchive first keeps a copy of the database from before the upgrade, beside it. "
+                                  "For a large repository this takes a while; the views open when it is done."));
+    notice.bar = gtk_progress_bar_new();
+    gtk_box_append(GTK_BOX(box), notice.heading);
+    gtk_box_append(GTK_BOX(box), notice.body);
+    gtk_box_append(GTK_BOX(box), notice.bar);
+    gtk_window_set_child(state.window, box);
+    gtk_window_present(state.window);
+
+    // Why no repository is open, in place of the notice; it can be selected
+    // and copied, as in Settings.
+    const auto show_failure = [&state, notice](const Report& why) {
+        set_heading(notice.heading, state.text("No repository is open."));
+        gtk_label_set_text(GTK_LABEL(notice.body), why ? why(state.text).c_str() : "");
+        gtk_label_set_selectable(GTK_LABEL(notice.body), TRUE);
+        gtk_widget_set_visible(notice.bar, FALSE);
+    };
+    auto opened = std::make_shared<std::optional<std::expected<app::Session, app::SessionFailure>>>();
+    state.job.start(state.text, notice.bar,
+        [opened, initialise](CancelToken&, IProgressSink&) -> Report {
+            *opened = app::open_session({initialise, std::nullopt, std::nullopt, {}, false, std::nullopt});
+            return nullptr;
+        },
+        [&state, opened, views, show_failure](const Report& report) {
+            if (!state.window) {
+                return;  // shutting down
+            }
+            bool shown = false;
+            guarded(
+                [&] {
+                    // Nothing when the open threw: `report` says what.
+                    auto& session = *opened;
+                    if (!session || !*session) {
+                        // What opening it did all the same follows why: where
+                        // the copy is, when the open failed after the upgrade.
+                        state.session.reset();
+                        state.session_error = session ? session_failure(std::move(session->error())) : report;
+                        show_failure(state.session_error);
+                        return;
+                    }
+                    state.session = std::move(**session);
+                    state.session_error = nullptr;
+                    gtk_window_set_child(state.window, views);
+                    g_object_unref(views);
+                    shown = true;
+                    refresh_settings(state);
+                    refresh_archive_list(state);
+                    refresh_archive_choices(state);
+                    // Settings says once where the copy of the database is.
+                    if (!state.session->notes.empty()) {
+                        gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "settings");
+                    }
+                },
+                [&](const Report& error) {
+                    if (!shown) {
+                        show_failure(error);
+                        return;
+                    }
+                    // As when the views cannot be filled at the start.
+                    g_printerr("%s\n", error(state.text).c_str());
+                    state.exit_status = 1;
+                    g_application_quit(G_APPLICATION(state.application));
+                });
+        });
+    g_timeout_add_full(G_PRIORITY_DEFAULT, 100,
+        +[](gpointer data) -> gboolean {
+            auto* pulse = static_cast<Pulse*>(data);
+            if (!pulse->state->job.running()) {
+                return G_SOURCE_REMOVE;
+            }
+            gtk_progress_bar_pulse(GTK_PROGRESS_BAR(pulse->bar));
+            return G_SOURCE_CONTINUE;
+        },
+        new Pulse{&state, GTK_WIDGET(g_object_ref(notice.bar))},
+        +[](gpointer data) {
+            auto* pulse = static_cast<Pulse*>(data);
+            g_object_unref(pulse->bar);
+            delete pulse;
+        });
+    return true;
+}
+
 void activate(GuiState& state, bool smoke_test)
 {
     build_window(state);
+    // An open that upgrades the repository's database shows the window at
+    // once, with a notice (decision 0032); the smoke test shows nothing.
+    if (!smoke_test && open_with_upgrade_notice(state, false)) {
+        return;
+    }
     open_repository_session(state, false);
     // Settings says why no repository is open, or, once, that its database
     // was upgraded and where the copy from before the upgrade is (decision

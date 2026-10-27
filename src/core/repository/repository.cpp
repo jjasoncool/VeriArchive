@@ -712,6 +712,23 @@ std::expected<void, IoError> open_repository(
     return {};
 }
 
+std::optional<int> schema_version_to_upgrade(const RepositoryLayout& layout)
+{
+    // Only a database that can be used is upgraded (open_repository): one
+    // that is missing, damaged or made again and not filled the open refuses
+    // as it is, and another version's it refuses too (database_state).
+    if (const auto state = database_state(layout); !state || *state != DatabaseState::Usable) {
+        return std::nullopt;
+    }
+    // Read only: a database that is not there is not made.
+    const auto database = repository_detail::SqliteDatabase::open(layout.database(), true);
+    if (!database) {
+        return std::nullopt;
+    }
+    const auto version = read_schema_version(*database);
+    return version && upgradable(*version) ? version : std::nullopt;
+}
+
 namespace {
 
 // Which schema versions check_schema takes: this program's alone, as the

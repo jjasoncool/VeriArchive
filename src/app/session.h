@@ -67,6 +67,15 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& option
 // command that opens no repository (`media list`).
 std::optional<std::string> elevated_warning();
 
+// The schema version of the database of the repository that open_session
+// would open, when that open would upgrade it, keeping a copy of it first
+// (decision 0032): known at once, without the write lock, also while another
+// process upgrades the database, which that open then waits for. Nothing for
+// a repository that it opens as it is, and one it cannot open, which it
+// reports itself. The GUI shows its window with a notice before such an
+// open, which takes a while for a large repository.
+std::optional<int> schema_upgrade_ahead(const SessionOptions& options);
+
 // What people are told once of `upgrade` (decision 0032): that the
 // repository database was upgraded, which earlier versions of VeriArchive
 // cannot open, and where its copy from before the upgrade is kept. An English

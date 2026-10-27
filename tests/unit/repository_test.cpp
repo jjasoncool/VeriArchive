@@ -1393,11 +1393,12 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
             std::filesystem::remove(upgrade->copy);
         }
     };
-    CHECK(va::database_state(layout) == va::DatabaseState::Usable);
+    CHECK(va::database_state(layout) == va::DatabaseState::Usable && va::schema_version_to_upgrade(layout) == 1);
 
-    // Version 1 without one of its tables: damaged, not upgraded.
+    // Version 1 without one of its tables: damaged, not upgraded, and no
+    // upgrade is ahead (the GUI shows no notice of one).
     run_sql(layout, "DROP TABLE verify_progress;");
-    CHECK(va::database_state(layout) == va::DatabaseState::Damaged);
+    CHECK(va::database_state(layout) == va::DatabaseState::Damaged && !va::schema_version_to_upgrade(layout));
     {
         auto reopened = *context;
         const auto opened = va::open_repository(reopened, test::today);
@@ -1411,7 +1412,7 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     std::ofstream(database, std::ios::binary | std::ios::trunc) << version_1;
     run_sql(layout, "INSERT INTO settings VALUES ('rebuild:replaced-database', "
                     "'{\"state\":\"damaged\",\"moved_to\":\"veriarchive.db.damaged-SAMPLE\",\"set_aside\":[]}');");
-    CHECK(va::database_state(layout) == va::DatabaseState::Unfilled);
+    CHECK(va::database_state(layout) == va::DatabaseState::Unfilled && !va::schema_version_to_upgrade(layout));
     {
         auto reopened = *context;
         CHECK(!va::open_repository(reopened, test::today));
@@ -1460,6 +1461,61 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         CHECK(!refused && refused.error().message == "unsupported repository schema");
         CHECK(file_bytes(database) == later && copies().empty());
     }
+}
+
+// Whether the next open will upgrade the repository's database, keeping a
+// copy of it first, is known ahead, at once and without the write lock
+// (schema_version_to_upgrade, decision 0032): the GUI shows its window with a
+// notice before such an open, which takes a while for a large repository. The
+// version of a database of version 1 or 2, also while another connection
+// holds the write lock, as another process that copies the database to
+// upgrade it does; nothing for a database at this version, at a later one, at
+// one no migration starts from, one whose version cannot be read, and a
+// repository without a database, where none is made.
+void an_upgrade_is_known_ahead()
+{
+    TemporaryDirectory temporary("schema-upgrade-ahead");
+    auto context = repository_of_version_1(temporary);
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    CHECK(va::schema_version_to_upgrade(layout) == 1);
+    std::optional<int> while_locked;
+    std::chrono::steady_clock::duration took{};
+    {
+        std::binary_semaphore asked{0};
+        const LockHolder holder(layout, [&](sqlite3* connection) {
+            (void)asked.try_acquire_for(std::chrono::seconds(10));
+            CHECK(sqlite3_exec(connection, "ROLLBACK", nullptr, nullptr, nullptr) == SQLITE_OK);
+        });
+        const auto started = std::chrono::steady_clock::now();
+        while_locked = va::schema_version_to_upgrade(layout);
+        took = std::chrono::steady_clock::now() - started;
+        asked.release();
+    }
+    CHECK(while_locked == 1 && took < std::chrono::seconds(2));
+    lower_schema(layout, 2);
+    CHECK(va::schema_version_to_upgrade(layout) == 2);
+    CHECK(stored_schema_version(layout) == 2 && copies_in(layout.root).empty());
+
+    // Upgraded, nothing more is ahead.
+    CHECK(va::open_repository(*context, test::today, short_tries).has_value() && context->schema_upgrade);
+    CHECK(!va::schema_version_to_upgrade(layout));
+    // A later program's version, and one no migration starts from, which the
+    // open refuses.
+    for (const char* version : {"UPDATE schema_version SET version = 4", "UPDATE schema_version SET version = 0"}) {
+        run_sql(layout, version);
+        CHECK(!va::schema_version_to_upgrade(layout));
+    }
+    run_sql(layout, "DROP TABLE schema_version");
+    CHECK(!va::schema_version_to_upgrade(layout));
+
+    // A repository without a database (sample data).
+    TemporaryDirectory without("schema-upgrade-ahead-none");
+    const va::RepositoryLayout none{without.path() / "SAMPLE-repository"};
+    std::filesystem::create_directories(none.root);
+    CHECK(!va::schema_version_to_upgrade(none) && !std::filesystem::exists(none.database()));
 }
 
 // A repository at this version is opened without the write lock, which an
@@ -1519,5 +1575,6 @@ void repository_tests()
     an_upgrade_waits_for_the_write_lock();
     an_open_waits_for_another_upgrade();
     an_upgrade_gives_up_after_its_patience();
+    an_upgrade_is_known_ahead();
     opening_a_current_repository_takes_no_write_lock();
 }

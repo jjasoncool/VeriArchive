@@ -167,10 +167,33 @@ void a_failed_open_still_says_where_the_copy_is()
     writable_again();
 }
 
+// Whether a session's open will upgrade the database of the repository it
+// opens is known ahead, for the repository that open resolves (decision
+// 0032): the GUI shows its window with a notice before such an open. The
+// version of a repository of version 1, and nothing once it is upgraded, nor
+// for a repository that cannot be resolved, whose open says why.
+void an_upgrade_is_known_ahead_of_the_open()
+{
+    SampleFolder folder("upgrade-ahead");
+    const auto options = repository_of_version_1(folder, moment_of_another_date());
+    if (!options) {
+        return;
+    }
+    CHECK(va::app::schema_upgrade_ahead(*options) == 1);
+    const auto opened = va::app::open_session(*options);
+    CHECK(opened && opened->notes.size() == 1);
+    CHECK(!va::app::schema_upgrade_ahead(*options));
+
+    auto elsewhere = *options;
+    elsewhere.repository = folder.path() / "SAMPLE-no-repository";
+    CHECK(!va::app::schema_upgrade_ahead(elsewhere) && !va::app::open_session(elsewhere));
+}
+
 } // namespace
 
 void session_tests()
 {
     the_copy_before_an_upgrade_is_named_for_the_local_date();
     a_failed_open_still_says_where_the_copy_is();
+    an_upgrade_is_known_ahead_of_the_open();
 }

@@ -172,9 +172,25 @@ GtkWidget* build_settings_view(GuiState& state)
     gtk_widget_set_halign(view.initialise, GTK_ALIGN_START);
     g_signal_connect(view.initialise, "clicked",
         G_CALLBACK(+[](GtkButton*, gpointer data) {
-            auto& state = *static_cast<GuiState*>(data);
-            guarded([&] { open_repository_session(state, true); },
-                [&](const Report& report) { show_notice(state, report); });
+            // Once this signal has returned: a repository found at last may
+            // need its database upgraded, and the notice of that open takes
+            // the place of the views, this button among them.
+            g_idle_add(
+                +[](gpointer data) -> gboolean {
+                    auto& state = *static_cast<GuiState*>(data);
+                    guarded(
+                        [&] {
+                            if (!state.window) {
+                                return;  // shutting down
+                            }
+                            if (!open_with_upgrade_notice(state, true)) {
+                                open_repository_session(state, true);
+                            }
+                        },
+                        [&](const Report& report) { show_notice(state, report); });
+                    return G_SOURCE_REMOVE;
+                },
+                data);
         }),
         &state);
     gtk_box_append(GTK_BOX(box), view.initialise);

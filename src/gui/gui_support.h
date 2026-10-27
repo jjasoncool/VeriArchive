@@ -38,6 +38,8 @@ GtkWidget* make_label(const std::string& text, bool selectable = false);
 // a column of single words or characters.
 GtkWidget* make_row_label(const std::string& text);
 GtkWidget* make_heading(const std::string& text);
+// Gives a heading made by make_heading another text.
+void set_heading(GtkWidget* heading, const std::string& text);
 GtkWidget* make_text_view();
 void set_text(GtkWidget* text_view, const std::string& text);
 void set_margins(GtkWidget* widget, int margin);
