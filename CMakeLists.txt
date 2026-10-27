@@ -299,11 +299,13 @@ if(BUILD_TESTING)
         tests/unit/text_test.cpp
         tests/unit/transfer_test.cpp
         tests/unit/typed_path_test.cpp)
-    # The platform layer's own names for failed calls (Win32 errors, errno).
+    # The platform layer's own names for failed calls (Win32 errors, errno),
+    # and a sparse sample file made as each system makes one (R-48).
     if(WIN32)
-        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_win.cpp)
+        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_win.cpp tests/unit/sparse_file_win.cpp)
     elseif(UNIX AND NOT APPLE)
-        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_linux.cpp)
+        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_linux.cpp
+            tests/unit/sparse_file_linux.cpp)
     endif()
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform VeriArchive::app)

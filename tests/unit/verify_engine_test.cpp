@@ -1,6 +1,7 @@
 #include "test_support.h"
 
 #include "engine_fixture.h"
+#include "sparse_file.h"
 
 #include "app/typed_path.h"
 #include "common/time.h"
@@ -22,6 +23,7 @@
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <thread>
 #include <utility>
 
@@ -285,6 +287,127 @@ void metadata_changes_warn()
     strict.strict_metadata = true;
     const auto strict_outcome = fixture.verify(strict);
     CHECK(strict_outcome && strict_outcome->result == "FAILED");
+}
+
+// R-53: the mode (POSIX bits) and the attributes (Windows bits) are recorded
+// where the system lists them, and compared only under --strict-metadata
+// (R-51): without it a change of either is no item at all; with it, each is
+// MetadataMismatch, naming what changed, and the run fails. Sample data.
+void mode_and_attributes_count_only_under_strict_metadata()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("SAMPLE-mode.txt", "mode").mode = 0644;
+    fixture.archive.add_file("SAMPLE-attrs.txt", "attrs").attrs = 0x20; // archive
+    fixture.archive.add_file("SAMPLE-same.txt", "same").mode = 0600;
+    const auto registered = fixture.register_root(fixture.archive.root());
+    CHECK(registered.has_value());
+    if (registered) {
+        const auto manifest = va::load_recorded_manifest(fixture.store, *fixture.repository.files,
+            fixture.repository.context.repo, registered->archive_uuid, registered->revision);
+        CHECK(manifest.has_value());
+        if (manifest) {
+            for (const auto& entry : manifest->entries) {
+                if (entry.path.p == "SAMPLE-mode.txt") {
+                    CHECK(entry.mode == 0644u && !entry.attrs);
+                } else if (entry.path.p == "SAMPLE-attrs.txt") {
+                    CHECK(entry.attrs == 0x20u && !entry.mode);
+                }
+            }
+        }
+    }
+    fixture.archive.node("SAMPLE-mode.txt").mode = 0600;
+    fixture.archive.node("SAMPLE-attrs.txt").attrs = 0x21; // read-only as well
+
+    const auto relaxed = fixture.verify(fixture.archive.root());
+    CHECK(relaxed && relaxed->result == "PASSED" && relaxed->items.empty() && relaxed->counts.at("Verified") == 3);
+
+    va::VerifyRequest strict;
+    strict.root = fixture.archive.root();
+    strict.strict_metadata = true;
+    const auto failed = fixture.verify(strict);
+    CHECK(failed && failed->result == "FAILED" && failed->items.size() == 2);
+    if (failed && failed->items.size() == 2) {
+        CHECK(failed->items[0].path.p == "SAMPLE-attrs.txt" && failed->items[0].status == "MetadataMismatch" &&
+              failed->items[0].detail == "attrs");
+        CHECK(failed->items[1].path.p == "SAMPLE-mode.txt" && failed->items[1].status == "MetadataMismatch" &&
+              failed->items[1].detail == "mode");
+    }
+}
+
+// §A6: a root that cannot be listed while its volume stays attached fails the
+// run with FilesystemAccessError (not INCOMPLETE: the device did not go away,
+// decision 0034), saying why, and reads nothing. Sample data.
+void a_root_that_cannot_be_scanned_fails_with_a_filesystem_access_error()
+{
+    Registered fixture;
+    fixture.archive.node("").list_error = va::IoError{va::IoErrorKind::PermissionDenied, 5, "access denied (sample)"};
+    fixture.archive.bytes_read = 0;
+    const auto outcome = fixture.verify_ok();
+    CHECK(outcome.result == "FAILED" && outcome.failure_classes == std::vector<std::string>{"FilesystemAccessError"});
+    CHECK(outcome.warnings == std::vector<std::string>{"scan: access denied (sample)"});
+    CHECK(outcome.items.empty() && outcome.coverage_bytes == 0 && fixture.archive.bytes_read == 0);
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && !runs->empty() && runs->back().result == "FAILED" &&
+          runs->back().failure_classes == "FilesystemAccessError");
+}
+
+// R-47, R-48 on a real folder (sample data in the temp folder): two names of
+// one file (a hardlink) are entries of their own, each read and hashed, and a
+// sparse file is hashed by its logical content, its hole read as zeros. Both
+// are registered and verified; a change through one name of the hardlinked
+// file shows at both entries.
+void hardlinks_and_sparse_files_are_hashed_by_content()
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("va-sample-links-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(root);
+    const std::string content = "SAMPLE hardlinked content\n";
+    std::ofstream(root / "SAMPLE-original.txt", std::ios::binary) << content;
+    std::error_code linked;
+    std::filesystem::create_hard_link(root / "SAMPLE-original.txt", root / "SAMPLE-hardlink.txt", linked);
+    CHECK(!linked);
+    const std::uint64_t hole = 3 * 1024 * 1024 + 123; // never written: reads as zeros
+    const std::string tail = "end of the SAMPLE sparse file\n";
+    const auto sparse = test::make_sparse_file(root / "SAMPLE-sparse.bin", hole, tail);
+    CHECK(sparse.created);
+    if (!sparse.sparse) {
+        std::cerr << "  note: the temp folder's filesystem keeps no hole; the sparse sample is checked by content\n";
+    }
+
+    const auto files = va::platform::make_file_system_access();
+    {
+        EngineFixture fixture(root);
+        fixture.media_files = files.get();
+        const auto registered = fixture.register_root(root);
+        CHECK(registered && registered->counts.files == 3 && registered->unreadable.empty());
+        if (registered) {
+            const auto manifest = va::load_recorded_manifest(fixture.store, *fixture.repository.files,
+                fixture.repository.context.repo, registered->archive_uuid, registered->revision);
+            CHECK(manifest.has_value());
+            std::map<std::string, va::Entry> entries;
+            if (manifest) {
+                for (const auto& entry : manifest->entries) {
+                    entries[entry.path.p] = entry;
+                }
+            }
+            const auto content_hash = va::blake3_hex(content);
+            CHECK(entries["SAMPLE-original.txt"].b3 == content_hash &&
+                  entries["SAMPLE-hardlink.txt"].b3 == content_hash &&
+                  entries["SAMPLE-hardlink.txt"].type == 'f' && entries["SAMPLE-hardlink.txt"].size == content.size());
+            CHECK(entries["SAMPLE-sparse.bin"].b3 == va::blake3_hex(std::string(hole, '\0') + tail) &&
+                  entries["SAMPLE-sparse.bin"].size == hole + tail.size());
+        }
+        const auto verified = fixture.verify(root);
+        CHECK(verified && verified->result == "PASSED" && verified->counts.at("Verified") == 3 &&
+              verified->coverage_bytes == 2 * content.size() + hole + tail.size());
+
+        std::ofstream(root / "SAMPLE-hardlink.txt", std::ios::binary | std::ios::trunc) << "SAMPLE changed\n";
+        const auto changed = fixture.verify(root);
+        CHECK(changed && changed->result == "FAILED" && status_of(*changed, "SAMPLE-original.txt") == "Modified" &&
+              status_of(*changed, "SAMPLE-hardlink.txt") == "Modified");
+    }
+    std::error_code removed;
+    std::filesystem::remove_all(root, removed);
 }
 
 // Decision 0010.
@@ -2004,6 +2127,9 @@ void verify_engine_tests()
     items_are_in_canonical_order();
     unreadable_files_fail_with_their_reason();
     metadata_changes_warn();
+    mode_and_attributes_count_only_under_strict_metadata();
+    a_root_that_cannot_be_scanned_fails_with_a_filesystem_access_error();
+    hardlinks_and_sparse_files_are_hashed_by_content();
     known_unreadable_entries_warn();
     tampered_manifest_fails();
     identity_outcomes();

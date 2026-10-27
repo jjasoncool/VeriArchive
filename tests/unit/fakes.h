@@ -101,7 +101,8 @@ public:
         std::string content;                  // file bytes
         std::string link_target;              // link target
         std::int64_t mtime_ns = 1'700'000'000'000'000'000;
-        std::optional<std::uint32_t> attrs;
+        std::optional<std::uint32_t> mode;    // POSIX permission bits, as Linux lists them
+        std::optional<std::uint32_t> attrs;   // Windows attribute bits, as Windows lists them
         bool mount_point = false;
         std::optional<va::IoError> list_error; // directory cannot be listed
         std::optional<va::IoError> open_error; // file cannot be opened
@@ -195,6 +196,7 @@ public:
             entry.type = node.type;
             entry.size = node.type == va::EntryType::File ? node.content.size() : 0;
             entry.mtime_ns = node.mtime_ns;
+            entry.mode = node.mode;
             entry.attrs = node.attrs;
             entry.is_mount_point = node.mount_point;
             entries.push_back(entry);
