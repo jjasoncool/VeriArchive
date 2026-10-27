@@ -7,6 +7,7 @@
 #include "common/time.h"
 #include "core/engine/abandon_registration.h"
 #include "core/engine/archive_status.h"
+#include "core/engine/comparison.h"
 #include "core/engine/abandon_relocation.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/registration_attempt.h"
@@ -925,6 +926,46 @@ void the_rotational_override_applies_to_a_relocation()
     const auto relocated = fixture.relocate(fixture.archive.root() / "new");
     CHECK(relocated && relocated->revision == 2 && relocated->result == "PASSED");
     CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
+}
+
+// Decision 0013, §A6: the FULL verification of the new carrier that a
+// relocation records for the new revision reports the portability warnings
+// that the revision records, as every later FULL verification of it does:
+// PASSED_WITH_WARNINGS with the plain warning line, in the outcome and in the
+// history. Sample names: "café" composed and decomposed in one folder.
+void a_relocation_reports_the_recorded_name_collisions()
+{
+    test::EngineFixture fixture;
+    auto second = test::fake_volume(fixture.archive.root() / "new");
+    second.filesystem_uuid = "5555666677778888";
+    second.devices.front().serial = "NEW-DISK";
+    fixture.media.extra_volumes.push_back(second);
+    const auto add_sample = [&](const std::string& folder) {
+        fixture.archive.add_file(folder + "/SAMPLE-nfc/caf\xC3\xA9.txt", "composed");    // e-acute as one character
+        fixture.archive.add_file(folder + "/SAMPLE-nfc/cafe\xCC\x81.txt", "decomposed"); // e, then a combining acute
+    };
+    add_sample("old");
+    const auto registered = fixture.register_root(fixture.archive.root() / "old");
+    if (!registered) {
+        CHECK(false);
+        return;
+    }
+    add_sample("new");
+
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo,
+        fixture.repository.context.repository_uuid, fixture.host, fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {registered->archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel,
+        fixture.progress);
+    CHECK(relocated && relocated->revision == 2 && relocated->result == "PASSED_WITH_WARNINGS" &&
+          relocated->items.empty() && relocated->warnings == std::vector<std::string>{va::name_collision_warning});
+    const auto runs = fixture.store.verify_runs(registered->archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->front().revision == 2 &&
+          runs->front().result == "PASSED_WITH_WARNINGS");
+    const auto verified = fixture.verify(fixture.archive.root() / "new");
+    CHECK(verified && verified->result == "PASSED_WITH_WARNINGS" &&
+          verified->warnings == std::vector<std::string>{va::name_collision_warning});
 }
 
 // Decision 0010: entries unreadable at registration travel unchanged.
@@ -2564,6 +2605,7 @@ void relocate_tests()
     a_new_carrier_that_stops_answering_leaves_the_relocation_resumable();
     the_rotational_override_applies_to_a_relocation();
     known_unreadable_entries_are_carried();
+    a_relocation_reports_the_recorded_name_collisions();
     an_interrupted_relocation_resumes_without_reading_again();
     a_resume_needs_the_volume_it_started_on();
     a_resumed_relocation_names_where_it_reads_and_keeps_its_start();

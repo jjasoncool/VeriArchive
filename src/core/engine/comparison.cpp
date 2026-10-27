@@ -430,4 +430,13 @@ ComparisonResult compare_with_manifest(
     return result;
 }
 
+bool records_name_collisions(const std::vector<Entry>& entries)
+{
+    return std::ranges::any_of(entries, [](const Entry& entry) {
+        return std::ranges::any_of(entry.warn, [](const std::string& warning) {
+            return warning == "nfc-collision" || warning == "case-collision";
+        });
+    });
+}
+
 } // namespace va

@@ -718,7 +718,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     outcome.archive_uuid = uuid;
     outcome.label = archive.label;
     outcome.revision = creates;
-    outcome.result = comparison.warning ? "PASSED_WITH_WARNINGS" : "PASSED";
+    // §A6, R-42 (decision 0013): the portability warnings that the new
+    // revision records, as every FULL verification of it reports them.
+    if (records_name_collisions(comparison.current_entries)) {
+        outcome.warnings.push_back(name_collision_warning);
+    }
+    outcome.result = comparison.warning || !outcome.warnings.empty() ? "PASSED_WITH_WARNINGS" : "PASSED";
     outcome.run_id = run_id;
     outcome.counts = comparison.counts;
     outcome.items = comparison.items;

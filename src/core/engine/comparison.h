@@ -68,4 +68,16 @@ ComparisonResult compare_with_manifest(
     CancelToken& cancel,
     IProgressSink& progress);
 
+// §A6, R-42 (decision 0013): whether the entries of a revision record names
+// that differ from another name in the same folder only by case or by
+// Unicode normalisation (`warn`: case-collision, nfc-collision), portability
+// warnings that make every FULL verification of that revision, a
+// relocation's included, PASSED_WITH_WARNINGS at most, with the warning
+// name_collision_warning.
+bool records_name_collisions(const std::vector<Entry>& entries);
+inline constexpr const char* name_collision_warning =
+    "some names differ from another name in the same folder only in upper and lower case, or in how a letter with "
+    "an accent or a mark is encoded (Unicode normalisation); a volume or system that does not tell such names apart "
+    "cannot keep them all";
+
 } // namespace va

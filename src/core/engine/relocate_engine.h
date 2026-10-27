@@ -53,6 +53,7 @@ struct RelocateOutcome {
     std::uint32_t revision = 0;             // the new revision
     std::string result;                     // PASSED or PASSED_WITH_WARNINGS
     std::string run_id;                     // the FULL verification that accepted the carrier
+    std::vector<std::string> warnings;      // run-level warnings of that verification (§A6)
     std::map<std::string, std::uint64_t> counts;
     std::vector<VerifyItemRecord> items;
     std::filesystem::path manifest;

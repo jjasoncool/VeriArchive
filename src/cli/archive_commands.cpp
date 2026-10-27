@@ -901,7 +901,7 @@ int relocate(const Arguments& arguments, Opened& opened)
     }
     if (arguments.json) {
         print_json({{"archive_uuid", outcome->archive_uuid}, {"revision", outcome->revision},
-            {"result", outcome->result}, {"run_id", outcome->run_id},
+            {"result", outcome->result}, {"run_id", outcome->run_id}, {"warnings", outcome->warnings},
             {"manifest", path_to_utf8(outcome->manifest)}, {"counts", outcome->counts},
             {"resumed", outcome->resumed}});
     } else {
@@ -911,6 +911,9 @@ int relocate(const Arguments& arguments, Opened& opened)
                   << text.format("FULL VERIFY {} of the new carrier (run {})", text(outcome->result),
                          outcome->run_id)
                   << '\n';
+        for (const auto& warning : outcome->warnings) {
+            std::cout << "  " << text.format("warning: {}", text(warning)) << '\n';
+        }
         for (const auto& item : outcome->items) {
             std::cout << "  " << text(item.status) << "  " << item.path.p
                       << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail)))

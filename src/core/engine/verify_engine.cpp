@@ -607,16 +607,8 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         }
         // §A6, R-42: portability warnings that the manifest records make the
         // run PASSED_WITH_WARNINGS at most, in one plain line.
-        const auto collides = [](const Entry& entry) {
-            return std::ranges::any_of(entry.warn, [](const std::string& warning) {
-                return warning == "nfc-collision" || warning == "case-collision";
-            });
-        };
-        if (std::ranges::any_of(manifest->entries, collides)) {
-            outcome.warnings.push_back(
-                "some names differ from another name in the same folder only in upper and lower case, or in how a "
-                "letter with an accent or a mark is encoded (Unicode normalisation); a volume or system that does "
-                "not tell such names apart cannot keep them all");
+        if (records_name_collisions(manifest->entries)) {
+            outcome.warnings.push_back(name_collision_warning);
         }
         outcome.counts = comparison.counts;
         outcome.items = comparison.items;

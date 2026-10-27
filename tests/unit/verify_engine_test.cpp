@@ -7,6 +7,7 @@
 #include "common/time.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
+#include "core/engine/comparison.h"
 #include "core/engine/item_rules.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/recorded_manifest.h"
@@ -546,6 +547,15 @@ void recorded_portability_warnings_make_the_run_pass_with_warnings()
                   "some names differ from another name in the same folder only in upper and lower case, or in how a "
                   "letter with an accent or a mark is encoded (Unicode normalisation); a volume or system that "
                   "does not tell such names apart cannot keep them all"});
+
+    // Names that differ only in case, alone.
+    EngineFixture case_only;
+    case_only.archive.add_file("SAMPLE-case/Report.txt", "upper");
+    case_only.archive.add_file("SAMPLE-case/report.txt", "lower");
+    CHECK(case_only.register_root(case_only.archive.root()).has_value());
+    const auto case_outcome = case_only.verify(case_only.archive.root());
+    CHECK(case_outcome && case_outcome->result == "PASSED_WITH_WARNINGS" &&
+          case_outcome->warnings == std::vector<std::string>{va::name_collision_warning});
 }
 
 // Decision 0006: a verification through a FUSE program instead of the kernel's
