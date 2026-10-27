@@ -1,5 +1,6 @@
-// Settings (§B17): the active RepositoryRoot and how it was selected, its uuid,
-// the config file, trusted keys (V1.1), policy and the backup reminder (R-86).
+// Settings (§B17): this program's version, the active RepositoryRoot and how it
+// was selected, its uuid, the config file, trusted keys (V1.1), policy and the
+// backup reminder (R-86).
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -41,9 +42,11 @@ void refresh_settings(GuiState& state)
     if (!view.info) {
         return;
     }
-    std::string info;
+    // This program's version, as `veriarchive-cli --version` and `repo info`
+    // show it (decision 0037), whether or not a repository is open.
+    std::string info = text.format("Program version: {}", state.host.app_version) + "\n\n";
     if (!state.session) {
-        info = text("No repository is open.") + "\n\n" + (state.session_error ? state.session_error(text) : "") +
+        info += text("No repository is open.") + "\n\n" + (state.session_error ? state.session_error(text) : "") +
                "\n\n" +
                text("On first use, initialise a repository: it is created next to the program "
                     "(or in your home folder when that is not writable) and remembered in the config file.");
@@ -51,7 +54,7 @@ void refresh_settings(GuiState& state)
     } else {
         const auto& context = state.session->context;
         const auto& policy = context.config.policy;
-        info = text.format("RepositoryRoot: {}", path_to_utf8(context.repo.root)) + "\n" +
+        info += text.format("RepositoryRoot: {}", path_to_utf8(context.repo.root)) + "\n" +
                text.format("Selected by: {}", text(context.repo_selected_by)) + "\n" +
                text.format("repository_uuid: {}", context.repository_uuid) + "\n" +
                text.format("Config file: {}", path_to_utf8(context.config_file)) + "\n\n" +

@@ -2,11 +2,11 @@
 # real directory tree, verifies it, damages it, and exercises history,
 # export/import, the sha256sum export and the interface language (decision 0017).
 #
-#   cmake -DCLI=<veriarchive-cli> -DWORK=<scratch dir> -P cli_e2e.cmake
+#   cmake -DCLI=<veriarchive-cli> -DWORK=<scratch dir> -DVERSION=<program version> -P cli_e2e.cmake
 cmake_minimum_required(VERSION 3.28)
 
-if(NOT CLI OR NOT WORK)
-    message(FATAL_ERROR "CLI and WORK must be set")
+if(NOT CLI OR NOT WORK OR NOT VERSION)
+    message(FATAL_ERROR "CLI, WORK and VERSION must be set")
 endif()
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}")
@@ -55,6 +55,26 @@ file(WRITE "${ROOT}/emoji 😀/nested/deep.bin" "0123456789")
 file(MAKE_DIRECTORY "${ROOT}/empty")
 
 run_cli("0" --repository "${WORK}/repo" repo init)
+# Decision 0037: the program shows its version, with --version (exit 0) in
+# either language and in --json, and in repo info, text and --json.
+run_cli("0" --lang en --version)
+set(version_english "${last_output}")
+run_cli("0" --version)
+set(version_chinese "${last_output}")
+run_cli("0" --version --json)
+string(JSON version_json GET "${last_output}" app_version)
+run_cli("0" --lang en repo info)
+string(FIND "${last_output}" "\nprogram version: ${VERSION}\n" info_version)
+run_cli("0" repo info)
+string(FIND "${last_output}" "\n程式版本：${VERSION}\n" info_version_chinese)
+run_cli("0" repo info --json)
+string(JSON info_json_version GET "${last_output}" app_version)
+if(NOT version_english STREQUAL "VeriArchive version ${VERSION}\n" OR NOT version_chinese STREQUAL "VeriArchive 版本 ${VERSION}\n"
+        OR NOT version_json STREQUAL VERSION OR info_version EQUAL -1 OR info_version_chinese EQUAL -1
+        OR NOT info_json_version STREQUAL VERSION)
+    message(FATAL_ERROR "the program's version (${VERSION}): ${version_english}${version_chinese}--json ${version_json}, "
+        "repo info ${info_version}/${info_version_chinese}, --json ${info_json_version}")
+endif()
 run_cli("0" register "${ROOT}" --json)
 string(JSON archive_uuid GET "${last_output}" archive_uuid)
 string(JSON files GET "${last_output}" counts files)

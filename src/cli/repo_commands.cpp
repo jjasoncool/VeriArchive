@@ -1,5 +1,6 @@
 // `repo init | info | rebuild-index | verify-history`.
-// info shows the active RepositoryRoot, its uuid and how it was selected (R-85).
+// info shows the active RepositoryRoot, its uuid and how it was selected (R-85),
+// and this program's version (decision 0037).
 #include "cli/commands.h"
 
 #include "app/history.h"
@@ -22,6 +23,7 @@ int info(const Arguments& arguments, const Session& session)
             {"repository_uuid", context.repository_uuid},
             {"repo_selected_by", context.repo_selected_by},
             {"config_file", path_to_utf8(context.config_file)},
+            {"app_version", program_version()},
         });
     } else {
         const auto& text = arguments.text;
@@ -29,6 +31,7 @@ int info(const Arguments& arguments, const Session& session)
                   << text.format("repository_uuid: {}", context.repository_uuid) << '\n'
                   << text.format("repo_selected_by: {}", text(context.repo_selected_by)) << '\n'
                   << text.format("config_file: {}", path_to_utf8(context.config_file)) << '\n'
+                  << text.format("program version: {}", program_version()) << '\n'
                   << text("Back up RepositoryRoot: losing it loses all verification history.")
                   << '\n';
     }

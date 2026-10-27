@@ -65,6 +65,7 @@ constexpr CatalogEntry entries[] = {
     // Command line
     // src/cli/cli.cpp
     {"Usage: veriarchive-cli [--config P] [--repository P] [--lang en|zh-TW] [--json] <command>\n"
+        "       veriarchive-cli --version\n"
         "\n"
         "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
@@ -81,6 +82,7 @@ constexpr CatalogEntry entries[] = {
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n",
         "用法：veriarchive-cli [--config P] [--repository P] [--lang en|zh-TW] [--json] <command>\n"
+        "      veriarchive-cli --version\n"
         "\n"
         "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
@@ -111,6 +113,10 @@ constexpr CatalogEntry entries[] = {
     {"repository_uuid: {}", "repository_uuid：{}"},
     {"repo_selected_by: {}", "儲存庫選定方式：{}"},
     {"config_file: {}", "設定檔：{}"},
+    // This program's version (decision 0037): repo info, --version, Settings.
+    {"program version: {}", "程式版本：{}"},
+    {"VeriArchive version {}", "VeriArchive 版本 {}"},
+    {"Program version: {}", "程式版本：{}"},
     {"Back up RepositoryRoot: losing it loses all verification history.",
         "請備份儲存庫根目錄：遺失它會失去所有驗證歷程。"},
     {"explicit", "明確指定"},

@@ -87,6 +87,9 @@ std::expected<Uuid, Failure> find_archive_uuid(ArchiveStore& store, const std::s
 // Operating system, host name and version for manifests and history.
 HostInfo host_info();
 
+// This program's version ("1.0.0"), as manifests and history record it.
+std::string program_version();
+
 // What a progress line counts: files read and hashed (register, verify,
 // relocate), or manifest entries compared (archive compare, which reads no
 // file content and so reports no bytes).

@@ -15,6 +15,7 @@ void print_usage(const app::Text& text)
 {
     std::cout << text(
         "Usage: veriarchive-cli [--config P] [--repository P] [--lang en|zh-TW] [--json] <command>\n"
+        "       veriarchive-cli --version\n"
         "\n"
         "  repo init | info | rebuild-index | verify-history\n"
         "  media list\n"
@@ -45,6 +46,16 @@ int run(std::vector<std::string> raw_arguments)
     if (!error.empty()) {
         std::cerr << arguments.text.format("error: {}", arguments.text(error)) << '\n';
         return exit_code::usage;
+    }
+    // The version of this program (decision 0037), as repo info and the
+    // GUI's Settings show it.
+    if (arguments.words.empty() && arguments.has("--version")) {
+        if (arguments.json) {
+            print_json({{"app_version", program_version()}});
+        } else {
+            std::cout << arguments.text.format("VeriArchive version {}", program_version()) << '\n';
+        }
+        return exit_code::passed;
     }
     if (arguments.words.empty()) {
         print_usage(arguments.text);

@@ -161,7 +161,12 @@ std::expected<Uuid, Failure> find_archive_uuid(ArchiveStore& store, const std::s
 
 HostInfo host_info()
 {
-    return app::host_info(VERIARCHIVE_VERSION);
+    return app::host_info(program_version());
+}
+
+std::string program_version()
+{
+    return VERIARCHIVE_VERSION;
 }
 
 void CliProgress::on_progress(const Progress& progress)
