@@ -1664,8 +1664,8 @@ if(CMAKE_HOST_WIN32)
     set(unbaselined_english "${last_output}")
     run_cli("2" verify --full "${UNBASELINED_ROOT}")
     if(NOT unbaselined_english MATCHES "\n  Unbaselined  SAMPLE-locked\\.txt  "
-            OR NOT unbaselined_english MATCHES "\n  The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet\\. To take one for them, register a new revision of the archive: veriarchive-cli register \"[^\"\n]*unbaselined-SAMPLE\" --new-revision\n"
-            OR NOT last_output MATCHES "\n  這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：veriarchive-cli register \"[^\"\n]*unbaselined-SAMPLE\" --new-revision\n")
+            OR NOT unbaselined_english MATCHES "\n  The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet\\. To take one for them, register a new revision of the archive: veriarchive-cli register (\"[^\"\n]*unbaselined-SAMPLE\"|[^ \"\n]*unbaselined-SAMPLE) --new-revision\n"
+            OR NOT last_output MATCHES "\n  這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：veriarchive-cli register (\"[^\"\n]*unbaselined-SAMPLE\"|[^ \"\n]*unbaselined-SAMPLE) --new-revision\n")
         message(FATAL_ERROR "the advice for Unbaselined entries:\n${unbaselined_english}\n${last_output}")
     endif()
 endif()

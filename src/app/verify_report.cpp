@@ -6,6 +6,25 @@
 
 namespace va::app {
 
+std::string command_line_argument(std::string_view argument)
+{
+    const auto plain = [](char character) {
+        const auto byte = static_cast<unsigned char>(character);
+        return byte >= 0x80 || (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+               (character >= '0' && character <= '9') || std::string_view("-_./\\:").contains(character);
+    };
+    if (!argument.empty() && std::ranges::all_of(argument, plain)) {
+        return std::string(argument);
+    }
+    std::string quoted = "\"" + std::string(argument);
+    std::size_t backslashes = 0;
+    while (backslashes < argument.size() && argument[argument.size() - 1 - backslashes] == '\\') {
+        ++backslashes;
+    }
+    quoted.append(backslashes, '\\');
+    return quoted + "\"";
+}
+
 std::optional<std::string> unbaselined_advice(const Text& text, const VerifyOutcome& outcome, ReportedIn where)
 {
     const auto unbaselined = outcome.counts.find("Unbaselined");
@@ -21,8 +40,8 @@ std::optional<std::string> unbaselined_advice(const Text& text, const VerifyOutc
     if (where == ReportedIn::CommandLine) {
         return text.format("The Unbaselined entries could not be read when the archive was registered, so they have "
                            "no baseline yet. To take one for them, register a new revision of the archive: "
-                           "veriarchive-cli register \"{}\" --new-revision",
-            root);
+                           "veriarchive-cli register {} --new-revision",
+            command_line_argument(root));
     }
     return text.format("The Unbaselined entries could not be read when the archive was registered, so they have no "
                        "baseline yet. To take one for them, register a new revision of the archive: in Register "

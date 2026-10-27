@@ -618,9 +618,9 @@ constexpr CatalogEntry entries[] = {
     // src/app/verify_report.cpp: how to take a baseline for Unbaselined
     // entries (decision 0010), on the command line and in the window.
     {"The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. To "
-        "take one for them, register a new revision of the archive: veriarchive-cli register \"{}\" --new-revision",
+        "take one for them, register a new revision of the archive: veriarchive-cli register {} --new-revision",
         "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次："
-        "veriarchive-cli register \"{}\" --new-revision",
+        "veriarchive-cli register {} --new-revision",
         Match::FormatOnly},
     {"The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. To "
         "take one for them, register a new revision of the archive: in Register Archive, choose its folder or volume "
