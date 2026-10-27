@@ -166,15 +166,13 @@ constexpr CatalogEntry entries[] = {
     {"skipped: {}", "已略過：{}"},
     // A rebuild that made the repository's database again (decision 0036):
     // what was wrong with it, where it was put aside, and what is lost.
-    {"The repository's database was missing; a new one was made from the manifests.",
-        "儲存庫的資料庫已遺失；已從清單檔建立新的資料庫。"},
-    {"The repository's database was empty; it was put aside as {} and a new one was made from the manifests.",
-        "儲存庫的資料庫是空的；已將它改名為 {} 留在一旁，並從清單檔建立新的資料庫。", Match::FormatOnly},
-    {"The repository's database was not a database; it was put aside as {} and a new one was made from the "
-        "manifests.",
-        "儲存庫的資料庫不是資料庫檔案；已將它改名為 {} 留在一旁，並從清單檔建立新的資料庫。", Match::FormatOnly},
-    {"The repository's database was damaged; it was put aside as {} and a new one was made from the manifests.",
-        "儲存庫的資料庫已損毀；已將它改名為 {} 留在一旁，並從清單檔建立新的資料庫。", Match::FormatOnly},
+    {"The repository's database was missing; a new one was made.", "儲存庫的資料庫已遺失；已建立新的資料庫。"},
+    {"The repository's database was empty; it was put aside as {} and a new one was made.",
+        "儲存庫的資料庫是空的；已將它改名為 {} 留在一旁，並建立新的資料庫。", Match::FormatOnly},
+    {"The repository's database was not a database; it was put aside as {} and a new one was made.",
+        "儲存庫的資料庫不是資料庫檔案；已將它改名為 {} 留在一旁，並建立新的資料庫。", Match::FormatOnly},
+    {"The repository's database was damaged; it was put aside as {} and a new one was made.",
+        "儲存庫的資料庫已損毀；已將它改名為 {} 留在一旁，並建立新的資料庫。", Match::FormatOnly},
     {"The verification history was kept only in the repository's database, so the manifests cannot give it back: "
         "every archive is listed as never verified until it is verified again, an archive that was retired is listed "
         "as registered, and unfinished registrations and relocations are gone. If a backup of the repository holds "
@@ -182,6 +180,15 @@ constexpr CatalogEntry entries[] = {
         "驗證歷程只存在儲存庫的資料庫中，清單檔無法還原它：每個封存在再次驗證之前都會列為從未驗證，已停用的封存會列為"
         "已註冊，未完成的註冊與搬移也都不在了。若儲存庫的備份中有 veriarchive.db，請用那個檔案取代新的資料庫，"
         "再執行一次 `repo rebuild-index`。"},
+    // A rebuild that stopped after it made the database again: the new one is
+    // not filled, and every command refuses it until a rebuild finishes.
+    {"the rebuild of the index was cancelled before it filled the new database; no command can use the repository "
+        "until `repo rebuild-index` runs to its end",
+        "重建索引在填好新的資料庫之前就已取消；在 `repo rebuild-index` 完整執行完畢之前，任何指令都無法使用這個儲存庫"},
+    {"the rebuild of the index did not fill the new database, and no command can use the repository until `repo "
+        "rebuild-index` runs to its end: {}",
+        "重建索引沒有填好新的資料庫；在 `repo rebuild-index` 完整執行完畢之前，任何指令都無法使用這個儲存庫：{}",
+        Match::Cause},
     {"usage: repo init | info | rebuild-index | verify-history",
         "用法：repo init | info | rebuild-index | verify-history"},
     // src/cli/media_commands.cpp
@@ -1375,6 +1382,12 @@ constexpr CatalogEntry entries[] = {
         "儲存庫的資料庫 {} 不是資料庫檔案；請以 `repo rebuild-index` 從清單檔重新建立"},
     {"the repository's database {} is damaged; make it again from the manifests with `repo rebuild-index`",
         "儲存庫的資料庫 {} 已損毀；請以 `repo rebuild-index` 從清單檔重新建立"},
+    {"the repository's database {} was made again, but its rebuild from the manifests did not finish; finish it "
+        "with `repo rebuild-index`",
+        "儲存庫的資料庫 {} 已重新建立，但從清單檔重建索引的工作沒有完成；請以 `repo rebuild-index` 完成它"},
+    {"cannot remove the unfinished new database {}: {}", "無法移除未完成的新資料庫 {}：{}", Match::Cause},
+    {"cannot put the new repository database in place: {}: {}", "無法將新的儲存庫資料庫放到原位：{}：{}",
+        Match::Cause},
     {"cannot read the repository's database: {}", "無法讀取儲存庫的資料庫：{}", Match::Cause},
     {"the repository's database {} is not a file", "儲存庫的資料庫 {} 不是檔案"},
     {"cannot put the repository's database aside: {}: {}", "無法將儲存庫的資料庫移到一旁：{}：{}", Match::Cause},

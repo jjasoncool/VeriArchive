@@ -61,7 +61,9 @@ struct RebuildReport {
 // manifest and entry, and between the archives written in the rebuild's one
 // transaction, which a cancelled rebuild rolls back: it changes nothing, and
 // fails with IoErrorKind::Cancelled ("the rebuild of the index was
-// cancelled; ...").
+// cancelled; ..."). The mark of a database made again (replaced_database_key,
+// decision 0036) goes in that transaction: only a rebuild that commits it
+// leaves the database usable.
 std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSystemAccess& repository_files,
     const RepositoryLayout& layout, CancelToken& cancel, IProgressSink& progress);
 

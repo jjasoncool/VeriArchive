@@ -692,6 +692,20 @@ void database_state_tells_what_cannot_be_used()
     CHECK(state() == va::DatabaseState::NotADatabase);
     opened_says("is not a database");
 
+    // A database made again whose rebuild did not finish: its mark (sample).
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << usable;
+    run_sql(database, "INSERT INTO settings VALUES ('rebuild:replaced-database', "
+                      "'{\"state\":\"damaged\",\"moved_to\":null}');");
+    CHECK(state() == va::DatabaseState::Unfilled);
+    {
+        auto reopened = *context;
+        const auto opened = va::open_repository(reopened);
+        CHECK(!opened && opened.error().message ==
+                             "the repository's database " + database_text +
+                                 " was made again, but its rebuild from the manifests did not finish; finish it with "
+                                 "`repo rebuild-index`");
+    }
+
     // Byte 100 starts the first page's b-tree, whose type is 2, 5, 10 or 13.
     auto damaged = usable;
     CHECK(damaged.size() > 100);
@@ -779,7 +793,7 @@ void rebuild_makes_a_database_that_cannot_be_used_again()
     CHECK(file_bytes(moved) == sample_bytes);
     CHECK(file_bytes(layout.root / va::path_from_utf8(moved_name + "-wal")) == "sample journal");
     CHECK(!std::filesystem::exists(layout.root / "veriarchive.db-wal"));
-    CHECK(va::database_state(layout) == va::DatabaseState::Usable);
+    CHECK(va::database_state(layout) == va::DatabaseState::Unfilled);
 
     // Missing, with a journal left beside it (sample bytes): made anew, the
     // journal put aside, so the new database never takes it up.
@@ -788,7 +802,7 @@ void rebuild_makes_a_database_that_cannot_be_used_again()
     const auto missing = rebuild();
     CHECK(missing && *missing && (*missing)->state == va::DatabaseState::Missing && !(*missing)->moved_to);
     CHECK(!std::filesystem::exists(layout.root / "veriarchive.db-journal"));
-    CHECK(va::database_state(layout) == va::DatabaseState::Usable);
+    CHECK(va::database_state(layout) == va::DatabaseState::Unfilled);
     const auto names = aside_files();
     const auto journal = std::ranges::find_if(names, [](const std::string& name) { return name.ends_with("-journal"); });
     CHECK(journal != names.end() &&
@@ -801,6 +815,65 @@ void rebuild_makes_a_database_that_cannot_be_used_again()
     const auto other = rebuild();
     CHECK(!other && other.error().message == "unsupported repository schema");
     CHECK(file_bytes(database) == other_bytes && aside_files() == names);
+}
+
+// Decision 0036: the new database is made beside the one it replaces, as
+// veriarchive.db.new with its mark, and moved into place last. A rebuild
+// that stopped between moving the database aside and moving its new one into
+// place (made so here: the new database moved back beside its place, sample)
+// left the database missing: the new one is taken up, naming the database
+// put aside before, and nothing more is put aside. A new database left beside
+// a database that cannot be used (sample bytes), as by a rebuild that stopped
+// before it moved anything, goes, and the database is replaced as any.
+void a_new_database_left_beside_its_place_is_taken_up()
+{
+    TemporaryDirectory temporary("database-taken-up");
+    auto context = sample_repository(temporary.path());
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    const auto database = layout.database();
+    const auto made_beside = layout.root / "veriarchive.db.new";
+    const auto aside_count = [&] {
+        std::size_t count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(layout.root)) {
+            // The database put aside, not the files SQLite keeps beside it.
+            const auto name = va::path_to_utf8(entry.path().filename());
+            count += name.starts_with("veriarchive.db.damaged-") && !name.ends_with("-wal") &&
+                             !name.ends_with("-shm") && !name.ends_with("-journal")
+                         ? 1
+                         : 0;
+        }
+        return count;
+    };
+    const std::string sample_bytes(4096, 'x');
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << sample_bytes;
+    auto first_context = *context;
+    const auto first = va::open_repository_to_rebuild(first_context);
+    CHECK(first && *first && (*first)->moved_to && !std::filesystem::exists(made_beside));
+    if (!first || !*first || !(*first)->moved_to) {
+        return;
+    }
+    std::filesystem::rename(database, made_beside);
+    CHECK(va::database_state(layout) == va::DatabaseState::Missing);
+    auto again_context = *context;
+    const auto again = va::open_repository_to_rebuild(again_context);
+    CHECK(again && *again && (*again)->state == va::DatabaseState::NotADatabase &&
+          (*again)->moved_to == (*first)->moved_to);
+    CHECK(aside_count() == 1 && !std::filesystem::exists(made_beside) &&
+          va::database_state(layout) == va::DatabaseState::Unfilled);
+
+    std::ofstream(made_beside, std::ios::binary) << "sample leftover";
+    std::ofstream(database, std::ios::binary | std::ios::trunc) << sample_bytes;
+    auto third_context = *context;
+    const auto third = va::open_repository_to_rebuild(third_context);
+    CHECK(third && *third && (*third)->moved_to && (*third)->moved_to != (*first)->moved_to);
+    CHECK(aside_count() == 2 && !std::filesystem::exists(made_beside) &&
+          va::database_state(layout) == va::DatabaseState::Unfilled);
+    if (third && *third && (*third)->moved_to) {
+        CHECK(file_bytes(*(*third)->moved_to) == sample_bytes);
+    }
 }
 
 } // namespace
@@ -828,4 +901,5 @@ void repository_tests()
     elevated_warning_holds_also_without_a_repository();
     database_state_tells_what_cannot_be_used();
     rebuild_makes_a_database_that_cannot_be_used_again();
+    a_new_database_left_beside_its_place_is_taken_up();
 }

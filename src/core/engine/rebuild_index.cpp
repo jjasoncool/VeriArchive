@@ -406,6 +406,12 @@ std::expected<RebuildReport, IoError> rebuild_index(ArchiveStore& store, IFileSy
                 }
             }
         }
+        // The index of a database made again is filled now: its mark goes
+        // with this transaction, and every command can use it (decision
+        // 0036). A rebuild cancelled or failed before leaves the mark.
+        if (auto unmarked = store.remove_setting(replaced_database_key); !unmarked) {
+            return unmarked;
+        }
         return store.commit();
     }();
     if (!rebuilt) {

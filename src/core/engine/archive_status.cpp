@@ -2,6 +2,7 @@
 
 #include "common/time.h"
 #include "core/engine/recorded_manifest.h"
+#include "core/repository/database_state.h"
 
 #include <map>
 #include <set>
@@ -71,6 +72,17 @@ std::expected<std::vector<ArchiveStatus>, IoError> archive_statuses(ArchiveStore
     IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Policy& policy,
     std::chrono::sys_seconds now, const StatusSelection& selection)
 {
+    // A database that `repo rebuild-index` made again and has not filled
+    // lists no archive: it says so rather than show an empty repository, as
+    // to a window opened before it was made (decision 0036).
+    const auto unfilled = store.setting(replaced_database_key);
+    if (!unfilled) {
+        return std::unexpected(unfilled.error());
+    }
+    if (!unfilled->empty()) {
+        return std::unexpected(IoError{IoErrorKind::Other, 0,
+            unusable_database_message(layout, DatabaseState::Unfilled)});
+    }
     const auto archives = store.archives();
     if (!archives) {
         return std::unexpected(archives.error());

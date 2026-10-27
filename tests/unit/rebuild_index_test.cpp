@@ -2,9 +2,11 @@
 
 #include "engine_fixture.h"
 
+#include "common/utf8.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/rebuild_index.h"
 #include "core/engine/relocate_engine.h"
+#include "core/repository/repository.h"
 #include "core/hash/hashers.h"
 
 #include <nlohmann/json.hpp>
@@ -1241,11 +1243,104 @@ void rebuild_reports_progress_and_stops_when_cancelled()
     CHECK(finished && rows && rows->size() == 1001);
 }
 
+// Decision 0036: a database that cannot be used (sample bytes) is made again
+// for `repo rebuild-index` with a mark that stays until a rebuild fills its
+// index. Until then it is unfilled: opening the repository names the rebuild
+// that did not finish, and so do the archive lists, rather than list no
+// archive. A rebuild cancelled (with its first report) and one that fails
+// (manifests/ moved away, sample damage) leave it so. The next opening for a
+// rebuild names the database put aside before and puts nothing more aside;
+// the rebuild that finishes takes the mark away, and the archive is listed
+// again.
+void a_rebuild_that_stops_leaves_the_new_database_unfilled()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("one/a.txt", "a");
+    const auto first = fixture.register_root(fixture.archive.root() / "one");
+    CHECK(first.has_value());
+    if (!first) {
+        return;
+    }
+    const auto& layout = fixture.repository.context.repo;
+    const auto close_the_store = [&] { [[maybe_unused]] const auto closed = std::move(fixture.store); };
+    const auto aside_files = [&] {
+        std::size_t count = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(layout.root)) {
+            // The database put aside, not the files SQLite keeps beside it.
+            const auto name = va::path_to_utf8(entry.path().filename());
+            count += name.starts_with("veriarchive.db.damaged-") && !name.ends_with("-wal") &&
+                             !name.ends_with("-shm") && !name.ends_with("-journal")
+                         ? 1
+                         : 0;
+        }
+        return count;
+    };
+    close_the_store();
+    std::ofstream(layout.database(), std::ios::binary | std::ios::trunc) << std::string(4096, 'x');
+    auto context = fixture.repository.context;
+    const auto replaced = va::open_repository_to_rebuild(context);
+    CHECK(replaced && *replaced && (*replaced)->state == va::DatabaseState::NotADatabase && (*replaced)->moved_to);
+    if (!replaced || !*replaced || !(*replaced)->moved_to) {
+        return;
+    }
+    const auto moved_to = *(*replaced)->moved_to;
+    CHECK(aside_files() == 1);
+
+    const auto unfilled = "the repository's database " + va::path_to_utf8(layout.database()) +
+                          " was made again, but its rebuild from the manifests did not finish; finish it with `repo "
+                          "rebuild-index`";
+    const auto still_unfilled = [&] {
+        CHECK(va::database_state(layout) == va::DatabaseState::Unfilled);
+        auto reopened = fixture.repository.context;
+        const auto opened = va::open_repository(reopened);
+        CHECK(!opened && opened.error().message == unfilled);
+    };
+    still_unfilled();
+    fixture.store = fixture.repository.store();
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    const auto listed = va::archive_statuses(fixture.store, *fixture.repository.files, layout, va::Policy{}, now);
+    CHECK(!listed && listed.error().message == unfilled);
+
+    {
+        va::CancelToken stop;
+        test::CancelAfter sink(stop, 1);
+        const auto cancelled = va::rebuild_index(fixture.store, *fixture.repository.files, layout, stop, sink);
+        CHECK(!cancelled && cancelled.error().kind == va::IoErrorKind::Cancelled);
+    }
+    still_unfilled();
+    const auto away = layout.root / "manifests-away-SAMPLE";
+    std::filesystem::rename(layout.manifests(), away);
+    const auto failed = va::rebuild_index(
+        fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
+    CHECK(!failed && failed.error().kind != va::IoErrorKind::Cancelled);
+    std::filesystem::rename(away, layout.manifests());
+    still_unfilled();
+
+    close_the_store();
+    auto again_context = fixture.repository.context;
+    const auto again = va::open_repository_to_rebuild(again_context);
+    CHECK(again && *again && (*again)->state == va::DatabaseState::NotADatabase && (*again)->moved_to == moved_to);
+    CHECK(aside_files() == 1);
+    fixture.store = fixture.repository.store();
+    const auto finished = va::rebuild_index(
+        fixture.store, *fixture.repository.files, layout, test::not_cancelled(), test::no_progress());
+    CHECK(finished && finished->archives == 1);
+    CHECK(va::database_state(layout) == va::DatabaseState::Usable);
+    const auto relisted = va::archive_statuses(fixture.store, *fixture.repository.files, layout, va::Policy{}, now);
+    CHECK(relisted && relisted->size() == 1 && relisted->front().archive.archive_uuid == first->archive_uuid);
+    close_the_store();
+    auto usable_context = fixture.repository.context;
+    const auto usable = va::open_repository_to_rebuild(usable_context);
+    CHECK(usable && !*usable);
+    fixture.store = fixture.repository.store();
+}
+
 } // namespace
 
 void rebuild_index_tests()
 {
     a_lost_database_is_made_again_from_the_manifests();
+    a_rebuild_that_stops_leaves_the_new_database_unfilled();
     rebuild_reports_progress_and_stops_when_cancelled();
     rebuild_keeps_database_facts();
     skipped_manifests_say_why();

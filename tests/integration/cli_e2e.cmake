@@ -1935,7 +1935,7 @@ run_cli("11" repo init)
 string(FIND "${last_errors}" "錯誤：儲存庫的資料庫 ${loss_db_shown} 已遺失；請以 `repo rebuild-index` 從清單檔重新建立\n" loss_init)
 run_cli("2" --lang en repo rebuild-index)
 set(loss_rebuilt "${last_output}")
-string(FIND "${loss_rebuilt}" "The repository's database was missing; a new one was made from the manifests.\nRebuilt the index from manifests: " loss_said)
+string(FIND "${loss_rebuilt}" "The repository's database was missing; a new one was made.\nRebuilt the index from manifests: " loss_said)
 string(FIND "${loss_rebuilt}" "\nThe verification history was kept only in the repository's database, so the manifests cannot give it back: every archive is listed as never verified until it is verified again" loss_history)
 run_cli("0" archive list --json)
 string(JSON loss_label GET "${last_output}" archives 0 label)
@@ -1976,6 +1976,44 @@ if(garbage_listed EQUAL -1 OR NOT garbage_state STREQUAL "not_a_database" OR NOT
         OR empty_said EQUAL -1 OR empty_history EQUAL -1 OR NOT usable_replaced STREQUAL "NULL")
     message(FATAL_ERROR "repo rebuild-index of a database that is not one: listed ${garbage_listed}, ${garbage_state} "
         "put aside as ${garbage_name}; empty: said ${empty_said}, history ${empty_history}; usable: ${usable_replaced}")
+endif()
+# A rebuild that fails after it made the database again (manifests/ moved
+# away, sample damage) says which database it put aside, that the history is
+# lost and that the rebuild must run to its end (exit 11), in --json too;
+# every command then names the rebuild that did not finish (exit 11), never
+# an empty repository. The next rebuild names the same database put aside and
+# the history again (exit 2), and the archive is listed.
+file(WRITE "${LOSS_DB}" "${not_a_database}")
+file(RENAME "${WORK}/repo7/manifests" "${WORK}/repo7/manifests-away-SAMPLE")
+run_cli("11" --lang en repo rebuild-index)
+set(stopped_output "${last_output}")
+set(stopped_errors "${last_errors}")
+string(REGEX MATCH "put aside as ([^\n]*) and a new one was made[.]" stopped_line "${stopped_output}")
+set(stopped_aside "${CMAKE_MATCH_1}")
+string(FIND "${stopped_output}" "The repository's database was not a database; it was put aside as " stopped_said)
+string(FIND "${stopped_output}" "\nThe verification history was kept only in the repository's database" stopped_history)
+string(FIND "${stopped_errors}" "error: the rebuild of the index did not fill the new database, and no command can use the repository until `repo rebuild-index` runs to its end: " stopped_error)
+run_cli("11" repo rebuild-index --json)
+string(JSON stopped_json_aside GET "${last_output}" replaced_database moved_to)
+string(JSON stopped_json_code GET "${last_output}" exit_code)
+run_cli("11" --lang en archive list)
+string(FIND "${last_errors}" "error: the repository's database ${loss_db_shown} was made again, but its rebuild from the manifests did not finish; finish it with `repo rebuild-index`\n" unfilled_listed)
+run_cli("11" archive list)
+string(FIND "${last_errors}" "錯誤：儲存庫的資料庫 ${loss_db_shown} 已重新建立，但從清單檔重建索引的工作沒有完成；請以 `repo rebuild-index` 完成它\n" unfilled_chinese)
+file(RENAME "${WORK}/repo7/manifests-away-SAMPLE" "${WORK}/repo7/manifests")
+run_cli("2" --lang en repo rebuild-index)
+string(FIND "${last_output}" "The repository's database was not a database; it was put aside as ${stopped_aside} and a new one was made.\nRebuilt the index from manifests: 1 archive" finished_said)
+string(FIND "${last_output}" "\nThe verification history was kept only in the repository's database" finished_history)
+run_cli("0" archive list --json)
+string(JSON finished_label GET "${last_output}" archives 0 label)
+if(stopped_said EQUAL -1 OR stopped_history EQUAL -1 OR stopped_error EQUAL -1 OR stopped_aside STREQUAL ""
+        OR NOT stopped_json_aside STREQUAL stopped_aside OR NOT stopped_json_code EQUAL 11
+        OR unfilled_listed EQUAL -1 OR unfilled_chinese EQUAL -1 OR finished_said EQUAL -1 OR finished_history EQUAL -1
+        OR NOT finished_label STREQUAL "ARCH-0042")
+    message(FATAL_ERROR "a rebuild that fails after it made the database again: said ${stopped_said}, history "
+        "${stopped_history}, error ${stopped_error}, aside '${stopped_aside}' (--json '${stopped_json_aside}', "
+        "${stopped_json_code}); listed ${unfilled_listed} ${unfilled_chinese}; finished ${finished_said} "
+        "${finished_history} ${finished_label}\n${stopped_output}\n${stopped_errors}")
 endif()
 set(GLOBAL --config "${WORK}/config.json")
 

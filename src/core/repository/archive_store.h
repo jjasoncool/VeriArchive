@@ -172,6 +172,15 @@ inline std::string skipped_manifest_key(const Uuid& archive_uuid)
     return skipped_manifest_prefix + archive_uuid;
 }
 
+// The mark of a database that `repo rebuild-index` made again in place of one
+// that could not be used (decision 0036): written in the transaction that
+// creates the new database's tables, removed in the one that fills its index
+// from the manifests. Its value says why the database before was replaced
+// and where it went ({"state":"damaged","moved_to":"veriarchive.db.damaged-..."},
+// a file name in the repository's folder). While it is there, every command
+// names the rebuild, which has not finished.
+inline const std::string replaced_database_key = "rebuild:replaced-database";
+
 // A relocation that has not finished (decision 0026): running now, in this or
 // another process, or interrupted and waiting for `archive relocate --resume`.
 // Its record is the setting relocation_key(archive_uuid); the entries of the

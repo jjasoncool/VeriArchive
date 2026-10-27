@@ -92,22 +92,16 @@ std::string what_was_unread(const UnreadRevision& revision)
         revision.archive_uuid, revision.revision, revision.manifest, revision.cause.value_or("")});
 }
 
-// How --json names why the database was made again (decision 0036).
-std::string state_code(DatabaseState state)
+// The database put aside, as --json gives it (decision 0036): null, or why
+// (`state`) and where it went (`moved_to`, null where it was missing).
+nlohmann::json replaced_json(const std::optional<ReplacedDatabase>& replaced)
 {
-    switch (state) {
-    case DatabaseState::Missing:
-        return "missing";
-    case DatabaseState::Empty:
-        return "empty";
-    case DatabaseState::NotADatabase:
-        return "not_a_database";
-    case DatabaseState::Damaged:
-        return "damaged";
-    case DatabaseState::Usable:
-        break;
+    if (!replaced) {
+        return nullptr;
     }
-    return "usable";
+    return {{"state", database_state_code(replaced->state)},
+        {"moved_to",
+            replaced->moved_to ? nlohmann::json(path_to_utf8(*replaced->moved_to)) : nlohmann::json(nullptr)}};
 }
 
 // The first line of a rebuild that made the database again (decision 0036):
@@ -117,22 +111,20 @@ std::string replaced_line(const app::Text& text, const ReplacedDatabase& replace
     const auto aside = replaced.moved_to ? path_to_utf8(*replaced.moved_to) : std::string{};
     switch (replaced.state) {
     case DatabaseState::Empty:
-        return text.format("The repository's database was empty; it was put aside as {} and a new one was made from "
-                           "the manifests.",
+        return text.format("The repository's database was empty; it was put aside as {} and a new one was made.",
             aside);
     case DatabaseState::NotADatabase:
-        return text.format("The repository's database was not a database; it was put aside as {} and a new one was "
-                           "made from the manifests.",
-            aside);
+        return text.format(
+            "The repository's database was not a database; it was put aside as {} and a new one was made.", aside);
     case DatabaseState::Damaged:
-        return text.format("The repository's database was damaged; it was put aside as {} and a new one was made "
-                           "from the manifests.",
+        return text.format("The repository's database was damaged; it was put aside as {} and a new one was made.",
             aside);
     case DatabaseState::Missing:
     case DatabaseState::Usable:
+    case DatabaseState::Unfilled:
         break;
     }
-    return text("The repository's database was missing; a new one was made from the manifests.");
+    return text("The repository's database was missing; a new one was made.");
 }
 
 // What a database made again cannot give back (decision 0036, R-80): the
@@ -143,13 +135,41 @@ constexpr const char* history_not_rebuilt =
     "registered, and unfinished registrations and relocations are gone. If a backup of the repository holds "
     "veriarchive.db, put that file in place of the new one and run `repo rebuild-index` again.";
 
+// A rebuild that stopped (cancelled, or failed). Where it made the database
+// again, now or in a rebuild before, the new database is not filled and every
+// command refuses it until a rebuild finishes (decision 0036): the rebuild
+// says which database was put aside, what is lost, and that it must run
+// again, never only that the index was left as it was.
+int rebuild_stopped(const Arguments& arguments, const std::optional<ReplacedDatabase>& replaced, const IoError& error)
+{
+    const bool cancelled = error.kind == IoErrorKind::Cancelled;
+    const int code = cancelled ? exit_code::incomplete : exit_code::repository;
+    if (!replaced) {
+        return report_failure(arguments, {code, error.message});
+    }
+    const auto message =
+        cancelled ? std::string("the rebuild of the index was cancelled before it filled the new database; no "
+                                "command can use the repository until `repo rebuild-index` runs to its end")
+                  : "the rebuild of the index did not fill the new database, and no command can use the repository "
+                    "until `repo rebuild-index` runs to its end: " +
+                        error.message;
+    if (arguments.json) {
+        print_json({{"error", message}, {"exit_code", code}, {"replaced_database", replaced_json(replaced)}});
+        return code;
+    }
+    const auto& text = arguments.text;
+    std::cout << replaced_line(text, *replaced) << '\n' << text(history_not_rebuilt) << '\n';
+    return report_failure(arguments, {code, message});
+}
+
 // R-80: rebuild index tables from manifests/; where the database is missing,
 // empty, not a database or damaged, into a new one (decision 0036).
 int rebuild(const Arguments& arguments, const Session& session)
 {
+    const auto& replaced = session.replaced_database;
     auto store = ArchiveStore::open(session.context.repo);
     if (!store) {
-        return report_failure(arguments, {exit_code::repository, store.error().message});
+        return rebuild_stopped(arguments, replaced, store.error());
     }
     const auto files = platform::make_file_system_access();
     // R-94: its progress on stderr, and Ctrl+C stops it with nothing changed.
@@ -159,25 +179,16 @@ int rebuild(const Arguments& arguments, const Session& session)
     const auto report = rebuild_index(*store, *files, session.context.repo, cancel, progress);
     progress.finish();
     if (!report) {
-        return report_failure(arguments, {report.error().kind == IoErrorKind::Cancelled ? exit_code::incomplete
-                                                                                         : exit_code::repository,
-                                             report.error().message});
+        return rebuild_stopped(arguments, replaced, report.error());
     }
-    const auto& replaced = session.replaced_database;
     if (arguments.json) {
-        nlohmann::json replaced_json = nullptr;
-        if (replaced) {
-            replaced_json = {{"state", state_code(replaced->state)},
-                {"moved_to", replaced->moved_to ? nlohmann::json(path_to_utf8(*replaced->moved_to))
-                                                : nlohmann::json(nullptr)}};
-        }
         print_json({{"archives", report->archives}, {"revisions", report->revisions},
             {"entries", report->entries}, {"skipped", report->skipped},
             {"saved_progress_kept", report->saved_progress_kept},
             {"revisions_kept", unread_json(report->revisions_kept)},
             {"revisions_left_out", unread_json(report->revisions_left_out)},
             {"revisions_not_indexed", unread_json(report->revisions_not_indexed)},
-            {"replaced_database", std::move(replaced_json)}});
+            {"replaced_database", replaced_json(replaced)}});
     } else {
         const auto& text = arguments.text;
         if (replaced) {
