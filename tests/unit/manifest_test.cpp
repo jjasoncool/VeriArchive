@@ -187,6 +187,56 @@ void golden_manifest_bytes()
     std::filesystem::remove_all(root, error);
 }
 
+// Decision 0005: a copy's manifest names the archive it is a copy of in the
+// header key copy_of, directly after supersedes (decision 0015). The golden
+// case: the second revision of ARCH-0008, a copy of the golden manifest's
+// archive with the same entries, on its own sample volume (sample data).
+// CLAUDE.md rule 10: any change to these bytes needs a decision record.
+void golden_manifest_with_copy_of()
+{
+    const auto root = temporary_directory("va-manifest-copy-of-");
+    const auto writer = va::platform::make_file_writer();
+    const auto files = va::platform::make_file_system_access();
+    const auto destination = va::manifest_path(root, "c0ffee00-0005-4000-8000-000000000008", 2);
+    std::filesystem::create_directories(destination.parent_path());
+
+    auto header = golden_header();
+    header.archive_uuid = "c0ffee00-0005-4000-8000-000000000008";
+    header.label = "ARCH-0008";
+    header.copy_of = "28ff645e-a220-4aac-ae0b-6c328bf1a2b3";
+    header.identity.filesystem_uuid = "c0ffee0000000008";
+    header.identity.filesystem_uuid_short = "00000008";
+    header.identity.volume_label = "SAMPLE-COPY";
+    header.identity.devices.front().model = "SAMPLE-DEVICE";
+    header.identity.devices.front().serial = "SAMPLE0008";
+    header.root_hint = "K:\\";
+    va::ManifestWriter manifest(*writer, *files, destination);
+    for (const auto& entry : golden_entries()) {
+        CHECK(manifest.add(entry));
+    }
+    const auto written = manifest.finish(header);
+    CHECK(written && written->file && written->file->commit());
+
+    const auto golden_path = std::filesystem::path(VERIARCHIVE_TEST_DATA_DIR) / "golden_copy_of_r0002.vam";
+    const auto actual = read_file(destination);
+    const auto expected = read_file(golden_path);
+    CHECK(actual == expected);
+    if (actual != expected) {
+        std::ofstream(root.parent_path() / "va-golden-copy-of-actual.vam", std::ios::binary) << actual;
+        std::cerr << "golden mismatch; actual bytes written to "
+                  << (root.parent_path() / "va-golden-copy-of-actual.vam").string() << '\n';
+    }
+    CHECK(actual.find(R"("revision":2,"supersedes":1,"copy_of":"28ff645e-a220-4aac-ae0b-6c328bf1a2b3","created":)") !=
+          std::string::npos);
+
+    // The reader gives copy_of back.
+    const auto reader = va::ManifestReader::open(*files, destination);
+    CHECK(reader && reader->header().copy_of == std::optional<va::Uuid>("28ff645e-a220-4aac-ae0b-6c328bf1a2b3"));
+
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 // Passes everything to the platform writer, and runs `after_body` once, right
 // after a body file (".body...") is committed.
 class BodyHookWriter final : public va::IFileWriter {
@@ -570,6 +620,7 @@ void line_one_is_compared_before_it_is_parsed()
 void manifest_tests()
 {
     golden_manifest_bytes();
+    golden_manifest_with_copy_of();
     writers_of_one_revision_keep_their_own_body();
     out_of_order_entries_are_rejected();
     malformed_manifests_say_why();

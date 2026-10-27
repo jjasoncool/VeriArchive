@@ -238,6 +238,41 @@ void relocation_keeps_identity_and_history()
     CHECK(fixture.saved(relocated->run_id).files == 0);
 }
 
+// Decision 0005: a relocation carries copy_of forward. A copy of the archive
+// (sample data) is registered at /vol/copy with copy_of naming the archive,
+// then relocated to the new disk: its next revision names the same archive.
+void a_relocation_carries_copy_of_forward()
+{
+    RelocationFixture fixture;
+    fixture.archive.add_file("copy/photos/a.jpg", "jpeg");
+    fixture.archive.add_file("copy/notes.txt", "notes");
+    va::RegisterRequest request;
+    request.root = fixture.archive.root() / "copy";
+    request.copy_of = fixture.archive_uuid;
+    const auto copy = fixture.register_root(request);
+    CHECK(copy.has_value());
+    if (!copy) {
+        std::cerr << "  register the copy: " << copy.error().message << '\n';
+        return;
+    }
+    fixture.archive.add_file("new/photos/a.jpg", "jpeg");
+    fixture.archive.add_file("new/notes.txt", "notes");
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto moved = va::relocate_archive(services,
+        va::RelocateRequest{copy->archive_uuid, fixture.archive.root() / "new", std::nullopt, false}, fixture.cancel,
+        fixture.progress);
+    CHECK(moved && moved->revision == 2);
+    if (!moved) {
+        std::cerr << "  relocate the copy: " << moved.error().message << '\n';
+        return;
+    }
+    const auto reader = va::ManifestReader::open(*fixture.repository.files, moved->manifest);
+    CHECK(reader && reader->header().supersedes == 1u &&
+          reader->header().copy_of == std::optional<va::Uuid>(fixture.archive_uuid));
+}
+
 // Decision 0004: an earlier revision's manifest is read only where matching
 // looks at the earlier carriers, which is where they decide the outcome. The
 // archive is relocated from /vol/old to the folder sub of the new disk, so its
@@ -2407,6 +2442,7 @@ void a_relocation_overtaken_before_its_record_writes_nothing()
 void relocate_tests()
 {
     relocation_keeps_identity_and_history();
+    a_relocation_carries_copy_of_forward();
     an_earlier_revision_is_read_only_where_matching_needs_it();
     a_relocation_back_onto_an_earlier_carrier_records_it_so();
     differing_copy_is_refused();
