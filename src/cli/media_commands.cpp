@@ -52,6 +52,11 @@ void print_volume(const app::Text& text, const VolumeInfo& volume)
 
 int media_command(const Arguments& arguments)
 {
+    // `media list` takes no option of its own; any other is a mistake, as in
+    // every other command (decision 0017).
+    if (const auto problem = check_options(arguments, {}, {})) {
+        return report_failure(arguments, *problem);
+    }
     if (arguments.words.size() != 2 || arguments.words[1] != "list") {
         return report_failure(arguments, {exit_code::usage, "usage: media list"});
     }

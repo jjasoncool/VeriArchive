@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-08
-amends: HANDOFF §B7.3 (config keys), §B16 (global options), §B17 (Settings); R-02 (§A1: how reports and the GUI word the guarantee, 2026-10-27)
+amends: HANDOFF §B7.3 (config keys), §B16 (global options; amended 2026-10-27: usage errors follow `--json`), §B17 (Settings); R-02 (§A1: how reports and the GUI word the guarantee, 2026-10-27)
 ---
 
 # The interface speaks English and Traditional Chinese
@@ -26,7 +26,7 @@ Timestamps are stored and exported in UTC (`2026-10-14T00:13:53Z`). The CLI's te
 
 ## Choosing the language
 
-`--lang en|zh-TW` (CLI), then `VERIARCHIVE_LANG`, then the config file's `"language"`, then the operating system's display language (on Linux gettext's order: `LANGUAGE`, which may be a `:`-separated list and is ignored under the C or POSIX locale, then `LC_ALL`, `LC_MESSAGES`, `LANG`), then English. Command-line errors found before the command runs follow `--lang` and `--config` too.
+`--lang en|zh-TW` (CLI), then `VERIARCHIVE_LANG`, then the config file's `"language"`, then the operating system's display language (on Linux gettext's order: `LANGUAGE`, which may be a `:`-separated list and is ignored under the C or POSIX locale, then `LC_ALL`, `LC_MESSAGES`, `LANG`), then English. Command-line errors found before the command runs follow `--lang` and `--config` too, and `--json` (amended 2026-10-27): with `--json` among the arguments, a parse error ("option --out needs a value", "--lang takes en or zh-TW"), an unknown command ("unknown command X") and no command at all ("a command is needed; veriarchive-cli without arguments shows the commands") are printed as every command's failure is, JSON on stdout with `error` and `exit_code` (10), in English, where they were text, or the usage. Without `--json`, an unknown command says so ("error: unknown command X") before the usage. `media list` checks its options as every command does: an unknown one is a usage error, where it was taken silently. Tests: the CLI end to end, each of these with `--json`, an unknown option of `media list` and an unknown command in text; a mutation check removed the JSON of a parse error, of an unknown command, of no command, and the option check of `media list`, in turn, and each removal failed the test.
 
 The GUI's Settings view has a language drop-down; it saves `"language"` in the config file and rebuilds the window. What the user typed and chose, the window size and the reports shown are kept, and reports are worded again in the new language; the window position is not kept (GTK 4 cannot set it). The drop-down is unavailable while an operation runs, because the operation reports into the current window. The GUI sets `LANGUAGE` before GTK starts and resets GTK's translation cache when the language changes, so GTK's own texts follow; the Windows package ships GTK's zh_TW catalogs (`share/locale/zh_TW`). On Linux, glyph forms of Chinese text follow the language the GUI started with until it is restarted (Pango reads the language once).
 

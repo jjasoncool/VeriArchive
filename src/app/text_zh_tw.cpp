@@ -105,6 +105,10 @@ constexpr CatalogEntry entries[] = {
     {"--lang takes en or zh-TW", "--lang 只接受 en 或 zh-TW"},
     {"unknown option {}", "未知的選項 {}"},
     {"option {} is not used by this command", "此指令不使用選項 {}"},
+    // A command that is not one, or none (decision 0017): also as JSON with --json.
+    {"unknown command {}", "未知的指令 {}"},
+    {"a command is needed; veriarchive-cli without arguments shows the commands",
+        "需要指定指令；不加任何引數執行 veriarchive-cli 即可列出所有指令"},
     {"scanning: {} entries", "掃描中：{} 個項目"},
     {"hashing: {}", "計算雜湊中：{}", Match::FormatOnly},
     {"comparing: {}/{} entries", "比較中：{}/{} 個項目"},

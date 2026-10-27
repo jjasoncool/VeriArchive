@@ -43,9 +43,10 @@ int run(std::vector<std::string> raw_arguments)
     // Chosen before a usage error is reported, so that error also follows --lang
     // and the --config file's language (decision 0017).
     arguments.text = app::Text(app::interface_language(arguments.language, arguments.config));
+    // A usage error follows --json too (decision 0017): as JSON on stdout,
+    // `error` and `exit_code`, as every command's failure.
     if (!error.empty()) {
-        std::cerr << arguments.text.format("error: {}", arguments.text(error)) << '\n';
-        return exit_code::usage;
+        return report_failure(arguments, {exit_code::usage, error});
     }
     // The version of this program (decision 0037), as repo info and the
     // GUI's Settings show it.
@@ -58,8 +59,16 @@ int run(std::vector<std::string> raw_arguments)
         return exit_code::passed;
     }
     if (arguments.words.empty()) {
+        if (raw_arguments.empty()) {
+            print_usage(arguments.text);
+            return exit_code::passed;
+        }
+        if (arguments.json) {
+            return report_failure(arguments,
+                {exit_code::usage, "a command is needed; veriarchive-cli without arguments shows the commands"});
+        }
         print_usage(arguments.text);
-        return raw_arguments.empty() ? exit_code::passed : exit_code::usage;
+        return exit_code::usage;
     }
 
     const auto& command = arguments.words.front();
@@ -91,7 +100,11 @@ int run(std::vector<std::string> raw_arguments)
         return import_command(arguments);
     }
 
-    print_usage(arguments.text);
+    // An unknown command: said, then the usage; with --json said as JSON.
+    report_failure(arguments, {exit_code::usage, "unknown command " + command});
+    if (!arguments.json) {
+        print_usage(arguments.text);
+    }
     return exit_code::usage;
 }
 
