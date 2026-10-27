@@ -73,6 +73,11 @@ void refresh_settings(GuiState& state)
         for (const auto& warning : state.session->warnings) {
             info += "\n\n" + text.format("Warning: {}", text(warning));
         }
+        // Where the copy of the database from before its upgrade is (decision
+        // 0032), for as long as the window that upgraded it runs.
+        for (const auto& note : state.session->notes) {
+            info += "\n\n" + text.format("Note: {}", text(note));
+        }
         gtk_widget_set_visible(view.initialise, FALSE);
     }
     if (view.notice) {

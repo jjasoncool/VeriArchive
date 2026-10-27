@@ -1283,7 +1283,7 @@ void a_rebuild_that_stops_leaves_the_new_database_unfilled()
     close_the_store();
     std::ofstream(layout.database(), std::ios::binary | std::ios::trunc) << std::string(4096, 'x');
     auto context = fixture.repository.context;
-    const auto replaced = va::open_repository_to_rebuild(context);
+    const auto replaced = va::open_repository_to_rebuild(context, test::today);
     CHECK(replaced && *replaced && (*replaced)->state == va::DatabaseState::NotADatabase && (*replaced)->moved_to);
     if (!replaced || !*replaced || !(*replaced)->moved_to) {
         return;
@@ -1297,7 +1297,7 @@ void a_rebuild_that_stops_leaves_the_new_database_unfilled()
     const auto still_unfilled = [&] {
         CHECK(va::database_state(layout) == va::DatabaseState::Unfilled);
         auto reopened = fixture.repository.context;
-        const auto opened = va::open_repository(reopened);
+        const auto opened = va::open_repository(reopened, test::today);
         CHECK(!opened && opened.error().message == unfilled);
     };
     still_unfilled();
@@ -1323,7 +1323,7 @@ void a_rebuild_that_stops_leaves_the_new_database_unfilled()
 
     close_the_store();
     auto again_context = fixture.repository.context;
-    const auto again = va::open_repository_to_rebuild(again_context);
+    const auto again = va::open_repository_to_rebuild(again_context, test::today);
     CHECK(again && *again && (*again)->state == va::DatabaseState::NotADatabase && (*again)->moved_to == moved_to);
     CHECK(aside_files() == 1);
     fixture.store = fixture.repository.store();
@@ -1335,7 +1335,7 @@ void a_rebuild_that_stops_leaves_the_new_database_unfilled()
     CHECK(relisted && relisted->size() == 1 && relisted->front().archive.archive_uuid == first->archive_uuid);
     close_the_store();
     auto usable_context = fixture.repository.context;
-    const auto usable = va::open_repository_to_rebuild(usable_context);
+    const auto usable = va::open_repository_to_rebuild(usable_context, test::today);
     CHECK(usable && !*usable);
     fixture.store = fixture.repository.store();
 }
@@ -1410,7 +1410,7 @@ void damage_beyond_the_first_page_is_named_and_made_again()
 
     damage_table_page(layout.database(), "archives");
     auto context = fixture.repository.context;
-    const auto replaced = va::open_repository_to_rebuild(context);
+    const auto replaced = va::open_repository_to_rebuild(context, test::today);
     CHECK(replaced && *replaced && (*replaced)->state == va::DatabaseState::Damaged &&
           (*replaced)->moved_to != rebuilt->replaced->moved_to);
     if (replaced && *replaced) {

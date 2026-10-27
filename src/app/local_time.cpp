@@ -46,4 +46,14 @@ std::string local_time(std::string_view utc_timestamp, const Text& text)
     return format_local_time(utc_timestamp, platform::utc_offset(*moment), text);
 }
 
+std::chrono::year_month_day local_date(std::chrono::sys_seconds moment, std::chrono::seconds offset)
+{
+    return std::chrono::year_month_day{std::chrono::floor<std::chrono::days>(moment + offset)};
+}
+
+std::chrono::year_month_day local_date(std::chrono::sys_seconds moment)
+{
+    return local_date(moment, platform::utc_offset(moment));
+}
+
 } // namespace va::app

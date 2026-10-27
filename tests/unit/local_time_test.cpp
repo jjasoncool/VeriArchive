@@ -28,6 +28,19 @@ void formatting_tests()
     CHECK(format_local_time("yesterday", 8h, chinese) == "yesterday");
 }
 
+// The date of a moment as the clock shows it where it is `offset` ahead of
+// UTC, which names the copy of a database kept before its upgrade (decision
+// 0032): the local date, which can differ from the UTC date.
+void local_date_tests()
+{
+    using va::app::local_date;
+    const auto evening = std::chrono::sys_days(2026y / 10 / 16) + 20h + 13min;
+    CHECK(local_date(evening, 8h) == 2026y / 10 / 17);
+    CHECK(local_date(evening, 0s) == 2026y / 10 / 16);
+    CHECK(local_date(std::chrono::sys_days(2026y / 10 / 17) + 2h, -5h) == 2026y / 10 / 16);
+    CHECK(local_date(std::chrono::sys_days(2026y / 10 / 17) + 2h, 5h + 30min) == 2026y / 10 / 17);
+}
+
 // The system's offset is plausible: at most 14 hours, whole quarter hours,
 // and summer and winter differ by at most two hours (daylight saving time).
 void system_offset_tests()
@@ -46,5 +59,6 @@ void system_offset_tests()
 void local_time_tests()
 {
     formatting_tests();
+    local_date_tests();
     system_offset_tests();
 }

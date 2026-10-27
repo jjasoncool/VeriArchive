@@ -91,6 +91,11 @@ std::expected<Session, Failure> open_session(const Arguments& arguments, bool in
     if (!session) {
         return std::unexpected(Failure{exit_code::repository, session.error().message});
     }
+    // Said once, on the open that upgraded the database (decision 0032); on
+    // stderr, so --json output stays one document.
+    for (const auto& note : session->notes) {
+        std::cerr << arguments.text.format("note: {}", arguments.text(note)) << '\n';
+    }
     return Session{std::move(session->context), std::move(session->writer), std::move(session->replaced_database)};
 }
 

@@ -250,7 +250,10 @@ void activate(GuiState& state, bool smoke_test)
 {
     build_window(state);
     open_repository_session(state, false);
-    if (!state.session) {
+    // Settings says why no repository is open, or, once, that its database
+    // was upgraded and where the copy from before the upgrade is (decision
+    // 0032).
+    if (!state.session || !state.session->notes.empty()) {
         gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "settings");
     }
 

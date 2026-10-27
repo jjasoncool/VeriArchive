@@ -2026,6 +2026,55 @@ else()
         "the plan (sample damage) is not installed")
 endif()
 set(GLOBAL --config "${WORK}/config.json")
+# Decision 0032: the first open of a repository of an older schema version
+# keeps a copy of its database beside it, then upgrades it, and the CLI says
+# once, on stderr, also with --json, where the copy is. A repository of
+# sample data is lowered to version 1, as V1 left its databases, and later to
+# version 2, with the sqlite3 program (SQLITE3), where there is one.
+if(SQLITE3)
+    set(OLDER "${WORK}/older-repository")
+    function(lower_schema version)
+        execute_process(
+            COMMAND "${SQLITE3}" "${OLDER}/veriarchive.db"
+                "DROP TABLE IF EXISTS verify_progress_chunks; UPDATE schema_version SET version = ${version};"
+            RESULT_VARIABLE code
+            ERROR_VARIABLE errors)
+        if(NOT code EQUAL 0)
+            message(FATAL_ERROR "sqlite3 could not lower the sample repository to version ${version}:\n${errors}")
+        endif()
+    endfunction()
+    run_cli("0" --repository "${OLDER}" repo init)
+    lower_schema(1)
+    run_cli("0" --repository "${OLDER}" --lang en repo info)
+    set(upgraded "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at ")
+    string(FIND "${last_errors}" "${upgraded}" said)
+    if(said EQUAL -1 OR NOT last_errors MATCHES "veriarchive-schema-1-before-upgrade-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\\.db\n")
+        message(FATAL_ERROR "the first open of a repository of schema version 1:\n${last_errors}")
+    endif()
+    file(GLOB older_copies "${OLDER}/veriarchive-schema-1-before-upgrade-*.db")
+    list(LENGTH older_copies older_copy_count)
+    execute_process(COMMAND "${SQLITE3}" "${older_copies}" "SELECT version FROM schema_version;"
+        OUTPUT_VARIABLE copy_version OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT older_copy_count EQUAL 1 OR NOT copy_version STREQUAL "1")
+        message(FATAL_ERROR "the copy before the upgrade: ${older_copies} at version ${copy_version}")
+    endif()
+    # Said once: the next open has nothing to upgrade.
+    run_cli("0" --repository "${OLDER}" --lang en repo info)
+    if(last_errors MATCHES "note:")
+        message(FATAL_ERROR "an upgraded repository opened again:\n${last_errors}")
+    endif()
+    # In Chinese, beside --json output, which stays one document.
+    lower_schema(2)
+    run_cli("0" --repository "${OLDER}" archive list --json)
+    string(JSON listed_archives LENGTH "${last_output}" archives)
+    string(FIND "${last_errors}" "附註：儲存庫資料庫已從結構描述版本 2 升級到 3，較早版本的 VeriArchive 無法再開啟它；升級前的資料庫副本保存在 " said)
+    if(said EQUAL -1 OR NOT last_errors MATCHES "veriarchive-schema-2-before-upgrade-[^\n]*\\.db\n"
+            OR NOT listed_archives EQUAL 0)
+        message(FATAL_ERROR "the first open of a repository of schema version 2, with --json:\n${last_output}\n${last_errors}")
+    endif()
+else()
+    message(STATUS "no sqlite3 program: the upgrade of an older repository is left to the unit tests")
+endif()
 
 # R-66: a fixture tree registered on this OS gives the golden manifest.
 include("${CMAKE_CURRENT_LIST_DIR}/golden_tree.cmake")

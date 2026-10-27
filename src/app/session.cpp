@@ -1,11 +1,13 @@
 #include "app/session.h"
 
+#include "app/local_time.h"
 #include "common/utf8.h"
 #include "core/repository/repository.h"
 #include "core/write_file.h"
 #include "platform/file_writer.h"
 #include "platform/platform_services.h"
 
+#include <chrono>
 #include <cstdlib>
 
 namespace va::app {
@@ -63,19 +65,25 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
         return failed(context.error().message);
     }
 
-    Session session{std::move(*context), platform::make_file_writer(), warnings, std::nullopt};
+    Session session{std::move(*context), platform::make_file_writer(), warnings, {}, std::nullopt};
+    // The copy of a database kept before its upgrade is named for the date
+    // that the clock here shows, as people read it (decision 0017).
+    const auto today = local_date(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
     if (session_options.rebuild) {
-        auto made = open_repository_to_rebuild(session.context);
+        auto made = open_repository_to_rebuild(session.context, today);
         if (!made) {
             return failed(made.error().message);
         }
         session.replaced_database = std::move(*made);
     } else {
-        auto opened = session_options.initialise ? initialise_repository(session.context, *session.writer)
-                                                 : open_repository(session.context);
+        auto opened = session_options.initialise ? initialise_repository(session.context, *session.writer, today)
+                                                 : open_repository(session.context, today);
         if (!opened) {
             return failed(opened.error().message);
         }
+    }
+    if (session.context.schema_upgrade) {
+        session.notes.push_back(schema_upgrade_note(*session.context.schema_upgrade));
     }
     if (auto recorded = record_repository_uuid(session.context, *session.writer); !recorded) {
         return failed(recorded.error().message);
@@ -86,6 +94,14 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
                                    session.context.repository_uuid + "; recorded the new uuid");
     }
     return session;
+}
+
+std::string schema_upgrade_note(const SchemaUpgrade& upgrade)
+{
+    return "the repository database was upgraded from schema version " + std::to_string(upgrade.from) + " to " +
+           std::to_string(upgrade.to) +
+           ", which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at " +
+           path_to_utf8(upgrade.copy);
 }
 
 HostInfo host_info(std::string app_version)

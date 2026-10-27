@@ -21,4 +21,10 @@ std::string format_local_time(std::string_view utc_timestamp, std::chrono::secon
 // (daylight saving time included).
 std::string local_time(std::string_view utc_timestamp, const Text& text);
 
+// The date that the clock shows at `moment` where it is `offset` ahead of
+// UTC, and in the system's time zone: what names a file made for people, as
+// the copy of the database kept before an upgrade (decision 0032).
+std::chrono::year_month_day local_date(std::chrono::sys_seconds moment, std::chrono::seconds offset);
+std::chrono::year_month_day local_date(std::chrono::sys_seconds moment);
+
 } // namespace va::app

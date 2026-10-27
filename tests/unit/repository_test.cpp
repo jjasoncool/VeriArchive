@@ -11,8 +11,11 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <iterator>
+#include <set>
 #include <optional>
 #include <sqlite3.h>
+#include <string>
 
 namespace {
 
@@ -104,7 +107,7 @@ void first_run_initialises_metadata_and_schema()
         return;
     }
 
-    const auto result = va::initialise_repository(*context, *va::platform::make_file_writer());
+    const auto result = va::initialise_repository(*context, *va::platform::make_file_writer(), test::today);
 
     CHECK(result.has_value());
     CHECK(std::filesystem::exists(context->repo.root / "repository.json"));
@@ -114,7 +117,7 @@ void first_run_initialises_metadata_and_schema()
     CHECK(va::validate_schema(context->repo).has_value());
 
     const auto config_time = std::filesystem::last_write_time(context->config_file);
-    CHECK(va::open_repository(*context).has_value());
+    CHECK(va::open_repository(*context, test::today).has_value());
     CHECK(std::filesystem::last_write_time(context->config_file) == config_time);
 
     sqlite3* database = nullptr;
@@ -126,7 +129,7 @@ void first_run_initialises_metadata_and_schema()
         CHECK(sqlite3_exec(database, "DROP TABLE files", nullptr, nullptr, nullptr) == SQLITE_OK);
     }
     sqlite3_close(database);
-    CHECK(!va::open_repository(*context));
+    CHECK(!va::open_repository(*context, test::today));
 }
 
 // A locked or damaged database is reported with SQLite's own reason; only a
@@ -173,7 +176,7 @@ void pinned_unavailable_repository_does_not_fall_back()
     if (!context) {
         return;
     }
-    const auto initialized = va::initialise_repository(*context, *va::platform::make_file_writer());
+    const auto initialized = va::initialise_repository(*context, *va::platform::make_file_writer(), test::today);
     CHECK(initialized.has_value());
     if (!initialized) { return; }
 
@@ -232,7 +235,7 @@ void explicit_init_creates_and_pins_repository()
     if (!context) {
         return;
     }
-    CHECK(va::initialise_repository(*context, *va::platform::make_file_writer()));
+    CHECK(va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
     CHECK(std::filesystem::exists(temporary.path() / "new-repository" / "repository.json"));
     // Outside the folder of the config file (<exe>/config.json): stored absolute.
     CHECK(stored_pin(context->config_file) ==
@@ -266,7 +269,7 @@ void changed_repository_uuid_is_reported_and_recorded()
     auto options = make_options(temporary.path());
     const auto writer = va::platform::make_file_writer();
     auto context = va::resolve_repository(options, always_writable_local);
-    CHECK(context && va::initialise_repository(*context, *writer));
+    CHECK(context && va::initialise_repository(*context, *writer, test::today));
     if (!context) {
         return;
     }
@@ -277,7 +280,7 @@ void changed_repository_uuid_is_reported_and_recorded()
 
     options.initialise = false;
     auto reopened = va::resolve_repository(options, always_writable_local);
-    CHECK(reopened && va::open_repository(*reopened));
+    CHECK(reopened && va::open_repository(*reopened, test::today));
     if (!reopened) {
         return;
     }
@@ -302,7 +305,7 @@ void init_run_again_pins_a_complete_repository()
             options.explicit_repository = temporary.path() / "named" / "repository-SAMPLE";
         }
         auto first = va::resolve_repository(options, always_writable_local);
-        CHECK(first && first->pins_repository && va::initialise_repository(*first, *writer));
+        CHECK(first && first->pins_repository && va::initialise_repository(*first, *writer, test::today));
         if (!first) {
             continue;
         }
@@ -310,7 +313,7 @@ void init_run_again_pins_a_complete_repository()
         std::filesystem::remove(first->config_file);
 
         auto again = va::resolve_repository(options, always_writable_local);
-        CHECK(again && again->pins_repository && va::initialise_repository(*again, *writer));
+        CHECK(again && again->pins_repository && va::initialise_repository(*again, *writer, test::today));
         if (!again) {
             continue;
         }
@@ -321,7 +324,7 @@ void init_run_again_pins_a_complete_repository()
         options.initialise = false;
         options.explicit_repository.reset();
         auto pinned = va::resolve_repository(options, always_writable_local);
-        CHECK(pinned && pinned->repo_selected_by == "pinned" && va::open_repository(*pinned));
+        CHECK(pinned && pinned->repo_selected_by == "pinned" && va::open_repository(*pinned, test::today));
         CHECK(pinned && pinned->repository_uuid == first->repository_uuid);
     }
 }
@@ -344,7 +347,7 @@ void explicit_repository_leaves_the_pins_record()
     auto options = make_options(temporary.path());
     const auto writer = va::platform::make_file_writer();
     auto pinned = va::resolve_repository(options, always_writable_local);
-    CHECK(pinned && pinned->pins_repository && va::initialise_repository(*pinned, *writer));
+    CHECK(pinned && pinned->pins_repository && va::initialise_repository(*pinned, *writer, test::today));
     if (!pinned) {
         return;
     }
@@ -360,7 +363,7 @@ void explicit_repository_leaves_the_pins_record()
     if (!created) {
         return;
     }
-    CHECK(va::initialise_repository(*created, *writer));
+    CHECK(va::initialise_repository(*created, *writer, test::today));
     CHECK(va::record_repository_uuid(*created, *writer));
     CHECK(created->previous_repository_uuid.empty());
     CHECK(created->repository_uuid != pinned->repository_uuid);
@@ -373,7 +376,7 @@ void explicit_repository_leaves_the_pins_record()
     environment_options.environment_repository = explicit_options.explicit_repository;
     for (const auto* chosen : {&explicit_options, &environment_options}) {
         auto opened = va::resolve_repository(*chosen, always_writable_local);
-        CHECK(opened && opened->repo_selected_by == "explicit" && va::open_repository(*opened));
+        CHECK(opened && opened->repo_selected_by == "explicit" && va::open_repository(*opened, test::today));
         if (!opened) {
             continue;
         }
@@ -385,7 +388,7 @@ void explicit_repository_leaves_the_pins_record()
     // The next plain command opens the pinned repository without a warning.
     options.initialise = false;
     auto plain = va::resolve_repository(options, always_writable_local);
-    CHECK(plain && plain->repo_selected_by == "pinned" && va::open_repository(*plain));
+    CHECK(plain && plain->repo_selected_by == "pinned" && va::open_repository(*plain, test::today));
     if (!plain) {
         return;
     }
@@ -457,7 +460,7 @@ void portable_first_run_pins_a_relative_path()
     auto options = make_options(temporary.path());
     const auto writer = va::platform::make_file_writer();
     auto context = va::resolve_repository(options, always_writable_local);
-    CHECK(context && va::initialise_repository(*context, *writer));
+    CHECK(context && va::initialise_repository(*context, *writer, test::today));
     if (!context) {
         return;
     }
@@ -466,7 +469,7 @@ void portable_first_run_pins_a_relative_path()
 
     options.initialise = false;
     auto reopened = va::resolve_repository(options, always_writable_local);
-    CHECK(reopened && va::open_repository(*reopened));
+    CHECK(reopened && va::open_repository(*reopened, test::today));
     if (!reopened) {
         return;
     }
@@ -485,7 +488,7 @@ void copied_program_folder_uses_its_own_repository()
     TemporaryDirectory temporary("portable-copy");
     auto options = make_options(temporary.path());
     auto context = va::resolve_repository(options, always_writable_local);
-    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
     if (!context) {
         return;
     }
@@ -497,7 +500,7 @@ void copied_program_folder_uses_its_own_repository()
     options.initialise = false;
     options.executable_dir = copied;
     auto moved = va::resolve_repository(options, always_writable_local);
-    CHECK(moved && va::open_repository(*moved));
+    CHECK(moved && va::open_repository(*moved, test::today));
     if (!moved) {
         return;
     }
@@ -575,7 +578,7 @@ void explicit_init_inside_config_folder_pins_a_relative_path()
     options.explicit_repository = settings / "repositories" / "main";
 
     auto context = va::resolve_repository(options, always_writable_local);
-    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
     if (!context) {
         return;
     }
@@ -618,7 +621,7 @@ void elevated_warning_holds_also_without_a_repository()
     std::ofstream(temporary.path() / "settings" / "config.json") << "{}\n";
     repository_options.explicit_config = temporary.path() / "settings" / "config.json";
     auto created = va::resolve_repository(repository_options, always_writable_local);
-    CHECK(created && va::initialise_repository(*created, *va::platform::make_file_writer()));
+    CHECK(created && va::initialise_repository(*created, *va::platform::make_file_writer(), test::today));
     options.repository = repository_options.explicit_repository;
     options.config = repository_options.explicit_config;
     options.elevated = [] { return true; };
@@ -636,7 +639,7 @@ std::optional<va::AppContext> sample_repository(const std::filesystem::path& roo
     auto options = make_options(root);
     options.explicit_repository = root / "repository-SAMPLE";
     auto context = va::resolve_repository(options, always_writable_local);
-    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
     if (!context) {
         return std::nullopt;
     }
@@ -700,7 +703,7 @@ void database_state_tells_what_cannot_be_used()
     const auto state = [&] { return va::database_state(layout); };
     const auto opened_says = [&](const std::string& what) {
         auto reopened = *context;
-        const auto opened = va::open_repository(reopened);
+        const auto opened = va::open_repository(reopened, test::today);
         CHECK(!opened && opened.error().message == "the repository's database " + database_text + " " + what +
                                                        "; make it again from the manifests with `repo rebuild-index`");
     };
@@ -730,7 +733,7 @@ void database_state_tells_what_cannot_be_used()
     CHECK(state() == va::DatabaseState::Unfilled);
     {
         auto reopened = *context;
-        const auto opened = va::open_repository(reopened);
+        const auto opened = va::open_repository(reopened, test::today);
         CHECK(!opened && opened.error().message ==
                              "the repository's database " + database_text +
                                  " was made again, but its rebuild from the manifests did not finish; finish it with "
@@ -795,7 +798,7 @@ void rebuild_makes_a_database_that_cannot_be_used_again()
     const auto rebuild = [&] {
         auto reopened = *context;
         reopened.repository_uuid.clear();
-        auto made = va::open_repository_to_rebuild(reopened);
+        auto made = va::open_repository_to_rebuild(reopened, test::today);
         CHECK(!made || reopened.repository_uuid == uuid);
         return made;
     };
@@ -898,7 +901,7 @@ void a_new_database_left_beside_its_place_is_taken_up()
     const std::string sample_bytes(4096, 'x');
     std::ofstream(database, std::ios::binary | std::ios::trunc) << sample_bytes;
     auto first_context = *context;
-    const auto first = va::open_repository_to_rebuild(first_context);
+    const auto first = va::open_repository_to_rebuild(first_context, test::today);
     CHECK(first && *first && (*first)->moved_to && !std::filesystem::exists(made_beside));
     if (!first || !*first || !(*first)->moved_to) {
         return;
@@ -906,7 +909,7 @@ void a_new_database_left_beside_its_place_is_taken_up()
     std::filesystem::rename(database, made_beside);
     CHECK(va::database_state(layout) == va::DatabaseState::Missing);
     auto again_context = *context;
-    const auto again = va::open_repository_to_rebuild(again_context);
+    const auto again = va::open_repository_to_rebuild(again_context, test::today);
     CHECK(again && *again && (*again)->state == va::DatabaseState::NotADatabase &&
           (*again)->moved_to == (*first)->moved_to);
     CHECK(aside_count() == 1 && !std::filesystem::exists(made_beside) &&
@@ -915,7 +918,7 @@ void a_new_database_left_beside_its_place_is_taken_up()
     std::ofstream(made_beside, std::ios::binary) << "sample leftover";
     std::ofstream(database, std::ios::binary | std::ios::trunc) << sample_bytes;
     auto third_context = *context;
-    const auto third = va::open_repository_to_rebuild(third_context);
+    const auto third = va::open_repository_to_rebuild(third_context, test::today);
     CHECK(third && *third && (*third)->moved_to && (*third)->moved_to != (*first)->moved_to);
     CHECK(aside_count() == 2 && !std::filesystem::exists(made_beside) &&
           va::database_state(layout) == va::DatabaseState::Unfilled);
@@ -944,73 +947,266 @@ bool has_table(const va::RepositoryLayout& layout, const char* name)
     return found;
 }
 
+// The first column of the first row of `sql` in the database file `file`, as
+// text, read through a connection of its own; "-" when there is none or it
+// cannot be read.
+std::string first_value(const std::filesystem::path& file, const char* sql)
+{
+    sqlite3* database = nullptr;
+    const auto name = file.u8string();
+    std::string value = "-";
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY, nullptr) ==
+        SQLITE_OK) {
+        sqlite3_stmt* statement = nullptr;
+        if (sqlite3_prepare_v2(database, sql, -1, &statement, nullptr) == SQLITE_OK &&
+            sqlite3_step(statement) == SQLITE_ROW) {
+            const auto* text = sqlite3_column_text(statement, 0);
+            value = text ? reinterpret_cast<const char*>(text) : "";
+        }
+        sqlite3_finalize(statement);
+    }
+    sqlite3_close(database);
+    return value;
+}
+
+// The names of the files in `folder` that start with "veriarchive-schema-":
+// the copies of the database kept before upgrades, and what is left of them.
+// A copy is in WAL mode, as its database is, so SQLite makes its -wal and
+// -shm files beside it whenever it is opened, as these tests open it: those
+// are left out.
+std::set<std::string> copies_in(const std::filesystem::path& folder)
+{
+    std::set<std::string> names;
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(folder, error)) {
+        const auto name = va::path_to_utf8(entry.path().filename());
+        if (name.starts_with("veriarchive-schema-") && !name.ends_with("-wal") && !name.ends_with("-shm")) {
+            names.insert(name);
+        }
+    }
+    return names;
+}
+
+// The repository's database as V1 left it (version 1, with V1's tables), or
+// as a program of `version` left it, with one archive (sample data).
+void lower_schema(const va::RepositoryLayout& layout, int version)
+{
+    run_sql(layout,
+        ("DROP TABLE IF EXISTS verify_progress_chunks; UPDATE schema_version SET version = " +
+            std::to_string(version) +
+            "; DELETE FROM archives; INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000032',"
+            "'ARCH-0001','2026-10-16T00:00:00Z',1,'REGISTERED','',NULL)")
+            .c_str());
+}
+
 // Decisions 0032 and 0033: a new repository has schema version 3. One that V1
 // created (version 1, whose tables are those of version 2), and one of
 // version 2, are raised to version 3 when this version opens them, keeping
 // their rows: version 3 adds verify_progress_chunks (decision 0033), and a V1
-// program refuses the repository from then on. A version this program does
-// not know is refused, and left as it is.
+// program refuses the repository from then on. Before it raises the version,
+// the open keeps a copy of the database as it is beside it, named for that
+// version and the day it is opened on: the copy holds the version and the
+// rows as they were, whole, and the open says where it is (decision 0032).
+// Opened again, the repository needs no upgrade, and no copy is made. A
+// version this program does not know is refused, and left as it is.
 void an_older_repository_is_raised_to_schema_version_3()
 {
     TemporaryDirectory temporary("schema-v1");
     auto options = make_options(temporary.path());
     auto context = va::resolve_repository(options, always_writable_local);
-    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
     if (!context) {
         return;
     }
     const auto& layout = context->repo;
     CHECK(stored_schema_version(layout) == 3 && has_table(layout, "verify_progress_chunks"));
+    CHECK(!context->schema_upgrade && copies_in(layout.root).empty());
 
     // As V1 left it, and as a version 2 program left it (sample data).
     for (const int older : {1, 2}) {
-        run_sql(layout,
-            ("DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = " + std::to_string(older) +
-                "; DELETE FROM archives; INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000032',"
-                "'ARCH-0001','2026-10-16T00:00:00Z',1,'REGISTERED','',NULL)")
-                .c_str());
+        lower_schema(layout, older);
         const auto unmigrated = va::validate_schema(layout);
         CHECK(!unmigrated && unmigrated.error().message == "unsupported repository schema");
-        CHECK(va::open_repository(*context).has_value());
+        CHECK(va::open_repository(*context, test::today).has_value());
         CHECK(stored_schema_version(layout) == 3 && has_table(layout, "verify_progress_chunks"));
         CHECK(va::validate_schema(layout).has_value());
-        sqlite3* database = nullptr;
-        const auto name = layout.database().u8string();
-        CHECK(sqlite3_open_v2(reinterpret_cast<const char*>(name.c_str()), &database, SQLITE_OPEN_READONLY,
-                  nullptr) == SQLITE_OK);
-        sqlite3_stmt* statement = nullptr;
-        CHECK(sqlite3_prepare_v2(database, "SELECT label FROM archives", -1, &statement, nullptr) == SQLITE_OK);
-        CHECK(statement && sqlite3_step(statement) == SQLITE_ROW &&
-              std::string(reinterpret_cast<const char*>(sqlite3_column_text(statement, 0))) == "ARCH-0001");
-        sqlite3_finalize(statement);
-        sqlite3_close(database);
-    }
+        CHECK(first_value(layout.database(), "SELECT label FROM archives") == "ARCH-0001");
 
-    // Opened again: nothing more to do.
-    CHECK(va::open_repository(*context).has_value());
+        const auto copy =
+            layout.root / ("veriarchive-schema-" + std::to_string(older) + "-before-upgrade-2026-10-17.db");
+        const auto& upgrade = context->schema_upgrade;
+        CHECK(upgrade && upgrade->from == older && upgrade->to == 3 && upgrade->copy == copy);
+        CHECK(first_value(copy, "SELECT version FROM schema_version") == std::to_string(older));
+        CHECK(first_value(copy, "SELECT label FROM archives") == "ARCH-0001");
+        CHECK(first_value(copy, "SELECT count(*) FROM sqlite_master WHERE name = 'verify_progress_chunks'") == "0");
+        CHECK(first_value(copy, "PRAGMA integrity_check") == "ok");
+    }
+    const std::set<std::string> both{
+        "veriarchive-schema-1-before-upgrade-2026-10-17.db", "veriarchive-schema-2-before-upgrade-2026-10-17.db"};
+    CHECK(copies_in(layout.root) == both);
+
+    // Opened again: nothing more to do, and nothing more to copy.
+    CHECK(va::open_repository(*context, test::today).has_value());
     CHECK(stored_schema_version(layout) == 3);
+    CHECK(!context->schema_upgrade && copies_in(layout.root) == both);
 
     // A version 3 database without the table is incomplete, not raised.
     run_sql(layout, "DROP TABLE verify_progress_chunks");
     const auto incomplete = va::validate_schema(layout);
     CHECK(!incomplete && incomplete.error().message == "unsupported or incomplete repository schema");
 
-    // A later program's repository.
+    // A later program's repository, neither upgraded nor copied.
     run_sql(layout, "UPDATE schema_version SET version = 4");
-    const auto later = va::open_repository(*context);
+    const auto later = va::open_repository(*context, test::today);
     CHECK(!later && later.error().message == "unsupported repository schema");
     CHECK(stored_schema_version(layout) == 4);
+    CHECK(!context->schema_upgrade && copies_in(layout.root) == both);
+}
+
+// The copy kept before an upgrade never replaces a file (decision 0032): when
+// its name is taken, as by a copy that was put back and upgraded again on the
+// same day, it takes the next name with -2, -3, ... before .db, and the file
+// that has the name stays as it is. What a copy cut short by a crash left
+// under its name with ".partial" added (and its journal) is replaced.
+void a_copy_before_an_upgrade_never_replaces_a_file()
+{
+    TemporaryDirectory temporary("schema-copy-names");
+    auto options = make_options(temporary.path());
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    lower_schema(layout, 1);
+    const std::string kept = "SAMPLE: a file of this name that is not to be replaced (sample data)\n";
+    const auto taken = layout.root / "veriarchive-schema-1-before-upgrade-2026-10-17.db";
+    std::ofstream(taken, std::ios::binary) << kept;
+    const auto second = layout.root / "veriarchive-schema-1-before-upgrade-2026-10-17-2.db";
+    auto partial = second;
+    partial += ".partial";
+    auto partial_journal = partial;
+    partial_journal += "-journal";
+    std::ofstream(partial, std::ios::binary) << "SAMPLE: a copy cut short (sample data)\n";
+    std::ofstream(partial_journal, std::ios::binary) << "SAMPLE: its journal (sample data)\n";
+
+    CHECK(va::open_repository(*context, test::today).has_value());
+    CHECK(context->schema_upgrade && context->schema_upgrade->copy == second);
+    CHECK(stored_schema_version(layout) == 3);
+    std::ifstream taken_file(taken, std::ios::binary);
+    const std::string taken_now{std::istreambuf_iterator<char>(taken_file), std::istreambuf_iterator<char>()};
+    CHECK(taken_now == kept);
+    CHECK(first_value(second, "SELECT version FROM schema_version") == "1");
+    CHECK(first_value(second, "SELECT label FROM archives") == "ARCH-0001");
+    CHECK(copies_in(layout.root) == (std::set<std::string>{"veriarchive-schema-1-before-upgrade-2026-10-17.db",
+                                        "veriarchive-schema-1-before-upgrade-2026-10-17-2.db"}));
+}
+
+// Without its copy, a database is not upgraded (decision 0032): when the copy
+// cannot be made, the open fails, saying where the copy was to be and why it
+// could not be made, and the repository stays at its version with its rows,
+// for a program of that version; no copy is left. Once the copy can be made,
+// the next open upgrades it.
+void an_upgrade_without_its_copy_is_refused()
+{
+    TemporaryDirectory temporary("schema-no-copy");
+    auto options = make_options(temporary.path());
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    // An upgrade from version 2 first, which the context then tells of.
+    lower_schema(layout, 2);
+    CHECK(va::open_repository(*context, test::today).has_value() && context->schema_upgrade);
+    lower_schema(layout, 1);
+    // A folder where the copy is written (sample data): no file can be made there.
+    const auto copy = layout.root / "veriarchive-schema-1-before-upgrade-2026-10-17.db";
+    auto partial = copy;
+    partial += ".partial";
+    std::filesystem::create_directories(partial / "SAMPLE folder in the way");
+
+    const auto refused = va::open_repository(*context, test::today);
+    const auto expected = "cannot keep a copy of the repository database at " + va::path_to_utf8(copy) +
+                          " before upgrading it from schema version 1 to 3, so the repository was not upgraded: "
+                          "unable to open database file";
+    CHECK(!refused && refused.error().message == expected);
+    if (!refused && refused.error().message != expected) {
+        std::cerr << "  refused with: " << refused.error().message << '\n';
+    }
+    CHECK(stored_schema_version(layout) == 1 && !has_table(layout, "verify_progress_chunks"));
+    CHECK(first_value(layout.database(), "SELECT label FROM archives") == "ARCH-0001");
+    CHECK(!context->schema_upgrade && !std::filesystem::exists(copy));
+
+    std::filesystem::remove_all(partial);
+    CHECK(va::open_repository(*context, test::today).has_value());
+    CHECK(context->schema_upgrade && context->schema_upgrade->copy == copy);
+    CHECK(stored_schema_version(layout) == 3 && first_value(copy, "SELECT version FROM schema_version") == "1");
+}
+
+// An upgrade that fails after its copy was made, as a database of version 2
+// that has the table version 3 adds already, leaves the database at its
+// version and removes the copy, which would be of a database that was not
+// upgraded (decision 0032).
+void an_upgrade_that_fails_keeps_no_copy()
+{
+    TemporaryDirectory temporary("schema-upgrade-fails");
+    auto options = make_options(temporary.path());
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    run_sql(layout, "UPDATE schema_version SET version = 2");
+    const auto failed = va::open_repository(*context, test::today);
+    CHECK(!failed && failed.error().message == "cannot upgrade the repository database to schema version 3: cannot "
+                                               "execute SQL: table verify_progress_chunks already exists");
+    CHECK(stored_schema_version(layout) == 2 && copies_in(layout.root).empty() && !context->schema_upgrade);
+}
+
+// The copy is made in the transaction that upgrades the database, under its
+// write lock (decision 0032), so that it is the very database upgraded, which
+// no other process changes meanwhile. While another connection holds that
+// lock, the open waits for it, then fails without a copy and without the
+// upgrade; once the lock is free, the open copies and upgrades.
+void an_upgrade_copies_under_the_write_lock()
+{
+    TemporaryDirectory temporary("schema-copy-lock");
+    auto options = make_options(temporary.path());
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    lower_schema(layout, 1);
+    sqlite3* holder = nullptr;
+    const auto name = layout.database().u8string();
+    CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &holder) == SQLITE_OK);
+    CHECK(sqlite3_exec(holder, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) == SQLITE_OK);
+    const auto locked = va::open_repository(*context, test::today);
+    CHECK(!locked && locked.error().message.starts_with("cannot upgrade the repository database to schema version "
+                                                        "3: "));
+    CHECK(copies_in(layout.root).empty() && stored_schema_version(layout) == 1);
+    CHECK(sqlite3_exec(holder, "ROLLBACK", nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(holder);
+    CHECK(va::open_repository(*context, test::today).has_value());
+    CHECK(copies_in(layout.root) == std::set<std::string>{"veriarchive-schema-1-before-upgrade-2026-10-17.db"});
 }
 
 // Decisions 0032 and 0036: a database of V1's schema (version 1) is judged by
 // the tables of its own version, and only one that can be used is upgraded. A
 // V1 database without one of its tables is damaged, and one that V1's rebuild
 // made again and did not fill is unfilled: opening the repository names the
-// rebuild for each and leaves it at version 1. Opened for `repo
-// rebuild-index`, a usable V1 database is upgraded in place, its rows kept and
-// nothing put aside; an unfilled one is upgraded with its mark, which still
-// names the database put aside then; a damaged one is put aside and made
-// again at this version; a later version's is refused and left as it is
+// rebuild for each and leaves it at version 1, keeping no copy. Opened for
+// `repo rebuild-index`, a usable V1 database is upgraded in place, its rows
+// kept and nothing put aside, after the copy of it from before the upgrade is
+// kept, which the open names (context.schema_upgrade); an unfilled one is
+// upgraded with its mark, which still names the database put aside then, and
+// its copy kept too; a damaged one is put aside and made again at this
+// version, with no copy; a later version's is refused and left as it is
 // (sample data).
 void an_older_schema_is_upgraded_only_where_it_can_be_used()
 {
@@ -1037,6 +1233,34 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         const auto archive = store->find_archive("c0ffee00-0000-4000-8000-000000000036");
         return archive && *archive && (*archive)->label == "ARCH-0001";
     };
+    // The copies of the database kept before an upgrade, by name.
+    const auto copies = [&] {
+        std::set<std::string> names;
+        for (const auto& entry : std::filesystem::directory_iterator(layout.root)) {
+            const auto name = va::path_to_utf8(entry.path().filename());
+            if (name.starts_with("veriarchive-schema-")) {
+                names.insert(name);
+            }
+        }
+        return names;
+    };
+    // The upgrade that `opened` made, from version 1, and its copy, a
+    // database of version 1, which is then removed.
+    const auto upgraded_with_copy = [&](const va::AppContext& opened) {
+        const auto& upgrade = opened.schema_upgrade;
+        CHECK(upgrade && upgrade->from == 1 && upgrade->to == 3 &&
+              copies() == std::set<std::string>{"veriarchive-schema-1-before-upgrade-2026-10-17.db"});
+        if (upgrade) {
+            CHECK(upgrade->copy == layout.root / "veriarchive-schema-1-before-upgrade-2026-10-17.db");
+            va::RepositoryLayout copy_layout;
+            copy_layout.root = layout.root / "copy-SAMPLE";
+            std::filesystem::create_directories(copy_layout.root);
+            std::filesystem::copy_file(upgrade->copy, copy_layout.database());
+            CHECK(stored_schema_version(copy_layout) == 1);
+            std::filesystem::remove_all(copy_layout.root);
+            std::filesystem::remove(upgrade->copy);
+        }
+    };
     CHECK(va::database_state(layout) == va::DatabaseState::Usable);
 
     // Version 1 without one of its tables: damaged, not upgraded.
@@ -1044,11 +1268,11 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     CHECK(va::database_state(layout) == va::DatabaseState::Damaged);
     {
         auto reopened = *context;
-        const auto opened = va::open_repository(reopened);
+        const auto opened = va::open_repository(reopened, test::today);
         CHECK(!opened && opened.error().message == "the repository's database " + database_text +
                                                        " is damaged; make it again from the manifests with `repo "
                                                        "rebuild-index`");
-        CHECK(stored_schema_version(layout) == 1);
+        CHECK(stored_schema_version(layout) == 1 && !reopened.schema_upgrade && copies().empty());
     }
 
     // Version 1 made again by a rebuild that did not finish: unfilled.
@@ -1058,22 +1282,24 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     CHECK(va::database_state(layout) == va::DatabaseState::Unfilled);
     {
         auto reopened = *context;
-        CHECK(!va::open_repository(reopened));
-        CHECK(stored_schema_version(layout) == 1);
+        CHECK(!va::open_repository(reopened, test::today));
+        CHECK(stored_schema_version(layout) == 1 && copies().empty());
         auto rebuilding = *context;
-        const auto marked = va::open_repository_to_rebuild(rebuilding);
+        const auto marked = va::open_repository_to_rebuild(rebuilding, test::today);
         CHECK(marked && *marked && (*marked)->moved_to == layout.root / "veriarchive.db.damaged-SAMPLE");
         CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Unfilled);
+        upgraded_with_copy(rebuilding);
     }
 
     // A usable version 1 database, opened for the rebuild: upgraded in place.
     std::ofstream(database, std::ios::binary | std::ios::trunc) << version_1;
     {
         auto rebuilding = *context;
-        const auto opened = va::open_repository_to_rebuild(rebuilding);
+        const auto opened = va::open_repository_to_rebuild(rebuilding, test::today);
         CHECK(opened && !*opened);
         CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Usable);
         CHECK(label_kept());
+        upgraded_with_copy(rebuilding);
     }
 
     // Version 1 without one of its tables, opened for the rebuild: put aside
@@ -1083,12 +1309,13 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     const auto damaged = file_bytes(database);
     {
         auto rebuilding = *context;
-        const auto replaced = va::open_repository_to_rebuild(rebuilding);
+        const auto replaced = va::open_repository_to_rebuild(rebuilding, test::today);
         CHECK(replaced && *replaced && (*replaced)->state == va::DatabaseState::Damaged && (*replaced)->moved_to);
         if (replaced && *replaced && (*replaced)->moved_to) {
             CHECK(file_bytes(*(*replaced)->moved_to) == damaged);
         }
         CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Unfilled);
+        CHECK(!rebuilding.schema_upgrade && copies().empty());
     }
 
     // A later version's database: refused by the rebuild too, unchanged.
@@ -1097,9 +1324,9 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     const auto later = file_bytes(database);
     {
         auto rebuilding = *context;
-        const auto refused = va::open_repository_to_rebuild(rebuilding);
+        const auto refused = va::open_repository_to_rebuild(rebuilding, test::today);
         CHECK(!refused && refused.error().message == "unsupported repository schema");
-        CHECK(file_bytes(database) == later);
+        CHECK(file_bytes(database) == later && copies().empty());
     }
 }
 
@@ -1111,7 +1338,7 @@ void opening_a_current_repository_takes_no_write_lock()
     TemporaryDirectory temporary("schema-lock");
     auto options = make_options(temporary.path());
     auto context = va::resolve_repository(options, always_writable_local);
-    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer()));
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
     if (!context) {
         return;
     }
@@ -1120,7 +1347,7 @@ void opening_a_current_repository_takes_no_write_lock()
     CHECK(sqlite3_open(reinterpret_cast<const char*>(name.c_str()), &holder) == SQLITE_OK);
     CHECK(sqlite3_exec(holder, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr) == SQLITE_OK);
     const auto started = std::chrono::steady_clock::now();
-    CHECK(va::open_repository(*context).has_value());
+    CHECK(va::open_repository(*context, test::today).has_value());
     CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(2));
     CHECK(sqlite3_exec(holder, "ROLLBACK", nullptr, nullptr, nullptr) == SQLITE_OK);
     sqlite3_close(holder);
@@ -1154,5 +1381,9 @@ void repository_tests()
     a_new_database_left_beside_its_place_is_taken_up();
     an_older_repository_is_raised_to_schema_version_3();
     an_older_schema_is_upgraded_only_where_it_can_be_used();
+    a_copy_before_an_upgrade_never_replaces_a_file();
+    an_upgrade_without_its_copy_is_refused();
+    an_upgrade_that_fails_keeps_no_copy();
+    an_upgrade_copies_under_the_write_lock();
     opening_a_current_repository_takes_no_write_lock();
 }

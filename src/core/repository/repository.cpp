@@ -11,10 +11,12 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <optional>
 #include <sqlite3.h>
+#include <system_error>
 
 namespace va {
 namespace {
@@ -263,16 +265,80 @@ std::optional<int> read_schema_version(const repository_detail::SqliteDatabase& 
     return sqlite3_column_int(version->get(), 0);
 }
 
+// The migration that upgrades a database of schema version `from`, if any.
+const Migration* migration_from(int from)
+{
+    const auto* found = std::find_if(
+        std::begin(migrations), std::end(migrations), [&](const Migration& step) { return step.from == from; });
+    return found == std::end(migrations) ? nullptr : found;
+}
+
 // Whether migrations lead from `version` to schema_version, one step at a time.
 bool upgradable(int version)
 {
     for (int at = version; at < schema_version; ++at) {
-        if (std::none_of(std::begin(migrations), std::end(migrations),
-                [&](const Migration& step) { return step.from == at; })) {
+        if (!migration_from(at)) {
             return false;
         }
     }
     return version < schema_version;
+}
+
+// Keeps a copy of the database of schema version `from`, beside it in
+// RepositoryRoot, before it is upgraded (decision 0032): the verification
+// history lives only in the database, and a program of an earlier version
+// cannot open it once it is upgraded. Called while the transaction that
+// upgrades holds the write lock and has written nothing yet, so a connection
+// of its own reads the very database to be upgraded (the backup API reads no
+// connection in a write transaction). Named for the version and the day, so
+// that anyone sees what it is: veriarchive-schema-1-before-upgrade-2026-10-17.db,
+// or -2, -3, ... before .db when that name is taken, as a file of that name
+// is never replaced. The copy is written under the name with ".partial"
+// added and renamed once its own commit has synced it, so that a copy cut
+// short by a crash never has the name of a whole one; a leftover ".partial"
+// of that name is replaced, as only an attempt that holds the write lock
+// writes one. Returns where the copy is.
+std::expected<std::filesystem::path, IoError> keep_copy_before_upgrade(
+    const RepositoryLayout& layout, int from, std::chrono::year_month_day today)
+{
+    const auto stem = std::format("veriarchive-schema-{}-before-upgrade-{:%F}", from, today);
+    auto copy = layout.root / (stem + ".db");
+    for (int number = 2; path_exists(copy); ++number) {
+        copy = layout.root / std::format("{}-{}.db", stem, number);
+    }
+    const auto failed = [&](const std::string& cause) {
+        return std::unexpected(repository_error(
+            "cannot keep a copy of the repository database at " + path_to_utf8(copy) +
+            " before upgrading it from schema version " + std::to_string(from) + " to " +
+            std::to_string(schema_version) + ", so the repository was not upgraded: " + cause));
+    };
+    auto partial = copy;
+    partial += ".partial";
+    auto partial_journal = partial;
+    partial_journal += "-journal";
+    const auto remove_partial = [&] {
+        std::error_code ignored;
+        std::filesystem::remove(partial_journal, ignored);
+        std::filesystem::remove(partial, ignored);
+    };
+    remove_partial();
+    auto reader = repository_detail::SqliteDatabase::open(layout.database(), true);
+    if (!reader) {
+        return failed(reader.error().message);
+    }
+    if (auto copied = reader->copy_to(partial); !copied) {
+        remove_partial();
+        return failed(copied.error().message);
+    }
+    // The name was free a moment ago, and only an attempt that holds the
+    // write lock gives one to a copy.
+    std::error_code error;
+    std::filesystem::rename(partial, copy, error);
+    if (error) {
+        remove_partial();
+        return failed(error.message());
+    }
+    return copy;
 }
 
 // Brings the database of a repository of an older schema version to
@@ -280,17 +346,21 @@ bool upgradable(int version)
 // old version or the new one. The version is read first without the write
 // lock, which an operation of another process may hold for long: a
 // repository at this version, at a later one, or one that cannot be read is
-// left as it is, for validate_schema to judge.
-std::expected<void, IoError> migrate_schema(const RepositoryLayout& layout)
+// left as it is, for validate_schema to judge. Before it changes anything,
+// the transaction keeps a copy of the database as it is (keep_copy_before_upgrade);
+// when the copy cannot be made, nothing is upgraded. Returns the upgrade, or
+// nothing when there was none.
+std::expected<std::optional<SchemaUpgrade>, IoError> migrate_schema(
+    const RepositoryLayout& layout, std::chrono::year_month_day today)
 {
     {
         auto database = repository_detail::SqliteDatabase::open(layout.database(), true);
         if (!database) {
-            return {};
+            return std::nullopt;
         }
         const auto version = read_schema_version(*database);
         if (!version || *version >= schema_version) {
-            return {};
+            return std::nullopt;
         }
     }
     auto database = repository_detail::SqliteDatabase::open(layout.database());
@@ -304,20 +374,28 @@ std::expected<void, IoError> migrate_schema(const RepositoryLayout& layout)
     if (auto begun = database->execute("PRAGMA busy_timeout=5000; BEGIN IMMEDIATE;"); !begun) {
         return failed(begun.error());
     }
+    // Again under the lock: another process may have upgraded it meanwhile.
+    const auto version = read_schema_version(*database);
+    if (!version) {
+        (void)database->execute("ROLLBACK;");
+        return failed(repository_error("cannot inspect repository schema"));
+    }
+    if (!upgradable(*version)) {
+        // Upgraded meanwhile, or a version no migration starts from, which
+        // validate_schema refuses.
+        (void)database->execute("ROLLBACK;");
+        return std::nullopt;
+    }
+    // The database as this transaction found it is the one it upgrades: the
+    // write lock keeps every other process from changing it meanwhile.
+    auto copy = keep_copy_before_upgrade(layout, *version, today);
+    if (!copy) {
+        (void)database->execute("ROLLBACK;");
+        return std::unexpected(copy.error());
+    }
     const auto upgraded = [&]() -> std::expected<void, IoError> {
-        // Again under the lock: another process may have upgraded it meanwhile.
-        const auto version = read_schema_version(*database);
-        if (!version) {
-            return std::unexpected(repository_error("cannot inspect repository schema"));
-        }
         for (int at = *version; at < schema_version; ++at) {
-            const auto* migration =
-                std::find_if(std::begin(migrations), std::end(migrations), [&](const Migration& step) {
-                    return step.from == at;
-                });
-            if (migration == std::end(migrations)) {
-                return {}; // a version no migration starts from: validate_schema refuses it
-            }
+            const auto* migration = migration_from(at);
             if (*migration->sql != '\0') {
                 if (auto migrated = database->execute(migration->sql); !migrated) {
                     return migrated;
@@ -332,9 +410,12 @@ std::expected<void, IoError> migrate_schema(const RepositoryLayout& layout)
     }();
     if (!upgraded) {
         (void)database->execute("ROLLBACK;");
+        // Not upgraded: the copy is of a database that stays as it was.
+        std::error_code ignored;
+        std::filesystem::remove(*copy, ignored);
         return failed(upgraded.error());
     }
-    return {};
+    return SchemaUpgrade{*version, schema_version, *copy};
 }
 
 std::expected<bool, IoError> table_exists(
@@ -485,7 +566,8 @@ std::expected<void, IoError> write_pin(AppContext& context, IFileWriter& writer)
 
 } // namespace
 
-std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer)
+std::expected<void, IoError> initialise_repository(
+    AppContext& context, IFileWriter& writer, std::chrono::year_month_day today)
 {
     // repository.json marks a complete repository (decision 0011). An init
     // that finds one opens it, and pins it where this init pins: a first
@@ -493,7 +575,7 @@ std::expected<void, IoError> initialise_repository(AppContext& context, IFileWri
     // complete but unpinned, and so did one whose config file was lost
     // since; running `repo init` again finishes the job.
     if (path_exists(context.repo.root / "repository.json")) {
-        if (auto opened = open_repository(context); !opened) {
+        if (auto opened = open_repository(context, today); !opened) {
             return opened;
         }
         return write_pin(context, writer);
@@ -552,8 +634,9 @@ std::string unusable_database_message(const RepositoryLayout& layout, DatabaseSt
     return {};
 }
 
-std::expected<void, IoError> open_repository(AppContext& context)
+std::expected<void, IoError> open_repository(AppContext& context, std::chrono::year_month_day today)
 {
+    context.schema_upgrade.reset();
     const auto uuid = read_repository_uuid(context.repo.root);
     if (!uuid) {
         return std::unexpected(repository_error("Invalid repository.json"));
@@ -570,9 +653,11 @@ std::expected<void, IoError> open_repository(AppContext& context)
     if (*state != DatabaseState::Usable) {
         return std::unexpected(repository_error(unusable_database_message(context.repo, *state)));
     }
-    if (auto migrated = migrate_schema(context.repo); !migrated) {
-        return migrated;
+    auto migrated = migrate_schema(context.repo, today);
+    if (!migrated) {
+        return std::unexpected(migrated.error());
     }
+    context.schema_upgrade = std::move(*migrated);
     if (auto result = validate_schema(context.repo); !result) {
         return result;
     }
@@ -901,8 +986,10 @@ std::expected<std::optional<ReplacedDatabase>, IoError> marked_replacement(const
 
 } // namespace
 
-std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(AppContext& context)
+std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(
+    AppContext& context, std::chrono::year_month_day today)
 {
+    context.schema_upgrade.reset();
     const auto uuid = read_repository_uuid(context.repo.root);
     if (!uuid) {
         return std::unexpected(repository_error("Invalid repository.json"));
@@ -939,12 +1026,14 @@ std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebui
     } else {
         // A database of an older schema version, also one that a rebuild of
         // an earlier version made again, is upgraded as opening the
-        // repository upgrades it, so that the rebuild fills an index of this
-        // version (decision 0032). A database made again now has this
-        // version's schema.
-        if (auto migrated = migrate_schema(layout); !migrated) {
+        // repository upgrades it, keeping a copy of it first, so that the
+        // rebuild fills an index of this version (decision 0032). A database
+        // made again now has this version's schema.
+        auto migrated = migrate_schema(layout, today);
+        if (!migrated) {
             return std::unexpected(migrated.error());
         }
+        context.schema_upgrade = std::move(*migrated);
         if (auto valid = validate_schema(layout); !valid) {
             return std::unexpected(valid.error());
         }

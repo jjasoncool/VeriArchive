@@ -119,6 +119,37 @@ bool SqliteDatabase::in_transaction() const
     return sqlite3_get_autocommit(database_) == 0;
 }
 
+std::expected<void, IoError> SqliteDatabase::copy_to(const std::filesystem::path& destination) const
+{
+    sqlite3* copy = nullptr;
+    const auto failed = [&copy]() {
+        IoError error{IoErrorKind::Other, copy ? sqlite3_errcode(copy) : 0,
+            copy ? sqlite3_errmsg(copy) : "unknown SQLite error"};
+        sqlite3_close(copy);
+        return std::unexpected(std::move(error));
+    };
+    if (sqlite3_open_v2(path_to_utf8(destination).c_str(), &copy, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+            nullptr) != SQLITE_OK ||
+        sqlite3_exec(copy, "PRAGMA synchronous=FULL", nullptr, nullptr, nullptr) != SQLITE_OK) {
+        return failed();
+    }
+    sqlite3_backup* backup = sqlite3_backup_init(copy, "main", database_, "main");
+    if (!backup) {
+        return failed();
+    }
+    // One step copies every page while this connection's read holds: the copy
+    // is the database as of one moment. sqlite3_backup_finish leaves the
+    // step's error, if any, on the copy's connection.
+    const int stepped = sqlite3_backup_step(backup, -1);
+    if (sqlite3_backup_finish(backup) != SQLITE_OK || stepped != SQLITE_DONE) {
+        return failed();
+    }
+    if (sqlite3_close(copy) != SQLITE_OK) {
+        return failed();
+    }
+    return {};
+}
+
 } // namespace va::repository_detail
 namespace va::repository_detail {
 

@@ -1,7 +1,17 @@
 #pragma once
+#include <chrono>
 #include <iostream> // IWYU pragma: keep (std::cerr in CHECK, expanded in every test file)
 
 inline int test_failures = 0;
+
+namespace test {
+
+// The local date on which the tests open repositories: it names the copy of a
+// database kept before its upgrade (decision 0032).
+inline constexpr std::chrono::year_month_day today{
+    std::chrono::year{2026}, std::chrono::October, std::chrono::day{17}};
+
+} // namespace test
 
 #define CHECK(expression)                                                                  \
     do {                                                                                   \

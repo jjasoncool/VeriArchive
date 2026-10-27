@@ -3,6 +3,7 @@
 #include "common/error.h"
 #include "core/interfaces.h"
 #include "core/repository/database_state.h"
+#include <chrono>
 #include <expected>
 #include <functional>
 #include <optional>
@@ -42,8 +43,10 @@ std::expected<AppContext, IoError> resolve_repository(
 // then repository.json (its presence marks a complete repository), then the
 // config pin, where this init pins (context.pins_repository). Re-running after
 // a crash at any step completes the repository, and pins one that is
-// complete but was never pinned (decision 0011).
-std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer);
+// complete but was never pinned (decision 0011). A repository that exists
+// already is opened (open_repository, `today`).
+std::expected<void, IoError> initialise_repository(
+    AppContext& context, IFileWriter& writer, std::chrono::year_month_day today);
 // Opens an existing repository: reads repository.json and checks the
 // database's schema. A database that is missing, empty, not a database or
 // damaged, or one that a rebuild made again and did not fill
@@ -51,9 +54,14 @@ std::expected<void, IoError> initialise_repository(AppContext& context, IFileWri
 // (decision 0036); any other failure keeps SQLite's own reason. A database
 // that can be used, at an older schema version (V1's version 1, or version
 // 2), is then raised to this program's, in one write transaction (R-92,
-// decisions 0032 and 0033); one of a version this program does not know is
-// refused ("unsupported repository schema") and left as it is.
-std::expected<void, IoError> open_repository(AppContext& context);
+// decisions 0032 and 0033), which first keeps a copy of it as it is beside
+// it, named for its version and `today`, the local date:
+// veriarchive-schema-1-before-upgrade-2026-10-17.db (decision 0032). Where
+// that copy cannot be made, nothing is upgraded and the open fails.
+// context.schema_upgrade says what was upgraded, and where the copy is, or
+// nothing. A database of a version this program does not know is refused
+// ("unsupported repository schema") and left as it is.
+std::expected<void, IoError> open_repository(AppContext& context, std::chrono::year_month_day today);
 // R-83 step 5, for the pinned repository only (decision 0037): when
 // repository.json's uuid differs from the one recorded in the config, sets
 // context.previous_repository_uuid (the caller warns) and records the new uuid
@@ -76,11 +84,13 @@ std::expected<void, IoError> validate_schema(const RepositoryLayout& layout);
 // moving the database aside and putting the new one in place left its new
 // one beside it, which is taken up. A database that can be used, or that a
 // rebuild made again, at an older schema version is raised to this
-// program's, as open_repository raises it, so that the rebuild fills an
-// index of this version (decision 0032). The repository keeps its uuid. Gives
-// the mark's database put aside, made now or by a rebuild that did not finish;
+// program's, as open_repository raises it, keeping its copy named for
+// `today` first (context.schema_upgrade), so that the rebuild fills an index
+// of this version (decision 0032). The repository keeps its uuid. Gives the
+// mark's database put aside, made now or by a rebuild that did not finish;
 // nothing where the database can be used and holds no mark; an error, with
 // nothing moved, where it cannot be read for another reason (database_state).
-std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(AppContext& context);
+std::expected<std::optional<ReplacedDatabase>, IoError> open_repository_to_rebuild(
+    AppContext& context, std::chrono::year_month_day today);
 
 } // namespace va

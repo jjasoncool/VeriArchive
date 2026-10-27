@@ -28,6 +28,8 @@ The zip holds no folder of its own: its `bin`, `lib` and `share` go straight int
 
 To update the program, close VeriArchive, then unzip the new version's zip **into the same folder** (`D:\VeriArchive` in the example) and let it replace the files there. In Windows Explorer: right-click the zip, choose "Extract All...", type the program folder as the destination, and when asked, choose to replace the files in the destination. Explorer proposes a new folder named after the zip instead; a program unzipped there finds none of your records. The zip holds no `bin\data` and no `bin\config.json`, so the existing records are not overwritten. Do not delete the old folder first. To see which version runs, look at "Program version" in the Settings view, or run `veriarchive-cli --version` or `veriarchive-cli repo info`.
 
+The first time a new version opens the repository, it may need to upgrade its database, after which earlier versions can no longer open it. Before the upgrade, the program keeps a copy of the database as it was in `bin\data`, named for the old schema version and the day, for example `veriarchive-schema-1-before-upgrade-2026-10-17.db`; that time the window opens on the Settings view, which tells you where the copy is. The verification history lives only in the database, so keep this copy until you are sure you will stay with the new version. If the copy cannot be made (for example, the disk is full), nothing is upgraded, and the Settings view says why.
+
 ### Moving the program folder
 
 On first use, the repository (`data`) and the config file that remembers it (`config.json`) are created in the program's folder (`bin` in the zip), and the config file records the repository relative to that folder: `"repository": "data"`. Program, configuration and repository are therefore one folder. You can move or copy the whole unzipped folder, to another drive, to another computer, or onto a USB disk that gets another drive letter, and it keeps using its own repository. Backing up that folder also backs up the repository.
@@ -37,6 +39,10 @@ On first use, the repository (`data`) and the config file that remembers it (`co
 - Copying the folder copies the repository; from then on each copy records its own verification history. Keep one of them as the folder you work with.
 - A repository outside the program folder (`VeriArchive` in your home folder, or a place chosen with `--repository`) is remembered by its full path and does not move with the folder.
 - A folder set up with an earlier version remembers the full path. To make it movable, open `bin\config.json` in a text editor and change the value of `"repository"` to `"data"`.
+
+### After updating VeriArchive
+
+A new version may need to upgrade the repository's database, which earlier versions then cannot open. The first time it opens the repository, it keeps a copy of the database as it is beside it, in the repository folder, named for the database's old schema version and the day, for example `veriarchive-schema-1-before-upgrade-2026-10-17.db`, and says once where the copy is: the command line in its error output (`note: the repository database was upgraded from schema version 1 to 3, ...`), the GUI in Settings, which it then shows first. The verification history lives only in the database, so keep the copy until you are sure you will stay with the new version: an earlier version can open only the copy. If the copy cannot be made, for example because the disk is full, nothing is upgraded and the program stops with an error (exit code 11): make room and open the repository again.
 
 ## Interface language
 

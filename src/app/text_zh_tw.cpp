@@ -1081,7 +1081,8 @@ constexpr CatalogEntry entries[] = {
         "有些名稱與同一資料夾中的另一個名稱只差在大小寫，或帶重音、標記的字母的編碼方式（Unicode 正規化）；"
         "不區分這些差異的磁碟區或作業系統無法同時保存它們"},
     // The program that read the media, where it is no kernel driver of its
-    // format (decision 0006), noted in a verification report.
+    // format (decision 0006), noted in a verification report; and what
+    // opening the repository is said to have done, once (decision 0032).
     {"note: {}", "附註：{}", Match::Cause},
     {"Note: {}", "附註：{}"},
     {"driver: {}", "驅動程式：{}"},
@@ -1536,9 +1537,19 @@ constexpr CatalogEntry entries[] = {
     {"the repository's database {} is not a file", "儲存庫的資料庫 {} 不是檔案"},
     {"cannot put the repository's database aside: {}: {}", "無法將儲存庫的資料庫移到一旁：{}：{}", Match::Cause},
     {"unsupported or incomplete repository schema", "不支援或不完整的儲存庫結構描述"},
-    // Decision 0032: a repository of an older schema version is upgraded when opened.
+    // Decision 0032: a repository of an older schema version is upgraded when
+    // opened, after a copy of its database is kept beside it; without the
+    // copy, it is not upgraded.
     {"cannot upgrade the repository database to schema version {}: {}", "無法將儲存庫資料庫升級到結構描述版本 {}：{}",
         Match::Cause},
+    {"cannot keep a copy of the repository database at {} before upgrading it from schema version {} to {}, so the "
+        "repository was not upgraded: {}",
+        "儲存庫資料庫從結構描述版本 {1} 升級到 {2} 之前，無法先在 {0} 保留它的副本，因此儲存庫沒有升級：{3}",
+        Match::Cause},
+    {"the repository database was upgraded from schema version {} to {}, which earlier versions of VeriArchive "
+        "cannot open; a copy of it from before the upgrade is kept at {}",
+        "儲存庫資料庫已從結構描述版本 {} 升級到 {}，較早版本的 VeriArchive 無法再開啟它；"
+        "升級前的資料庫副本保存在 {}"},
     // src/core/repository/sqlite_raii.cpp
     {"unknown SQLite error", "未知的 SQLite 錯誤"},
     {"cannot open repository database: {}", "無法開啟儲存庫資料庫：{}", Match::Cause},

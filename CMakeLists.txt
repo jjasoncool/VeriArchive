@@ -369,11 +369,16 @@ if(BUILD_TESTING)
                 -DVERSION=${PROJECT_VERSION}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/check_package.cmake)
     endif()
+    # The sqlite3 program, where there is one (MSYS2's sqlite3 package has it),
+    # makes a repository of an older schema version for the end-to-end test
+    # of the upgrade (decision 0032); without it, that part is left out.
+    find_program(VERIARCHIVE_SQLITE3 sqlite3)
     add_test(NAME veriarchive_cli_e2e
         COMMAND ${CMAKE_COMMAND}
             -DCLI=$<TARGET_FILE:veriarchive_cli>
             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/e2e
             -DVERSION=${PROJECT_VERSION}
+            -DSQLITE3=${VERIARCHIVE_SQLITE3}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/cli_e2e.cmake)
     # The test chooses the language through its config file and --lang.
     set_tests_properties(veriarchive_cli_e2e PROPERTIES ENVIRONMENT_MODIFICATION "VERIARCHIVE_LANG=unset:")

@@ -60,6 +60,14 @@ public:
     // True while a transaction is open on this connection (BEGIN without its
     // COMMIT or ROLLBACK yet).
     bool in_transaction() const;
+    // Copies the database, as this connection reads it in one read
+    // transaction, into a new database file at `destination` through
+    // SQLite's backup API, which refuses a connection in a write transaction
+    // (SQLITE_BUSY). The copy's own commit syncs it to stable storage before
+    // this returns (synchronous=FULL), which VACUUM INTO would not do. The
+    // error's message is SQLite's own ("unable to open database file",
+    // "database or disk is full").
+    std::expected<void, IoError> copy_to(const std::filesystem::path& destination) const;
 
 private:
     explicit SqliteDatabase(sqlite3* database) noexcept;

@@ -1,6 +1,7 @@
 #include "test_support.h"
 #include "app/history.h"
 #include "app/plain_words.h"
+#include "app/session.h"
 #include "app/text.h"
 #include "app/unfinished_operations.h"
 #include "app/verify_report.h"
@@ -378,6 +379,24 @@ void translation_tests()
     // The index of chunk hashes (decision 0032).
     CHECK(chinese("cannot upgrade the repository database to schema version 2: cannot execute SQL: database is "
                   "locked") == "無法將儲存庫資料庫升級到結構描述版本 2：無法執行 SQL：資料庫已被鎖定");
+    // The copy of the database kept before an upgrade (decision 0032): the
+    // note that says once where it is, at the CLI's "note:" and in Settings,
+    // and the refusal to upgrade without it, whose cause is translated too.
+    const auto note = va::app::schema_upgrade_note(
+        {1, 3, std::filesystem::path("K:/SAMPLE/data/veriarchive-schema-1-before-upgrade-2026-10-17.db")});
+    CHECK(note == "the repository database was upgraded from schema version 1 to 3, which earlier versions of "
+                  "VeriArchive cannot open; a copy of it from before the upgrade is kept at "
+                  "K:/SAMPLE/data/veriarchive-schema-1-before-upgrade-2026-10-17.db");
+    CHECK(chinese.format("note: {}", chinese(note)) ==
+          "附註：儲存庫資料庫已從結構描述版本 1 升級到 3，較早版本的 VeriArchive 無法再開啟它；"
+          "升級前的資料庫副本保存在 K:/SAMPLE/data/veriarchive-schema-1-before-upgrade-2026-10-17.db");
+    CHECK(chinese.format("Note: {}", chinese(note)).starts_with("附註：儲存庫資料庫已從結構描述版本 1 升級到 3"));
+    CHECK(english.format("note: {}", english(note)) == "note: " + note);
+    CHECK(chinese("cannot keep a copy of the repository database at K:/SAMPLE/data/veriarchive-schema-2-before-"
+                  "upgrade-2026-10-17.db before upgrading it from schema version 2 to 3, so the repository was not "
+                  "upgraded: database or disk is full") ==
+          "儲存庫資料庫從結構描述版本 2 升級到 3 之前，無法先在 K:/SAMPLE/data/veriarchive-schema-2-before-upgrade-"
+          "2026-10-17.db 保留它的副本，因此儲存庫沒有升級：資料庫或磁碟已滿");
     CHECK(chinese("chunk hashes of big.bin: 2 given, 3 expected") == "big.bin 的區塊雜湊：提供 2 個，應為 3 個");
     // Each revision's chunks in archive show (decision 0032): the Merkle root is 總碼 there.
     CHECK(chinese.format("chunk size {}, {} chunks, Merkle root {}", "64 MiB", 160, "4f3f") ==

@@ -23,7 +23,7 @@ struct TestRepository {
             ("va-repo-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         context.repo.root = root / "repository";
         context.config_file = root / "config.json";
-        const auto initialised = va::initialise_repository(context, *writer);
+        const auto initialised = va::initialise_repository(context, *writer, test::today);
         CHECK(initialised.has_value());
     }
 

@@ -2,9 +2,19 @@
 #include "common/config.h"
 #include "common/repository_layout.h"
 
+#include <optional>
 #include <string>
 
 namespace va {
+
+// What opening a repository changed in its database: its schema version was
+// raised from `from` to `to` (R-92), after the database as it was, with its
+// verification history, was copied beside it to `copy` (decision 0032).
+struct SchemaUpgrade {
+    int from = 0;
+    int to = 0;
+    std::filesystem::path copy;
+};
 
 struct AppContext {
     std::filesystem::path executable_dir;
@@ -24,6 +34,9 @@ struct AppContext {
     // shows a warning. A repository chosen with --repository or
     // VERIARCHIVE_REPOSITORY is never compared with that record.
     std::string previous_repository_uuid;
+    // Set when opening the repository upgraded its database; the user
+    // interface says once where the copy from before the upgrade is.
+    std::optional<SchemaUpgrade> schema_upgrade;
 };
 
 } // namespace va

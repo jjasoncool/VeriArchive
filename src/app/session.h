@@ -31,6 +31,10 @@ struct Session {
     AppContext context;
     std::unique_ptr<IFileWriter> writer;
     std::vector<std::string> warnings;  // running elevated, repository uuid changed, ...
+    // What opening the repository did that people are told once, where it is
+    // opened: the upgrade of its database and where the copy from before it
+    // is (schema_upgrade_note). English sentences, translated where shown.
+    std::vector<std::string> notes;
     // The database that opening for repo rebuild-index put aside and made
     // again (decision 0036); nothing otherwise.
     std::optional<ReplacedDatabase> replaced_database;
@@ -44,11 +48,20 @@ struct SessionFailure {
     std::vector<std::string> warnings;
 };
 
+// Opens the repository, upgrading its database where it is of an older
+// schema version, with the copy from before the upgrade named for the local
+// date (decision 0032).
 std::expected<Session, SessionFailure> open_session(const SessionOptions& options);
 
 // R-12: the warning that this process runs elevated, where it does; for a
 // command that opens no repository (`media list`).
 std::optional<std::string> elevated_warning();
+
+// What people are told once of `upgrade` (decision 0032): that the
+// repository database was upgraded, which earlier versions of VeriArchive
+// cannot open, and where its copy from before the upgrade is kept. An English
+// sentence, translated where it is shown.
+std::string schema_upgrade_note(const SchemaUpgrade& upgrade);
 
 // Operating system, host name and version for manifests and history.
 HostInfo host_info(std::string app_version);
