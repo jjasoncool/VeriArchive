@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-27
-amends: HANDOFF §A6 (run result `INCOMPLETE` when the device disappeared or stopped answering; item status `Unreadable(removed)` is never produced), §B9 (`IoErrorKind::DeviceRemoved`: which errors of the platform name a device that went away), §B7.3 and R-111 (`io.rotational_override`: its values, how a serial is found, where it applies; section "The readers of a device")
+amends: HANDOFF §A6 (run result `INCOMPLETE` when the device disappeared or stopped answering; item status `Unreadable(removed)` is never produced; a `SkippedMountPoint` where the revision records nothing changes no result, operator 2026-10-27), §B9 (`IoErrorKind::DeviceRemoved`: which errors of the platform name a device that went away), §B7.3 and R-111 (`io.rotational_override`: its values, how a serial is found, where it applies; section "The readers of a device")
 ---
 
 # A device that goes away interrupts the read; it never makes entries unreadable
@@ -45,6 +45,7 @@ Rejected alternatives:
 ## Operator decisions (2026-10-27)
 
 1. **A device that stops answering while the computer still lists its volume** (a USB enclosure that hangs): when several entries in a row cannot be read because of I/O errors, not permission or not-found errors, the verification, and a registration or a relocation reading the media, stops as interrupted, recorded `INCOMPLETE` and resumable, and says in plain words that the device stopped answering: attach it again and resume; if it stops again at the same place, the device may be damaged. The threshold is ten entries in a row with no read between them that succeeds (point 6). The cost the operator accepted: a device whose damage spans that many entries in a row also stops instead of failing; a resume reads those entries again.
+2. **A mount point below the root where the revision records nothing**: the verification keeps its result (`PASSED`, where nothing else needs attention) and lists the folder in its report as an item that changes no result (`SkippedMountPoint`, "another volume is mounted here; it is not part of the archive"), as decision 0009 built it. Every registered byte is still read; the volume mounted there is no part of the archive.
 
 ## The readers of a device (R-111)
 
