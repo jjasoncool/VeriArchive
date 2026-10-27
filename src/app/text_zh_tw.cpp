@@ -870,6 +870,12 @@ constexpr CatalogEntry entries[] = {
     {"identity: the filesystem id cannot be read; the volume was recognised by its device (MATCH_WEAK)",
         "媒體身分：讀不到檔案系統 UUID，改以硬碟序號和容量辨識（弱相符）"},
     {"scan: {}", "掃描：{}", Match::Cause},
+    // Portability warnings that the manifest records (R-42, §A6).
+    {"some names differ from another name in the same folder only in upper and lower case, or in how a letter with "
+        "an accent or a mark is encoded (Unicode normalisation); a volume or system that does not tell such names "
+        "apart cannot keep them all",
+        "有些名稱與同一資料夾中的另一個名稱只差在大小寫，或帶重音、標記的字母的編碼方式（Unicode 正規化）；"
+        "不區分這些差異的磁碟區或作業系統無法同時保存它們"},
     // A device that went away while it was read (decision 0034).
     {"the device that holds the archive went away while it was read (unplugged, or no longer answering); attach it "
         "again, then resume this run",

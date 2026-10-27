@@ -362,6 +362,30 @@ void a_name_registered_on_this_system_that_is_gone_is_missing()
     }
 }
 
+// §A6, R-42: names in one folder that differ only by case, or only by Unicode
+// normalisation, are portability warnings that the manifest records. A FULL
+// verification of that revision is PASSED_WITH_WARNINGS, saying so in one
+// plain line, with every entry verified; an archive without them stays
+// PASSED (unchanged_archive_passes). Sample names.
+void recorded_portability_warnings_make_the_run_pass_with_warnings()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("SAMPLE-case/Report.txt", "upper");
+    fixture.archive.add_file("SAMPLE-case/report.txt", "lower");
+    fixture.archive.add_file("SAMPLE-nfc/caf\xC3\xA9.txt", "composed");    // e-acute as one character
+    fixture.archive.add_file("SAMPLE-nfc/cafe\xCC\x81.txt", "decomposed"); // e, then a combining acute
+    const auto registered = fixture.register_root(fixture.archive.root());
+    CHECK(registered && registered->warnings == std::vector<std::string>{"4 entries carry portability warnings"});
+    const auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "PASSED_WITH_WARNINGS" && outcome->items.empty() &&
+          outcome->counts.at("Verified") == 4 &&
+          outcome->warnings ==
+              std::vector<std::string>{
+                  "some names differ from another name in the same folder only in upper and lower case, or in how a "
+                  "letter with an accent or a mark is encoded (Unicode normalisation); a volume or system that "
+                  "does not tell such names apart cannot keep them all"});
+}
+
 // Decision 0008: absolute targets may be translated across OSes.
 void link_targets_across_systems()
 {
@@ -1896,6 +1920,7 @@ void verify_engine_tests()
     verify_by_archive_uuid();
     unrepresentable_names_warn();
     a_name_registered_on_this_system_that_is_gone_is_missing();
+    recorded_portability_warnings_make_the_run_pass_with_warnings();
     link_targets_across_systems();
     interrupted_run_resumes_without_rehashing();
     a_device_that_goes_away_leaves_the_run_incomplete();

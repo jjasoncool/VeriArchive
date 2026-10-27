@@ -242,6 +242,13 @@ void translation_tests()
           "清單檔：清單檔與儲存庫的紀錄不符");
     CHECK(chinese("identity: volume-label-differs") == "媒體身分：磁碟區標籤不同");
     CHECK(chinese("12 entries carry portability warnings") == "12 個項目帶有可攜性警告");
+    // §A6, R-42: a verification of a revision whose manifest records names
+    // that collide by case or by Unicode normalisation says so.
+    CHECK(chinese("some names differ from another name in the same folder only in upper and lower case, or in how "
+                  "a letter with an accent or a mark is encoded (Unicode normalisation); a volume or system that "
+                  "does not tell such names apart cannot keep them all") ==
+          "有些名稱與同一資料夾中的另一個名稱只差在大小寫，或帶重音、標記的字母的編碼方式（Unicode 正規化）；"
+          "不區分這些差異的磁碟區或作業系統無法同時保存它們");
     // Decision 0034: an INCOMPLETE run whose device went away says so.
     CHECK(chinese("the device that holds the archive went away while it was read (unplugged, or no longer "
                   "answering); attach it again, then resume this run") ==
