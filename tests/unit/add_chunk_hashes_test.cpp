@@ -639,6 +639,42 @@ void an_interrupted_run_resumes_adding()
     CHECK(old && old->empty());
 }
 
+// Decision 0034: a FULL verify that adds chunk hashes whose device goes away
+// halfway through a large file, its reads failing with I/O errors alone and
+// its volume no longer found, is interrupted as any FULL verify is: it ends
+// INCOMPLETE, lists no entry unreadable and records no revision. Its resume,
+// once the device is attached again, goes on adding chunk hashes and records
+// revision 2 with every one of them (sample data).
+void a_device_that_goes_away_interrupts_the_run_that_adds_them()
+{
+    Halves fixture;
+    test::RemovableDevice device(fixture.archive);
+    device.file = "f.bin";
+    device.at_offset = test_chunk_size + 10;
+    device.on_removed = [&fixture] {
+        fixture.media.error = va::IoError{va::IoErrorKind::NotFound, 2, "no volume at the root (sample)"};
+    };
+    fixture.media_files = &device;
+    const auto interrupted = fixture.add();
+    CHECK(interrupted && interrupted->result == "INCOMPLETE" && interrupted->items.empty() &&
+          interrupted->failure_classes.empty() && interrupted->added_revision == 0 &&
+          interrupted->not_added.empty() && interrupted->adding_chunk_size == test_chunk_size &&
+          interrupted->warnings ==
+              std::vector<std::string>{"the device that holds the archive went away while it was read (unplugged, or "
+                                       "no longer answering); attach it again, then resume this run"});
+    CHECK(fixture.current_revision() == 1 && !std::filesystem::exists(fixture.manifest(2)));
+    if (!interrupted) {
+        return;
+    }
+
+    device.attach_again();
+    fixture.media.error.reset();
+    const auto resumed = fixture.add(interrupted->run_id);
+    CHECK(resumed && resumed->result == "PASSED" && resumed->resumed_from == interrupted->run_id &&
+          resumed->added_revision == 2 && resumed->added_chunks == 10);
+    fixture.check_revision_2();
+}
+
 // Interrupted twice, the run's resume takes over the checkpoints and the kept
 // chunk hashes of the run it resumes, and the next resume those of both:
 // nothing is read twice, though a.bin and c.bin were read by the first run.
@@ -2278,6 +2314,7 @@ void add_chunk_hashes_tests()
     the_record_removes_what_can_no_longer_finish();
     entry_lines_that_cannot_be_written_again_add_nothing();
     an_interrupted_run_resumes_adding();
+    a_device_that_goes_away_interrupts_the_run_that_adds_them();
     a_file_without_all_its_kept_chunk_hashes_is_read_again();
     a_run_interrupted_twice_reads_nothing_twice();
     kept_chunk_hashes_in_the_repository();
