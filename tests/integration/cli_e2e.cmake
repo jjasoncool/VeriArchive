@@ -1935,7 +1935,9 @@ run_cli("11" repo init)
 string(FIND "${last_errors}" "錯誤：儲存庫的資料庫 ${loss_db_shown} 已遺失；請以 `repo rebuild-index` 從清單檔重新建立\n" loss_init)
 run_cli("2" --lang en repo rebuild-index)
 set(loss_rebuilt "${last_output}")
-string(FIND "${loss_rebuilt}" "The repository's database was missing; a new one was made.\nRebuilt the index from manifests: " loss_said)
+# The files SQLite may have kept beside the database (its -wal and -shm,
+# after a connection that only read) are put aside and named.
+string(REGEX MATCH "The repository's database was missing; (the files left beside it were put aside as [^\n]* and )?a new one was made[.]\nRebuilt the index from manifests: " loss_said "${loss_rebuilt}")
 string(FIND "${loss_rebuilt}" "\nThe verification history was kept only in the repository's database, so the manifests cannot give it back: every archive is listed as never verified until it is verified again" loss_history)
 run_cli("0" archive list --json)
 string(JSON loss_label GET "${last_output}" archives 0 label)
@@ -1946,7 +1948,7 @@ string(JSON loss_repository_after GET "${last_output}" repository_uuid)
 run_cli("0;2" verify --full "${LOSS}")
 run_cli("0" history "${loss_uuid}" --json)
 string(JSON loss_runs LENGTH "${last_output}" runs)
-if(loss_listed EQUAL -1 OR loss_init EQUAL -1 OR loss_said EQUAL -1 OR loss_history EQUAL -1
+if(loss_listed EQUAL -1 OR loss_init EQUAL -1 OR loss_said STREQUAL "" OR loss_history EQUAL -1
         OR NOT loss_label STREQUAL "ARCH-0042" OR NOT loss_listed_uuid STREQUAL loss_uuid
         OR NOT loss_never STREQUAL "NULL" OR NOT loss_repository_after STREQUAL loss_repository OR NOT loss_runs EQUAL 1)
     message(FATAL_ERROR "repo rebuild-index of a missing database: listed ${loss_listed}, init ${loss_init}, said "
@@ -2014,6 +2016,30 @@ if(stopped_said EQUAL -1 OR stopped_history EQUAL -1 OR stopped_error EQUAL -1 O
         "${stopped_history}, error ${stopped_error}, aside '${stopped_aside}' (--json '${stopped_json_aside}', "
         "${stopped_json_code}); listed ${unfilled_listed} ${unfilled_chinese}; finished ${finished_said} "
         "${finished_history} ${finished_label}\n${stopped_output}\n${stopped_errors}")
+endif()
+# Missing, with a file SQLite would keep beside it (sample bytes): the
+# rebuild names the file it put aside, in text and in --json (set_aside),
+# where no database put aside would name it.
+file(REMOVE "${LOSS_DB}")
+file(WRITE "${LOSS_DB}-wal" "sample journal, not SQLite's\n")
+run_cli("2" --lang en repo rebuild-index)
+string(REGEX MATCH "The repository's database was missing; the files left beside it were put aside as ([^\n]*) and a new one was made[.]\nRebuilt the index from manifests: " wal_said "${last_output}")
+string(REGEX MATCH "[^ ,]*veriarchive[.]db[.]damaged-[^ ,]*-wal" wal_named "${CMAKE_MATCH_1}")
+file(TO_CMAKE_PATH "${wal_named}" wal_named_file)
+if(EXISTS "${wal_named_file}")
+    file(READ "${wal_named_file}" wal_kept)
+endif()
+file(REMOVE "${LOSS_DB}")
+file(WRITE "${LOSS_DB}-wal" "sample journal, not SQLite's\n")
+run_cli("2" repo rebuild-index --json)
+string(JSON wal_json_state GET "${last_output}" replaced_database state)
+string(JSON wal_json_moved TYPE "${last_output}" replaced_database moved_to)
+string(JSON wal_json_files GET "${last_output}" replaced_database set_aside)
+if(wal_said STREQUAL "" OR NOT wal_kept STREQUAL "sample journal, not SQLite's\n"
+        OR NOT wal_json_state STREQUAL "missing" OR NOT wal_json_moved STREQUAL "NULL"
+        OR NOT wal_json_files MATCHES "veriarchive[.]db[.]damaged-[^\"]*-wal\"")
+    message(FATAL_ERROR "a missing database with a file beside it: named '${wal_named}' (${wal_kept}); --json "
+        "${wal_json_state} ${wal_json_moved} ${wal_json_files}\n${last_output}")
 endif()
 set(GLOBAL --config "${WORK}/config.json")
 

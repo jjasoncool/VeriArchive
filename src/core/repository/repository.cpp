@@ -657,8 +657,13 @@ std::expected<void, IoError> replace_database(const RepositoryLayout& layout, Da
         }
     }
     const bool database_there = !there.empty() && *there.back() == '\0';
+    auto set_aside = nlohmann::json::array();
+    for (const char* suffix : there) {
+        set_aside.push_back(aside + suffix);
+    }
     const nlohmann::json mark{{"state", database_state_code(state)},
-        {"moved_to", database_there ? nlohmann::json(aside) : nlohmann::json(nullptr)}};
+        {"moved_to", database_there ? nlohmann::json(aside) : nlohmann::json(nullptr)},
+        {"set_aside", std::move(set_aside)}};
 
     // The new database first, complete with its mark: until it is in place,
     // the database to replace stays where it was.
@@ -709,6 +714,13 @@ std::optional<ReplacedDatabase> replaced_by_mark(const RepositoryLayout& layout,
     }
     if (const auto moved = json.find("moved_to"); moved != json.end() && moved->is_string()) {
         replaced.moved_to = layout.root / path_from_utf8(moved->get<std::string>());
+    }
+    if (const auto files = json.find("set_aside"); files != json.end() && files->is_array()) {
+        for (const auto& file : *files) {
+            if (file.is_string()) {
+                replaced.set_aside.push_back(layout.root / path_from_utf8(file.get<std::string>()));
+            }
+        }
     }
     return replaced;
 }
@@ -786,7 +798,7 @@ std::expected<ReplacedDatabase, IoError> make_damaged_database_again(const Repos
     if (!marked) {
         return std::unexpected(marked.error());
     }
-    return marked->value_or(ReplacedDatabase{DatabaseState::Damaged, std::nullopt});
+    return marked->value_or(ReplacedDatabase{DatabaseState::Damaged, std::nullopt, {}});
 }
 
 std::expected<void, IoError> record_repository_uuid(AppContext& context, IFileWriter& writer)

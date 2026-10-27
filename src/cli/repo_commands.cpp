@@ -93,15 +93,21 @@ std::string what_was_unread(const UnreadRevision& revision)
 }
 
 // The database put aside, as --json gives it (decision 0036): null, or why
-// (`state`) and where it went (`moved_to`, null where it was missing).
+// (`state`), where it went (`moved_to`, null where it was missing) and every
+// file put aside (`set_aside`: it and the files SQLite kept beside it).
 nlohmann::json replaced_json(const std::optional<ReplacedDatabase>& replaced)
 {
     if (!replaced) {
         return nullptr;
     }
+    auto set_aside = nlohmann::json::array();
+    for (const auto& file : replaced->set_aside) {
+        set_aside.push_back(path_to_utf8(file));
+    }
     return {{"state", database_state_code(replaced->state)},
         {"moved_to",
-            replaced->moved_to ? nlohmann::json(path_to_utf8(*replaced->moved_to)) : nlohmann::json(nullptr)}};
+            replaced->moved_to ? nlohmann::json(path_to_utf8(*replaced->moved_to)) : nlohmann::json(nullptr)},
+        {"set_aside", std::move(set_aside)}};
 }
 
 // The first line of a rebuild that made the database again (decision 0036):
@@ -123,6 +129,18 @@ std::string replaced_line(const app::Text& text, const ReplacedDatabase& replace
     case DatabaseState::Usable:
     case DatabaseState::Unfilled:
         break;
+    }
+    // Where the database was missing, the files SQLite kept beside it, put
+    // aside so that the new one does not take them up, are named: they hold
+    // no name of a database put aside that would tell them.
+    if (!replaced.set_aside.empty()) {
+        std::string files;
+        for (const auto& file : replaced.set_aside) {
+            files += (files.empty() ? "" : ", ") + path_to_utf8(file);
+        }
+        return text.format("The repository's database was missing; the files left beside it were put aside as {} and "
+                           "a new one was made.",
+            files);
     }
     return text("The repository's database was missing; a new one was made.");
 }

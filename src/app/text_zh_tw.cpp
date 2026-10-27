@@ -167,6 +167,8 @@ constexpr CatalogEntry entries[] = {
     // A rebuild that made the repository's database again (decision 0036):
     // what was wrong with it, where it was put aside, and what is lost.
     {"The repository's database was missing; a new one was made.", "儲存庫的資料庫已遺失；已建立新的資料庫。"},
+    {"The repository's database was missing; the files left beside it were put aside as {} and a new one was made.",
+        "儲存庫的資料庫已遺失；留在它旁邊的檔案已改名為 {} 留在一旁，並建立新的資料庫。", Match::FormatOnly},
     {"The repository's database was empty; it was put aside as {} and a new one was made.",
         "儲存庫的資料庫是空的；已將它改名為 {} 留在一旁，並建立新的資料庫。", Match::FormatOnly},
     {"The repository's database was not a database; it was put aside as {} and a new one was made.",

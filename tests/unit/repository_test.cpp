@@ -801,6 +801,13 @@ void rebuild_makes_a_database_that_cannot_be_used_again()
           moved_name.ends_with("Z") && moved_name.find(':') == std::string::npos);
     CHECK(file_bytes(moved) == sample_bytes);
     CHECK(file_bytes(layout.root / va::path_from_utf8(moved_name + "-wal")) == "sample journal");
+    // Every file put aside is named: the database and the journal written
+    // beside it, and any other file SQLite kept beside it, under its name.
+    const auto& set_aside = (*replaced)->set_aside;
+    CHECK(std::ranges::count(set_aside, layout.root / va::path_from_utf8(moved_name + "-wal")) == 1 &&
+          std::ranges::count(set_aside, moved) == 1 && std::ranges::all_of(set_aside, [&](const auto& file) {
+              return va::path_to_utf8(file.filename()).starts_with(moved_name) && std::filesystem::exists(file);
+          }));
     CHECK(!std::filesystem::exists(layout.root / "veriarchive.db-wal"));
     CHECK(va::database_state(layout) == va::DatabaseState::Unfilled);
 
@@ -816,6 +823,10 @@ void rebuild_makes_a_database_that_cannot_be_used_again()
     const auto journal = std::ranges::find_if(names, [](const std::string& name) { return name.ends_with("-journal"); });
     CHECK(journal != names.end() &&
           file_bytes(layout.root / va::path_from_utf8(*journal)) == "sample journal");
+    // The journal put aside is named, where no database put aside names it.
+    if (journal != names.end() && missing && *missing) {
+        CHECK(std::ranges::count((*missing)->set_aside, layout.root / va::path_from_utf8(*journal)) == 1);
+    }
 
     // Another program's database: an error, and the file left as it was.
     std::filesystem::remove(database);

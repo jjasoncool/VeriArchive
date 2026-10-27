@@ -176,9 +176,10 @@ inline std::string skipped_manifest_key(const Uuid& archive_uuid)
 // that could not be used (decision 0036): written in the transaction that
 // creates the new database's tables, removed in the one that fills its index
 // from the manifests. Its value says why the database before was replaced
-// and where it went ({"state":"damaged","moved_to":"veriarchive.db.damaged-..."},
-// a file name in the repository's folder). While it is there, every command
-// names the rebuild, which has not finished.
+// and where it and the files beside it went ({"state":"damaged","moved_to":
+// "veriarchive.db.damaged-...","set_aside":["veriarchive.db.damaged-...-wal",
+// "veriarchive.db.damaged-..."]}, file names in the repository's folder).
+// While it is there, every command names the rebuild, which has not finished.
 inline const std::string replaced_database_key = "rebuild:replaced-database";
 
 // A relocation that has not finished (decision 0026): running now, in this or

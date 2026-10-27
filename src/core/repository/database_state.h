@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace va {
 
@@ -51,6 +52,9 @@ std::string unusable_database_message(const RepositoryLayout& layout, DatabaseSt
 struct ReplacedDatabase {
     DatabaseState state = DatabaseState::Missing;   // why it was replaced
     std::optional<std::filesystem::path> moved_to;   // where veriarchive.db went; none where it was missing
+    // Every file put aside: veriarchive.db and the files SQLite kept beside
+    // it (-wal, -shm, -journal), also where the database itself was missing.
+    std::vector<std::filesystem::path> set_aside;
 };
 
 // Puts the repository's database aside as damaged and makes it again, as
