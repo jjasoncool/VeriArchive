@@ -1,7 +1,13 @@
 #include "test_support.h"
 
+#include "common/utf8.h"
 #include "core/identity/filesystem_id.h"
+#include "core/identity/identity_text.h"
 #include "core/identity/matcher.h"
+#include "core/identity/volume_json.h"
+#include "core/manifest/manifest.h"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 
@@ -321,6 +327,47 @@ void kernel_filesystem_id_matching()
     CHECK(outcome.result == va::MatchResult::Unknown);
 }
 
+// Decision 0035: identity strings as a platform may read them, with bytes that
+// are no UTF-8 text, become valid UTF-8: each such byte U+FFFD, valid text as
+// it was. Sample strings: a volume label in a legacy code page, as Linux's
+// udev passes it on (Big5 "範例"), a USB bridge's model with a stray byte and
+// a serial cut in the middle of a character. The manifest header written with
+// them reads back, and the media evidence (JSON) is written and reads back.
+void identity_text_is_made_valid_utf8()
+{
+    auto raw = volume(disk_a, "SAMPLE-\xE7\xAF");
+    raw.volume_label = "SAMPLE-\xBD\x64\xA8\xD2-範例";
+    raw.devices.front().model = "SAMPLE MODEL \xFF";
+    const auto clean = va::with_valid_identity_text(raw);
+    const std::string replacement = "\xEF\xBF\xBD";
+    CHECK(clean.volume_label == "SAMPLE-" + replacement + "d" + replacement + replacement + "-範例");
+    CHECK(clean.devices.front().model == "SAMPLE MODEL " + replacement);
+    CHECK(clean.devices.front().serial == "SAMPLE-" + replacement + replacement);
+    CHECK(clean.filesystem_uuid == raw.filesystem_uuid && clean.filesystem_type == raw.filesystem_type);
+    CHECK(va::is_valid_utf8(clean.volume_label) && va::is_valid_utf8(clean.devices.front().model) &&
+          va::is_valid_utf8(clean.devices.front().serial));
+    // Valid text, Chinese included, is left as it is.
+    CHECK(va::with_valid_identity_text(clean).volume_label == clean.volume_label);
+
+    va::ManifestHeader header;
+    header.archive_uuid = "c0ffee00-0000-4000-8000-000000000035";
+    header.label = "ARCH-0035";
+    header.created = "2026-10-27T00:00:00Z";
+    header.os = "windows";
+    header.identity = clean;
+    try {
+        const auto read = va::header_from_json(nlohmann::json::parse(va::header_to_json(header)));
+        CHECK(read.identity.volume_label == clean.volume_label &&
+              read.identity.devices.front().serial == clean.devices.front().serial);
+        const auto evidence_read = va::volume_from_json(nlohmann::json::parse(va::volume_to_json_text(clean)));
+        CHECK(evidence_read.volume_label == clean.volume_label &&
+              evidence_read.devices.front().model == clean.devices.front().model);
+    } catch (const nlohmann::json::exception& error) {
+        CHECK(false);
+        std::cerr << "  " << error.what() << '\n';
+    }
+}
+
 } // namespace
 
 void identity_tests()
@@ -336,4 +383,5 @@ void identity_tests()
     unreadable_filesystem_id();
     kernel_filesystem_id_format();
     kernel_filesystem_id_matching();
+    identity_text_is_made_valid_utf8();
 }

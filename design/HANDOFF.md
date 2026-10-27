@@ -175,6 +175,7 @@ Avoid: global mutable state, hard-coded drive letters or `/dev` names, manual sl
 ### B1.2 Types (`common/types.h`)
 
 > Amended by `design/decisions/0006-ntfs3-reference-driver.md`: `filesystem_type` is the on-disk format name, never the mount driver name.
+> Amended by `design/decisions/0035-identity-strings-are-valid-utf-8.md`: every string of `VolumeInfo` and `PhysicalDeviceInfo` that the platform gives is valid UTF-8: each byte that belongs to no valid UTF-8 sequence becomes U+FFFD.
 
 ```cpp
 struct PhysicalDeviceInfo {
@@ -560,6 +561,7 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 > Amended by `design/decisions/0029-network-roots-are-refused.md`: on Windows `IMediaEnumerator::volumes()` also gives a volume that has no drive letter or folder path, with its GUID path (`\\?\Volume{...}\`) as its `mount_point`, so that verification by archive uuid finds an archive on it.
 > Amended by `design/decisions/0039-exclusions-helper-and-pinned-keys-are-not-built.md`: there is no helper: the Windows `IChangeTracker`, `NtfsUsnChangeTracker`, runs in the main process, unprivileged; `IRawDeviceAccess` has no V1.1 implementation, as raw device reads serve only V2's whole-disk fingerprint.
 > Amended by `design/decisions/0034-a-device-that-goes-away-interrupts-the-read.md`: `IoErrorKind::DeviceRemoved` also for Windows `ERROR_MEDIA_CHANGED`, `ERROR_NO_MEDIA_IN_DRIVE`, `ERROR_UNRECOGNIZED_VOLUME` and `ERROR_FILE_INVALID`, and for Linux `ENOLINK` and `ENOTCONN`; any other error of a read is taken for the entry's only once `IMediaEnumerator::volume_for_path` finds the volume of the root as the operation found it.
+> Amended by `design/decisions/0035-identity-strings-are-valid-utf-8.md`: `IMediaEnumerator` gives every identity string of a volume and its devices as valid UTF-8 (`with_valid_identity_text`).
 
 ```cpp
 namespace va {

@@ -14,6 +14,7 @@
 #include "platform/linux/vpd.h"
 
 #include "core/identity/filesystem_id.h"
+#include "core/identity/identity_text.h"
 
 #include <algorithm>
 #include <compare> // IWYU pragma: keep (std::strong_ordering of the defaulted operator<=>)
@@ -347,7 +348,10 @@ VolumeInfo describe_mount(const linux_mounts::Mount& mount, DeviceNumber number)
     for (const auto& disk : disks) {
         volume.devices.push_back(describe_disk(disk));
     }
-    return volume;
+    // Decision 0035: udev passes a label or a model on as raw bytes (its
+    // "_ENC" escapes), and sysfs shows a device's model as the device reports
+    // it: neither need be text.
+    return with_valid_identity_text(std::move(volume));
 }
 
 // Filesystems without a block device (ZFS datasets, overlayfs, tmpfs): the
@@ -366,7 +370,7 @@ VolumeInfo describe_virtual_mount(const linux_mounts::Mount& mount)
         volume.capacity_bytes = status->capacity_bytes;
         volume.filesystem_uuid = kernel_filesystem_id(status->kernel_id);
     }
-    return volume;
+    return with_valid_identity_text(std::move(volume)); // decision 0035
 }
 
 bool pseudo_filesystem(const std::string& type)

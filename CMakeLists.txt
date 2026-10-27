@@ -87,6 +87,7 @@ add_library(veriarchive_core
     src/core/hash/hash_pipeline.cpp
     src/core/hash/hashers.cpp
     src/core/identity/filesystem_id.cpp
+    src/core/identity/identity_text.cpp
     src/core/identity/matcher.cpp
     src/core/identity/volume_json.cpp
     src/core/manifest/entry.cpp

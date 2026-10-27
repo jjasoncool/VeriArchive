@@ -7,6 +7,7 @@
 
 #include "common/utf8.h"
 #include "core/identity/filesystem_id.h"
+#include "core/identity/identity_text.h"
 
 #include <algorithm>
 #include <format>
@@ -243,7 +244,9 @@ std::expected<VolumeInfo, IoError> describe_volume(const std::wstring& volume_na
         volume.capacity_bytes = total.QuadPart;
     }
     volume.devices = describe_devices(volume_name);
-    return volume;
+    // Decision 0035: the storage descriptor's model and serial are bytes as
+    // the device reports them, which need not be text.
+    return with_valid_identity_text(std::move(volume));
 }
 
 class WindowsMediaEnumerator final : public IMediaEnumerator {
