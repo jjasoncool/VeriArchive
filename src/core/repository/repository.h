@@ -39,7 +39,9 @@ std::expected<AppContext, IoError> resolve_repository(
     const RepositoryProbes& probes);
 // Crash-safe order: directories, then the database schema in one transaction,
 // then repository.json (its presence marks a complete repository), then the
-// config pin. Re-running after a crash at any step completes the repository.
+// config pin, where this init pins (context.pins_repository). Re-running after
+// a crash at any step completes the repository, and pins one that is
+// complete but was never pinned (decision 0011).
 std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer);
 std::expected<void, IoError> open_repository(AppContext& context);
 // R-83 step 5, for the pinned repository only (decision 0037): when

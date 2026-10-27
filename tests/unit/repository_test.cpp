@@ -262,6 +262,45 @@ void changed_repository_uuid_is_reported_and_recorded()
     CHECK(saved && *saved && (*saved)->last_repository_uuid == actual_uuid);
 }
 
+// Decision 0011: an init that stopped between repository.json and the pin
+// left a complete repository that no config file pins. Running `repo init`
+// again opens it and pins it, with its uuid as the pin's record, in the
+// portable folder (first use) and at a place named with --repository; the
+// next command then finds it pinned.
+void init_run_again_pins_a_complete_repository()
+{
+    TemporaryDirectory temporary("init-again");
+    const auto writer = va::platform::make_file_writer();
+    for (const bool named : {false, true}) {
+        auto options = make_options(temporary.path() / (named ? "named" : "portable"));
+        if (named) {
+            options.explicit_repository = temporary.path() / "named" / "repository-SAMPLE";
+        }
+        auto first = va::resolve_repository(options, always_writable_local);
+        CHECK(first && first->pins_repository && va::initialise_repository(*first, *writer));
+        if (!first) {
+            continue;
+        }
+        // The crash: the pin was never written.
+        std::filesystem::remove(first->config_file);
+
+        auto again = va::resolve_repository(options, always_writable_local);
+        CHECK(again && again->pins_repository && va::initialise_repository(*again, *writer));
+        if (!again) {
+            continue;
+        }
+        CHECK(again->repository_uuid == first->repository_uuid);
+        const auto saved = va::read_config(again->config_file);
+        CHECK(saved && *saved && (*saved)->repository && (*saved)->last_repository_uuid == first->repository_uuid);
+
+        options.initialise = false;
+        options.explicit_repository.reset();
+        auto pinned = va::resolve_repository(options, always_writable_local);
+        CHECK(pinned && pinned->repo_selected_by == "pinned" && va::open_repository(*pinned));
+        CHECK(pinned && pinned->repository_uuid == first->repository_uuid);
+    }
+}
+
 // The whole content of `file`, byte for byte.
 std::string file_bytes(const std::filesystem::path& file)
 {
@@ -541,6 +580,7 @@ void repository_tests()
     explicit_init_creates_and_pins_repository();
     malformed_repository_uuid_is_rejected();
     changed_repository_uuid_is_reported_and_recorded();
+    init_run_again_pins_a_complete_repository();
     explicit_repository_leaves_the_pins_record();
     relative_paths_ignore_working_directory();
     network_repository_is_rejected_by_default();

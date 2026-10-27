@@ -295,10 +295,40 @@ std::expected<AppContext, IoError> resolve_repository(
     return context;
 }
 
+namespace {
+
+// The last step of an init (decision 0011): the pin, and its record of the
+// repository's uuid (R-83 step 5), written into the config file. Only an init
+// that pins the repository writes it: `repo init --repository P` beside an
+// existing pin leaves that pin and its record as they are (decision 0037).
+std::expected<void, IoError> write_pin(AppContext& context, IFileWriter& writer)
+{
+    if (!context.pins_repository) {
+        return {};
+    }
+    context.config.last_repository_uuid = context.repository_uuid;
+    std::error_code error;
+    std::filesystem::create_directories(context.config_file.parent_path(), error);
+    if (auto pinned = write_file_atomically(writer, context.config_file, config_to_json(context.config)); !pinned) {
+        return std::unexpected(repository_error("cannot pin repository in config: " + pinned.error().message));
+    }
+    return {};
+}
+
+} // namespace
+
 std::expected<void, IoError> initialise_repository(AppContext& context, IFileWriter& writer)
 {
+    // repository.json marks a complete repository (decision 0011). An init
+    // that finds one opens it, and pins it where this init pins: a first
+    // init that stopped between repository.json and the pin left it
+    // complete but unpinned, and so did one whose config file was lost
+    // since; running `repo init` again finishes the job.
     if (path_exists(context.repo.root / "repository.json")) {
-        return open_repository(context);
+        if (auto opened = open_repository(context); !opened) {
+            return opened;
+        }
+        return write_pin(context, writer);
     }
     if (auto result = create_repository_directories(context.repo); !result) {
         return result;
@@ -309,23 +339,7 @@ std::expected<void, IoError> initialise_repository(AppContext& context, IFileWri
     if (auto result = write_repository_metadata(context, writer); !result) {
         return result;
     }
-
-    // Only an init that pins the repository writes the config file: the pin,
-    // and its record of the repository's uuid (R-83 step 5). `repo init
-    // --repository P` beside an existing pin leaves that pin and its record
-    // as they are (decision 0037).
-    if (context.pins_repository) {
-        context.config.last_repository_uuid = context.repository_uuid;
-        std::error_code error;
-        std::filesystem::create_directories(context.config_file.parent_path(), error);
-        if (auto pinned = write_file_atomically(
-                writer, context.config_file, config_to_json(context.config));
-            !pinned) {
-            return std::unexpected(
-                repository_error("cannot pin repository in config: " + pinned.error().message));
-        }
-    }
-    return {};
+    return write_pin(context, writer);
 }
 
 std::expected<void, IoError> open_repository(AppContext& context)
