@@ -266,7 +266,7 @@ Item statuses:
 | Unreadable | could not be read (permission, media error, ...) |
 | MetadataMismatch | same content, different modification time (a warning by default); with "Strict metadata" or `--strict-metadata` mode and attributes are compared too, and a difference fails the run |
 | TypeChanged | for example a file became a folder |
-| Unbaselined | unreadable at registration, so there is no hash to compare |
+| Unbaselined | unreadable at registration, so there is no hash to compare. When everything else matched, the report suggests registering a new revision, which takes a baseline for it (`register <root> --new-revision`, or "New revision of the archive registered at this folder or volume" in the Register Archive view) |
 
 ### Resuming an interrupted run
 

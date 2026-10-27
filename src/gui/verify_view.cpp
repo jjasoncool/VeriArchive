@@ -4,6 +4,7 @@
 #include "gui/gui_app.h"
 
 #include "app/typed_path.h"
+#include "app/verify_report.h"
 #include "common/utf8.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/verify_engine.h"
@@ -51,6 +52,9 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
             body += text(item.status) + "  " + item.path.p +
                     (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail))) + "\n";
         }
+    }
+    if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::Window)) {
+        body += "\n" + *advice + "\n";
     }
     if (outcome.result == "INCOMPLETE") {
         body += "\n" + text("The run was interrupted; use Resume to continue without re-reading verified files.") +

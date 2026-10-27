@@ -151,7 +151,8 @@ add_library(veriarchive_app
     src/app/session.cpp
     src/app/text.cpp
     src/app/text_zh_tw.cpp
-    src/app/typed_path.cpp)
+    src/app/typed_path.cpp
+    src/app/verify_report.cpp)
 add_library(VeriArchive::app ALIAS veriarchive_app)
 target_compile_features(veriarchive_app PUBLIC cxx_std_23)
 target_link_libraries(veriarchive_app PUBLIC VeriArchive::platform)

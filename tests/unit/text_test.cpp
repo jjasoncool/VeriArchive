@@ -2,6 +2,8 @@
 #include "app/history.h"
 #include "app/text.h"
 #include "app/unfinished_operations.h"
+#include "app/verify_report.h"
+#include "common/utf8.h"
 
 #include <array>
 #include <format>
@@ -919,6 +921,47 @@ void format_fallback_tests()
     CHECK(archives("{ 個封存") == "5 archive");       // not a valid template
 }
 
+// Decision 0010: a verification whose content matched and that has
+// Unbaselined entries says how to take a baseline for them: a new revision,
+// named on the command line with the root the run read, in the window as the
+// Register Archive view's box, in either language. Nothing for a run that
+// FAILED, whose entries that differ a new revision would take for good ones,
+// nor for one without such entries. (A sample run.)
+void unbaselined_advice_tests()
+{
+    using va::app::ReportedIn;
+    va::VerifyOutcome outcome;
+    outcome.result = "PASSED_WITH_WARNINGS";
+    outcome.root = va::path_from_utf8("/vol/SAMPLE-範例");
+    outcome.counts = {{"Unbaselined", 2}, {"Verified", 5}};
+    const Text english;
+    const Text chinese(Language::TraditionalChinese);
+    CHECK(va::app::unbaselined_advice(english, outcome, ReportedIn::CommandLine) ==
+          "The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. "
+          "To take one for them, register a new revision of the archive: veriarchive-cli register "
+          "\"/vol/SAMPLE-範例\" --new-revision");
+    CHECK(va::app::unbaselined_advice(chinese, outcome, ReportedIn::CommandLine) ==
+          "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次："
+          "veriarchive-cli register \"/vol/SAMPLE-範例\" --new-revision");
+    CHECK(va::app::unbaselined_advice(english, outcome, ReportedIn::Window) ==
+          "The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. "
+          "To take one for them, register a new revision of the archive: in Register Archive, choose its folder or "
+          "volume (/vol/SAMPLE-範例), tick \"New revision of the archive registered at this folder or volume\" and "
+          "press \"Register\".");
+    CHECK(va::app::unbaselined_advice(chinese, outcome, ReportedIn::Window) ==
+          "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：在"
+          "「註冊封存」頁選擇它的資料夾或磁碟區（/vol/SAMPLE-範例），勾選「為此資料夾或磁碟區已註冊的封存建立新版次」，"
+          "再按「註冊」。");
+
+    auto failed = outcome;
+    failed.result = "FAILED";
+    failed.counts["Modified"] = 1;
+    CHECK(!va::app::unbaselined_advice(english, failed, ReportedIn::CommandLine));
+    auto without = outcome;
+    without.counts.erase("Unbaselined");
+    CHECK(!va::app::unbaselined_advice(english, without, ReportedIn::Window));
+}
+
 } // namespace
 
 void text_tests()
@@ -927,4 +970,5 @@ void text_tests()
     language_tests();
     translation_tests();
     format_fallback_tests();
+    unbaselined_advice_tests();
 }

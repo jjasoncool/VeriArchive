@@ -3,6 +3,7 @@
 // (R-21) and the report states which guarantee applies (R-02).
 #include "cli/commands.h"
 
+#include "app/verify_report.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/engine/verify_engine.h"
@@ -65,6 +66,9 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
         std::cout << "  " << text(item.status) << "  " << item.path.p
                   << (item.detail.empty() ? "" : "  " + text.parenthesized(text(item.detail)))
                   << '\n';
+    }
+    if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::CommandLine)) {
+        std::cout << "  " << *advice << '\n';
     }
     if (outcome.result == "INCOMPLETE") {
         std::cout << "  "

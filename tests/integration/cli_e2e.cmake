@@ -1640,5 +1640,34 @@ set(GLOBAL --config "${WORK}/config.json")
 
 # R-66: a fixture tree registered on this OS gives the golden manifest.
 include("${CMAKE_CURRENT_LIST_DIR}/golden_tree.cmake")
+# Decision 0010 (Windows): a file that could not be read at registration and
+# can be read now is Unbaselined, and the report of a run whose content
+# otherwise matched says that a new revision takes a baseline for it, naming
+# the root, in either language (sample data). Linux CI runs as root, which
+# reads any file, so this part runs on Windows.
+if(CMAKE_HOST_WIN32)
+    set(UNBASELINED_ROOT "${WORK}/unbaselined-SAMPLE")
+    file(WRITE "${UNBASELINED_ROOT}/SAMPLE-locked.txt" "locked at registration\n")
+    file(WRITE "${UNBASELINED_ROOT}/SAMPLE-open.txt" "open\n")
+    file(TO_NATIVE_PATH "${UNBASELINED_ROOT}/SAMPLE-locked.txt" locked_file)
+    # The registration runs without run_cli, whose failure would end the test
+    # while the file is still denied, which the next run could not remove.
+    execute_process(COMMAND icacls "${locked_file}" /deny "*S-1-1-0:(R)" RESULT_VARIABLE denied OUTPUT_QUIET ERROR_QUIET)
+    execute_process(COMMAND "${CLI}" ${GLOBAL} register "${UNBASELINED_ROOT}" ENCODING UTF-8
+        RESULT_VARIABLE registered OUTPUT_VARIABLE registered_output ERROR_VARIABLE registered_errors)
+    execute_process(COMMAND icacls "${locked_file}" /remove:d "*S-1-1-0" RESULT_VARIABLE allowed OUTPUT_QUIET ERROR_QUIET)
+    if(NOT denied EQUAL 0 OR NOT allowed EQUAL 0 OR NOT registered EQUAL 2)
+        message(FATAL_ERROR "a registration with a file that cannot be read: deny ${denied}, allow ${allowed}, "
+            "exit ${registered}\n${registered_output}\n${registered_errors}")
+    endif()
+    run_cli("2" --lang en verify --full "${UNBASELINED_ROOT}")
+    set(unbaselined_english "${last_output}")
+    run_cli("2" verify --full "${UNBASELINED_ROOT}")
+    if(NOT unbaselined_english MATCHES "\n  Unbaselined  SAMPLE-locked\\.txt  "
+            OR NOT unbaselined_english MATCHES "\n  The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet\\. To take one for them, register a new revision of the archive: veriarchive-cli register \"[^\"\n]*unbaselined-SAMPLE\" --new-revision\n"
+            OR NOT last_output MATCHES "\n  這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：veriarchive-cli register \"[^\"\n]*unbaselined-SAMPLE\" --new-revision\n")
+        message(FATAL_ERROR "the advice for Unbaselined entries:\n${unbaselined_english}\n${last_output}")
+    endif()
+endif()
 
 message(STATUS "veriarchive-cli end-to-end test passed")

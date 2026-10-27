@@ -615,6 +615,19 @@ constexpr CatalogEntry entries[] = {
         "嚴格中繼資料（時間戳記與屬性差異會使執行失敗）"},
     {"Verify (FULL)", "完整驗證"},
     {"Resume interrupted run", "繼續中斷的執行"},
+    // src/app/verify_report.cpp: how to take a baseline for Unbaselined
+    // entries (decision 0010), on the command line and in the window.
+    {"The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. To "
+        "take one for them, register a new revision of the archive: veriarchive-cli register \"{}\" --new-revision",
+        "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次："
+        "veriarchive-cli register \"{}\" --new-revision",
+        Match::FormatOnly},
+    {"The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. To "
+        "take one for them, register a new revision of the archive: in Register Archive, choose its folder or volume "
+        "({}), tick \"{}\" and press \"{}\".",
+        "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：在"
+        "「註冊封存」頁選擇它的資料夾或磁碟區（{}），勾選「{}」，再按「{}」。",
+        Match::FormatOnly},
     // src/gui/compare_view.cpp
     {"ARCHIVES {}", "比較結果：{}"},
     {"Every entry of A is in B with the same type and content, and B has no other entries.",
