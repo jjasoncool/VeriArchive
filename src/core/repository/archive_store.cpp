@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <set>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -515,6 +517,34 @@ std::expected<std::string, IoError> ArchiveStore::next_label()
         } catch (const std::exception&) {
             sequence = 1;
         }
+    }
+    // Labels stay without a uniqueness constraint (R-33), but an automatic
+    // label skips every number that a label of this repository has already,
+    // typed with --label, imported, or given back by a rebuild into a new
+    // database, which starts the sequence again (decision 0036): ARCH-0002 is
+    // never given twice, and neither is ARCH-00002, which reads the same.
+    auto statement = database_.prepare("SELECT label FROM archives WHERE label LIKE 'ARCH-%'");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    std::set<std::uint64_t> used;
+    for (;;) {
+        const auto row = statement->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            break;
+        }
+        const auto digits = std::string_view(statement->text(0)).substr(5);
+        if (digits.empty() || digits.size() > 18 ||
+            !std::ranges::all_of(digits, [](char character) { return character >= '0' && character <= '9'; })) {
+            continue;
+        }
+        used.insert(std::stoull(std::string(digits)));
+    }
+    while (used.contains(sequence)) {
+        ++sequence;
     }
     if (auto saved = set_setting("next_label_seq", std::to_string(sequence + 1)); !saved) {
         return std::unexpected(saved.error());

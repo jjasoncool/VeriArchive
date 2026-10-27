@@ -801,11 +801,40 @@ void later_revision_of_an_archive()
     CHECK(later("c0ffee00-0000-4000-8000-0000000000ff", 0) == std::nullopt);
 }
 
+// Decision 0036: an automatic label skips the numbers of the labels that the
+// repository has (sample archives): ARCH-0003 typed, ARCH-00004 imported (the
+// same number as ARCH-0004), ARCH-0006 typed; ARCH-12X, which names no
+// number, skips nothing. Labels stay without a uniqueness constraint (R-33):
+// a label typed twice is recorded twice.
+void automatic_labels_skip_the_labels_in_use()
+{
+    TestRepository repository;
+    auto store = va::ArchiveStore::open(repository.context.repo);
+    CHECK(store.has_value());
+    if (!store) {
+        return;
+    }
+    CHECK(store->next_label() == "ARCH-0001");
+    for (const auto& [uuid, label] : std::vector<std::pair<std::string, std::string>>{
+             {"c0ffee00-0000-4000-8000-000000000003", "ARCH-0003"},
+             {"c0ffee00-0000-4000-8000-000000000004", "ARCH-00004"},
+             {"c0ffee00-0000-4000-8000-000000000006", "ARCH-0006"},
+             {"c0ffee00-0000-4000-8000-000000000016", "ARCH-0006"},
+             {"c0ffee00-0000-4000-8000-000000000012", "ARCH-12X"}}) {
+        CHECK(store->insert_archive({uuid, label, "2026-10-27T00:00:00Z", 1, "REGISTERED", "", ""}));
+    }
+    CHECK(store->next_label() == "ARCH-0002");
+    CHECK(store->next_label() == "ARCH-0005");
+    CHECK(store->next_label() == "ARCH-0007");
+    CHECK(store->next_label() == "ARCH-0008");
+}
+
 } // namespace
 
 void archive_store_tests()
 {
     archives_revisions_and_labels();
+    automatic_labels_skip_the_labels_in_use();
     history_chain_detects_tampering();
     history_chain_limits_in_v1();
     items_and_progress();

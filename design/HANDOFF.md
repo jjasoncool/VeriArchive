@@ -178,6 +178,7 @@ Avoid: global mutable state, hard-coded drive letters or `/dev` names, manual sl
 
 > Amended by `design/decisions/0006-ntfs3-reference-driver.md`: `filesystem_type` is the on-disk format name, never the mount driver name; `VolumeInfo` also carries a runtime-only `driver`, the program that serves a FUSE mount (`ntfs-3g`), which a verification report notes and identity never holds.
 > Amended by `design/decisions/0035-identity-strings-are-valid-utf-8.md`: every string of `VolumeInfo` and `PhysicalDeviceInfo` that the platform gives is valid UTF-8: each byte that belongs to no valid UTF-8 sequence becomes U+FFFD.
+> Amended by `design/decisions/0036-the-repository-database-made-again.md`: R-33's automatic label skips every number that a label of the repository already has (typed, imported, or given back by `repo rebuild-index` into a new database); labels stay without a uniqueness constraint.
 
 ```cpp
 struct PhysicalDeviceInfo {

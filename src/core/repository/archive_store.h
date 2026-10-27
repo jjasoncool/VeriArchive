@@ -252,7 +252,9 @@ public:
     // for as long as it is held, so there each query reads on its own.
     std::expected<void, IoError> read_transaction(const std::function<std::expected<void, IoError>()>& reads);
 
-    // Labels: "ARCH-" + zero-padded sequence, assigned by this repository (R-33).
+    // Labels: "ARCH-" + zero-padded sequence, assigned by this repository
+    // (R-33), skipping the numbers of the labels it has already, whatever
+    // gave them (decision 0036).
     std::expected<std::string, IoError> next_label();
 
     std::expected<void, IoError> insert_archive(const ArchiveRecord& archive);

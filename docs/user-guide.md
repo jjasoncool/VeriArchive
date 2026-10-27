@@ -93,7 +93,7 @@ On the screen, "folder or volume" means these two. "Volume" is the program's wor
 To register a whole disk in the Register Archive view:
 
 1. In the field at the top, type the disk's volume root, for example `F:\` (or pick it with "Choose...").
-2. The label is optional. If you give one, it is `ARCH-` followed by four or more digits, for example `ARCH-0001`; without one, VeriArchive numbers the archive itself.
+2. The label is optional. If you give one, it is `ARCH-` followed by four or more digits, for example `ARCH-0001`; without one, VeriArchive numbers the archive itself, skipping the numbers that labels in the repository already have.
 3. Press "Register". The progress bar shows the share done, the speed and the time left (see "Reading the progress" below); "Cancel" stops at any time.
 
 To register a single folder, step 1 becomes: pick that folder with "Choose...", or type its path, for example `F:\Photos`; the other steps are the same. The screenshot registers `D:\va-sample\原始資料`, which is a folder (the introduction says why).
