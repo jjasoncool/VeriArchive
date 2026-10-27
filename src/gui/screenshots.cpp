@@ -7,6 +7,9 @@
 // The archives and the folder come from the environment:
 //   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: verified, its history shown, compared
 //   VERIARCHIVE_SCREENSHOT_COPY       uuid of archive B: compared with A
+//   VERIARCHIVE_SCREENSHOT_EARLIER    uuid of archive C, registered without chunk hashes as an
+//                                     earlier version registered archives: chosen in Verify
+//                                     Archive with "Full verify, and add chunk hashes" ticked
 //   VERIARCHIVE_SCREENSHOT_FOLDER     archive A's folder: typed into Register and Verify
 //
 // GTK renders the pictures itself from what the window drew, so they show only
@@ -179,6 +182,7 @@ public:
         }
         reference_ = environment("VERIARCHIVE_SCREENSHOT_REFERENCE");
         copy_ = environment("VERIARCHIVE_SCREENSHOT_COPY");
+        earlier_ = environment("VERIARCHIVE_SCREENSHOT_EARLIER");
         folder_ = environment("VERIARCHIVE_SCREENSHOT_FOLDER");
         std::error_code error;
         std::filesystem::create_directories(*state_.screenshot_folder, error);
@@ -208,7 +212,19 @@ public:
                     gtk_drop_down_set_selected(GTK_DROP_DOWN(state_.verify_view.archive), 0);
                     start(state_.verify_view.start, state_.verify_view.report, "verification");
                 },
-                [this] { expect(state_.verify_view.shown_report, "FULL VERIFY ", "verification"); }},
+                [this] {
+                    expect(state_.verify_view.shown_report, "FULL VERIFY ", "verification");
+                    // Then archive C chosen in the list, which an earlier
+                    // version registered without chunk hashes, and "Full
+                    // verify, and add chunk hashes" ticked, as the operator's
+                    // own archives registered by V1 show it (not started).
+                    choose(state_.verify_view.archive, state_.verify_view.archive_uuids, 1, earlier_);
+                    if (!gtk_widget_get_sensitive(state_.verify_view.add_chunk_hashes)) {
+                        throw std::runtime_error("\"Full verify, and add chunk hashes\" is not offered for archive " +
+                                                 earlier_);
+                    }
+                    gtk_check_button_set_active(GTK_CHECK_BUTTON(state_.verify_view.add_chunk_hashes), TRUE);
+                }},
             {"05-history.png",
                 [this] {
                     show("history");
@@ -385,6 +401,7 @@ private:
     GuiState& state_;
     Uuid reference_;
     Uuid copy_;
+    Uuid earlier_;
     std::string folder_;
     std::vector<Stop> stops_;
     std::size_t next_ = 0;

@@ -1,13 +1,13 @@
 # Screenshots for the user guides
 
-`make_screenshots.cmake` makes the pictures of the GUI that the user guides show: `docs/images/en/` for the English guide (`docs/user-guide.md`) and `docs/images/zh-TW/` for the Chinese one (`docs/user-guide.zh-TW.md`), with the same file names in both. It builds sample data, registers it as two archives with `veriarchive-cli`, then starts `veriarchive-gui` in its screenshot mode. The GUI tours its views as a reader of the guide would: it fills in forms and starts a verification and a comparison with the buttons' own handlers. It saves one PNG per view and quits.
+`make_screenshots.cmake` makes the pictures of the GUI that the user guides show: `docs/images/en/` for the English guide (`docs/user-guide.md`) and `docs/images/zh-TW/` for the Chinese one (`docs/user-guide.zh-TW.md`), with the same file names in both. It builds sample data, registers it as two archives with `veriarchive-cli`, adds a third archive registered without chunk hashes, as an earlier version of VeriArchive registered archives, then starts `veriarchive-gui` in its screenshot mode. The GUI tours its views as a reader of the guide would: it fills in forms and starts a verification and a comparison with the buttons' own handlers. It saves one PNG per view and quits.
 
 | File | What it shows |
 |---|---|
 | `01-settings.png` | Settings: the repository, the config file, the policy |
-| `02-archive-list.png` | Archive List with the two sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB) |
+| `02-archive-list.png` | Archive List with the three sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB) |
 | `03-register.png` | Register Archive with archive A's folder and label typed in (not started) |
-| `04-verify.png` | Verify Archive after a FULL verification of archive A, with the checkbox "Full verify, and add chunk hashes" greyed out: the folder above is verified, and the sample archives have chunk hashes |
+| `04-verify.png` | Verify Archive after a FULL verification of archive A by its folder, then with archive C chosen in "Verify:" and the checkbox "Full verify, and add chunk hashes" ticked (not started), as an archive registered by an earlier version shows it |
 | `05-history.png` | Verification History of archive A, with the history chain checked |
 | `06-compare.png` | Compare Archives: A (`原始資料`) against its copy B (`備份資料`) |
 | `07-language.png` | Settings with the language list open |
@@ -38,7 +38,7 @@ cmake -DCLI=build/windows-ucrt64-debug/veriarchive-cli.exe \
 
 ## Sample data only
 
-The repository is public, and so are these pictures. The script makes its own sample data, a few small files with Chinese and English names. Archive B is a copy of A with one file changed, one deleted and one added, so the comparison has differences to show. Never point the tool at real folders or at a real repository.
+The repository is public, and so are these pictures. The script makes its own sample data, a few small files with Chinese and English names. Archive B is a copy of A with one file changed, one deleted and one added, so the comparison has differences to show. Archive C (`舊版封存`, `ARCH-0003`) stands for an archive that an earlier version registered, which has no chunk hashes: this program registers every archive with them, so the script registers C's folder in a scratch repository under `WORK`, writes its exported manifest again as an earlier version wrote it (chunk size 0, no Merkle root) under the sample uuid `c0ffee00-0000-4000-8000-000000000003`, its files and their hashes as they are, and imports it. Never point the tool at real folders or at a real repository.
 
 - The GUI finds its config file in `WORK`: the script points `APPDATA` (Windows) or `XDG_CONFIG_HOME` (Linux) there and clears `VERIARCHIVE_REPOSITORY`.
 - A portable install (a `config.json` next to `veriarchive-gui`) would use its own repository instead, so the script refuses such a GUI.
@@ -54,9 +54,10 @@ The script sets these variables for the GUI. Setting them by hand works too, aga
 | `VERIARCHIVE_GUI_SCREENSHOTS` | Folder for the PNG files; turns the mode on |
 | `VERIARCHIVE_SCREENSHOT_REFERENCE` | uuid of archive A: verified, its history shown, compared |
 | `VERIARCHIVE_SCREENSHOT_COPY` | uuid of archive B: compared with A |
+| `VERIARCHIVE_SCREENSHOT_EARLIER` | uuid of archive C, registered without chunk hashes: chosen in Verify Archive with "Full verify, and add chunk hashes" ticked |
 | `VERIARCHIVE_SCREENSHOT_FOLDER` | archive A's folder: typed into Register Archive and Verify Archive |
 | `VERIARCHIVE_LANG` | The interface language of the pictures |
 
 While the mode runs, every view shows the same sample media identity in place of the recorded one, in every language: volume label `SAMPLE-VOLUME`, device model `SAMPLE-DEVICE`, serial `SAMPLE0001`, capacity 1.0 TiB, and sample values in every other identity field (filesystem type and id, volume GUID, WWN, bus); whether the device rotates (HDD or SSD) is unknown. One function decides which identity the views show: `displayed_identity` in `src/gui/displayed_identity.cpp`. Normal use always shows what was recorded, and the smoke test (`VERIARCHIVE_GUI_SMOKE_TEST`), which takes precedence, shows nothing.
 
-The GUI exits with status 1 and writes the reason to stderr when a step fails, for example when an archive is not in the repository or the verification does not reach a result. The tour is in `src/gui/screenshots.cpp`.
+The GUI exits with status 1 and writes the reason to stderr when a step fails, for example when an archive is not in the repository, the verification does not reach a result, or "Full verify, and add chunk hashes" is not offered for archive C. The tour is in `src/gui/screenshots.cpp`.

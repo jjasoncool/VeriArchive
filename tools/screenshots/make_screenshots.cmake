@@ -1,7 +1,8 @@
 # Makes the screenshots of the user guide (see README.md next to this file):
-# builds sample data, registers it as two archives with veriarchive-cli, then
-# runs veriarchive-gui in its screenshot mode, which tours the views and saves
-# one PNG per view.
+# builds sample data, registers it as two archives with veriarchive-cli and
+# imports a third one registered without chunk hashes, as an earlier version
+# registered archives, then runs veriarchive-gui in its screenshot mode, which
+# tours the views and saves one PNG per view.
 #
 #   cmake -DCLI=<veriarchive-cli> -DGUI=<veriarchive-gui> -DWORK=<scratch dir>
 #         -DOUT=<png folder> [-DLANG=zh-TW|en] -P make_screenshots.cmake
@@ -93,6 +94,57 @@ string(JSON reference GET "${last_output}" archive_uuid)
 run_cli(register "${copy_folder}" --label ARCH-0002 --copy-of "${reference}" --json)
 string(JSON copy GET "${last_output}" archive_uuid)
 
+# Archive C stands for one that an earlier version of VeriArchive registered,
+# as the operator's own archives are: its manifest has no chunk hashes (chunk
+# size 0), so Verify Archive offers "Full verify, and add chunk hashes" for it
+# (decision 0033). This program registers every archive with chunk hashes,
+# so C is registered in a scratch repository, and its manifest, exported, is
+# written again as such a version wrote it, chunk size 0 and no Merkle root,
+# under a sample uuid, then imported (sample data, as its folder is). Its
+# files are smaller than one chunk, so it has no chunk lines either way, and
+# its body, which its header's hash covers, is kept byte for byte.
+set(earlier_folder "${WORK}/舊版封存")
+file(WRITE "${earlier_folder}/readme.txt"
+    "VeriArchive sample data: an archive registered by an earlier version, without chunk hashes.\n")
+file(WRITE "${earlier_folder}/掃描文件/2019 收據.txt" "範例收據\n")
+set(earlier_repository "${WORK}/earlier-repository")
+run_cli(--repository "${earlier_repository}" repo init)
+run_cli(--repository "${earlier_repository}" register "${earlier_folder}" --label ARCH-0003 --json)
+string(JSON registered_earlier GET "${last_output}" archive_uuid)
+run_cli(--repository "${earlier_repository}" export "${registered_earlier}" --out "${WORK}/earlier-export" --json)
+string(JSON exported GET "${last_output}" manifest)
+file(TO_CMAKE_PATH "${exported}" exported)
+file(READ "${exported}" manifest)
+string(FIND "${manifest}" "\n" header_end)
+string(SUBSTRING "${manifest}" 0 ${header_end} header)
+string(SUBSTRING "${manifest}" ${header_end} -1 body)
+set(earlier "c0ffee00-0000-4000-8000-000000000003")
+set(header_before "${header}")
+string(REPLACE "\"archive_uuid\":\"${registered_earlier}\"" "\"archive_uuid\":\"${earlier}\"" header "${header}")
+string(REPLACE "\"chunk_size\":67108864}" "\"chunk_size\":0}" header "${header}")
+string(REGEX REPLACE ",\"merkle_root\":\"[0-9a-f]+\"" "" header "${header}")
+string(LENGTH "${header_before}" length_before)
+string(LENGTH "${header}" length_after)
+math(EXPR removed "${length_before} - ${length_after}")
+# The uuid has as many characters as before; "67108864" -> "0" removes 7, and
+# the Merkle root, its 64 hex digits and its key, 81.
+if(NOT removed EQUAL 88 OR NOT header MATCHES "\"archive_uuid\":\"${earlier}\"" OR NOT header MATCHES "\"chunks\":0,")
+    message(FATAL_ERROR "the exported manifest of archive C is not as expected:\n${header_before}")
+endif()
+# file(CONFIGURE) keeps the line endings (file(WRITE) would write CRLF on
+# Windows), and @ONLY replaces nothing in a header without "@".
+string(FIND "${header}${body}" "@" at)
+if(NOT at EQUAL -1)
+    message(FATAL_ERROR "the manifest of archive C holds \"@\", which file(CONFIGURE) would take for a variable")
+endif()
+set(earlier_manifest "${WORK}/earlier-manifest/r0001.vam")
+file(CONFIGURE OUTPUT "${earlier_manifest}" CONTENT "${header}${body}" @ONLY NEWLINE_STYLE UNIX)
+run_cli(import "${earlier_manifest}" --json)
+string(JSON imported GET "${last_output}" archive_uuid)
+if(NOT imported STREQUAL earlier)
+    message(FATAL_ERROR "archive C was imported as ${imported}")
+endif()
+
 set(pictures 01-settings.png 02-archive-list.png 03-register.png 04-verify.png 05-history.png
     06-compare.png 07-language.png)
 file(MAKE_DIRECTORY "${OUT}")
@@ -110,6 +162,7 @@ execute_process(
         "VERIARCHIVE_GUI_SCREENSHOTS=${OUT}"
         "VERIARCHIVE_SCREENSHOT_REFERENCE=${reference}"
         "VERIARCHIVE_SCREENSHOT_COPY=${copy}"
+        "VERIARCHIVE_SCREENSHOT_EARLIER=${earlier}"
         "VERIARCHIVE_SCREENSHOT_FOLDER=${reference_folder_native}"
         "${GUI}"
     ENCODING UTF-8
