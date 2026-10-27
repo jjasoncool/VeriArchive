@@ -77,7 +77,9 @@ FULL verify is still to run.
 
 ## V1.1
 
-Stage 1, chunk hashes and the Merkle root (decisions 0031 to 0033), is done on this branch:
+Stage 1, chunk hashes and the Merkle root (decisions 0031 to 0033), is done on this branch, which
+numbers the program 1.1.0 (`--version`, `repo info` and Settings show it, and every manifest and
+verification run records it):
 
 | Part | Implemented |
 |---|---|
