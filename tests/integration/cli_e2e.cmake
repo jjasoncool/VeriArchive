@@ -2078,6 +2078,66 @@ if(SQLITE3)
             OR NOT listed_archives EQUAL 0)
         message(FATAL_ERROR "the first open of a repository of schema version 2, with --json:\n${last_output}\n${last_errors}")
     endif()
+    # A version 1 database without one of its tables (a table that V1 created
+    # dropped from a sample repository) is damaged: the open names the rebuild,
+    # upgrades nothing and keeps no copy (decisions 0032 and 0036), also the
+    # next time.
+    set(INCOMPLETE "${WORK}/older-incomplete")
+    run_cli("0" --repository "${INCOMPLETE}" repo init)
+    execute_process(
+        COMMAND "${SQLITE3}" "${INCOMPLETE}/veriarchive.db"
+            "DROP TABLE verify_progress_chunks; DROP TABLE trusted_keys; UPDATE schema_version SET version = 1;"
+        RESULT_VARIABLE code
+        ERROR_VARIABLE errors)
+    if(NOT code EQUAL 0)
+        message(FATAL_ERROR "sqlite3 could not make the sample repository incomplete:\n${errors}")
+    endif()
+    foreach(attempt first next)
+        run_cli("11" --repository "${INCOMPLETE}" --lang en repo info)
+        file(GLOB incomplete_copies "${INCOMPLETE}/veriarchive-schema-*")
+        execute_process(COMMAND "${SQLITE3}" "${INCOMPLETE}/veriarchive.db" "SELECT version FROM schema_version;"
+            OUTPUT_VARIABLE incomplete_version OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT last_errors MATCHES "error: the repository's database [^\n]*veriarchive\\.db is damaged; make it again from the manifests with `repo rebuild-index`\n"
+                OR last_errors MATCHES "note:" OR incomplete_copies OR NOT incomplete_version STREQUAL "1")
+            message(FATAL_ERROR "the ${attempt} open of a version 1 database without one of its tables "
+                "(schema version ${incomplete_version}, copies: ${incomplete_copies}):\n${last_errors}")
+        endif()
+    endforeach()
+    # Said also when the open fails after it upgraded the database, before the
+    # error: on Windows, where a read-only file cannot be replaced, when the
+    # config file cannot be written as the open records the uuid of the
+    # repository it pins (it records another repository's: sample data).
+    if(CMAKE_HOST_WIN32)
+        set(LOCKED "${WORK}/older-locked")
+        set(LOCKED_CONFIG "${WORK}/locked-config.json")
+        file(WRITE "${LOCKED_CONFIG}" "{}\n")
+        set(GLOBAL --config "${LOCKED_CONFIG}")
+        run_cli("0" --repository "${LOCKED}" repo init)
+        execute_process(
+            COMMAND "${SQLITE3}" "${LOCKED}/veriarchive.db"
+                "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1;"
+            RESULT_VARIABLE code
+            ERROR_VARIABLE errors)
+        if(NOT code EQUAL 0)
+            message(FATAL_ERROR "sqlite3 could not lower the sample repository to version 1:\n${errors}")
+        endif()
+        file(WRITE "${LOCKED_CONFIG}"
+            "{\"repository\": \"${LOCKED}\", \"last_repository_uuid\": \"c0ffee00-0000-4000-8000-000000000099\"}\n")
+        file(CHMOD "${LOCKED_CONFIG}" PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+        string(TIMESTAMP before_open "%Y-%m-%d")
+        execute_process(
+            COMMAND "${CLI}" ${GLOBAL} --lang en repo info
+            ENCODING UTF-8
+            RESULT_VARIABLE code
+            OUTPUT_VARIABLE output
+            ERROR_VARIABLE errors)
+        string(TIMESTAMP after_open "%Y-%m-%d")
+        file(CHMOD "${LOCKED_CONFIG}" PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+        set(GLOBAL --config "${WORK}/config.json")
+        if(NOT code EQUAL 11 OR NOT errors MATCHES "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db\nerror: cannot record repository_uuid in config: ")
+            message(FATAL_ERROR "an open that could not record the repository's uuid after the upgrade: exit ${code}\n${errors}")
+        endif()
+    endif()
 else()
     message(STATUS "no sqlite3 program: the upgrade of an older repository is left to the unit tests")
 endif()

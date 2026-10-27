@@ -2,12 +2,14 @@
 
 #include "app/local_time.h"
 #include "app/session.h"
+#include "common/utf8.h"
 #include "platform/platform_services.h"
 
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <sqlite3.h>
 #include <string>
@@ -113,9 +115,62 @@ void the_copy_before_an_upgrade_is_named_for_the_local_date()
     CHECK(std::filesystem::exists(copy));
 }
 
+// An open that fails after it upgraded the database, as on a config file
+// that it cannot write when it records the pinned repository's uuid (decision
+// 0037; here a sample config file naming another uuid, which cannot be
+// replaced: read only, in a read-only folder), still says where the copy from
+// before the upgrade is, with why it failed (decision 0032): the database
+// stays upgraded, and no later open says it again, as the next one, which
+// fails the same way, shows. Where the config file can be written all the
+// same, as for an account that may write anything, the check is left out.
+void a_failed_open_still_says_where_the_copy_is()
+{
+    SampleFolder folder("failed-open");
+    const auto moment = moment_of_another_date();
+    auto options = repository_of_version_1(folder, moment);
+    if (!options) {
+        return;
+    }
+    // The repository through its pin, which the init wrote into the config
+    // file, and a record of another uuid there (sample).
+    const auto repository = *options->repository;
+    options->repository.reset();
+    const auto config = *options->config;
+    const auto pinned = nlohmann::json{{"repository", va::path_to_utf8(repository)},
+        {"last_repository_uuid", "c0ffee00-0000-4000-8000-000000000099"}};
+    std::ofstream(config, std::ios::binary | std::ios::trunc) << pinned.dump();
+    const auto read_only = std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+                           std::filesystem::perms::others_read;
+    std::filesystem::permissions(config, read_only);
+    std::filesystem::permissions(folder.path(), read_only | std::filesystem::perms::owner_exec |
+                                                    std::filesystem::perms::group_exec |
+                                                    std::filesystem::perms::others_exec);
+    const auto writable_again = [&] {
+        std::filesystem::permissions(folder.path(), std::filesystem::perms::owner_all);
+        std::filesystem::permissions(config, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    };
+    const auto copy = repository.lexically_normal() /
+                      std::format("veriarchive-schema-1-before-upgrade-{:%F}.db",
+                          va::app::local_date(moment, va::platform::utc_offset(moment)));
+    const auto failed = va::app::open_session(*options);
+    if (failed) {
+        writable_again();
+        std::cerr << "  the config file could be written: the open that fails after its upgrade is not checked\n";
+        return;
+    }
+    CHECK(failed.error().message.starts_with("cannot record repository_uuid in config: ") &&
+          failed.error().notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 3, copy})});
+    CHECK(std::filesystem::exists(copy));
+    const auto again = va::app::open_session(*options);
+    CHECK(!again && again.error().message.starts_with("cannot record repository_uuid in config: ") &&
+          again.error().notes.empty());
+    writable_again();
+}
+
 } // namespace
 
 void session_tests()
 {
     the_copy_before_an_upgrade_is_named_for_the_local_date();
+    a_failed_open_still_says_where_the_copy_is();
 }

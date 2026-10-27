@@ -34,8 +34,8 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
     if (session_options.elevated ? session_options.elevated() : platform::process_is_elevated()) {
         warnings.emplace_back(running_elevated);
     }
-    const auto failed = [&](std::string message) {
-        return std::unexpected(SessionFailure{std::move(message), warnings});
+    const auto failed = [&](std::string message, std::vector<std::string> notes = {}) {
+        return std::unexpected(SessionFailure{std::move(message), warnings, std::move(notes)});
     };
 
     const auto executable = platform::executable_path();
@@ -70,24 +70,29 @@ std::expected<Session, SessionFailure> open_session(const SessionOptions& sessio
     // that the clock here shows, as people read it (decision 0017).
     const auto today = local_date(
         session_options.now.value_or(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now())));
+    std::expected<void, IoError> opened;
     if (session_options.rebuild) {
         auto made = open_repository_to_rebuild(session.context, today);
-        if (!made) {
-            return failed(made.error().message);
+        if (made) {
+            session.replaced_database = std::move(*made);
+        } else {
+            opened = std::unexpected(made.error());
         }
-        session.replaced_database = std::move(*made);
     } else {
-        auto opened = session_options.initialise ? initialise_repository(session.context, *session.writer, today)
-                                                 : open_repository(session.context, today);
-        if (!opened) {
-            return failed(opened.error().message);
-        }
+        opened = session_options.initialise ? initialise_repository(session.context, *session.writer, today)
+                                            : open_repository(session.context, today);
     }
+    // Said once, also when the open fails after the upgrade, as on a config
+    // file it cannot write: the database stays upgraded, and no later open
+    // says where its copy is (decision 0032).
     if (session.context.schema_upgrade) {
         session.notes.push_back(schema_upgrade_note(*session.context.schema_upgrade));
     }
+    if (!opened) {
+        return failed(opened.error().message, session.notes);
+    }
     if (auto recorded = record_repository_uuid(session.context, *session.writer); !recorded) {
-        return failed(recorded.error().message);
+        return failed(recorded.error().message, session.notes);
     }
     if (!session.context.previous_repository_uuid.empty()) {
         session.warnings.push_back("repository_uuid changed from " +

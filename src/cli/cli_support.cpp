@@ -82,6 +82,14 @@ Arguments parse_arguments(const std::vector<std::string>& raw, std::string& erro
 
 std::expected<Session, Failure> open_session(const Arguments& arguments, bool initialise, bool rebuild)
 {
+    // Said once, on the open that upgraded the database (decision 0032), also
+    // when it then fails, before the error; on stderr, so --json output stays
+    // one document.
+    const auto print_notes = [&](const std::vector<std::string>& notes) {
+        for (const auto& note : notes) {
+            std::cerr << arguments.text.format("note: {}", arguments.text(note)) << '\n';
+        }
+    };
     auto session = app::open_session({initialise, arguments.repository, arguments.config, {}, rebuild, std::nullopt});
     // The warnings first, also where no repository could be opened: that
     // VeriArchive runs elevated may be why (R-12, decision 0037).
@@ -89,13 +97,10 @@ std::expected<Session, Failure> open_session(const Arguments& arguments, bool in
         print_warning(arguments.text, warning);
     }
     if (!session) {
+        print_notes(session.error().notes);
         return std::unexpected(Failure{exit_code::repository, session.error().message});
     }
-    // Said once, on the open that upgraded the database (decision 0032); on
-    // stderr, so --json output stays one document.
-    for (const auto& note : session->notes) {
-        std::cerr << arguments.text.format("note: {}", arguments.text(note)) << '\n';
-    }
+    print_notes(session->notes);
     return Session{std::move(session->context), std::move(session->writer), std::move(session->replaced_database)};
 }
 

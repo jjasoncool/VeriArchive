@@ -10,6 +10,27 @@
 #include <libintl.h>
 
 namespace va::gui {
+namespace {
+
+// Why no repository is open, followed by what holds all the same: the
+// warnings, as running elevated may be why (R-12, decision 0037), and what
+// opening it did, said once: the upgrade of its database, and where the copy
+// from before it is (decision 0032). Worded in the language shown.
+Report session_failure(app::SessionFailure failure)
+{
+    return [failure = std::move(failure)](const app::Text& text) {
+        auto shown = text(failure.message);
+        for (const auto& warning : failure.warnings) {
+            shown += "\n\n" + text.format("Warning: {}", text(warning));
+        }
+        for (const auto& note : failure.notes) {
+            shown += "\n\n" + text.format("Note: {}", text(note));
+        }
+        return shown;
+    };
+}
+
+} // namespace
 
 void open_repository_session(GuiState& state, bool initialise)
 {
@@ -24,13 +45,7 @@ void open_repository_session(GuiState& state, bool initialise)
             // The warnings too, which hold where no repository could be
             // opened: running elevated may be why (R-12, decision 0037).
             state.session.reset();
-            state.session_error = [failure = session.error()](const app::Text& text) {
-                auto shown = text(failure.message);
-                for (const auto& warning : failure.warnings) {
-                    shown += "\n\n" + text.format("Warning: {}", text(warning));
-                }
-                return shown;
-            };
+            state.session_error = session_failure(std::move(session.error()));
         }
     } catch (const std::exception& error) {
         log_failure(std::string("exception while opening the repository: ") + error.what());

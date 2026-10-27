@@ -45,12 +45,17 @@ struct Session {
     std::optional<ReplacedDatabase> replaced_database;
 };
 
-// Why no repository could be opened, with the warnings that hold all the
-// same: running elevated (R-12), which may be why, as the home folder and the
-// config file then resolve otherwise (decision 0037).
+// Why no session was opened, with the warnings that hold all the same:
+// running elevated (R-12), which may be why, as the home folder and the config
+// file then resolve otherwise (decision 0037); and what opening the repository
+// did all the same that people are told once, as Session::notes: the upgrade
+// of its database, which stays upgraded when the open fails after it, and
+// where the copy from before it is (decision 0032). English sentences,
+// translated where shown, the notes before the message.
 struct SessionFailure {
     std::string message;
     std::vector<std::string> warnings;
+    std::vector<std::string> notes;
 };
 
 // Opens the repository, upgrading its database where it is of an older
