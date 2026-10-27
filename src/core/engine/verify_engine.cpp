@@ -495,10 +495,22 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             volume_to_json_text(evidence.volume), std::string(to_string(identity.result)), ""});
     };
     switch (identity.result) {
-    case MatchResult::Unknown:
+    case MatchResult::Unknown: {
         (void)record_evidence("", "");
+        // An empty folder is most often a place where a volume is mounted
+        // while its device is not attached, as a mount point on Linux that
+        // the system mounts when the device is there (decision 0029, point
+        // 7): it says so, as for a root that is not there, never offering
+        // `register` for an empty folder (exit 10).
+        if (const auto listed = services.archive_files.list(located->root); listed && listed->empty()) {
+            return stop(VerifyStop::Kind::NotFound,
+                "the folder " + path_to_utf8(located->root) +
+                    " is empty, and no archive is registered there; if a volume is mounted at this folder, check "
+                    "that the device that holds it is attached");
+        }
         return stop(VerifyStop::Kind::Decision,
             "UNKNOWN: this is not a registered archive; use `register` to create one", identity);
+    }
     case MatchResult::Ambiguous:
         for (const auto& archive_uuid : identity.archives) {
             (void)record_evidence(archive_uuid, "");

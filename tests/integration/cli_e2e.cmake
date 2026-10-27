@@ -2107,6 +2107,19 @@ string(FIND "${gone_chinese}" "錯誤：找不到封存 ${gone_folder_uuid} 的�
 if(gone_said EQUAL -1 OR gone_translated EQUAL -1)
     message(FATAL_ERROR "verify of an archive whose folder is gone:\n${gone_english}\n${gone_chinese}")
 endif()
+# An empty folder that is no registered archive, as a mount point on Linux
+# whose device is not attached (sample), asks to check that the device is
+# attached (exit 10), in either language, never offering `register`.
+set(EMPTY_MOUNT "${WORK}/mount-point-sample")
+file(MAKE_DIRECTORY "${EMPTY_MOUNT}")
+file(TO_NATIVE_PATH "${EMPTY_MOUNT}" empty_mount_shown)
+run_cli("10" --lang en verify --full "${EMPTY_MOUNT}")
+string(FIND "${last_errors}" "error: the folder ${empty_mount_shown} is empty, and no archive is registered there; if a volume is mounted at this folder, check that the device that holds it is attached\n" empty_said)
+run_cli("10" verify --full "${EMPTY_MOUNT}")
+string(FIND "${last_errors}" "錯誤：資料夾 ${empty_mount_shown} 是空的，也沒有任何封存註冊在那裡；如果這個資料夾是某個磁碟區掛載的位置，請確認存放該磁碟區的裝置已連接\n" empty_translated)
+if(empty_said EQUAL -1 OR empty_translated EQUAL -1)
+    message(FATAL_ERROR "verify of an empty folder that is no archive: ${empty_said} ${empty_translated}\n${last_errors}")
+endif()
 set(GLOBAL --config "${WORK}/config.json")
 
 message(STATUS "veriarchive-cli end-to-end test passed")

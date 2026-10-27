@@ -473,6 +473,26 @@ void identity_outcomes()
     CHECK(weak && weak->identity.result == va::MatchResult::MatchWeak);
 }
 
+// Decision 0029, point 7: a root that is no registered archive (UNKNOWN)
+// and is an empty folder, as a mount point on Linux whose device is not
+// attached (sample), stops as not found, asking to check that the device is
+// attached, never offering `register`; a folder with something in it stays
+// UNKNOWN.
+void an_empty_folder_asks_whether_its_device_is_attached()
+{
+    EngineFixture fixture;
+    fixture.archive.add_directory("mnt-SAMPLE");
+    fixture.archive.add_file("other-SAMPLE/a.txt", "a (sample data)");
+    const auto empty = fixture.verify(fixture.archive.root() / "mnt-SAMPLE");
+    CHECK(!empty && empty.error().kind == va::VerifyStop::Kind::NotFound &&
+          empty.error().message == "the folder " + va::path_to_utf8(fixture.archive.root() / "mnt-SAMPLE") +
+                                       " is empty, and no archive is registered there; if a volume is mounted at "
+                                       "this folder, check that the device that holds it is attached");
+    const auto other = fixture.verify(fixture.archive.root() / "other-SAMPLE");
+    CHECK(!other && other.error().kind == va::VerifyStop::Kind::Decision &&
+          other.error().identity.result == va::MatchResult::Unknown);
+}
+
 void verify_by_archive_uuid()
 {
     Registered fixture;
@@ -2447,6 +2467,7 @@ void verify_engine_tests()
     unreadable_filesystem_id_warns();
     identity_details_warn_in_plain_words();
     verify_by_archive_uuid();
+    an_empty_folder_asks_whether_its_device_is_attached();
     unrepresentable_names_warn();
     a_name_registered_on_this_system_that_is_gone_is_missing();
     recorded_portability_warnings_make_the_run_pass_with_warnings();

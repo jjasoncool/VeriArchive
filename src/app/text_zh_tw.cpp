@@ -942,6 +942,9 @@ constexpr CatalogEntry entries[] = {
         "the repository may have been rolled back",
         "媒體上有版次 {}，比儲存庫的版次 {} 新：儲存庫可能已被回復到較舊的狀態"},
     {"no registered archive {}", "找不到已註冊的封存 {}"},
+    {"the folder {} is empty, and no archive is registered there; if a volume is mounted at this folder, check that "
+        "the device that holds it is attached",
+        "資料夾 {} 是空的，也沒有任何封存註冊在那裡；如果這個資料夾是某個磁碟區掛載的位置，請確認存放該磁碟區的裝置已連接"},
     {"UNKNOWN: this is not a registered archive; use `register` to create one",
         "未知：這不是已註冊的封存；請使用 `register` 建立封存"},
     {"AMBIGUOUS: the media matches several archives (cloned media); select one with `verify --full <archive_uuid>`; "
