@@ -554,13 +554,17 @@ private:
 
 // How many files the readers hold open at once, which tells how many readers
 // hash them (R-110: one for an HDD, several for an SSD). With `meet`, the
-// first file opened waits up to 10 s for a second one to be opened beside it,
-// so that several readers are seen together however their threads are
-// scheduled; one reader opens no second file meanwhile, and goes on after
+// first file opened waits up to `wait` (10 s) for a second one to be opened
+// beside it, so that several readers are seen together however their threads
+// are scheduled; one reader opens no second file meanwhile, and goes on after
 // the wait. Everything else passes to `inner`.
 class OpenFilesWatch final : public va::IFileSystemAccess {
 public:
-    OpenFilesWatch(va::IFileSystemAccess& inner, bool meet) : inner_(inner), met_(!meet) {}
+    OpenFilesWatch(va::IFileSystemAccess& inner, bool meet,
+        std::chrono::milliseconds wait = std::chrono::seconds(10))
+        : inner_(inner), met_(!meet), wait_(wait)
+    {
+    }
 
     int most_open_at_once()
     {
@@ -583,7 +587,7 @@ public:
             std::unique_lock lock(mutex_);
             most_ = std::max(most_, ++open_);
             if (!met_) {
-                together_.wait_for(lock, std::chrono::seconds(10), [&] { return open_ >= 2; });
+                together_.wait_for(lock, wait_, [&] { return open_ >= 2; });
                 met_ = true;
             }
             together_.notify_all();
@@ -628,6 +632,7 @@ private:
     int open_ = 0;
     int most_ = 0;
     bool met_;
+    std::chrono::milliseconds wait_;
 };
 
 // Passes everything to `inner`, except that the `nth` opening of a file named

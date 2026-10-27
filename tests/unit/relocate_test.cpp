@@ -108,12 +108,13 @@ struct RelocationFixture : test::EngineFixture {
     {
         va::RelocateServices services{archive_files(), *repository.files, *repository.writer, media, store,
             repository.context.repo, repository.context.repository_uuid, host, processes};
-        va::RelocateRequest request{archive_uuid, root, std::nullopt, resume};
+        va::RelocateRequest request{archive_uuid, root, io, resume};
         request.rotational_override = rotational_override;
         return va::relocate_archive(services, request, cancel, progress);
     }
 
     std::map<std::string, bool> rotational_override; // the config's io.rotational_override (R-111)
+    std::optional<bool> io;                          // --io hdd (true) or ssd (false) (R-111)
 
     std::string key() const { return va::relocation_key(archive_uuid); }
 
@@ -966,6 +967,34 @@ void a_relocation_reports_the_recorded_name_collisions()
     const auto verified = fixture.verify(fixture.archive.root() / "new");
     CHECK(verified && verified->result == "PASSED_WITH_WARNINGS" &&
           verified->warnings == std::vector<std::string>{va::name_collision_warning});
+}
+
+// R-111: --io wins over what the platform detected and over the config's
+// override. --io ssd on a new carrier whose sample device reports an HDD:
+// several readers hash the copy at once (on a computer with more than one
+// core). --io hdd on one whose device reports an SSD and whose serial the
+// override names an SSD as well: one reader, which waits a second for a
+// second file that never comes.
+void the_io_option_wins_in_a_relocation()
+{
+    for (const bool ssd : {true, false}) {
+        RelocationFixture fixture(true);
+        fixture.copy_to_new_disk();
+        fixture.media.extra_volumes.front().devices.front().rotational = ssd; // an HDD for --io ssd, an SSD for --io hdd
+        test::OpenFilesWatch watch(fixture.archive, true, std::chrono::seconds(1));
+        fixture.media_files = &watch;
+        fixture.io = !ssd; // --io ssd, --io hdd
+        if (!ssd) {
+            fixture.rotational_override = {{"NEW-DISK", false}};
+        }
+        const auto relocated = fixture.relocate(fixture.archive.root() / "new");
+        CHECK(relocated && relocated->revision == 2 && relocated->result == "PASSED");
+        if (ssd) {
+            CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
+        } else {
+            CHECK(watch.most_open_at_once() == 1);
+        }
+    }
 }
 
 // Decision 0010: entries unreadable at registration travel unchanged.
@@ -2604,6 +2633,7 @@ void relocate_tests()
     a_new_carrier_that_goes_away_leaves_the_relocation_resumable();
     a_new_carrier_that_stops_answering_leaves_the_relocation_resumable();
     the_rotational_override_applies_to_a_relocation();
+    the_io_option_wins_in_a_relocation();
     known_unreadable_entries_are_carried();
     a_relocation_reports_the_recorded_name_collisions();
     an_interrupted_relocation_resumes_without_reading_again();

@@ -431,6 +431,37 @@ void the_rotational_override_applies_to_a_registration()
     CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
 }
 
+// R-111: --io wins over what the platform detected and over the config's
+// override. --io ssd on a sample device that reports an HDD: several readers
+// hash its files at once (on a computer with more than one core). --io hdd on
+// a sample device that reports an SSD and whose serial the override names an
+// SSD as well: one reader, which waits a second for a second file that never
+// comes.
+void the_io_option_wins_in_a_registration()
+{
+    for (const bool ssd : {true, false}) {
+        Fixture fixture; // its device SERIAL-1 reports an HDD
+        fixture.media.volume.devices.front().rotational = ssd; // an HDD for --io ssd, an SSD for --io hdd
+        for (int index = 1; index <= 6; ++index) {
+            fixture.archive.add_file(std::format("SAMPLE-{}.bin", index), std::string(1000, 'i'));
+        }
+        test::OpenFilesWatch watch(fixture.archive, true, std::chrono::seconds(1));
+        fixture.media_files = &watch;
+        auto request = at("/vol");
+        request.rotational = !ssd; // --io ssd, --io hdd
+        if (!ssd) {
+            request.rotational_override = {{"SERIAL-1", false}};
+        }
+        const auto registered = fixture.run(request);
+        CHECK(registered && registered->counts.files == 6);
+        if (ssd) {
+            CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
+        } else {
+            CHECK(watch.most_open_at_once() == 1);
+        }
+    }
+}
+
 // A root typed with separators at its end, as shells complete a folder name,
 // is the folder before them; a root keeps its own. A backslash separates only
 // on Windows (R-40).
@@ -3289,6 +3320,7 @@ void register_engine_tests()
     interrupted_registration_resumes();
     a_device_that_goes_away_interrupts_the_registration();
     a_device_that_stops_answering_interrupts_the_registration();
+    the_io_option_wins_in_a_registration();
     the_rotational_override_applies_to_a_registration();
     trailing_separators_leave_the_folder();
     a_plan_recorded_with_a_trailing_separator_is_found();

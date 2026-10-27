@@ -671,6 +671,39 @@ void the_rotational_override_applies_to_a_verification()
     CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
 }
 
+// R-111: --io wins over what the platform detected and over the config's
+// override. --io ssd on a sample device that reports an HDD: several readers
+// hash its files at once (on a computer with more than one core). --io hdd on
+// a sample device that reports an SSD and whose serial the override names an
+// SSD as well: one reader, which waits a second for a second file that never
+// comes.
+void the_io_option_wins_in_a_verification()
+{
+    for (const bool ssd : {true, false}) {
+        EngineFixture fixture; // its device SERIAL-1 reports an HDD
+        for (int index = 1; index <= 6; ++index) {
+            fixture.archive.add_file(std::format("SAMPLE-{}.bin", index), std::string(1000, 'v'));
+        }
+        CHECK(fixture.register_root(fixture.archive.root()).has_value());
+        fixture.media.volume.devices.front().rotational = ssd; // an HDD for --io ssd, an SSD for --io hdd
+        test::OpenFilesWatch watch(fixture.archive, true, std::chrono::seconds(1));
+        fixture.media_files = &watch;
+        va::VerifyRequest request;
+        request.root = fixture.archive.root();
+        request.rotational = !ssd; // --io ssd, --io hdd
+        if (!ssd) {
+            request.rotational_override = {{"SERIAL-1", false}};
+        }
+        const auto outcome = fixture.verify(request);
+        CHECK(outcome && outcome->result == "PASSED");
+        if (ssd) {
+            CHECK(watch.most_open_at_once() >= (std::thread::hardware_concurrency() >= 2 ? 2 : 1));
+        } else {
+            CHECK(watch.most_open_at_once() == 1);
+        }
+    }
+}
+
 // What an INCOMPLETE run whose device went away says (decision 0034).
 const std::string device_went_away = "the device that holds the archive went away while it was read (unplugged, or no "
                                      "longer answering); attach it again, then resume this run";
@@ -2334,6 +2367,7 @@ void verify_engine_tests()
     a_watch_tells_a_device_that_stopped_answering();
     a_volume_is_the_same_while_its_ids_and_devices_are();
     the_rotational_override_applies_to_a_verification();
+    the_io_option_wins_in_a_verification();
     resume_refused_after_new_revision();
     a_resume_by_uuid_stops_where_several_volumes_hold_the_archive();
     clones_registered_as_two_archives_say_to_detach_the_other_volumes();
