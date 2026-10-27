@@ -245,6 +245,7 @@ Manifest paths (`ArchivePath`, `common/archive_path.*`) are relative to `archive
 ### B3.1 Entry types
 
 > Amended by `design/decisions/0008-link-target-canonical-form.md` (canonical link target, cross-OS comparison) and `design/decisions/0009-only-name-surrogates-are-links.md` (on Windows only name-surrogate reparse points are `l`; other reparse points are `f`; recall-on-access files are never opened).
+> Amended by `design/decisions/0020-archive-comparison.md`: R-50 also where a directory has contents, which no entry records (R-49): told from its descendants, a file or link replaced by a folder with contents, or a folder with contents replaced by a file or link, is `TypeChanged` beside the folder's entries (`New` or `Missing`), in a comparison and in a verification.
 
 | `t` | Entry | What is hashed |
 |---|---|---|

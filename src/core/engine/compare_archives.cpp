@@ -1,5 +1,6 @@
 #include "core/engine/compare_archives.h"
 
+#include "core/engine/item_rules.h"
 #include "core/engine/recorded_manifest.h"
 
 #include <algorithm>
@@ -26,36 +27,11 @@ auto key_of(const Entry& entry)
     return std::tie(entry.path.p, entry.path.raw, entry.stream);
 }
 
-// Whether `child` lies somewhere below the directory `directory`. For a name
-// that is not valid Unicode, `p` is only a display form, so the raw native
-// path must continue with a '/' as well (hex "2f", or "2f00" in UTF-16LE).
-bool is_below(const ArchivePath& child, const ArchivePath& directory)
-{
-    if (!child.p.starts_with(directory.p + '/')) {
-        return false;
-    }
-    if (directory.raw.empty()) {
-        return true;
-    }
-    return child.raw.starts_with(directory.raw + (directory.enc == "utf16le" ? "2f00" : "2f"));
-}
-
-// Whether `entries` (canonical order) hold anything below `directory`. A
-// manifest records a directory only when it is empty or cannot be listed
-// (R-49); a directory with contents shows only through its descendants.
-// Binary search: entries below "x" are the consecutive run of paths that start
-// with "x/".
+// Whether `entries` (canonical order) hold anything below `directory`: a
+// directory with contents (item_rules.h).
 bool holds_directory(const std::vector<Entry>& entries, const ArchivePath& directory)
 {
-    const auto prefix = directory.p + '/';
-    auto found = std::lower_bound(entries.begin(), entries.end(), prefix,
-        [](const Entry& entry, const std::string& value) { return entry.path.p < value; });
-    for (; found != entries.end() && found->path.p.starts_with(prefix); ++found) {
-        if (is_below(found->path, directory)) {
-            return true;
-        }
-    }
-    return false;
+    return va::holds_directory(entries, directory, [](const Entry& entry) -> const ArchivePath& { return entry.path; });
 }
 
 // Directories that could not be listed at registration (decision 0010), by

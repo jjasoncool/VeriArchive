@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-10-15
-amends: HANDOFF §B15 (repository structure), §B16 (CLI: `archive compare`), §B17 (GUI: the Compare Archives view)
+amends: HANDOFF §B15 (repository structure), §B16 (CLI: `archive compare`), §B17 (GUI: the Compare Archives view), §B3.1 (R-50: a directory with contents is told from its descendants, in a comparison and, since 2026-10-27, in a verification)
 ---
 
 # A copy is compared with its archive through their manifests
@@ -150,5 +150,6 @@ Rejected alternatives:
 - No change to the manifest format, the database schema or the golden manifests: the comparison only reads.
 - New result words `IDENTICAL`, `IDENTICAL_WITH_WARNINGS`, `DIFFERENT`; new detail texts listed above; new failure class `Cancelled` for the comparison. All are English codes in `--json` and translated in text output (decision 0017).
 - Only current revisions are compared. Comparing an older revision would need a `--revision` option; nothing asks for it yet.
+- Verification tells a directory with contents the same way (2026-10-27; R-50), against what the scan of the media finds now: a file or a link that became a folder with contents is `TypeChanged` (`f -> d`, `l -> d`) beside that folder's entries `New`, and a folder with contents that became a file or a link is `TypeChanged` (`d -> f`, `d -> l`) beside its recorded entries `Missing`, where it reported `Missing` plus `New` before; the run fails either way. An empty directory that now holds files is still the same directory. Both share the rule (`holds_directory`, `src/core/engine/item_rules.h`). A relocation onto such a carrier ends as before (decision 0026): the new carrier does not hold the recorded content.
 - The comparison is pure core code (`src/core/engine/compare_archives.*`) with no platform calls, so it behaves the same on Windows and Linux. An archive registered on Windows can be compared with one registered on Linux; absolute link targets are then only warnings (decision 0008).
 - Tests: unit tests of the engine (identical copy with other mtimes; each difference in canonical order; directories with contents; modified details; absolute links across OSes; unreadable files and directories in either archive; an archive with itself; a tampered manifest; an unknown uuid; progress and cancel) and a CLI end-to-end case (a copy is `IDENTICAL`, then one file changed, one deleted and one added gives `DIFFERENT` with exit 3, archives named by 8-character prefixes).

@@ -42,6 +42,17 @@ bool component_representable(std::string_view component)
 
 } // namespace
 
+bool is_below(const ArchivePath& child, const ArchivePath& directory)
+{
+    if (!child.p.starts_with(directory.p + '/')) {
+        return false;
+    }
+    if (directory.raw.empty()) {
+        return true;
+    }
+    return child.raw.starts_with(directory.raw + (directory.enc == "utf16le" ? "2f00" : "2f"));
+}
+
 bool mtime_matches(std::string_view filesystem_type, std::int64_t recorded_ns, std::int64_t current_ns)
 {
     const auto difference = std::llabs(recorded_ns - current_ns);

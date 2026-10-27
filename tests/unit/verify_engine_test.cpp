@@ -137,6 +137,60 @@ void content_changes_fail()
     CHECK(outcome.coverage_bytes == 20000); // only bytes that were read and matched
 }
 
+// R-50, as archive comparison tells it (decision 0020): a file or a link
+// replaced by a folder with contents, and a folder with contents replaced by a
+// file or a link, changed type at that path. A folder with contents is no entry
+// (R-49), so it is told from what lies in it: the path is TypeChanged, beside
+// the folder's entries, New where the folder is new and Missing where it went,
+// and the run fails. An empty folder stays the same folder once it holds
+// files. Sample data.
+void a_type_change_to_or_from_a_folder_with_contents_is_reported()
+{
+    EngineFixture fixture;
+    fixture.archive.add_file("SAMPLE-file-to-folder.txt", "file");
+    fixture.archive.add_file("SAMPLE-folder-to-file/inside.txt", "inside");
+    fixture.archive.add_file("SAMPLE-folder-to-link/inside.txt", "inside");
+    fixture.archive.add_link("SAMPLE-link-to-folder", "SAMPLE-folder-to-file");
+    fixture.archive.add_directory("SAMPLE-empty-folder");
+    CHECK(fixture.register_root(fixture.archive.root()).has_value());
+
+    fixture.archive.remove("SAMPLE-file-to-folder.txt");
+    fixture.archive.add_file("SAMPLE-file-to-folder.txt/new-inside.txt", "new");
+    fixture.archive.remove("SAMPLE-folder-to-file");
+    fixture.archive.add_file("SAMPLE-folder-to-file", "now a file");
+    fixture.archive.remove("SAMPLE-folder-to-link");
+    fixture.archive.add_link("SAMPLE-folder-to-link", "elsewhere");
+    fixture.archive.remove("SAMPLE-link-to-folder");
+    fixture.archive.add_file("SAMPLE-link-to-folder/inside.txt", "inside");
+    fixture.archive.add_file("SAMPLE-empty-folder/new.txt", "new");
+
+    const auto outcome = fixture.verify(fixture.archive.root());
+    CHECK(outcome && outcome->result == "FAILED");
+    if (!outcome) {
+        return;
+    }
+    std::vector<std::string> items;
+    for (const auto& item : outcome->items) {
+        items.push_back(item.path.p + " " + item.status + (item.detail.empty() ? "" : " (" + item.detail + ")"));
+    }
+    CHECK((items == std::vector<std::string>{
+        "SAMPLE-empty-folder/new.txt New",
+        "SAMPLE-file-to-folder.txt TypeChanged (f -> d)",
+        "SAMPLE-file-to-folder.txt/new-inside.txt New",
+        "SAMPLE-folder-to-file TypeChanged (d -> f)",
+        "SAMPLE-folder-to-file/inside.txt Missing",
+        "SAMPLE-folder-to-link TypeChanged (d -> l)",
+        "SAMPLE-folder-to-link/inside.txt Missing",
+        "SAMPLE-link-to-folder TypeChanged (l -> d)",
+        "SAMPLE-link-to-folder/inside.txt New",
+    }));
+    if (outcome->items.size() != 9) {
+        for (const auto& item : items) {
+            std::cerr << "  " << item << '\n';
+        }
+    }
+}
+
 // Items come in canonical order (R-43), not in the order they were found: a
 // missing file is found while merging, a modified one only after re-hashing.
 void items_are_in_canonical_order()
@@ -1804,6 +1858,7 @@ void verify_engine_tests()
     unchanged_archive_passes();
     progress_counts_bytes();
     content_changes_fail();
+    a_type_change_to_or_from_a_folder_with_contents_is_reported();
     items_are_in_canonical_order();
     unreadable_files_fail_with_their_reason();
     metadata_changes_warn();

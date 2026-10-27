@@ -152,30 +152,42 @@ ComparisonResult compare_with_manifest(
 
     // Directory facts needed to explain missing and new entries.
     std::set<std::string> known_unreadable_dirs; // unreadable at registration
-    std::set<std::string> recorded_dirs;         // every directory implied by the manifest
     for (const auto& entry : recorded) {
         if (entry.type == 'd' && !entry.unreadable.empty()) {
             known_unreadable_dirs.insert(entry.path.p);
         }
-        for_each_ancestor(entry.path.p, [&](const std::string& dir) { recorded_dirs.insert(dir); });
     }
     std::map<std::string, std::string> unreadable_dirs_now;
-    std::set<std::string> current_dirs;
     for (const auto& scanned_entry : scanned->entries) {
         const auto& entry = scanned_entry.entry;
         if (entry.type == 'd' && !entry.unreadable.empty()) {
             unreadable_dirs_now[entry.path.p] = entry.unreadable;
         }
-        for_each_ancestor(entry.path.p, [&](const std::string& dir) { current_dirs.insert(dir); });
     }
     std::set<std::string> mount_points_now;
     for (const auto& mount_point : scanned->skipped_mount_points) {
         mount_points_now.insert(mount_point.p);
     }
+    // A directory with contents is no entry (R-49): it shows only through its
+    // descendants, in the manifest and in the scan alike (item_rules.h).
+    const auto recorded_folder = [&](const ArchivePath& path) {
+        return holds_directory(recorded, path, [](const Entry& entry) -> const ArchivePath& { return entry.path; });
+    };
+    const auto folder_now = [&](const ArchivePath& path) {
+        return holds_directory(scanned->entries, path,
+            [](const ScannedEntry& scanned_entry) -> const ArchivePath& { return scanned_entry.entry.path; });
+    };
 
     const auto missing = [&](const Entry& entry) {
-        if (entry.type == 'd' && current_dirs.contains(entry.path.p)) {
-            classify.add(entry, "Verified", "", Severity::None); // now holds new entries
+        if (entry.type != 's' && folder_now(entry.path)) {
+            if (entry.type == 'd') {
+                classify.add(entry, "Verified", "", Severity::None); // now holds new entries
+            } else {
+                // R-50: a file or link that became a folder with contents, as
+                // archive comparison tells it (decision 0020); its contents
+                // are New.
+                classify.add(entry, "TypeChanged", std::string(1, entry.type) + " -> d", Severity::Failure);
+            }
         } else if (ancestor_in(entry.path.p, mount_points_now)) {
             classify.add(entry, "SkippedMountPoint", "a mount point now covers this path", Severity::Failure);
         } else if (const auto dir = ancestor_in(entry.path.p, unreadable_dirs_now)) {
@@ -190,8 +202,15 @@ ComparisonResult compare_with_manifest(
         }
     };
     const auto added = [&](const Entry& entry) {
-        if (entry.type == 'd' && recorded_dirs.contains(entry.path.p)) {
-            return; // existed implicitly; its recorded contents are reported individually
+        if (entry.type != 's' && recorded_folder(entry.path)) {
+            if (entry.type == 'd') {
+                return; // existed implicitly; its recorded contents are reported individually
+            }
+            // R-50: a folder with contents that became a file or a link, as
+            // archive comparison tells it (decision 0020); its recorded
+            // contents are Missing.
+            classify.add(entry, "TypeChanged", std::string("d -> ") + entry.type, Severity::Failure);
+            return;
         }
         if (ancestor_in(entry.path.p, known_unreadable_dirs)) {
             classify.add(entry, "Unbaselined", "inside a directory unreadable at registration",
