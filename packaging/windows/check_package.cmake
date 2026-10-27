@@ -94,6 +94,31 @@ foreach(required
         message(FATAL_ERROR "missing from the package: ${required}")
     endif()
 endforeach()
+# Every MSYS2 package that owns a bundled file, as THIRD-PARTY.txt names it
+# beside the file's name, and the packages of the icon themes have their
+# license in share/licenses/<package>, a folder that holds a file (R-121,
+# decision 0038). MSYS2 ships none for some packages, as GStreamer's.
+file(STRINGS "${PREFIX}/share/licenses/THIRD-PARTY.txt" bundled_files REGEX "^[^ ]+  [^ ]+$")
+if(NOT bundled_files)
+    message(FATAL_ERROR "share/licenses/THIRD-PARTY.txt lists no bundled file")
+endif()
+set(licensed_packages adwaita-icon-theme hicolor-icon-theme)
+foreach(bundled_file IN LISTS bundled_files)
+    string(REGEX REPLACE "^[^ ]+  " "" package "${bundled_file}")
+    list(APPEND licensed_packages "${package}")
+endforeach()
+list(REMOVE_DUPLICATES licensed_packages)
+set(unlicensed "")
+foreach(package IN LISTS licensed_packages)
+    file(GLOB_RECURSE license_files "${PREFIX}/share/licenses/${package}/*")
+    if(NOT license_files)
+        list(APPEND unlicensed "${package}")
+    endif()
+endforeach()
+if(unlicensed)
+    list(JOIN unlicensed ", " unlicensed)
+    message(FATAL_ERROR "the package holds no license of ${unlicensed}, whose files it bundles (THIRD-PARTY.txt)")
+endif()
 # NOTICE.txt names the code compiled into the programs and where its licenses
 # are (decision 0038).
 file(READ "${PREFIX}/share/doc/VeriArchive/NOTICE.txt" notice)
