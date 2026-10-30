@@ -118,6 +118,11 @@ void windows_errors_are_plain_words()
     CHECK(error_from_win32(ERROR_DISK_FULL, "WriteFile").message == "the volume is full (WriteFile, Windows error 112)");
     CHECK(error_from_win32(ERROR_CRC, "ReadFile").message ==
           "the device reported an error (ReadFile, Windows error 23)");
+    // Not "cancelled": nobody cancelled anything, Windows aborted the request.
+    CHECK(error_from_win32(ERROR_OPERATION_ABORTED, "ReadFile").message ==
+          "aborted before it finished (ReadFile, Windows error 995)");
+    CHECK(chinese(error_from_win32(ERROR_OPERATION_ABORTED, "ReadFile").message) ==
+          "完成前即被中止（ReadFile，Windows 錯誤 995）");
     CHECK(error_from_win32(1234, "CreateFileW").message == "Windows error 1234 (CreateFileW)");
     CHECK(error_from_win32(ERROR_INVALID_DRIVE, "GetVolumePathNameW").message ==
           "no such drive letter (GetVolumePathNameW, Windows error 15)");

@@ -26,6 +26,12 @@ void platform_error_tests()
     for (const DWORD code : {ERROR_CRC, ERROR_IO_DEVICE, ERROR_GEN_FAILURE}) {
         CHECK(error_from_win32(code, "ReadFile").kind == IoErrorKind::MediaError);
     }
+    // A request that Windows aborted is the device's, as one it did not
+    // answer in time: the program's own cancel is never a Win32 error.
+    for (const DWORD code : {ERROR_SEM_TIMEOUT, ERROR_OPERATION_ABORTED}) {
+        const auto error = error_from_win32(code, "ReadFile");
+        CHECK(error.kind == IoErrorKind::Timeout && error.native_code == static_cast<int>(code));
+    }
     CHECK(error_from_win32(ERROR_PATH_NOT_FOUND, "CreateFileW").kind == IoErrorKind::NotFound);
     CHECK(error_from_win32(ERROR_ACCESS_DENIED, "CreateFileW").kind == IoErrorKind::PermissionDenied);
 }

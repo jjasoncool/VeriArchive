@@ -26,6 +26,12 @@ void platform_error_tests()
     // media error, and the engines look the volume up again before they take
     // it for the entry's.
     CHECK(error_from_errno(EIO, "pread").kind == IoErrorKind::MediaError);
+    // A request that the kernel cancelled is the device's, as one it did not
+    // answer in time: the program's own cancel is never an errno.
+    for (const int code : {ETIMEDOUT, ECANCELED}) {
+        const auto error = error_from_errno(code, "pread");
+        CHECK(error.kind == IoErrorKind::Timeout && error.native_code == code);
+    }
     CHECK(error_from_errno(ENOENT, "open").kind == IoErrorKind::NotFound);
     CHECK(error_from_errno(EACCES, "open").kind == IoErrorKind::PermissionDenied);
 }

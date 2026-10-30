@@ -51,8 +51,10 @@ std::optional<bool> volume_rotational(const VolumeInfo& volume, std::optional<bo
     const std::map<std::string, bool>& overrides);
 
 // Hashes every job. `on_result` runs on the calling thread once per finished
-// file; returning false stops the pipeline (e.g. the device disappeared).
-// Returns Cancelled when stopped by `cancel` or by `on_result`.
+// file, a file whose reading failed included, whatever its error; returning
+// false stops the pipeline (e.g. the device disappeared). Returns Cancelled
+// when stopped by `cancel` or by `on_result`; otherwise every job's result was
+// delivered (decision 0034).
 //
 // Progress is reported on the calling thread about five times a second, also
 // while one large file is being read: bytes_done counts the bytes hashed so far,

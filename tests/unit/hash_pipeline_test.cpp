@@ -134,6 +134,34 @@ void read_failures_are_reported_per_file()
     CHECK(results[2].error && results[2].error->kind == va::IoErrorKind::PermissionDenied);
 }
 
+// A file whose opening fails with a Cancelled error that the pipeline did not
+// cause (a file system that reports one; neither platform does, decision 0034)
+// is that file's result like any other failure: it is delivered, and the bytes
+// it did not read leave the total to hash. A run ends without the result of a
+// file only by stopping. Sample data.
+void a_cancelled_error_the_pipeline_did_not_cause_is_delivered()
+{
+    test::FakeFileSystem files("/archive");
+    files.add_file("SAMPLE-good", "fine");
+    files.add_file("SAMPLE-aborted", "never read").open_error =
+        va::IoError{va::IoErrorKind::Cancelled, 995, "aborted (sample)"};
+    const std::vector<va::HashJob> jobs{
+        {0, files.root() / "SAMPLE-good", 4}, {1, files.root() / "SAMPLE-aborted", 10}};
+
+    va::CancelToken cancel;
+    RecordingProgress progress;
+    std::map<std::size_t, va::HashResult> results;
+    CHECK(va::hash_files(files, jobs, small_buffers(2), cancel, progress, [&](va::HashResult&& result) {
+        results[result.id] = std::move(result);
+        return true;
+    }));
+    CHECK(results.size() == 2);
+    CHECK(results[1].error && results[1].error->native_code == 995);
+    CHECK(!progress.reports.empty());
+    const auto& last = progress.reports.back();
+    CHECK(last.items_done == 2 && last.bytes_done == 4 && last.bytes_total == 4);
+}
+
 void stopping_and_cancelling()
 {
     test::FakeFileSystem files("/archive");
@@ -317,6 +345,7 @@ void hash_pipeline_tests()
     the_rotational_override_goes_by_serial();
     every_file_is_hashed_once();
     read_failures_are_reported_per_file();
+    a_cancelled_error_the_pipeline_did_not_cause_is_delivered();
     stopping_and_cancelling();
     progress_counts_bytes_against_the_sizes();
     cancelled_progress_keeps_the_sizes_not_reached();

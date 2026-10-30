@@ -275,6 +275,38 @@ void unreadable_files_fail_with_their_reason()
     CHECK(status_of(outcome, "photos/a.jpg") == "Unreadable(media)");
 }
 
+// Decision 0034 (a request the system aborted): Windows' error 995 is a
+// request the device did not answer (Timeout). While the volume stays, the file
+// is held as an I/O error and then is the entry's own, Unreadable(other), and
+// the run fails: it cannot pass without having read the file. Sample data.
+void a_read_the_system_aborted_fails_the_run()
+{
+    Registered fixture;
+    fixture.archive.node("notes.txt").open_error = va::IoError{
+        va::IoErrorKind::Timeout, 995, "aborted before it finished (CreateFileW, Windows error 995) (sample)"};
+
+    const auto outcome = fixture.verify_ok();
+    CHECK(outcome.result == "FAILED");
+    CHECK(status_of(outcome, "notes.txt") == "Unreadable(other)");
+    CHECK(outcome.coverage_bytes < outcome.registered_bytes);
+}
+
+// A Cancelled error that the hash pipeline did not cause (a file system that
+// reports one; neither platform does) is the entry's like any other read
+// error: the file is reported, never left out of a run that passes without
+// it. Sample data.
+void a_cancelled_error_is_never_left_out()
+{
+    Registered fixture;
+    fixture.archive.node("notes.txt").open_error =
+        va::IoError{va::IoErrorKind::Cancelled, 995, "aborted before it finished (sample)"};
+
+    const auto outcome = fixture.verify_ok();
+    CHECK(outcome.result == "FAILED");
+    CHECK(status_of(outcome, "notes.txt") == "Unreadable(other)");
+    CHECK(outcome.coverage_bytes < outcome.registered_bytes);
+}
+
 // R-51: metadata is a warning unless --strict-metadata.
 void metadata_changes_warn()
 {
@@ -2457,6 +2489,8 @@ void verify_engine_tests()
     mount_points_below_the_root_are_reported();
     items_are_in_canonical_order();
     unreadable_files_fail_with_their_reason();
+    a_read_the_system_aborted_fails_the_run();
+    a_cancelled_error_is_never_left_out();
     metadata_changes_warn();
     mode_and_attributes_count_only_under_strict_metadata();
     a_root_that_cannot_be_scanned_fails_with_a_filesystem_access_error();

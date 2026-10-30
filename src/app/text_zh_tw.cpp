@@ -1488,7 +1488,7 @@ constexpr CatalogEntry entries[] = {
     {"not permitted for this user ({}, Windows error {})", "此使用者沒有權限（{}，Windows 錯誤 {}）"},
     {"no answer in time ({}, Windows error {})", "未能及時回應（{}，Windows 錯誤 {}）"},
     {"not supported ({}, Windows error {})", "不支援（{}，Windows 錯誤 {}）"},
-    {"cancelled ({}, Windows error {})", "已取消（{}，Windows 錯誤 {}）"},
+    {"aborted before it finished ({}, Windows error {})", "完成前即被中止（{}，Windows 錯誤 {}）"},
     {"Windows error {} ({})", "Windows 錯誤 {}（{}）"},
     // src/platform/windows/platform_services_win.cpp
     {"GetModuleFileNameW failed", "GetModuleFileNameW 失敗"},
@@ -1531,10 +1531,11 @@ constexpr CatalogEntry entries[] = {
     {"File name too long", "檔名過長"},
     {"Filename too long", "檔名過長"},
     {"Operation not supported", "不支援此操作"},
-    {"Operation canceled", "操作已取消"},
     {"Function not implemented", "功能未實作"},
     // On Linux file systems EBADMSG is a checksum failure and EUCLEAN a
-    // corrupted file system; the literal wording would not say so.
+    // corrupted file system, and ECANCELED a request the kernel aborted, which
+    // nobody cancelled (decision 0034); the literal wording would not say so.
+    {"Operation canceled", "完成前即被中止"},
     {"Bad message", "資料損毀（校驗碼錯誤）"},
     {"Structure needs cleaning", "檔案系統結構損毀，需要修復"},
     // src/platform/linux/platform_services_linux.cpp

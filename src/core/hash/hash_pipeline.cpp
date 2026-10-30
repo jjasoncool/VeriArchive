@@ -79,9 +79,12 @@ private:
     std::condition_variable not_empty_;
 };
 
-// One message from a reader to its hash thread.
+// One message from a reader to its hash thread: a file's bytes (Data), its end
+// (End), the error that ended its reading (Failed, whatever the error's kind),
+// a file whose reading the pipeline's stop interrupted (Interrupted: it has no
+// result, and a resume reads it again), or the reader's own end (Stop).
 struct Chunk {
-    enum class Kind { Data, End, Failed, Stop };
+    enum class Kind { Data, End, Failed, Interrupted, Stop };
 
     explicit Chunk(Kind kind_, std::size_t job_ = 0, std::byte* data_ = nullptr,
         std::size_t size_ = 0, std::optional<IoError> error_ = std::nullopt)
@@ -190,8 +193,7 @@ private:
         std::uint64_t offset = 0;
         for (;;) {
             if (stopping()) {
-                lane.filled.push(Chunk{Chunk::Kind::Failed, index, nullptr, 0,
-                    IoError{IoErrorKind::Cancelled, 0, "cancelled"}});
+                lane.filled.push(Chunk{Chunk::Kind::Interrupted, index});
                 return;
             }
             auto buffer = lane.free.pop();
@@ -228,6 +230,13 @@ private:
             if (chunk->kind == Chunk::Kind::Stop) {
                 break;
             }
+            if (chunk->kind == Chunk::Kind::Interrupted) {
+                // No result: the file keeps its expected size in the total to
+                // hash, as the bytes it did not reach are not done.
+                blake3.reset();
+                sha256.reset();
+                continue;
+            }
             if (!blake3) {
                 blake3.emplace();
                 sha256.emplace();
@@ -253,12 +262,9 @@ private:
             }
             // The file is done (read to its end, or as far as it could be read):
             // the total to hash now counts what was read instead of what the
-            // scan expected. A file stopped by a cancel keeps its expected size,
-            // as the bytes it did not reach are not done.
-            if (!result.error || result.error->kind != IoErrorKind::Cancelled) {
-                size_difference_.fetch_add(static_cast<std::int64_t>(size) -
-                                           static_cast<std::int64_t>(jobs_[chunk->job].size));
-            }
+            // scan expected.
+            size_difference_.fetch_add(static_cast<std::int64_t>(size) -
+                                       static_cast<std::int64_t>(jobs_[chunk->job].size));
             blake3.reset();
             sha256.reset();
             results_.push(std::move(result));
@@ -361,9 +367,10 @@ std::expected<void, IoError> hash_files(
             break; // every hash thread has finished and the queue is empty
         }
         if (result) {
-            const bool cancelled_file =
-                result->error && result->error->kind == IoErrorKind::Cancelled;
-            if (!cancelled_file && !consumer_stopped) {
+            // Every result is a file's own, failed files included, whatever
+            // their error: a file whose reading a stop interrupted makes none
+            // (Chunk::Kind::Interrupted).
+            if (!consumer_stopped) {
                 ++items_done;
                 if (!on_result(std::move(*result))) {
                     consumer_stopped = true;

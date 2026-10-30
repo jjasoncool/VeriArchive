@@ -71,7 +71,7 @@ std::string_view plain_words(DWORD code)
     case ERROR_INVALID_FUNCTION:
         return "not supported";
     case ERROR_OPERATION_ABORTED:
-        return "cancelled";
+        return "aborted before it finished";
     default:
         return {};
     }
@@ -122,16 +122,19 @@ IoError error_from_win32(DWORD code, std::string operation)
     case ERROR_FILE_INVALID:
         kind = IoErrorKind::DeviceRemoved;
         break;
+    // A request the device did not finish: no answer in time, or one that
+    // Windows aborted (ERROR_OPERATION_ABORTED), as a driver does when it
+    // resets a device. This program never aborts its own requests (its cancel
+    // is the CancelToken, IoErrorKind::Cancelled), so the engines treat both
+    // as a device that did not answer (decision 0034).
     case ERROR_SEM_TIMEOUT:
     case WAIT_TIMEOUT:
+    case ERROR_OPERATION_ABORTED:
         kind = IoErrorKind::Timeout;
         break;
     case ERROR_NOT_SUPPORTED:
     case ERROR_INVALID_FUNCTION:
         kind = IoErrorKind::NotSupported;
-        break;
-    case ERROR_OPERATION_ABORTED:
-        kind = IoErrorKind::Cancelled;
         break;
     default:
         break;

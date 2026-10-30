@@ -217,12 +217,10 @@ private:
 
     // Decision 0034: `error`, from reading the tree, as the error of a device
     // that went away or stopped answering, when it names a removed device or
-    // must_stop says so; nothing when the error is the entry's own.
+    // must_stop says so; nothing when the error is the entry's own. Whatever
+    // its kind: no platform error is the scan's own cancel.
     std::optional<IoError> removal(const IoError& error) const
     {
-        if (error.kind == IoErrorKind::Cancelled) {
-            return std::nullopt;
-        }
         const bool stop = options_.must_stop ? options_.must_stop(error) : error.kind == IoErrorKind::DeviceRemoved;
         if (!stop) {
             return std::nullopt;
