@@ -618,9 +618,12 @@ set(MOVE_FROM "${WORK}/move-from")
 set(MOVE_TO "${WORK}/move to SAMPLE")
 # A root as the program writes it in a command: as it is when it holds only
 # letters, digits and \ / : . _ -, else in double quotes on Windows and in
-# single quotes on Linux.
+# single quotes on Linux. A path the program writes is compared as
+# cmake_path(NATIVE_PATH) gives it, with the system's separators and nothing
+# else: on Linux file(TO_NATIVE_PATH) writes each space as "\ ", as a makefile
+# needs it.
 function(shell_argument out path)
-    file(TO_NATIVE_PATH "${path}" native)
+    cmake_path(NATIVE_PATH path NORMALIZE native)
     if(native MATCHES "^[A-Za-z0-9\\\\/:._-]+$")
         set(${out} "${native}" PARENT_SCOPE)
     elseif(CMAKE_HOST_WIN32)
@@ -1974,7 +1977,7 @@ run_cli("0;2" verify --full "${LOSS}")
 run_cli("0" repo info --json)
 string(JSON loss_repository GET "${last_output}" repository_uuid)
 set(LOSS_DB "${WORK}/repo7/veriarchive.db")
-file(TO_NATIVE_PATH "${LOSS_DB}" loss_db_shown)
+cmake_path(NATIVE_PATH LOSS_DB NORMALIZE loss_db_shown)
 file(REMOVE "${LOSS_DB}")
 run_cli("11" --lang en archive list)
 string(FIND "${last_errors}" "error: the repository's database ${loss_db_shown} is missing; make it again from the manifests with `repo rebuild-index`\n" loss_listed)
@@ -2095,7 +2098,7 @@ file(WRITE "${GONE_FOLDER}/a.txt" "folder gone sample\n")
 run_cli("0" register "${GONE_FOLDER}" --json)
 string(JSON gone_folder_uuid GET "${last_output}" archive_uuid)
 file(RENAME "${GONE_FOLDER}" "${GONE_FOLDER}-moved")
-file(TO_NATIVE_PATH "${GONE_FOLDER}" gone_folder_shown)
+cmake_path(NATIVE_PATH GONE_FOLDER NORMALIZE gone_folder_shown)
 run_cli("10" --lang en verify --full "${gone_folder_uuid}")
 set(gone_english "${last_errors}")
 run_cli("10" verify --full "${gone_folder_uuid}")
@@ -2112,7 +2115,7 @@ endif()
 # attached (exit 10), in either language, never offering `register`.
 set(EMPTY_MOUNT "${WORK}/mount-point-sample")
 file(MAKE_DIRECTORY "${EMPTY_MOUNT}")
-file(TO_NATIVE_PATH "${EMPTY_MOUNT}" empty_mount_shown)
+cmake_path(NATIVE_PATH EMPTY_MOUNT NORMALIZE empty_mount_shown)
 run_cli("10" --lang en verify --full "${EMPTY_MOUNT}")
 string(FIND "${last_errors}" "error: the folder ${empty_mount_shown} is empty, and no archive is registered there; if a volume is mounted at this folder, check that the device that holds it is attached\n" empty_said)
 run_cli("10" verify --full "${EMPTY_MOUNT}")
