@@ -1005,6 +1005,43 @@ void lower_schema(const va::RepositoryLayout& layout, int version)
             .c_str());
 }
 
+// Decision 0040: the upgrade of a repository of version 1 (V1) or 2 makes each
+// archive with a revision created when its first revision is, as the index
+// keeps it from the revision's manifest; an archive whose first registration
+// is unfinished, without a revision, keeps its time. The copy kept before the
+// upgrade keeps the times as they were. Sample data.
+void the_upgrade_creates_each_archive_when_its_first_revision_is()
+{
+    TemporaryDirectory temporary("schema-created");
+    auto options = make_options(temporary.path());
+    auto context = va::resolve_repository(options, always_writable_local);
+    CHECK(context && va::initialise_repository(*context, *va::platform::make_file_writer(), test::today));
+    if (!context) {
+        return;
+    }
+    const auto& layout = context->repo;
+    for (const int older : {1, 2}) {
+        lower_schema(layout, older);
+        run_sql(layout,
+            "DELETE FROM archive_revisions;"
+            "INSERT INTO archive_revisions (archive_uuid,revision,manifest_relpath,header_json,header_blake3,"
+            "body_blake3,created) VALUES('c0ffee00-0000-4000-8000-000000000032',2,'r2','{}','b','b',"
+            "'2026-10-17T09:00:00Z'),('c0ffee00-0000-4000-8000-000000000032',1,'r1','{}','b','b',"
+            "'2026-10-16T09:00:00Z');"
+            "INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000033','ARCH-0002',"
+            "'2026-10-18T00:00:00Z',0,'REGISTRATION_INCOMPLETE','',NULL)");
+        CHECK(va::open_repository(*context, test::today).has_value());
+        CHECK(stored_schema_version(layout) == 3);
+        CHECK(first_value(layout.database(), "SELECT created FROM archives WHERE label = 'ARCH-0001'") ==
+              "2026-10-16T09:00:00Z");
+        CHECK(first_value(layout.database(), "SELECT created FROM archives WHERE label = 'ARCH-0002'") ==
+              "2026-10-18T00:00:00Z");
+        const auto copy =
+            layout.root / ("veriarchive-schema-" + std::to_string(older) + "-before-upgrade-2026-10-17.db");
+        CHECK(first_value(copy, "SELECT created FROM archives WHERE label = 'ARCH-0001'") == "2026-10-16T00:00:00Z");
+    }
+}
+
 // Decisions 0032 and 0033: a new repository has schema version 3. One that V1
 // created (version 1, whose tables are those of version 2), and one of
 // version 2, are raised to version 3 when this version opens them, keeping
@@ -1661,6 +1698,7 @@ void repository_tests()
     rebuild_makes_a_database_that_cannot_be_used_again();
     a_new_database_left_beside_its_place_is_taken_up();
     an_older_repository_is_raised_to_schema_version_3();
+    the_upgrade_creates_each_archive_when_its_first_revision_is();
     an_older_schema_is_upgraded_only_where_it_can_be_used();
     a_copy_before_an_upgrade_never_replaces_a_file();
     the_copies_before_upgrades_are_read_from_the_folder();

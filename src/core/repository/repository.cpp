@@ -43,12 +43,18 @@ struct Migration {
 // so that a V1 program, which neither writes nor removes chunk rows and whose
 // relocation drops chunk lines (decision 0031), refuses the repository from
 // then on ("unsupported repository schema"). 2 -> 3 adds a table, as V1.1
-// may (§B8), to which no other table refers.
+// may (§B8), to which no other table refers, and makes each archive with a
+// revision created when its first revision is, as its manifest says and a
+// rebuild of the index reads it again (decision 0040): V1, and V1.1 before
+// that decision, recorded when its first registration was planned.
 constexpr Migration migrations[] = {
     {1, ""},
     {2, "CREATE TABLE verify_progress_chunks (run_id TEXT NOT NULL,path TEXT NOT NULL,raw_hex TEXT NOT NULL DEFAULT "
         "'',stream TEXT NOT NULL DEFAULT '',idx INTEGER NOT NULL,b3 TEXT NOT NULL,PRIMARY KEY(run_id,path,raw_hex,"
-        "stream,idx)) WITHOUT ROWID;"},
+        "stream,idx)) WITHOUT ROWID;"
+        "UPDATE archives SET created = (SELECT created FROM archive_revisions WHERE archive_revisions.archive_uuid = "
+        "archives.archive_uuid ORDER BY revision LIMIT 1) WHERE EXISTS (SELECT 1 FROM archive_revisions WHERE "
+        "archive_revisions.archive_uuid = archives.archive_uuid);"},
 };
 
 // The tables of §B8, each with the schema version that first has it. A
