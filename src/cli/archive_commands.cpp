@@ -610,9 +610,9 @@ int comparison_code(const std::string& result)
 }
 
 nlohmann::json compared_archive_json(const Uuid& uuid, const std::string& label, std::uint32_t revision,
-    const std::string& registered)
+    const std::string& created)
 {
-    return {{"uuid", uuid}, {"label", label}, {"revision", revision}, {"registered", registered}};
+    return {{"uuid", uuid}, {"label", label}, {"revision", revision}, {"created", created}};
 }
 
 nlohmann::json comparison_json(const ArchiveComparison& comparison)
@@ -624,9 +624,9 @@ nlohmann::json comparison_json(const ArchiveComparison& comparison)
     }
     return {
         {"archive_a", compared_archive_json(comparison.archive_a, comparison.label_a, comparison.revision_a,
-                          comparison.registered_a)},
+                          comparison.created_a)},
         {"archive_b", compared_archive_json(comparison.archive_b, comparison.label_b, comparison.revision_b,
-                          comparison.registered_b)},
+                          comparison.created_b)},
         {"result", comparison.result},
         {"same", comparison.same},
         {"entries_a", comparison.entries_a},
@@ -645,12 +645,12 @@ void print_comparison(const app::Text& text, const ArchiveComparison& comparison
                      comparison.archive_b, comparison.revision_b)
               // Details such as "unreadable in A" name the archives A and B.
               << "\n  "
-              << text.format("A: {}, registered {}, {}", comparison.label_a,
-                     app::local_time(comparison.registered_a, text),
+              << text.format("A: {}, revision {} recorded {}, {}", comparison.label_a, comparison.revision_a,
+                     app::local_time(comparison.created_a, text),
                      app::count_of(text, comparison.entries_a, app::Counted::Entry))
               << "\n  "
-              << text.format("B: {}, registered {}, {}", comparison.label_b,
-                     app::local_time(comparison.registered_b, text),
+              << text.format("B: {}, revision {} recorded {}, {}", comparison.label_b, comparison.revision_b,
+                     app::local_time(comparison.created_b, text),
                      app::count_of(text, comparison.entries_b, app::Counted::Entry))
               << "\n  " << text.format("same: {}", comparison.same);
     for (const auto& [status, count] : comparison.counts) {

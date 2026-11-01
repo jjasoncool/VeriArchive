@@ -53,8 +53,8 @@ struct ArchiveComparison {
     std::string label_b;
     std::uint32_t revision_a = 0;
     std::uint32_t revision_b = 0;
-    std::string registered_a;  // when each compared revision was created (UTC timestamp)
-    std::string registered_b;
+    std::string created_a;  // when each compared revision was recorded: its manifest's `created` (UTC)
+    std::string created_b;
     std::uint64_t entries_a = 0;
     std::uint64_t entries_b = 0;
     std::uint64_t same = 0;                        // in both, same type and content

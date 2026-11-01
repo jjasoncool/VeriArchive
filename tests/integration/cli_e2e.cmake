@@ -456,6 +456,16 @@ run_cli("0" --lang en archive compare "${archive_uuid}" "${copy_uuid}")
 if(NOT last_output MATCHES "^COMPARE IDENTICAL  [^\n]*\\(${archive_uuid}\\) r1  vs  [^\n]*\\(${copy_uuid}\\) r1\n")
     message(FATAL_ERROR "compare of a copy is not IDENTICAL:\n${last_output}")
 endif()
+# Each archive's line names the compared revision and when it was recorded
+# (decision 0041), in either language.
+set(recorded_at "[0-9]+-[0-9]+-[0-9]+ [0-9]+:[0-9]+:[0-9]+")
+if(NOT last_output MATCHES "\n  A: [^\n]+, revision 1 recorded ${recorded_at} \\(UTC[^\n]*\\), 5 entries\n  B: [^\n]+, revision 1 recorded ${recorded_at} \\(UTC[^\n]*\\), 5 entries\n")
+    message(FATAL_ERROR "compare of a copy does not say when each revision was recorded:\n${last_output}")
+endif()
+run_cli("0" archive compare "${archive_uuid}" "${copy_uuid}")
+if(NOT last_output MATCHES "\n  A：[^\n]+，版次 1 記錄於 ${recorded_at}（UTC[^\n]*），共 5 個項目\n  B：[^\n]+，版次 1 記錄於 ${recorded_at}（UTC[^\n]*），共 5 個項目\n")
+    message(FATAL_ERROR "compare of a copy in Chinese does not say when each revision was recorded:\n${last_output}")
+endif()
 run_cli("0" archive compare "${archive_uuid}" "${copy_uuid}" --json)
 string(JSON result GET "${last_output}" result)
 string(JSON same GET "${last_output}" same)
@@ -500,8 +510,23 @@ if(NOT result STREQUAL "DIFFERENT" OR NOT revision_b EQUAL 2 OR NOT modified EQU
         OR NOT added EQUAL 1 OR NOT difference_count EQUAL 3)
     message(FATAL_ERROR "compare --json after changes in the copy:\n${last_output}")
 endif()
+# `created` is when the compared revision was recorded, as `archive show`
+# gives it (decision 0041); `registered` is gone. ERROR_VARIABLE is NOTFOUND
+# when the member is there.
+string(JSON created_b GET "${last_output}" archive_b created)
+string(JSON registered_b ERROR_VARIABLE without_registered GET "${last_output}" archive_b registered)
+if(without_registered STREQUAL "NOTFOUND")
+    message(FATAL_ERROR "compare --json still gives registered:\n${last_output}")
+endif()
+run_cli("0" archive show "${copy_uuid}" --json)
+string(JSON shown_revision GET "${last_output}" revisions 1 revision)
+string(JSON shown_created GET "${last_output}" revisions 1 created)
+if(NOT shown_revision EQUAL 2 OR NOT created_b STREQUAL shown_created)
+    message(FATAL_ERROR "compare --json gives ${created_b} for revision 2 of the copy, which archive show gives as revision ${shown_revision} ${shown_created}")
+endif()
 run_cli("3" --lang en archive compare "${archive_prefix}" "${copy_prefix}")
 if(NOT last_output MATCHES "^COMPARE DIFFERENT  "
+        OR NOT last_output MATCHES "\n  A: [^\n]+, revision 1 recorded ${recorded_at} \\(UTC[^\n]*\\), 5 entries\n  B: [^\n]+, revision 2 recorded ${recorded_at} \\(UTC[^\n]*\\), [0-9]+ entries\n"
         OR NOT last_output MATCHES "\n  Modified  readme\\.txt  \\(size [0-9]+ -> [0-9]+\\)\n"
         OR NOT last_output MATCHES "\n  Missing  中文/資料\\.txt\n"
         OR NOT last_output MATCHES "\n  New  extra\\.txt\n")

@@ -277,8 +277,8 @@ std::expected<ArchiveComparison, CompareFailure> compare_archives(
     result.label_b = record_b->label;
     result.revision_a = record_a->current_revision;
     result.revision_b = record_b->current_revision;
-    result.registered_a = a.header.created;
-    result.registered_b = b.header.created;
+    result.created_a = a.header.created;
+    result.created_b = b.header.created;
     result.entries_a = a.entries.size();
     result.entries_b = b.entries.size();
 

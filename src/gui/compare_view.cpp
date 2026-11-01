@@ -39,11 +39,11 @@ std::string report(const app::Text& text, const Shown& shown)
         body += text("No entry differs, but the entries listed below are not proven the same.") + "\n";
     }
     body += "\n" +
-            text.format("A (reference): {} ({}) revision {}, registered {}", comparison.label_a,
-                comparison.archive_a, comparison.revision_a, app::local_time(comparison.registered_a, text)) +
+            text.format("A (reference): {} ({}) revision {}, recorded {}", comparison.label_a,
+                comparison.archive_a, comparison.revision_a, app::local_time(comparison.created_a, text)) +
             "\n" +
-            text.format("B (copy): {} ({}) revision {}, registered {}", comparison.label_b, comparison.archive_b,
-                comparison.revision_b, app::local_time(comparison.registered_b, text)) +
+            text.format("B (copy): {} ({}) revision {}, recorded {}", comparison.label_b, comparison.archive_b,
+                comparison.revision_b, app::local_time(comparison.created_b, text)) +
             "\n" +
             text.format("Entries: {} in A, {} in B, {} the same", comparison.entries_a, comparison.entries_b,
                 comparison.same) +

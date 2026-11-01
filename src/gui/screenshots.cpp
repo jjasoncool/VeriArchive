@@ -240,7 +240,22 @@ public:
                     choose(state_.compare_view.copy, state_.compare_view.archive_uuids, 0, copy_);
                     start(state_.compare_view.start, state_.compare_view.report, "comparison");
                 },
-                [this] { expect(state_.compare_view.shown_report, "ARCHIVES ", "comparison"); }},
+                [this] {
+                    expect(state_.compare_view.shown_report, "ARCHIVES ", "comparison");
+                    // Each archive's line says when its compared revision was
+                    // recorded (decision 0041).
+                    const auto english = state_.compare_view.shown_report(app::Text());
+                    for (const std::string archive : {"\nA (reference): ", "\nB (copy): "}) {
+                        const auto start = english.find(archive);
+                        const auto line = start == std::string::npos
+                                              ? std::string()
+                                              : english.substr(start + 1, english.find('\n', start + 1) - start - 1);
+                        if (line.find(" revision 1, recorded ") == std::string::npos) {
+                            throw std::runtime_error(
+                                "the comparison does not say when each compared revision was recorded: " + line);
+                        }
+                    }
+                }},
             {"07-language.png",
                 [this] {
                     show("settings");

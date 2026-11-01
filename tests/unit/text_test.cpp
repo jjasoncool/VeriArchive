@@ -877,6 +877,21 @@ void translation_tests()
     CHECK(chinese.format("ARCHIVES {}", chinese("IDENTICAL")) == "比較結果：相同");
     CHECK(chinese.format("ARCHIVES {}", chinese("IDENTICAL_WITH_WARNINGS")) == "比較結果：相同（有警告）");
     CHECK(chinese.format("same: {}", 4) + "  " + chinese("Missing") + " 1" == "相同：4  遺失 1");
+    // Each archive's line names the compared revision and when it was
+    // recorded: by a registration, a relocation or a verification that added
+    // chunk hashes (decision 0041). Sample times.
+    CHECK(chinese.format("A: {}, revision {} recorded {}, {}", "ARCH-0001", 2, "2025-01-16 09:00:00（UTC+8）",
+              va::app::count_of(chinese, 5, va::app::Counted::Entry)) ==
+          "A：ARCH-0001，版次 2 記錄於 2025-01-16 09:00:00（UTC+8），共 5 個項目");
+    CHECK(chinese.format("B: {}, revision {} recorded {}, {}", "ARCH-0002", 1, "2025-01-15 09:00:00（UTC+8）",
+              va::app::count_of(chinese, 1, va::app::Counted::Entry)) ==
+          "B：ARCH-0002，版次 1 記錄於 2025-01-15 09:00:00（UTC+8），共 1 個項目");
+    CHECK(chinese.format("A (reference): {} ({}) revision {}, recorded {}", "ARCH-0001", uuid, 2,
+              "2025-01-16 09:00:00（UTC+8）") ==
+          "A（參考）：ARCH-0001（" + uuid + "）版次 2，記錄於 2025-01-16 09:00:00（UTC+8）");
+    CHECK(chinese.format("B (copy): {} ({}) revision {}, recorded {}", "ARCH-0002", uuid_b, 1,
+              "2025-01-15 09:00:00（UTC+8）") ==
+          "B（副本）：ARCH-0002（" + uuid_b + "）版次 1，記錄於 2025-01-15 09:00:00（UTC+8）");
     // Item details: sizes are values; the reason an entry was unreadable is
     // translated, for every reason the scanner records.
     CHECK(chinese("size 7 -> 14") == "大小 7 → 14");

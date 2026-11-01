@@ -5,7 +5,9 @@
 
 #include "core/engine/compare_archives.h"
 
+#include <chrono>
 #include <fstream>
+#include <thread>
 
 namespace {
 
@@ -90,8 +92,13 @@ void identical_copy_is_identical()
     CHECK(comparison.label_b == "ARCH-0002");
     CHECK(comparison.revision_a == 1);
     CHECK(comparison.revision_b == 1);
-    CHECK(!comparison.registered_a.empty());
-    CHECK(!comparison.registered_b.empty());
+    // When each compared revision was recorded: its manifest's `created`.
+    const auto recorded_a = fixture.store.revision(fixture.a, 1);
+    const auto recorded_b = fixture.store.revision(fixture.b, 1);
+    CHECK(recorded_a && *recorded_a && !comparison.created_a.empty() &&
+          comparison.created_a == (*recorded_a)->created);
+    CHECK(recorded_b && *recorded_b && !comparison.created_b.empty() &&
+          comparison.created_b == (*recorded_b)->created);
 }
 
 // One of each difference, reported in canonical order whatever the kind.
@@ -240,6 +247,8 @@ void unreadable_at_registration_is_unbaselined()
     comparison = fixture.compare_ok(fixture.a, fixture.b);
     CHECK(comparison.result == "DIFFERENT");
     CHECK(comparison.revision_b == 2);
+    const auto recorded = fixture.store.revision(fixture.b, 2);
+    CHECK(recorded && *recorded && comparison.created_b == (*recorded)->created);
 }
 
 // An archive compared with itself; known-unreadable entries stay unproven.
@@ -374,6 +383,35 @@ void a_chunked_and_an_unchunked_copy_are_identical()
           (lines_of(changed_comparison) == std::vector<std::string>{"video/big.bin Modified content differs"}));
 }
 
+// Each archive's time is when its compared revision was recorded, which for a
+// revision after the first is not when the archive was registered (decision
+// 0041). The next revision is recorded a second later, so the times differ.
+void each_time_is_when_the_compared_revision_was_recorded()
+{
+    TwoArchives fixture;
+    fixture.add_to_both("notes.txt", "notes (sample data)");
+    if (!fixture.register_both()) {
+        return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    va::RegisterRequest again;
+    again.root = fixture.archive.root() / "b";
+    again.new_revision = true;
+    CHECK(fixture.register_root(again).has_value());
+
+    const auto comparison = fixture.compare_ok(fixture.a, fixture.b);
+    const auto first_a = fixture.store.revision(fixture.a, 1);
+    const auto first_b = fixture.store.revision(fixture.b, 1);
+    const auto second_b = fixture.store.revision(fixture.b, 2);
+    CHECK(first_a && *first_a && first_b && *first_b && second_b && *second_b);
+    if (!first_a || !*first_a || !first_b || !*first_b || !second_b || !*second_b) {
+        return;
+    }
+    CHECK(comparison.revision_a == 1 && comparison.created_a == (*first_a)->created);
+    CHECK(comparison.revision_b == 2 && comparison.created_b == (*second_b)->created);
+    CHECK((*second_b)->created != (*first_b)->created && comparison.created_b != comparison.created_a);
+}
+
 } // namespace
 
 void compare_archives_tests()
@@ -389,4 +427,5 @@ void compare_archives_tests()
     unknown_archive_is_refused();
     progress_and_cancel();
     a_chunked_and_an_unchunked_copy_are_identical();
+    each_time_is_when_the_compared_revision_was_recorded();
 }

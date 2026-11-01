@@ -381,8 +381,8 @@ constexpr CatalogEntry entries[] = {
         "abandon-relocation <uuid> [--confirm] | abandon-verification <uuid> [--confirm]"},
     // archive compare: A is the reference archive, B the copy compared with it.
     {"COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", "比較結果：{}  {}（{}）r{}  與  {}（{}）r{}"},
-    {"A: {}, registered {}, {}", "A：{}，註冊於 {}，共 {}", Match::FormatOnly},
-    {"B: {}, registered {}, {}", "B：{}，註冊於 {}，共 {}", Match::FormatOnly},
+    {"A: {}, revision {} recorded {}, {}", "A：{}，版次 {} 記錄於 {}，共 {}", Match::FormatOnly},
+    {"B: {}, revision {} recorded {}, {}", "B：{}，版次 {} 記錄於 {}，共 {}", Match::FormatOnly},
     {"same: {}", "相同：{}"},
     {"This compares what each registration read. A FULL verify of each archive proves that its "
         "carrier still holds that content.",
@@ -748,8 +748,8 @@ constexpr CatalogEntry entries[] = {
         "A 的每個項目都以相同的類型與內容存在於 B，且 B 沒有其他項目。"},
     {"No entry differs, but the entries listed below are not proven the same.",
         "沒有項目不同，但下列項目無法證明相同。"},
-    {"A (reference): {} ({}) revision {}, registered {}", "A（參考）：{}（{}）版次 {}，註冊於 {}"},
-    {"B (copy): {} ({}) revision {}, registered {}", "B（副本）：{}（{}）版次 {}，註冊於 {}"},
+    {"A (reference): {} ({}) revision {}, recorded {}", "A（參考）：{}（{}）版次 {}，記錄於 {}"},
+    {"B (copy): {} ({}) revision {}, recorded {}", "B（副本）：{}（{}）版次 {}，記錄於 {}"},
     {"Entries: {} in A, {} in B, {} the same", "項目：A 有 {} 個，B 有 {} 個，其中 {} 個相同"},
     {"Differences: {}", "差異：{}"},
     {"... and {} more differences, not listed here", "……另有 {} 個差異未列於此"},
