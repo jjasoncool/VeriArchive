@@ -89,8 +89,8 @@ The first line says what was done and its result in every language, like verific
 
 ```text
 COMPARE DIFFERENT  ARCH-0001 (99188c9d-3467-495e-98f8-f0bc7769e053) r1  vs  ARCH-0002 (94bbff52-39fa-458a-8831-9b30fb0cadf1) r2
-  A: ARCH-0001, registered 2026-10-15 09:47:40 (UTC+8), 5 entries
-  B: ARCH-0002, registered 2026-10-15 09:47:40 (UTC+8), 6 entries
+  A: ARCH-0001, revision 1 recorded 2026-10-15 09:47:40 (UTC+8), 5 entries
+  B: ARCH-0002, revision 2 recorded 2026-10-15 09:52:18 (UTC+8), 6 entries
   same: 4  Missing 1  Modified 1  New 1
   New  extra.txt
   Modified  readme.txt  (size 7 -> 14)
@@ -100,11 +100,11 @@ COMPARE DIFFERENT  ARCH-0001 (99188c9d-3467-495e-98f8-f0bc7769e053) r1  vs  ARCH
 
 ### JSON
 
-English, as every `--json` output (decision 0017); keys are in alphabetical order; `registered` is the UTC `created` of the compared revision's header; `counts` is `{}` when nothing differs; `differences` are in canonical order.
+English, as every `--json` output (decision 0017); keys are in alphabetical order; `created` is the UTC `created` of the compared revision's header, when that revision was recorded; `counts` is `{}` when nothing differs; `differences` are in canonical order.
 
 ```json
-{"archive_a":{"label":"ARCH-0001","registered":"2026-10-15T01:47:40Z","revision":1,"uuid":"99188c9d-3467-495e-98f8-f0bc7769e053"},
- "archive_b":{"label":"ARCH-0002","registered":"2026-10-15T01:47:40Z","revision":2,"uuid":"94bbff52-39fa-458a-8831-9b30fb0cadf1"},
+{"archive_a":{"created":"2026-10-15T01:47:40Z","label":"ARCH-0001","revision":1,"uuid":"99188c9d-3467-495e-98f8-f0bc7769e053"},
+ "archive_b":{"created":"2026-10-15T01:52:18Z","label":"ARCH-0002","revision":2,"uuid":"94bbff52-39fa-458a-8831-9b30fb0cadf1"},
  "counts":{"Missing":1,"Modified":1,"New":1},
  "differences":[{"detail":"","p":"extra.txt","status":"New","stream":""},
                 {"detail":"size 7 -> 14","p":"readme.txt","status":"Modified","stream":""},
@@ -119,7 +119,7 @@ Failures use the usual `{"error": "...", "exit_code": n}`.
 A sixth view, **Compare Archives**, follows Verify Archive in the sidebar. It has two drop-downs, "Reference archive (A)" and "Copy to check (B)" (B starts on the second archive in the list), Compare and Cancel buttons, a progress bar that counts entries (it shows "Starting..." while the manifests load) and the report. The comparison runs as a job off the GTK main thread, like registration and verification, and the language drop-down is unavailable meanwhile (decision 0017).
 
 - The view refuses A = B ("A and B are the same archive; choose the copy to check as B."): there an `IDENTICAL` result would say nothing about the copy the operator meant to check.
-- The report starts with `ARCHIVES <result>`, a sentence explaining `IDENTICAL` or `IDENTICAL_WITH_WARNINGS`, the A (reference) and B (copy) lines with label, uuid, revision and registration time, the entry counts, the number of differences per status, and the differences themselves, then the scope sentence. It lists at most 2 000 differences ("... and N more differences, not listed here"); the counts cover all of them.
+- The report starts with `ARCHIVES <result>`, a sentence explaining `IDENTICAL` or `IDENTICAL_WITH_WARNINGS`, the A (reference) and B (copy) lines with label, uuid, revision and when that revision was recorded, the entry counts, the number of differences per status, and the differences themselves, then the scope sentence. It lists at most 2 000 differences ("... and N more differences, not listed here"); the counts cover all of them.
 - A failure shows "Not compared: <message>" and, unless the comparison was cancelled, "Failure: <failure_class>".
 
 ### Interface terms (decision 0017)
@@ -152,4 +152,5 @@ Rejected alternatives:
 - Only current revisions are compared. Comparing an older revision would need a `--revision` option; nothing asks for it yet.
 - Verification tells a directory with contents the same way (2026-10-27; R-50), against what the scan of the media finds now: a file or a link that became a folder with contents is `TypeChanged` (`f -> d`, `l -> d`) beside that folder's entries `New`, and a folder with contents that became a file or a link is `TypeChanged` (`d -> f`, `d -> l`) beside its recorded entries `Missing`, where it reported `Missing` plus `New` before; the run fails either way. An empty directory that now holds files is still the same directory. Both share the rule (`holds_directory`, `src/core/engine/item_rules.h`). A relocation onto such a carrier ends as before (decision 0026): the new carrier does not hold the recorded content.
 - The comparison is pure core code (`src/core/engine/compare_archives.*`) with no platform calls, so it behaves the same on Windows and Linux. An archive registered on Windows can be compared with one registered on Linux; absolute link targets are then only warnings (decision 0008).
+- Amended by decision 0041: each archive's line says which revision is compared and when it was recorded (`A: ARCH-0001, revision 1 recorded <time>, 5 entries`; Compare Archives: `revision 1, recorded <time>`), where it said `registered <time>`, as a relocation and a verification adding chunk hashes record revisions too; `--json` names that time `created`, where it was `registered`. The output quoted above says so.
 - Tests: unit tests of the engine (identical copy with other mtimes; each difference in canonical order; directories with contents; modified details; absolute links across OSes; unreadable files and directories in either archive; an archive with itself; a tampered manifest; an unknown uuid; progress and cancel) and a CLI end-to-end case (a copy is `IDENTICAL`, then one file changed, one deleted and one added gives `DIFFERENT` with exit 3, archives named by 8-character prefixes).

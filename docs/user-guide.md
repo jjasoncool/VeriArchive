@@ -366,7 +366,7 @@ GUI, Compare Archives view:
 How to read the report:
 
 - **The first line**: "ARCHIVES IDENTICAL", "ARCHIVES IDENTICAL_WITH_WARNINGS" or "ARCHIVES DIFFERENT".
-- **The lines A and B**: which archive each is, and when it was registered.
+- **The lines A and B**: which archive each is, which of its revisions is compared, and when that revision was recorded: by a registration, by a relocation or by adding chunk hashes.
 - **Entries** and **Differences**: how many entries each side has, how many of them are the same, and how many differences there are of each kind.
 - Below them, every entry that differs is listed (see "Reading the comparison" below).
 
@@ -382,8 +382,8 @@ veriarchive-cli archive compare 0d0ce48d a82ebd4e
 
 ```text
 COMPARE DIFFERENT  ARCH-0001 (0d0ce48d-9445-4e7a-ae49-8fb42ef05201) r1  vs  ARCH-0002 (a82ebd4e-7766-4291-9795-d1a8d29efadd) r1
-  A: ARCH-0001, registered 2026-10-15 10:18:09 (UTC+8), 6 entries
-  B: ARCH-0002, registered 2026-10-15 10:18:09 (UTC+8), 6 entries
+  A: ARCH-0001, revision 1 recorded 2026-10-15 10:18:09 (UTC+8), 6 entries
+  B: ARCH-0002, revision 1 recorded 2026-10-15 10:18:09 (UTC+8), 6 entries
   same: 4  Missing 1  Modified 1  New 1
   Modified  專案/budget 預算.csv  (size 26 -> 41)
   New  新增的檔案.txt

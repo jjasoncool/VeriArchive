@@ -26,6 +26,6 @@ Rejected alternatives:
 
 ## Consequences
 
-- The archive's details (`archive show`, and the GUI) and Compare Archives show the same time for an archive: when its first revision's manifest was made, at the end of its registration.
+- Amended by decision 0041: `archive show` gives an archive's registration, when its first revision's manifest was made, at the end of its registration, and no GUI view shows it. Compare Archives gives the time each compared revision was recorded, under that name, which is the archive's registration only while its first revision is the one compared. This bullet said that the archive's details (`archive show`, and the GUI) and Compare Archives show the same time for an archive.
 - Upgrading a V1 repository moves the time of each registered archive to the end of its first registration, later by as long as that registration took.
 - Tests: a registration that takes more than a second (its file read slowly, sample data) records its archive at its manifest's time; the upgrade of a version 1 and of a version 2 database sets an archive with revisions to its first revision's time, keeps the time of one without a revision, and leaves the copy as it was. Removing the recording, the writing of `created` or the upgrade's update makes a test fail.
