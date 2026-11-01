@@ -575,17 +575,18 @@ std::expected<void, IoError> ArchiveStore::insert_archive(const ArchiveRecord& a
 std::expected<void, IoError> ArchiveStore::update_archive(const ArchiveRecord& archive)
 {
     auto statement = database_.prepare(
-        "UPDATE archives SET label = ?, current_revision = ?, status = ?, root_subpath = ?, "
+        "UPDATE archives SET label = ?, created = ?, current_revision = ?, status = ?, root_subpath = ?, "
         "notes = ? WHERE archive_uuid = ?");
     if (!statement) {
         return std::unexpected(statement.error());
     }
     statement->bind(1, archive.label)
-        .bind(2, static_cast<std::int64_t>(archive.current_revision))
-        .bind(3, archive.status)
-        .bind(4, archive.root_subpath);
-    bind_optional_text(*statement, 5, archive.notes);
-    statement->bind(6, archive.archive_uuid);
+        .bind(2, archive.created)
+        .bind(3, static_cast<std::int64_t>(archive.current_revision))
+        .bind(4, archive.status)
+        .bind(5, archive.root_subpath);
+    bind_optional_text(*statement, 6, archive.notes);
+    statement->bind(7, archive.archive_uuid);
     return statement->run();
 }
 

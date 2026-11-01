@@ -1484,6 +1484,12 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         } else {
             archive = {plan.archive_uuid, plan.label, plan.created, 0, "", "", ""};
         }
+        // A new archive is created when its first revision is, at the time its
+        // manifest says, which a rebuild of the index reads again (decision
+        // 0040): not when this registration was planned, hours before.
+        if (plan.new_archive) {
+            archive.created = header.created;
+        }
         archive.current_revision = plan.revision;
         archive.status = "REGISTERED";
         archive.root_subpath = *root_subpath;

@@ -47,6 +47,33 @@ va::RegisterRequest at(const std::filesystem::path& root)
     return request;
 }
 
+// Decision 0040: a new archive is created when its first revision is, at the
+// time its manifest says, which a rebuild of the index reads again. Here the
+// registration takes more than a second (its file is read slowly, sample
+// data), so the time its plan was made is another: the archive takes its
+// manifest's time.
+void an_archive_is_created_when_its_manifest_is()
+{
+    Fixture fixture;
+    fixture.archive.add_file("SAMPLE-slow.txt", "sample");
+    test::HookedFiles slow(
+        fixture.archive, "SAMPLE-slow.txt", [] { std::this_thread::sleep_for(std::chrono::milliseconds(1100)); });
+    auto store = fixture.repository.store();
+    va::RegisterServices services{slow, *fixture.repository.files, *fixture.repository.writer, fixture.media_writer,
+        fixture.media, store, fixture.repository.context.repo, fixture.host, fixture.processes};
+    const auto outcome = va::register_archive(services, at("/vol"), fixture.cancel, fixture.progress);
+    CHECK(outcome.has_value());
+    if (!outcome) {
+        return;
+    }
+    const auto archives = store.archives();
+    const auto revisions = store.revisions(outcome->archive_uuid);
+    CHECK(archives && archives->size() == 1 && revisions && revisions->size() == 1);
+    if (archives && archives->size() == 1 && revisions && revisions->size() == 1) {
+        CHECK(archives->front().created == revisions->front().created);
+    }
+}
+
 void first_registration_writes_manifest_and_index()
 {
     Fixture fixture;
@@ -3929,6 +3956,7 @@ void abandoning_removes_saved_chunk_hashes()
 void register_engine_tests()
 {
     first_registration_writes_manifest_and_index();
+    an_archive_is_created_when_its_manifest_is();
     malformed_values_are_invalid();
     a_root_that_holds_the_repository_is_refused();
     a_root_that_names_the_repository_otherwise_is_refused();
