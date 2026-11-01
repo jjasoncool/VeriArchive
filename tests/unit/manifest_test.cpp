@@ -339,13 +339,16 @@ void writers_of_one_revision_keep_their_own_body()
 void out_of_order_entries_are_rejected()
 {
     const auto root = temporary_directory("va-manifest-order-");
-    const auto writer = va::platform::make_file_writer();
-    const auto files = va::platform::make_file_system_access();
-    va::ManifestWriter manifest(*writer, *files, root / "r0001.vam", 0);
-    CHECK(manifest.add(file("b", "b")));
-    CHECK(!manifest.add(file("a", "a")));
+    {
+        const auto writer = va::platform::make_file_writer();
+        const auto files = va::platform::make_file_system_access();
+        va::ManifestWriter manifest(*writer, *files, root / "r0001.vam", 0);
+        CHECK(manifest.add(file("b", "b")));
+        CHECK(!manifest.add(file("a", "a")));
+    } // the writer closes its file, which Windows keeps from being removed while open
     std::error_code error;
     std::filesystem::remove_all(root, error);
+    CHECK(!std::filesystem::exists(root));
 }
 
 // A malformed line is explained with the JSON library's own sentence, without
