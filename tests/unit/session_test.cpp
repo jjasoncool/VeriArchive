@@ -20,6 +20,14 @@ namespace {
 
 using namespace std::chrono_literals;
 
+// The sessions of these tests run as an account that is not elevated, whoever
+// runs them: GitLab's Linux runners run as root, and a session of an elevated
+// process warns of it before all else (R-12), which these texts do not hold.
+bool not_elevated()
+{
+    return false;
+}
+
 // A folder of its own in the temporary directory for a sample repository and
 // its config file (sample data), removed afterwards.
 class SampleFolder {
@@ -67,13 +75,13 @@ std::optional<va::app::SessionOptions> repository_of_version_1(
     const auto repository = folder.path() / "SAMPLE-repository";
     const auto config = folder.path() / "config.json";
     std::ofstream(config) << "{}\n";
-    const auto created = va::app::open_session({true, repository, config, {}, false, now});
+    const auto created = va::app::open_session({true, repository, config, not_elevated, false, now});
     CHECK(created.has_value());
     if (!created) {
         return std::nullopt;
     }
     run_sql(repository, "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1");
-    return va::app::SessionOptions{false, repository, config, {}, false, now};
+    return va::app::SessionOptions{false, repository, config, not_elevated, false, now};
 }
 
 // A moment at which the local date here is not the UTC date, where there is
@@ -270,11 +278,11 @@ void a_failed_open_names_the_copies_where_the_repository_is()
     const auto later = later_folder.path() / "SAMPLE-repository";
     const auto config = later_folder.path() / "config.json";
     std::ofstream(config) << "{}\n";
-    CHECK(va::app::open_session({true, later, config, {}, false, moment}).has_value());
+    CHECK(va::app::open_session({true, later, config, not_elevated, false, moment}).has_value());
     run_sql(later, "UPDATE schema_version SET version = 4");
     const auto later_copy = later.lexically_normal() / "veriarchive-schema-3-before-upgrade-2026-10-17.db";
     std::ofstream(later_copy, std::ios::binary) << "SAMPLE: the copy a later version kept (sample data)\n";
-    const auto refused = va::app::open_session({false, later, config, {}, false, moment});
+    const auto refused = va::app::open_session({false, later, config, not_elevated, false, moment});
     CHECK(!refused && refused.error().message == "unsupported repository schema" &&
           refused.error().repository && refused.error().repository->root == later.lexically_normal());
     CHECK(!refused && va::app::session_failure_in_window(english, refused.error()) ==
