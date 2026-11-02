@@ -1,10 +1,10 @@
 # Implementation status
 
-Status of branch `v1.1-implementation`, which is `v1-implementation`, version 1.0.0, with V1.1
-stage 1 on top (last section), against HANDOFF Part C. "Done" means implemented and covered by
-automated tests on Windows (MSYS2 UCRT64, GCC 16). A milestone is accepted only when its
-acceptance tests pass on both operating systems in CI (HANDOFF Part C), which needs the branch
-pushed to GitLab.
+Status of `master`, version 1.1.0: version 1.0.0 (tag `v1.0.0`, V1) with V1.1 stage 1 on top
+(last section), against HANDOFF Part C. "Done" means implemented and covered by automated tests,
+on Windows (MSYS2 UCRT64, GCC 16) and in GitLab CI. A milestone is accepted only when its
+acceptance tests pass on both operating systems in CI (HANDOFF Part C); the hardware tests that CI
+cannot run are listed under "Still required before acceptance".
 
 ## Done
 
@@ -19,7 +19,7 @@ pushed to GitLab.
 | M5 | GTK4 GUI with Archive List, Register, Verify, Compare, History and Settings views, progress, cancel and resume; the Archive List lists the unfinished registrations, verifications and relocations with progress and state, and offers Resume and Abandon... (decisions 0022, 0025, 0026), asking first before it resumes a registration that an older version left; a screenshot mode and `tools/screenshots/` for the user guide's pictures, from sample data |
 | Comparison | `archive compare` and the GUI's Compare Archives view: two archives' current manifests compared by path, type and content (BLAKE3 + SHA-256) without reading media, results IDENTICAL / IDENTICAL_WITH_WARNINGS / DIFFERENT, typically an archive against its copy on other media (decision 0020) |
 | Language | CLI and GUI in English and Traditional Chinese with a language setting, messages in plain words without decision numbers or failure class names; `--json` stays English (decision 0017) |
-| Version | 1.0.0, shown by `--version`, `repo info` and Settings |
+| Version | 1.0.0 (tag `v1.0.0`), shown by `--version`, `repo info` and Settings |
 
 Automated tests: unit tests for every module (fake file system and media enumerator per R-93)
 and the translation catalog, golden manifests of a fixture tree registered on each system
@@ -27,7 +27,8 @@ and the translation catalog, golden manifests of a fixture tree registered on ea
 with a copy, export/import, damaged and lost manifests, a database made again, interface
 language), a windowless GUI smoke test, and a check that the Windows package runs without MSYS2
 in both languages. Every rule added since decision 0022 was removed once to see a test fail
-(mutation checks).
+(mutation checks). The last GitLab pipeline, at commit 31e1abb (2026-11-02), passed on Ubuntu
+24.04, Fedora 41 and Windows UCRT64, as did the pipeline of the tag `v1.0.0`.
 
 Measured locally (Release build, Windows 11, WD SN850X NVMe, uncached reads, four 512 MiB
 files): FULL verify at about 4.5 GB/s with eight readers and about 1.47 GB/s with one reader
@@ -45,16 +46,16 @@ files as the `dd` baseline:
 R-112's HDD throughput criterion (≥ 80 % of `dd`) is met. `sha256sum -c` of the exported list
 agreed with every file of the 4.3 GB archive, and an archive given by uuid was found on the disk.
 
-In use on the operator's own data: a 22 TB internal SATA disk and a 24 TB disk on USB, both NTFS,
-registered read-only into a repository on another disk as two archives of 10.1 TB in 144 270 files
-each, the second a copy of the first; `archive compare` of the two gives IDENTICAL. Their first
-FULL verify is still to run.
+In use on the operator's own data: a 22 TB internal SATA disk and a 24 TB disk on a USB 3 bridge
+(UAS) that reports the disk's serial, both NTFS, registered read-only into a repository on another
+disk as two archives of 10.1 TB in 144 270 files each, the second a copy of the first. A build of
+version 1.0.0 from before the tag verified both FULL, the two at once (2026-10-30 to 31): PASSED,
+all 10 135 965 225 485 bytes of each read and matched, at about 180 MB/s on the internal disk and
+237 MB/s on the USB disk.
+`archive compare` of the two gives IDENTICAL.
 
 ## Still required before acceptance
 
-- **CI for the latest commits.** The last GitLab pipeline (commit 06cce92, 2026-10-22) passed on
-  Ubuntu 24.04, Fedora 41 and Windows UCRT64. The commits since are checked on Windows only; they
-  still have to pass in the three CI jobs, which needs the branch pushed.
 - **Linux without udev (HANDOFF D9, decision 0021).** The Linux build compiles and passes the
   unit and end-to-end tests in GitLab CI, but so far only on a runner whose device reports a
   serial. Decision 0021 takes the kernel filesystem id (`fsid-…`, read with `statfs`, never zero)
@@ -63,23 +64,23 @@ FULL verify is still to run.
   with a virtual SCSI device, where the kernel id alone gives `MATCH_WEAK` and the second
   registration of the same root must be refused (exit 12).
 - **Hardware acceptance (M2, M3).** Done on Windows for an internal SATA HDD (model, serial,
-  NTFS serial, identity MATCH, throughput above), and for registration through a USB bridge that
-  reports the disk's serial (the operator's 24 TB disk). Still open: USB bridges without serials,
-  a FULL verify through a USB bridge, a USB disk unplugged during a FULL verify and resumed once
-  attached again (decision 0034), exFAT external disks; the NTFS serial relationship on one medium seen from both
-  OSes; the 100 000-file / 20 GB fixture; register on Windows and verify on Linux and the reverse;
-  uncached-read audits.
+  NTFS serial, identity MATCH, throughput above), and for registration and FULL verification
+  through a USB bridge that reports the disk's serial (the operator's 24 TB disk, two FULL verifies
+  of 10.1 TB, PASSED). Still open: USB bridges without serials, a USB disk unplugged during a FULL
+  verify and resumed once attached again (decision 0034), exFAT external disks; the NTFS serial
+  relationship on one medium seen from both OSes; the 100 000-file / 20 GB fixture; register on
+  Windows and verify on Linux and the reverse; uncached-read audits.
 - **Packaging (R-121).** The Windows package is checked locally (`veriarchive_package`: the
   installed tree runs in both languages with only Windows on `PATH` and imports no
-  `msys-2.0.dll`) and passed the GitLab Windows job at 06cce92. Its zip now holds no folder of its
+  `msys-2.0.dll`) and in the GitLab Windows job, last at 31e1abb. Its zip now holds no folder of its
   own, so that a new version unzips over the old one, and the licenses of what it bundles
   (decision 0038). It still has to run on a machine without MSYS2.
 
 ## V1.1
 
-Stage 1, chunk hashes and the Merkle root (decisions 0031 to 0033), is done on this branch, which
-numbers the program 1.1.0 (`--version`, `repo info` and Settings show it, and every manifest and
-verification run records it):
+Stage 1, chunk hashes and the Merkle root (decisions 0031 to 0033), is done, and numbers the
+program 1.1.0 (`--version`, `repo info` and Settings show it, and every manifest and verification
+run records it):
 
 | Part | Implemented |
 |---|---|
@@ -87,11 +88,20 @@ verification run records it):
 | Verification by chunk | A FULL verify compares a file whose content differs chunk by chunk and names the chunks that differ and the first byte that differs, also after a resume, and warns where the chunk hashes and the whole-file hashes disagree (decision 0032) |
 | Adding chunk hashes | `verify --full <root_path\|archive_uuid> --add-chunk-hashes`, and in Verify Archive the checkbox "Full verify, and add chunk hashes", give an archive registered by V1 a next revision with chunk hashes, its entry lines byte for byte the verified revision's, where every entry still matches it. One operation at a time creates an archive's next revision; an unfinished one is listed until it finishes or is abandoned (`archive abandon-verification`) (decision 0033) |
 | Repository schema version 3 | The first open by this version keeps a copy of the database beside it, then upgrades it, the window shown at once with a notice while it does; Settings and `repo info` name each copy and what it is for, for as long as it is there (decision 0032). Only a database that can be used is upgraded: one that is missing, empty, not a database, damaged or made again and not filled is named for `repo rebuild-index` as V1 names it, and the rebuild upgrades an older database, keeping its copy, before it fills its chunk rows and Merkle roots from the manifests; one it makes again has version 3 (decisions 0032, 0036) |
+| Times and words | An archive is created when its first revision is, at the time its manifest gives, and the upgrade sets the archives of an older repository so (decision 0040); `archive compare` and Compare Archives say when each compared revision was recorded (decision 0041); what a revision records is called recorded, not registered (decision 0042) |
 
-Still required before stage 1 is accepted: CI for this branch, which has not been pushed; the HDD
-throughput measurement (R-120) again, now that the read pass also hashes chunks; on the
-operator's repository, the upgrade from schema version 1 and a FULL verify that adds chunk hashes
-to its archives.
+On the operator's repository (the two archives above), a build of 1.1.0 from before decisions
+0040 to 0042 upgraded the database from schema version 1, and its FULL verifies that add chunk
+hashes, the two disks at once (2026-11-01), PASSED and recorded revision 2 of both archives:
+152 408 chunk lines for the 11 929 files larger than 64 MiB, the same Merkle root on both disks,
+and `archive compare` IDENTICAL on revision 2, at about 220 MB/s on the internal disk and 280 MB/s
+on the USB disk. Decision 0040's update of the archives' times was then applied to that database
+with the upgrade's own statement, after a copy was kept, and the final 1.1.0 opens it with its
+history intact.
+
+Still required before stage 1 is accepted: the HDD throughput measurement against `dd` (R-120)
+again, now that the read pass also hashes chunks. The FULL verifies above read faster with chunk
+hashes than version 1.0.0 did without them on the same disks, but were not compared with `dd`.
 
 Still to come: QUICK and DEEP verification, Ed25519 signatures and trusted keys, signed history
 checkpoints, NTFS alternate data streams and the USN change tracker. The elevated helper is not
