@@ -1,5 +1,6 @@
 #include "gui/gui_support.h"
 
+#include "app/keep_awake.h"
 #include "app/plain_words.h"
 #include "app/progress_estimate.h"
 #include "app/typed_path.h"
@@ -403,6 +404,8 @@ void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done 
     try {
         thread_ = std::thread([this, text, progress_bar, counting, work = std::move(work),
                                   done = std::move(done)]() mutable {
+            // The computer stays awake until the operation ends (decision 0043).
+            const auto awake = app::keep_awake(text);
             BarProgress progress(text, progress_bar, counting);
             Report report;
             try {

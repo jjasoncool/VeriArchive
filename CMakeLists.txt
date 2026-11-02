@@ -124,6 +124,7 @@ if(WIN32)
         src/platform/windows/file_writer_win.cpp
         src/platform/windows/fs_access_win.cpp
         src/platform/windows/interrupt_win.cpp
+        src/platform/windows/keep_awake_win.cpp
         src/platform/windows/long_path.cpp
         src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
@@ -139,6 +140,7 @@ elseif(UNIX AND NOT APPLE)
         src/platform/linux/file_writer_linux.cpp
         src/platform/linux/fs_access_linux.cpp
         src/platform/linux/interrupt_linux.cpp
+        src/platform/linux/keep_awake_linux.cpp
         src/platform/linux/media_enumerator_linux.cpp
         src/platform/linux/mountinfo.cpp
         src/platform/linux/platform_services_linux.cpp
@@ -146,6 +148,9 @@ elseif(UNIX AND NOT APPLE)
         src/platform/linux/process_table_linux.cpp
         src/platform/linux/vpd.cpp
     )
+    # GDBus: the inhibitor lock that keeps the computer awake (keep_awake_linux.cpp).
+    pkg_check_modules(GIO_UNIX REQUIRED IMPORTED_TARGET gio-unix-2.0>=2.72)
+    target_link_libraries(veriarchive_platform PRIVATE PkgConfig::GIO_UNIX)
 else()
     message(FATAL_ERROR "VeriArchive currently supports Windows and Linux only")
 endif()
@@ -294,6 +299,7 @@ if(BUILD_TESTING)
         tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
         tests/unit/interrupt_test.cpp
+        tests/unit/keep_awake_test.cpp
         tests/unit/local_time_test.cpp
         tests/unit/progress_estimate_test.cpp
         tests/unit/manifest_test.cpp
@@ -327,8 +333,9 @@ if(BUILD_TESTING)
     target_compile_features(veriarchive_tests PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_tests PRIVATE VeriArchive::platform VeriArchive::app)
     if(WIN32)
-        # interrupt_test.cpp sends the session's end to the hidden window.
-        target_link_libraries(veriarchive_tests PRIVATE user32)
+        # interrupt_test.cpp sends the session's end to the hidden window;
+        # keep_awake_test.cpp asks the system's execution state (powrprof).
+        target_link_libraries(veriarchive_tests PRIVATE user32 powrprof)
     endif()
     target_compile_definitions(veriarchive_tests PRIVATE
         VERIARCHIVE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")

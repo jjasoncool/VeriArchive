@@ -461,6 +461,9 @@ constexpr CatalogEntry entries[] = {
     {"about {}-{} hours left", "約剩 {}～{} 小時", Match::FormatOnly},
     {"about {} days left", "約剩 {} 天", Match::FormatOnly},
     {"about {}-{} days left", "約剩 {}～{} 天", Match::FormatOnly},
+    // src/app/keep_awake.h: why the computer is kept awake, as the system
+    // lists it (decision 0043).
+    {"A long operation is running", "長時間作業執行中"},
 
     // Graphical interface
     // src/gui/gui_app.cpp

@@ -82,7 +82,8 @@ enum class Counting { Files, Entries };
 
 // One long operation at a time. `work` runs on a worker thread and returns the
 // report; `done` then runs on the main thread. Progress goes to `bar`, worded in
-// the language of `text`.
+// the language of `text`. While `work` runs, the computer stays awake
+// (app::keep_awake, decision 0043).
 class Job {
 public:
     using Work = std::function<Report(CancelToken&, IProgressSink&)>;
