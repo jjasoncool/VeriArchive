@@ -120,7 +120,7 @@ int unconfirmed(const Arguments& arguments, const RegisterFailure& failure)
     }
     std::cout << text.format("Registering revision {} from this root takes what it holds now as the archive's new "
                              "baseline, without comparing it with revision {}, whose manifest is lost: damage since "
-                             "revision {} was registered would not be found. Do this only where no backup of the "
+                             "revision {} was recorded would not be found. Do this only where no backup of the "
                              "repository, export of revision {} or media copy holds that manifest. The archive "
                              "keeps its verification history and its hash chain, and never goes back to an earlier "
                              "revision.",

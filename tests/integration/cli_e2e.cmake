@@ -1574,7 +1574,7 @@ string(JSON over_verified GET "${last_output}" result)
 string(JSON over_verified_revision GET "${last_output}" revision)
 run_cli("0" repo verify-history)
 if(media_usable EQUAL -1 OR media_last_resort EQUAL -1 OR media_import_named EQUAL -1
-        OR NOT media_asked MATCHES "^Lost manifest of ARCH-[0-9]+ \\(${media_uuid}\\), revision 2\n  the manifest of revision 2 \\(manifests/${media_uuid}/r0002[.]vam\\) is missing\n  root: [^\n]+\nRegistering revision 3 from this root takes what it holds now as the archive's new baseline, without comparing it with revision 2, whose manifest is lost: damage since revision 2 was registered would not be found[.]"
+        OR NOT media_asked MATCHES "^Lost manifest of ARCH-[0-9]+ \\(${media_uuid}\\), revision 2\n  the manifest of revision 2 \\(manifests/${media_uuid}/r0002[.]vam\\) is missing\n  root: [^\n]+\nRegistering revision 3 from this root takes what it holds now as the archive's new baseline, without comparing it with revision 2, whose manifest is lost: damage since revision 2 was recorded would not be found[.]"
         OR NOT media_asked_error STREQUAL "error: run the command again with --confirm to register revision 3\n"
         OR NOT media_asked_chinese MATCHES "^無法取回的清單檔：ARCH-[0-9]+（${media_uuid}），版次 2\n"
         OR NOT media_asked_chinese MATCHES "錯誤：若要註冊版次 3，請加上 --confirm 再執行一次\n$"

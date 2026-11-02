@@ -7,9 +7,9 @@
 // differs), TypeChanged (file in one, directory or link in the other).
 // Unbaselined: an entry without content hash in A or B (unreadable at
 // registration, decision 0010), or found inside a directory one side could not
-// list. MetadataMismatch: a link whose absolute target differs between archives
-// registered on different OSes, which a driver may have translated (decision
-// 0008).
+// list. MetadataMismatch: a link whose absolute target differs between
+// revisions recorded on different OSes (created_by.os), which a driver may have
+// translated (decision 0008).
 //
 // Entries are matched by path and stream, not by type. A manifest records a
 // directory only when it is empty (R-49), so a directory with contents is

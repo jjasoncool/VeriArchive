@@ -242,7 +242,13 @@ void translation_tests()
     // Engine warnings whose cause is an engine message or code.
     CHECK(chinese("manifest: the manifest differs from the repository record") ==
           "清單檔：清單檔與儲存庫的紀錄不符");
-    CHECK(chinese("identity: the volume label differs from the one registered") == "媒體身分：磁碟區標籤與註冊時不同");
+    // What matching noted is compared with the identity that the verified
+    // revision records, which a relocation may have recorded (decision 0042).
+    CHECK(chinese("identity: the volume label differs from the one recorded") == "媒體身分：磁碟區標籤與記錄中的不同");
+    CHECK(chinese("identity: the capacity differs from the one recorded") == "媒體身分：容量與記錄中的不同");
+    CHECK(chinese("identity: the filesystem type differs from the one recorded") ==
+          "媒體身分：檔案系統類型與記錄中的不同");
+    CHECK(chinese("identity: the device model differs from the one recorded") == "媒體身分：裝置型號與記錄中的不同");
     CHECK(chinese("12 entries carry portability warnings") == "12 個項目帶有可攜性警告");
     // §A6, R-42: a verification of a revision whose manifest records names
     // that collide by case or by Unicode normalisation says so.
@@ -1061,11 +1067,11 @@ void translation_tests()
           "無法取回的清單檔：ARCH-0002（" + uuid + "），版次 2");
     CHECK(chinese.format("Registering revision {} from this root takes what it holds now as the archive's new "
                          "baseline, without comparing it with revision {}, whose manifest is lost: damage since "
-                         "revision {} was registered would not be found. Do this only where no backup of the "
+                         "revision {} was recorded would not be found. Do this only where no backup of the "
                          "repository, export of revision {} or media copy holds that manifest. The archive keeps its "
                          "verification history and its hash chain, and never goes back to an earlier revision.",
               3, 2, 2, 2) ==
-          "從此根目錄註冊版次 3，會把它目前的內容當作封存新的基準，而不與清單檔已無法取回的版次 2 比對：自版次 2 註冊以來"
+          "從此根目錄註冊版次 3，會把它目前的內容當作封存新的基準，而不與清單檔已無法取回的版次 2 比對：自版次 2 記錄以來"
           "發生的損壞將不會被發現。只有在儲存庫的備份、版次 2 的匯出檔和媒體副本中都沒有該清單檔時，才這麼做。封存會保留"
           "它的驗證歷程及其雜湊鏈，也絕不會回到較早的版次。");
     CHECK(chinese("error: run the command again with --confirm to register revision 3") ==

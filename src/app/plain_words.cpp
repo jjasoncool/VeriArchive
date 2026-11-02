@@ -91,7 +91,7 @@ std::string item_detail_words(std::string_view detail)
 std::string failure_class_words(std::string_view failure_class)
 {
     if (failure_class == "MediaIdentityMismatch") {
-        return "the media is not the one registered";
+        return "the media is not the one recorded";
     }
     if (failure_class == "MediaIdentityAmbiguous") {
         return "the media matches more than one archive";

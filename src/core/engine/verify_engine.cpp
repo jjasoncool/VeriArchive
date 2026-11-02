@@ -231,16 +231,16 @@ std::expected<std::string, IoError> relocation_root_argument(ArchiveStore& store
 std::string identity_detail_words(const std::string& detail)
 {
     if (detail == "volume-label-differs") {
-        return "the volume label differs from the one registered";
+        return "the volume label differs from the one recorded";
     }
     if (detail == "capacity-differs") {
-        return "the capacity differs from the one registered";
+        return "the capacity differs from the one recorded";
     }
     if (detail == "filesystem-type-differs") {
-        return "the filesystem type differs from the one registered";
+        return "the filesystem type differs from the one recorded";
     }
     if (detail == "model-differs") {
-        return "the device model differs from the one registered";
+        return "the device model differs from the one recorded";
     }
     if (detail == "device-replaced") {
         return "the device was replaced";

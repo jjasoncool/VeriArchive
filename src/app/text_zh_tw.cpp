@@ -48,7 +48,7 @@ constexpr CatalogEntry entries[] = {
 
     // Run-level failure classes in plain words (app/plain_words.h); --json
     // keeps the classes.
-    {"the media is not the one registered", "媒體不是已註冊的那一個"},
+    {"the media is not the one recorded", "媒體不是記錄中的那一個"},
     {"the media matches more than one archive", "媒體符合多個封存"},
     {"the manifest's signature does not verify", "清單檔的簽章驗證失敗"},
     {"the manifest is not the one recorded", "清單檔不是記錄中的那一個"},
@@ -224,12 +224,12 @@ constexpr CatalogEntry entries[] = {
     // would register, said before the operator confirms it, and its outcome.
     {"Lost manifest of {} ({}), revision {}", "無法取回的清單檔：{}（{}），版次 {}", Match::FormatOnly},
     {"Registering revision {} from this root takes what it holds now as the archive's new baseline, without "
-        "comparing it with revision {}, whose manifest is lost: damage since revision {} was registered would not be "
+        "comparing it with revision {}, whose manifest is lost: damage since revision {} was recorded would not be "
         "found. Do this only where no backup of the repository, export of revision {} or media copy holds that "
         "manifest. The archive keeps its verification history and its hash chain, and never goes back to an earlier "
         "revision.",
         "從此根目錄註冊版次 {0}，會把它目前的內容當作封存新的基準，而不與清單檔已無法取回的版次 {1} 比對："
-        "自版次 {2} 註冊以來發生的損壞將不會被發現。只有在儲存庫的備份、版次 {3} 的匯出檔和媒體副本中都沒有"
+        "自版次 {2} 記錄以來發生的損壞將不會被發現。只有在儲存庫的備份、版次 {3} 的匯出檔和媒體副本中都沒有"
         "該清單檔時，才這麼做。封存會保留它的驗證歷程及其雜湊鏈，也絕不會回到較早的版次。",
         Match::FormatOnly},
     {"run the command again with --confirm to register revision {}", "若要註冊版次 {}，請加上 --confirm 再執行一次"},
@@ -1746,10 +1746,10 @@ constexpr CatalogEntry entries[] = {
     // src/core/identity/matcher.cpp
     // What matching noted, in plain words in the warning "identity: ..."
     // (src/core/engine/verify_engine.cpp); --json keeps the codes.
-    {"the volume label differs from the one registered", "磁碟區標籤與註冊時不同"},
-    {"the capacity differs from the one registered", "容量與註冊時不同"},
-    {"the filesystem type differs from the one registered", "檔案系統類型與註冊時不同"},
-    {"the device model differs from the one registered", "裝置型號與註冊時不同"},
+    {"the volume label differs from the one recorded", "磁碟區標籤與記錄中的不同"},
+    {"the capacity differs from the one recorded", "容量與記錄中的不同"},
+    {"the filesystem type differs from the one recorded", "檔案系統類型與記錄中的不同"},
+    {"the device model differs from the one recorded", "裝置型號與記錄中的不同"},
     {"the device was replaced", "裝置已更換"},
     {"the filesystem id cannot be read", "讀不到檔案系統 UUID"},
     // Shown as "identity: the archive is retired": the archive, not its identity.

@@ -62,7 +62,10 @@ void failure_classes_are_plain_words()
         CHECK(words != failure_class && chinese(words) != words);
     }
     CHECK(va::app::failure_classes_words(english, "ManifestHashMismatch,MediaIdentityMismatch") ==
-          "the manifest is not the one recorded; the media is not the one registered");
+          "the manifest is not the one recorded; the media is not the one recorded");
+    // The media is compared with the identity that the verified revision
+    // records, which a relocation may have recorded (decision 0042).
+    CHECK(va::app::failure_classes_words(chinese, "MediaIdentityMismatch") == "媒體不是記錄中的那一個");
     CHECK(va::app::failure_classes_words(chinese, "FilesystemAccessError") == "有檔案無法讀取");
     CHECK(va::app::failure_classes_words(english, "").empty());
     CHECK(va::app::without_failure_class("RepositoryError: archive c0ffee00 has no revision yet") ==

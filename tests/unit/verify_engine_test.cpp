@@ -2862,8 +2862,25 @@ void identity_details_warn_in_plain_words()
     const auto outcome = fixture.verify_ok();
     CHECK(outcome.result == "PASSED_WITH_WARNINGS");
     CHECK(std::ranges::count(outcome.identity.details, "volume-label-differs") == 1);
-    CHECK(std::ranges::count(outcome.warnings, "identity: the volume label differs from the one registered") == 1);
+    CHECK(std::ranges::count(outcome.warnings, "identity: the volume label differs from the one recorded") == 1);
     CHECK(std::ranges::count(outcome.warnings, "identity: volume-label-differs") == 0);
+
+    // The other notes, each compared with the identity that the verified
+    // revision records (decision 0042); sample values.
+    const std::vector<std::pair<std::function<void(va::VolumeInfo&)>, std::string>> changes{
+        {[](va::VolumeInfo& volume) { volume.capacity_bytes = 2000000; },
+            "the capacity differs from the one recorded"},
+        {[](va::VolumeInfo& volume) { volume.filesystem_type = "refs"; },
+            "the filesystem type differs from the one recorded"},
+        {[](va::VolumeInfo& volume) { volume.devices.front().model = "Other Sample Disk"; },
+            "the device model differs from the one recorded"},
+    };
+    for (const auto& [change, words] : changes) {
+        Registered changed;
+        change(changed.media.volume);
+        const auto noted = changed.verify_ok();
+        CHECK(std::ranges::count(noted.warnings, "identity: " + words) == 1);
+    }
 }
 
 void verify_engine_tests()
