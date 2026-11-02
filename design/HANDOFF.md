@@ -235,6 +235,7 @@ struct MediaEvidence {                   // observed at register / verify time
 ## B2. Path and filename rules
 
 > Amended by `design/decisions/0008-link-target-canonical-form.md`: R-44 holds only where another OS registered the revision (`created_by.os`); on the OS that registered it, a recorded entry not found now is `Missing`.
+> Amended by `design/decisions/0042-what-a-revision-records-is-not-called-registered.md`: the OS that registered the revision, above, is the one that recorded it (`created_by.os`): that of its registration, or of the relocation or verification adding chunk hashes that recorded it.
 
 Manifest paths (`ArchivePath`, `common/archive_path.*`) are relative to `archive_root`.
 
