@@ -1,7 +1,9 @@
 #pragma once
-// One manifest entry (HANDOFF §B4.4): a file, directory, link or stream as it
-// was recorded at registration. Hashes are empty for directories and for
-// entries that could not be read (decision 0010).
+// One manifest entry (HANDOFF §B4.4): a file, directory, link or stream as its
+// revision records it, whether a registration, a relocation or a verification
+// adding chunk hashes recorded the revision (decisions 0004, 0033). Hashes are
+// empty for directories and for entries that could not be read at registration
+// (decision 0010), which later revisions carry unchanged.
 #include "common/archive_path.h"
 
 #include <cstdint>

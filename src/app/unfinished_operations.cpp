@@ -186,8 +186,9 @@ std::expected<OperationsRead, IoError> read_unfinished_operations(const Reposito
         auto operation = verification_operation(verification, attempts);
         if (const auto older = older_runs.find(verification.run_id); older != older_runs.end()) {
             // A run of a version before decision 0022: its revision's counts
-            // (which include the entries unreadable at registration) and
-            // where it was registered, as its manifest's line 1 holds them.
+            // (which include the entries unreadable at registration) and the
+            // root it was read from (root_hint), as its manifest's line 1
+            // holds them.
             std::expected<ManifestHeader, std::string> header = std::unexpected(
                 "revision " + std::to_string(verification.revision) + " is not recorded");
             if (older->second) {

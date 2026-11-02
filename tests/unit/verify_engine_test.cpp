@@ -555,8 +555,8 @@ void unrepresentable_names_warn()
     CHECK(outcome && status_of(*outcome, "what?.txt") == "Unrepresentable");
 }
 
-// R-44 holds only where another system registered the revision (decision
-// 0008): on the system that registered it, a name that cannot be created
+// R-44 holds only where another system recorded the revision (created_by.os,
+// decision 0008): on the system that recorded it, a name that cannot be created
 // there existed all the same (Windows reads names from NTFS that it lets no
 // program create, such as a reserved name or a name ending in a dot or a
 // space, as Linux drivers write them), so a recorded entry that is gone is

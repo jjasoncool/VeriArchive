@@ -176,7 +176,7 @@ In the Archive List view, each row is an archive:
 | Column | Meaning |
 |---|---|
 | Label, UUID | the archive's label and identifier (only the first 8 characters of the UUID are shown) |
-| Volume, Model, Capacity | the volume label, device model and capacity recorded at registration |
+| Volume, Model, Capacity | the volume label, device model and capacity that the archive's current revision records: those of the carrier it was read from (after a relocation, the new carrier) |
 | Last FULL verify, Last verify, Overdue | as above; before the first verification, the first two read "never" |
 | Rev, Status | the current revision; REGISTERED or RETIRED |
 

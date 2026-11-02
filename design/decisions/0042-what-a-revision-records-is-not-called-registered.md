@@ -11,6 +11,7 @@ Decision 0041 found that Compare Archives called the time of a compared revision
 - A verification's words for `MediaIdentityMismatch`, "the media is not the one registered", and for what identity matching noted, "identity: the volume label differs from the one registered" (and so the capacity, the filesystem type and the device model), compare the media with the identity of the revision verified. That identity describes the carrier the revision was read from (HANDOFF §B4.3, decision 0004): a relocation records the new carrier's, and a verification adding chunk hashes the one it read.
 - The confirmation of a registration over a lost manifest says "damage since revision N was registered would not be found" of the archive's current revision, whatever recorded it.
 - The rules for a link's absolute target and for a name that cannot exist on the verifying OS (decision 0008, R-44) follow the OS that recorded the revision, its `created_by.os`, which the records and the user guides called the OS that registered it.
+- The user guides said that the Archive List's Volume, Model and Capacity are those recorded at registration, though the list shows the identity that the archive's current revision records (decision 0028, point 5).
 
 ## Decision (operator, 2026-11-02)
 
@@ -25,11 +26,12 @@ The operator chose one word for what a revision records, whatever recorded it: "
 
 ## Consequences
 
-- Decision 0008: the registering OS of its title is the OS that recorded the revision; its Names bullet says so.
+- Decision 0008: the registering OS of its title is the OS that recorded the revision; its Names bullet and its amends line say so.
 - Decision 0017: the words it quotes say so.
 - Decision 0020: its table of statuses and its bullet about Windows and Linux say so.
-- Decision 0028: its confirmation and its interface terms say so.
-- The user guides: the registration over a lost manifest, the `Unrepresentable` row of a verification's statuses and the `MetadataMismatch` row of a comparison's.
+- Decision 0028: its confirmation, the reasons for it and its interface terms say so.
+- The user guides: the Archive List's Volume, Model and Capacity, the registration over a lost manifest, the `Unrepresentable` row of a verification's statuses and the `MetadataMismatch` row of a comparison's.
+- Comments in the code and the tests that said the same say "recorded" too.
 - Tests: the words of the four notes of identity matching in the engine, each from a sample identity that differs in it, and in Chinese; the words of `MediaIdentityMismatch` in English and in Chinese; the confirmation over a lost manifest in English and in Chinese, and end to end in English. A mutation check put "registered" back in each text in turn (the four notes in the engine and in Chinese, the media's words in English and in Chinese, the confirmation in English and in Chinese), and each failed the test meant for it.
 
 ### Interface terms (decision 0017)
