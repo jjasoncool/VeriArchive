@@ -4,6 +4,7 @@
 #include "app/plain_words.h"
 #include "app/progress_estimate.h"
 #include "app/typed_path.h"
+#include "gui/ended_notification.h"
 #include "platform/platform_services.h"
 
 #include <algorithm>
@@ -364,6 +365,33 @@ private:
     std::chrono::steady_clock::time_point last_{};
 };
 
+namespace {
+
+// Says in a notification of the system that the window's operation ended,
+// unless a window of the program is the active one, where the operator reads
+// its report (decision 0043): GLib's GNotification, shown on Windows from the
+// notification area, on Linux by the desktop's notification service.
+void notify_if_away(const std::string& report)
+{
+    GApplication* application = g_application_get_default();
+    if (!application || !GTK_IS_APPLICATION(application)) {
+        return;
+    }
+    for (GList* window = gtk_application_get_windows(GTK_APPLICATION(application)); window;
+         window = window->next) {
+        if (gtk_window_is_active(GTK_WINDOW(window->data))) {
+            return;
+        }
+    }
+    GNotification* notification = g_notification_new("VeriArchive");
+    g_notification_set_body(notification, ended_notification_body(report).c_str());
+    // One at a time: the next operation's notification replaces this one.
+    g_application_send_notification(application, "operation-ended", notification);
+    g_object_unref(notification);
+}
+
+} // namespace
+
 Job::~Job()
 {
     cancel();
@@ -397,13 +425,15 @@ void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done 
         GtkWidget* bar;  // the job's reference, given back on the main thread
         std::atomic<bool>* running;
         const std::atomic<bool>* shut_down;
+        app::Text text;
+        bool notifying;
     };
     // The job keeps the bar alive until it has finished, even if the window closes.
     g_object_ref(progress_bar);
     running_.store(true);
     try {
-        thread_ = std::thread([this, text, progress_bar, counting, work = std::move(work),
-                                  done = std::move(done)]() mutable {
+        thread_ = std::thread([this, text, progress_bar, counting, work = std::move(work), done = std::move(done),
+                                  notifying = notifying_]() mutable {
             // The computer stays awake until the operation ends (decision 0043).
             const auto awake = app::keep_awake(text);
             BarProgress progress(text, progress_bar, counting);
@@ -414,7 +444,8 @@ void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done 
                 log_failure(std::string("exception in an operation: ") + error.what());
                 report = unexpected_error(error.what());
             }
-            auto* finished = new Finished{std::move(done), std::move(report), progress_bar, &running_, &shut_down_};
+            auto* finished = new Finished{
+                std::move(done), std::move(report), progress_bar, &running_, &shut_down_, text, notifying};
             g_idle_add(
                 +[](gpointer data) -> gboolean {
                     std::unique_ptr<Finished> finished(static_cast<Finished*>(data));
@@ -422,6 +453,9 @@ void Job::start(const app::Text& text, GtkWidget* progress_bar, Work work, Done 
                     if (!finished->shut_down->load()) {
                         try {
                             finished->done(finished->report);
+                            if (finished->notifying) {
+                                notify_if_away(finished->report(finished->text));
+                            }
                         } catch (const std::exception& error) {
                             log_failure(std::string("exception after an operation: ") + error.what());
                         }

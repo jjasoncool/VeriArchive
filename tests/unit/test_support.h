@@ -32,6 +32,7 @@ void platform_error_tests();
 void unicode_tests();
 void identity_tests();
 void displayed_identity_tests();
+void ended_notification_tests();
 void hash_tests();
 void merkle_tests();
 void fs_access_tests();

@@ -83,7 +83,10 @@ enum class Counting { Files, Entries };
 // One long operation at a time. `work` runs on a worker thread and returns the
 // report; `done` then runs on the main thread. Progress goes to `bar`, worded in
 // the language of `text`. While `work` runs, the computer stays awake
-// (app::keep_awake, decision 0043).
+// (app::keep_awake, decision 0043). Once `done` has run, an operation that
+// ended while no window of the program is the active one is told in a
+// notification of the system, its body the report's first two lines
+// (ended_notification_body), unless notifications are off.
 class Job {
 public:
     using Work = std::function<Report(CancelToken&, IProgressSink&)>;
@@ -99,6 +102,9 @@ public:
     // because the window it would report into is gone. For the application's
     // shutdown.
     void shut_down();
+    // Off for the screenshot mode and the smoke test, which nobody watches
+    // from another window. On the main thread, before start.
+    void set_notifying(bool notifying) { notifying_ = notifying; }
 
 private:
     class BarProgress;
@@ -106,6 +112,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> shut_down_{false};
     CancelToken cancel_;
+    bool notifying_ = true;
 };
 
 } // namespace va::gui

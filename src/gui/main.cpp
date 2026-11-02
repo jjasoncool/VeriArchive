@@ -46,6 +46,9 @@ int main(int argc, char* argv[])
     if (VERIARCHIVE_WITHOUT_SESSION_BUS && !g_getenv("DBUS_SESSION_BUS_ADDRESS")) {
         g_setenv("DBUS_SESSION_BUS_ADDRESS", "disabled:", TRUE);
     }
+    // Nobody watches the screenshot mode or the smoke test from another
+    // window: their operations end without a notification (decision 0043).
+    state.job.set_notifying(!smoke_test && !state.screenshot_folder);
     state.application = gtk_application_new("io.veriarchive.Gui", G_APPLICATION_NON_UNIQUE);
     g_signal_connect(state.application, "activate",
         G_CALLBACK(+[](GtkApplication*, gpointer data) {
