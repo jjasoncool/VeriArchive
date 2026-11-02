@@ -161,6 +161,14 @@ On the command line, Ctrl+C or Ctrl+Break stops a registration, verification or 
 - **The speed** is the average of the last three minutes.
 - **The time left is an estimate**, shown as a range. The low end of the range picks the unit: minutes while it is under an hour, hours while it is under two days, then days ("about 55-175 minutes left", "about 47-96 hours left"). It counts each file's fixed cost (opening it; on an HDD, moving the head) as well as its bytes, so a stretch of small files does not make it jump. It reads "estimating time left" during the first minute and after minutes without progress, and the range widens when the speed varies or keeps dropping (an HDD reads its inner tracks more slowly). A pause, such as the computer sleeping, does not count as slow reading. Once every file is hashed, the line shows no time left while the results are written.
 
+### While an operation runs
+
+While the window runs an operation (registering, verifying, comparing, abandoning, or upgrading the repository database), the computer does not go to sleep on its own: VeriArchive asks the system to stay awake until the operation ends. The system lists the request as "A long operation is running" (on Windows `powercfg /requests`, run as administrator; on Linux `systemd-inhibit --list`). The display may still turn off and the screen may lock; neither stops the operation. A sleep you ask for still happens: choosing Sleep, pressing the power button, or closing a laptop's lid. On Linux this needs logind (systemd); without it the computer sleeps as its settings say.
+
+When an operation of the window ends while another window is in front, VeriArchive says so in a notification of the system with the first lines of its report, for example "FULL VERIFY PASSED" and the archive's label and revision. While the VeriArchive window is in front there is no notification: the report is in front of you.
+
+The command line does neither. It often runs in scripts, in scheduled tasks and on servers, whose power settings decide. On a computer that sleeps when idle, set its power settings not to sleep (sleep after: Never) before a long command; on Linux, run the command under `systemd-inhibit`, for example `systemd-inhibit veriarchive-cli verify --full /media/archive`.
+
 ## Archive list and OVERDUE
 
 ![Archive List](images/en/02-archive-list.png)
