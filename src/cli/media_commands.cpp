@@ -1,16 +1,20 @@
 // `media list`: every volume with its filesystem identity and the physical
 // devices behind it (M2), under its mount point: on Windows its first drive
 // letter or folder path, or its GUID path where it has neither (decision
-// 0029). Needs no repository.
+// 0029), and what each device reports of its health (decision 0044). Needs
+// no repository.
 #include "cli/commands.h"
 
+#include "app/device_alerts.h"
 #include "app/session.h"
 #include "common/utf8.h"
+#include "core/engine/device_alerts.h"
 #include "core/identity/volume_json.h"
 #include "platform/media_enumerator.h"
 
 #include <format>
 #include <iostream>
+#include <map>
 
 namespace va::cli {
 namespace {
@@ -45,6 +49,11 @@ void print_volume(const app::Text& text, const VolumeInfo& volume)
                          device.bus.empty() ? "?" : device.bus)
                   << "  " << format_bytes(device.capacity_bytes)
                   << (device.rotational ? (*device.rotational ? "  hdd" : "  ssd") : "") << '\n';
+        // Decision 0044: a device alert is marked, as in a report.
+        if (device.health) {
+            std::cout << "    " << (health_alerts(*device.health) ? app::alert_mark : "")
+                      << text.format("health: {}", app::health_words(text, *device.health)) << '\n';
+        }
     }
 }
 
@@ -66,9 +75,22 @@ int media_command(const Arguments& arguments)
         print_warning(arguments.text, *elevated);
     }
     const auto enumerator = platform::make_media_enumerator();
-    const auto volumes = enumerator->volumes();
+    auto volumes = enumerator->volumes();
     if (!volumes) {
         return report_failure(arguments, {exit_code::repository, volumes.error().message});
+    }
+    // What each device reports of its health, asked once for a device that
+    // holds several volumes (decision 0044).
+    std::map<std::string, DeviceHealth> asked;
+    for (auto& volume : *volumes) {
+        for (auto& device : volume.devices) {
+            auto known = asked.find(device.device_ref);
+            if (known == asked.end()) {
+                const auto health = enumerator->device_health(device);
+                known = asked.emplace(device.device_ref, health ? *health : DeviceHealth{}).first;
+            }
+            device.health = known->second;
+        }
     }
 
     if (arguments.json) {

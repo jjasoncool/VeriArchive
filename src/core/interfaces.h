@@ -95,6 +95,13 @@ public:
     virtual std::expected<std::vector<VolumeInfo>, IoError> volumes() = 0;
     virtual std::expected<VolumeInfo, IoError> volume_for_path(
         const std::filesystem::path& path) = 0;
+    // What `device` (one of a volume's devices, by its device_ref) reports of
+    // its own health, without elevation (decision 0044): asked once at the
+    // start of a registration, a verification and a relocation, and by
+    // `media list`, never by the enumeration itself. HealthStatus::Unknown
+    // where the device or the system tells nothing; an error only where the
+    // device cannot be asked at all.
+    virtual std::expected<DeviceHealth, IoError> device_health(const PhysicalDeviceInfo& device) = 0;
 };
 
 class IRawDeviceAccess {

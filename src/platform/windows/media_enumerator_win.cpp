@@ -2,6 +2,7 @@
 // volume handles are opened with desired access 0, which is enough for the
 // identification IOCTLs used here.
 #include "platform/media_enumerator.h"
+#include "platform/windows/device_health_status.h"
 #include "platform/windows/volume_list.h"
 #include "platform/windows/win_util.h"
 
@@ -288,6 +289,33 @@ public:
                 error_from_win32(GetLastError(), "GetVolumeNameForVolumeMountPointW"));
         }
         return describe_volume(volume_name, mount_point);
+    }
+
+    // Decision 0044: the disk's health as the storage stack keeps it (what
+    // Get-PhysicalDisk shows as HealthStatus and OperationalStatus), asked of
+    // a handle opened without access rights (R-09). A disk whose driver
+    // keeps none (a USB enclosure may not) answers with an error: Unknown.
+    std::expected<DeviceHealth, IoError> device_health(const PhysicalDeviceInfo& device) override
+    {
+        if (!device.device_ref.starts_with("\\\\.\\PhysicalDrive")) {
+            return DeviceHealth{};
+        }
+        const auto units = utf8_to_utf16(device.device_ref);
+        const auto disk = open_for_query(std::wstring(units.begin(), units.end()));
+        if (!disk.valid()) {
+            return std::unexpected(error_from_win32(GetLastError(), "CreateFileW"));
+        }
+        STORAGE_PROPERTY_QUERY query{};
+        query.PropertyId = StorageDeviceManagementStatus;
+        query.QueryType = PropertyStandardQuery;
+        std::vector<std::byte> answer(4096);
+        DWORD returned = 0;
+        if (!DeviceIoControl(disk.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), answer.data(),
+                static_cast<DWORD>(answer.size()), &returned, nullptr)) {
+            return DeviceHealth{};
+        }
+        answer.resize(std::min<std::size_t>(returned, answer.size()));
+        return windows::health_from_management_status(answer);
     }
 };
 

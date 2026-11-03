@@ -101,12 +101,23 @@ public:
 };
 
 // Reports `volume` for every path, except paths below the mount point of one of
-// `extra_volumes` (the deepest match wins), like real nested mounts.
+// `extra_volumes` (the deepest match wins), like real nested mounts. A
+// device's health is what `health` holds for its serial, Unknown for every
+// other device (decision 0044); `health_asked` counts the questions.
 class FakeMediaEnumerator final : public va::IMediaEnumerator {
 public:
     va::VolumeInfo volume;
     std::vector<va::VolumeInfo> extra_volumes;
     std::optional<va::IoError> error;
+    std::map<std::string, va::DeviceHealth> health;
+    std::size_t health_asked = 0;
+
+    std::expected<va::DeviceHealth, va::IoError> device_health(const va::PhysicalDeviceInfo& device) override
+    {
+        ++health_asked;
+        const auto found = health.find(device.serial);
+        return found == health.end() ? va::DeviceHealth{} : found->second;
+    }
 
     std::expected<std::vector<va::VolumeInfo>, va::IoError> volumes() override
     {

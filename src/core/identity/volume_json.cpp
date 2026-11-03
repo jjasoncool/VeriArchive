@@ -17,6 +17,10 @@ nlohmann::json volume_to_json(const VolumeInfo& volume)
             {"bus", device.bus},
         };
         entry["rotational"] = device.rotational ? nlohmann::json(*device.rotational) : nullptr;
+        // Decision 0044: kept where the operation asked for it.
+        if (device.health) {
+            entry["health"] = health_to_json(*device.health);
+        }
         devices.push_back(std::move(entry));
     }
     return {
@@ -57,6 +61,9 @@ VolumeInfo volume_from_json(const nlohmann::json& json)
             if (entry.contains("rotational") && entry["rotational"].is_boolean()) {
                 device.rotational = entry["rotational"].get<bool>();
             }
+            if (entry.contains("health") && entry["health"].is_object()) {
+                device.health = health_from_json(entry["health"]);
+            }
             volume.devices.push_back(std::move(device));
         }
     }
@@ -66,6 +73,45 @@ VolumeInfo volume_from_json(const nlohmann::json& json)
 std::string volume_to_json_text(const VolumeInfo& volume)
 {
     return volume_to_json(volume).dump();
+}
+
+std::string_view health_status_code(HealthStatus status)
+{
+    switch (status) {
+    case HealthStatus::Healthy:
+        return "healthy";
+    case HealthStatus::Warning:
+        return "warning";
+    case HealthStatus::Unhealthy:
+        return "unhealthy";
+    case HealthStatus::Unknown:
+        break;
+    }
+    return "unknown";
+}
+
+nlohmann::json health_to_json(const DeviceHealth& health)
+{
+    return {{"status", health_status_code(health.status)}, {"conditions", health.conditions}};
+}
+
+DeviceHealth health_from_json(const nlohmann::json& json)
+{
+    DeviceHealth health;
+    const auto status = json.value("status", std::string{});
+    for (const auto known : {HealthStatus::Healthy, HealthStatus::Warning, HealthStatus::Unhealthy}) {
+        if (status == health_status_code(known)) {
+            health.status = known;
+        }
+    }
+    if (const auto conditions = json.find("conditions"); conditions != json.end() && conditions->is_array()) {
+        for (const auto& condition : *conditions) {
+            if (condition.is_string()) {
+                health.conditions.push_back(condition.get<std::string>());
+            }
+        }
+    }
+    return health;
 }
 
 } // namespace va

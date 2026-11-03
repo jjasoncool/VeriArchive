@@ -7,8 +7,9 @@
 // The udev database files are read directly (the same data libudev returns).
 // Containers and minimal systems have no udev database; decision 0021 then
 // takes the kernel filesystem id (statfs) and, for SATA devices, the SCSI
-// serial page (sysfs).
+// serial page (sysfs). A device's health comes from udisks2 (decision 0044).
 #include "platform/media_enumerator.h"
+#include "platform/linux/device_health_linux.h"
 #include "platform/linux/mountinfo.h"
 #include "platform/linux/posix_util.h"
 #include "platform/linux/vpd.h"
@@ -492,6 +493,15 @@ public:
             return describe_virtual_mount(*mount);
         }
         return describe_mount(*mount, *number);
+    }
+
+    // Decision 0044: what udisks2 read of the drive's SMART, where it runs.
+    std::expected<DeviceHealth, IoError> device_health(const PhysicalDeviceInfo& device) override
+    {
+        if (!device.device_ref.starts_with("/dev/")) {
+            return DeviceHealth{};
+        }
+        return linux_health::udisks_device_health(device.device_ref);
     }
 };
 

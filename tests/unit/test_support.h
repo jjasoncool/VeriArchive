@@ -31,6 +31,7 @@ void platform_tests();
 void platform_error_tests();
 void unicode_tests();
 void identity_tests();
+void device_health_tests();
 void displayed_identity_tests();
 void ended_notification_tests();
 void hash_tests();

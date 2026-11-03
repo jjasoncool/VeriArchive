@@ -2219,6 +2219,10 @@ public:
     {
         return inner_.volume_for_path(path);
     }
+    std::expected<va::DeviceHealth, va::IoError> device_health(const va::PhysicalDeviceInfo& device) override
+    {
+        return inner_.device_health(device);
+    }
 
 private:
     va::IMediaEnumerator& inner_;

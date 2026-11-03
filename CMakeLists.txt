@@ -79,6 +79,7 @@ add_library(veriarchive_core
     src/core/engine/compare_archives.cpp
     src/core/engine/candidates.cpp
     src/core/engine/comparison.cpp
+    src/core/engine/device_alerts.cpp
     src/core/engine/item_rules.cpp
     src/core/engine/rebuild_index.cpp
     src/core/engine/recorded_manifest.cpp
@@ -121,6 +122,7 @@ target_link_libraries(veriarchive_platform PUBLIC VeriArchive::core)
 
 if(WIN32)
     target_sources(veriarchive_platform PRIVATE
+        src/platform/windows/device_health_status.cpp
         src/platform/windows/file_writer_win.cpp
         src/platform/windows/fs_access_win.cpp
         src/platform/windows/interrupt_win.cpp
@@ -137,6 +139,7 @@ if(WIN32)
     target_link_libraries(veriarchive_platform PRIVATE mpr user32)
 elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
+        src/platform/linux/device_health_linux.cpp
         src/platform/linux/file_writer_linux.cpp
         src/platform/linux/fs_access_linux.cpp
         src/platform/linux/interrupt_linux.cpp
@@ -146,9 +149,11 @@ elseif(UNIX AND NOT APPLE)
         src/platform/linux/platform_services_linux.cpp
         src/platform/linux/posix_util.cpp
         src/platform/linux/process_table_linux.cpp
+        src/platform/linux/udisks_health.cpp
         src/platform/linux/vpd.cpp
     )
-    # GDBus: the inhibitor lock that keeps the computer awake (keep_awake_linux.cpp).
+    # GDBus: the inhibitor lock that keeps the computer awake (keep_awake_linux.cpp)
+    # and the health that udisks2 reads of a drive (device_health_linux.cpp).
     pkg_check_modules(GIO_UNIX REQUIRED IMPORTED_TARGET gio-unix-2.0>=2.72)
     target_link_libraries(veriarchive_platform PRIVATE PkgConfig::GIO_UNIX)
 else()
@@ -158,6 +163,7 @@ endif()
 # Composition-root helpers shared by the CLI and the GUI (R-05).
 add_library(veriarchive_app
     src/app/adding_chunk_hashes.cpp
+    src/app/device_alerts.cpp
     src/app/history.cpp
     src/app/local_time.cpp
     src/app/plain_words.cpp
@@ -293,6 +299,7 @@ if(BUILD_TESTING)
         tests/unit/archive_store_test.cpp
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
+        tests/unit/device_health_test.cpp
         tests/unit/displayed_identity_test.cpp
         tests/unit/ended_notification_test.cpp
         tests/unit/file_writer_test.cpp
@@ -342,12 +349,14 @@ if(BUILD_TESTING)
     target_compile_definitions(veriarchive_tests PRIVATE
         VERIARCHIVE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
     if(NOT (UNIX AND NOT APPLE))
-        # Pure C++ parser; tested on every OS although only Linux uses it.
-        target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp src/platform/linux/vpd.cpp)
+        # Pure C++ parsers; tested on every OS although only Linux uses them.
+        target_sources(veriarchive_tests PRIVATE src/platform/linux/mountinfo.cpp src/platform/linux/udisks_health.cpp
+            src/platform/linux/vpd.cpp)
     endif()
     if(NOT WIN32)
-        # Pure C++ path handling; tested on every OS although only Windows uses it.
-        target_sources(veriarchive_tests PRIVATE src/platform/windows/long_path.cpp src/platform/windows/root_kind.cpp
+        # Pure C++ path handling and parsing; tested on every OS although only Windows uses it.
+        target_sources(veriarchive_tests PRIVATE src/platform/windows/device_health_status.cpp
+            src/platform/windows/long_path.cpp src/platform/windows/root_kind.cpp
             src/platform/windows/subst_drive.cpp)
     endif()
     # The GUI's choice of the media identity it shows, and the body of its

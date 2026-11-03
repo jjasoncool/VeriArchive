@@ -11,6 +11,7 @@ int main()
     platform_error_tests();
     unicode_tests();
     identity_tests();
+    device_health_tests();
     displayed_identity_tests();
     ended_notification_tests();
     hash_tests();
