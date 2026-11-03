@@ -43,4 +43,17 @@ nlohmann::json device_health_json(const std::vector<PhysicalDeviceInfo>& devices
 // none for a run recorded before decision 0044, or that read no media.
 std::vector<PhysicalDeviceInfo> recorded_device_health(std::string_view counts_json);
 
+// The device alerts that a recorded run gives, from its counts: a device
+// whose health alerts, and a read markedly slower than the one it was
+// compared with (read_speed.h).
+struct RunAlerts {
+    bool health = false;
+    bool slower = false;
+    bool any() const { return health || slower; }
+};
+RunAlerts run_alerts(std::string_view counts_json);
+
+// As --json gives them: ["health", "slower"], each that is there.
+nlohmann::json run_alerts_json(const RunAlerts& alerts);
+
 } // namespace va

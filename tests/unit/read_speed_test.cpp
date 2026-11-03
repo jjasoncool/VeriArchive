@@ -1,7 +1,8 @@
 // Read speed (decision 0044): the time spent on each hundredth of the
 // content as a FULL verification reads it, how two reads of it compare, what
 // a run's counts keep of them, which earlier verification a finished one is
-// compared with, and how reports word it. Every archive, device, run and time
+// compared with, how reports word it, and the marks of a run's device alerts
+// in the history and the Archive List. Every archive, device, run and time
 // here is sample data made up for the test.
 #include "test_support.h"
 
@@ -368,9 +369,61 @@ void verifications_are_compared()
         CHECK(speed && speed->devices == std::vector<std::string>{"SERIAL-1"} &&
               speed->volume == "1111222233334444");
     }
+    // The Archive List marks the archive while its last FULL verification
+    // read slower, and no longer once a later one did not.
+    const auto alerts_now = [&] {
+        const auto statuses = va::archive_statuses(fixture.store, *fixture.repository.files,
+            fixture.repository.context.repo, va::Policy{}, std::chrono::floor<std::chrono::seconds>(
+                                                             std::chrono::system_clock::now()));
+        return statuses && statuses->size() == 1 ? va::app::archive_alerts(statuses->front()) : va::RunAlerts{true, true};
+    };
+    CHECK(alerts_now().slower && !alerts_now().health);
     const auto third = verify(1000s);
     CHECK(third && third->read_compared && first && third->read_compared->baseline_run == first->run_id &&
           third->read_compared->slower_percent == 0 && !third->read_compared->alerts());
+    CHECK(!alerts_now().any());
+}
+
+// A run's device alerts from its counts, as the history and the Archive List
+// show them, and the archive's from its latest runs.
+void marks()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    va::SpeedComparison slower;
+    slower.whole_compared = true;
+    slower.slower_percent = 40;
+    const auto slow = counts_with(sample_speed(20'000), slower);
+    const auto failing = nlohmann::json{{"items", nlohmann::json::object()},
+        {"device_health", {{{"model", "SAMPLE DISK"}, {"serial", "SAMPLE"}, {"wwn", ""},
+                              {"health", {{"status", "warning"}, {"conditions", {"predicting-failure"}}}}}}}}
+                             .dump();
+    const auto healthy = nlohmann::json{{"items", nlohmann::json::object()},
+        {"device_health", {{{"model", "SAMPLE DISK"}, {"serial", "SAMPLE"}, {"wwn", ""},
+                              {"health", {{"status", "healthy"}, {"conditions", nlohmann::json::array()}}}}}}}
+                             .dump();
+    CHECK(va::run_alerts(slow).slower && !va::run_alerts(slow).health);
+    CHECK(va::run_alerts(failing).health && !va::run_alerts(failing).slower);
+    CHECK(!va::run_alerts(healthy).any() && !va::run_alerts(R"({"items":{}})").any() && !va::run_alerts("").any());
+    CHECK(va::run_alerts_json({true, true}) == nlohmann::json::array({"health", "slower"}));
+    CHECK(va::run_alerts_json({}) == nlohmann::json::array());
+    CHECK((va::app::alert_marks(english, {true, true}) ==
+           std::vector<std::string>{"⚠ device reports a problem", "⚠ reading slower"}));
+    CHECK((va::app::alert_marks(chinese, {true, true}) ==
+           std::vector<std::string>{"⚠ 裝置回報異常", "⚠ 讀取變慢"}));
+    CHECK(va::app::alert_marks(english, {}).empty());
+
+    // The health of the latest run, an interrupted one included; the read of
+    // the latest FULL verification that reached a result.
+    va::ArchiveStatus status;
+    status.last_full = sample_run("run-1", "PASSED", slow);
+    status.last_run = sample_run("run-2", "INCOMPLETE", failing);
+    const auto both = va::app::archive_alerts(status);
+    CHECK(both.health && both.slower);
+    status.last_run = sample_run("run-3", "PASSED", healthy);
+    status.last_full = status.last_run;
+    CHECK(!va::app::archive_alerts(status).any());
+    CHECK(!va::app::archive_alerts(va::ArchiveStatus{}).any());
 }
 
 void words()
@@ -432,5 +485,6 @@ void read_speed_tests()
     what_the_counts_keep();
     which_verification_is_compared_with();
     verifications_are_compared();
+    marks();
     words();
 }

@@ -5,6 +5,8 @@
 // --json keep the codes and numbers.
 #include "app/text.h"
 #include "common/types.h"
+#include "core/engine/archive_status.h"
+#include "core/engine/device_alerts.h"
 #include "core/engine/read_speed.h"
 
 #include <cstdint>
@@ -54,5 +56,17 @@ std::optional<std::string> read_speed_words(
 // it was compared with, led by alert_mark: how much slower, where in the
 // content, and what else makes reading slower; nothing where it did not.
 std::optional<std::string> slower_alert_line(const Text& text, const SpeedComparison& compared);
+
+// The short marks of a run's device alerts, led by alert_mark: "⚠ device
+// reports a problem", "⚠ reading slower"; none for a run without any. Beside
+// each run of the history.
+std::vector<std::string> alert_marks(const Text& text, const RunAlerts& alerts);
+
+// The device alerts that the Archive List marks an archive with, beside its
+// last verification, until a later one gives none: the health that the
+// devices reported in its latest run (an INCOMPLETE one included: it asked
+// them as it started), and the read of its latest FULL verification that
+// reached a result.
+RunAlerts archive_alerts(const ArchiveStatus& status);
 
 } // namespace va::app

@@ -2,6 +2,7 @@
 // of the hash chain that protects the history (R-18, R-90).
 #include "gui/gui_app.h"
 
+#include "app/device_alerts.h"
 #include "app/history.h"
 #include "app/local_time.h"
 #include "app/plain_words.h"
@@ -67,11 +68,16 @@ void show_runs(GuiState& state)
     if (!runs) {
         return;
     }
-    // The runs of a relocation say so in a last column (decision 0026), shown
-    // only for an archive that has such runs.
+    // The runs of a relocation say so in a last column (decision 0026), and
+    // so do the device alerts of a run (decision 0044), shown only for an
+    // archive that has such runs.
     std::vector<std::string> notes;
     for (const auto& run : *runs) {
-        notes.push_back(app::history_note(text, run));
+        auto note = app::history_note(text, run);
+        for (const auto& mark : app::alert_marks(text, run_alerts(run.counts_json))) {
+            note += (note.empty() ? "" : "\n") + mark;
+        }
+        notes.push_back(std::move(note));
     }
     const int columns = std::ranges::any_of(notes, [](const auto& note) { return !note.empty(); }) ? 8 : 7;
     const char* headers[] = {"Finished", "Mode", "Result", "Revision", "Bytes matched", "Failures", "Run", "Note"};

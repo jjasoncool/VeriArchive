@@ -229,6 +229,9 @@ constexpr CatalogEntry entries[] = {
     {"device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
     {"Device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
     // src/app/device_alerts.cpp: how fast a FULL verification read (decision 0044).
+    // The marks of a run's device alerts (Archive List, history).
+    {"device reports a problem", "裝置回報異常"},
+    {"reading slower", "讀取變慢"},
     {"read speed: {}", "讀取速度：{}", Match::FormatOnly},
     {"Read speed: {}", "讀取速度：{}", Match::FormatOnly},
     {"{}; the last FULL verification of this archive on this device read {} ({})",

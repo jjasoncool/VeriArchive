@@ -9,6 +9,7 @@
 
 #include "app/adding_chunk_hashes.h"
 #include "app/chunk_size.h"
+#include "app/device_alerts.h"
 #include "app/history.h"
 #include "app/local_time.h"
 #include "app/plain_words.h"
@@ -242,6 +243,15 @@ const UnusableManifest* earlier_problem(const ArchiveStatus& status, std::uint32
     return found == status.earlier_unusable.end() ? nullptr : &*found;
 }
 
+// Decision 0044: each device alert of the archive's last verification, on a
+// line of its own below it, until a later verification gives none.
+void print_alert_marks(const app::Text& text, const ArchiveStatus& status, const std::string& indent)
+{
+    for (const auto& mark : app::alert_marks(text, app::archive_alerts(status))) {
+        std::cout << indent << mark << '\n';
+    }
+}
+
 nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchive& unfinished)
 {
     nlohmann::json json{
@@ -256,6 +266,8 @@ nlohmann::json status_json(const ArchiveStatus& status, const UnfinishedByArchiv
         {"last_verify", run_json(status.last_any)},
         {"full_verify_overdue", status.full_overdue},
         {"verify_overdue", status.any_overdue},
+        // Decision 0044: the device alerts of its last verification.
+        {"device_alerts", run_alerts_json(app::archive_alerts(status))},
     };
     if (status.header) {
         const auto& identity = status.header->identity;
@@ -410,6 +422,7 @@ int list(const Arguments& arguments, Opened& opened)
         print_manifest_problem(text, status, "    ");
         std::cout << "    " << last_verify_line(text, status.last_full, false, status.full_overdue) << "\n    "
                   << last_verify_line(text, status.last_any, true, status.any_overdue) << '\n';
+        print_alert_marks(text, status, "    ");
         print_unfinished(text, *unfinished, status, "    ");
     }
     return listed_code(opened.statuses);
@@ -502,6 +515,7 @@ int show(const Arguments& arguments, Opened& opened)
     print_manifest_problem(text, *status, "  ");
     std::cout << "  " << last_verify_line(text, status->last_full, false, status->full_overdue) << "\n  "
               << last_verify_line(text, status->last_any, true, status->any_overdue) << '\n';
+    print_alert_marks(text, *status, "  ");
     print_unfinished(text, *unfinished, *status, "  ");
     std::cout << "  " << text("revisions:") << '\n';
     for (std::size_t index = 0; index < revisions->size(); ++index) {
@@ -1157,6 +1171,7 @@ int history_command(const Arguments& arguments)
                                              {"from_revision", part->from_revision},
                                              {"interrupted_attempt", part->interrupted_attempt}}
                                        : nlohmann::json(nullptr);
+            entry["device_alerts"] = run_alerts_json(run_alerts(run.counts_json));
             list.push_back(std::move(entry));
         }
         print_json({{"archive_uuid", status->archive.archive_uuid}, {"runs", std::move(list)}});
@@ -1168,7 +1183,11 @@ int history_command(const Arguments& arguments)
         std::cout << "  " << text("never verified") << '\n';
     }
     for (const auto& run : *runs) {
-        const auto note = app::history_note(text, run);
+        auto note = app::history_note(text, run);
+        // Decision 0044: the run's device alerts, after what else it is.
+        for (const auto& mark : app::alert_marks(text, run_alerts(run.counts_json))) {
+            note += (note.empty() ? "" : "  ") + mark;
+        }
         std::cout << "  "
                   << text.format("{}  {} VERIFY {}  r{}  {}", app::local_time(run.finished, text),
                          text(run.mode), text(run.result), run.revision,

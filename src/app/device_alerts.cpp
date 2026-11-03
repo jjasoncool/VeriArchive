@@ -141,4 +141,28 @@ std::optional<std::string> slower_alert_line(const Text& text, const SpeedCompar
                 "the same time, or another device read through the same port or hub, also makes reading slower.");
 }
 
+std::vector<std::string> alert_marks(const Text& text, const RunAlerts& alerts)
+{
+    std::vector<std::string> marks;
+    if (alerts.health) {
+        marks.push_back(std::string(alert_mark) + text("device reports a problem"));
+    }
+    if (alerts.slower) {
+        marks.push_back(std::string(alert_mark) + text("reading slower"));
+    }
+    return marks;
+}
+
+RunAlerts archive_alerts(const ArchiveStatus& status)
+{
+    RunAlerts alerts;
+    if (status.last_run) {
+        alerts.health = run_alerts(status.last_run->counts_json).health;
+    }
+    if (status.last_full) {
+        alerts.slower = run_alerts(status.last_full->counts_json).slower;
+    }
+    return alerts;
+}
+
 } // namespace va::app

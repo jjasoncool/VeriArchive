@@ -13,6 +13,7 @@
 // still run it.
 #include "gui/gui_app.h"
 
+#include "app/device_alerts.h"
 #include "app/local_time.h"
 #include "app/plain_words.h"
 #include "core/engine/abandon_registration.h"
@@ -1146,14 +1147,21 @@ void refresh_archive_list(GuiState& state)
             }
         }
         const bool overdue = status.full_overdue || status.any_overdue;
-        const bool failed = status.last_any && status.last_any->result == "FAILED";
+        // Decision 0044: a device alert of the last verification shows beside
+        // it, as a failure does, until a later one gives none.
+        const auto marks = app::alert_marks(text, app::archive_alerts(status));
+        const bool failed = (status.last_any && status.last_any->result == "FAILED") || !marks.empty();
+        auto last_verify = run_text(text, status.last_any, true);
+        for (const auto& mark : marks) {
+            last_verify += "\n" + mark;
+        }
         gtk_grid_attach(GTK_GRID(view.grid), cell(display_label(status), true), 0, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(status.archive.archive_uuid.substr(0, 8)), 1, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(volume), 2, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(model), 3, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(capacity), 4, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(run_text(text, status.last_full, false)), 5, row, 1, 1);
-        gtk_grid_attach(GTK_GRID(view.grid), cell(run_text(text, status.last_any, true), false, failed), 6, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(view.grid), cell(last_verify, false, failed), 6, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(overdue ? text("OVERDUE") : "", false, overdue), 7, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell("r" + std::to_string(status.archive.current_revision)), 8, row, 1, 1);
         gtk_grid_attach(GTK_GRID(view.grid), cell(text(status.archive.status)), 9, row, 1, 1);

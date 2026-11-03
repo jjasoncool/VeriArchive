@@ -1,5 +1,6 @@
 #include "core/engine/device_alerts.h"
 
+#include "core/engine/read_speed.h"
 #include "core/identity/volume_json.h"
 
 #include <algorithm>
@@ -71,6 +72,24 @@ std::vector<PhysicalDeviceInfo> recorded_device_health(std::string_view counts_j
         devices.push_back(std::move(device));
     }
     return devices;
+}
+
+RunAlerts run_alerts(std::string_view counts_json)
+{
+    const auto compared = recorded_speed_comparison(counts_json);
+    return {any_health_alerts(recorded_device_health(counts_json)), compared && compared->alerts()};
+}
+
+nlohmann::json run_alerts_json(const RunAlerts& alerts)
+{
+    auto codes = nlohmann::json::array();
+    if (alerts.health) {
+        codes.push_back("health");
+    }
+    if (alerts.slower) {
+        codes.push_back("slower");
+    }
+    return codes;
 }
 
 } // namespace va
