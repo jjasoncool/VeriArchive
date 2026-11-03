@@ -178,6 +178,17 @@ VeriArchive watches for signs that a device may be failing. Such a sign, a **dev
 
 The Archive List then shows "⚠ device reports a problem" or "⚠ reading slower" beside the archive's last verification, until a later verification gives none, and the Verification History marks the run. What to do: copy the archives on that device to another device soon, and verify the copies.
 
+### Jobs
+
+Every registration, verification and comparison started in the window runs as a **job** in the background, so you can start the next one at once: register a second disk while the first is verified, or compare two archives meanwhile. The view that started a job shows its progress and report, as before.
+
+- **Jobs that read the same device wait for one another**, in the order you started them, and the page says which one they wait for ("Waiting: Register H:\ reads the same device"). A disk read in two places at once reads both slower than one after the other. Jobs of different devices run at once; a comparison reads no disk and never waits.
+- The **Jobs** page lists every job of the window, newest first: what it does, how far it is (share done, speed, time left), its device alert if any, and **Stop**. **Details** opens a window with the same and, once the job has ended, its report. **Clear ended jobs** removes the ended ones from the list.
+- **Stop** is like Cancel: the job ends, and it can be resumed later (Resume interrupted run in Verify Archive, Resume in the Archive List) without reading again what it read.
+- **Closing the window while jobs run asks first.** Stop them and close stops every job, each resumable; Keep the window open lets them go on.
+- While a job works on an unfinished operation, that operation cannot be abandoned or resumed from the Archive List: stop the job in Jobs first.
+- For two disks at once, connect them to different ports, or to different USB controllers: two disks behind one USB hub share its speed.
+
 ## Archive list and OVERDUE
 
 ![Archive List](images/en/02-archive-list.png)
