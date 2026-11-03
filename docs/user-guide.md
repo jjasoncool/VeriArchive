@@ -169,6 +169,15 @@ When an operation of the window ends while another window is in front, VeriArchi
 
 The command line does neither. It often runs in scripts, in scheduled tasks and on servers, whose power settings decide. On a computer that sleeps when idle, set its power settings not to sleep (sleep after: Never) before a long command; on Linux, run the command under `systemd-inhibit`, for example `systemd-inhibit veriarchive-cli verify --full /media/archive`.
 
+### Device alerts
+
+VeriArchive watches for signs that a device may be failing. Such a sign, a **device alert**, is shown in red and led by ⚠, beside the result, which it never changes: a FULL VERIFY PASSED stays PASSED, with the same exit code.
+
+- **The device's own health.** When a registration, a verification or a relocation starts, VeriArchive asks each device of the volume what it reports of its own health, without administrator rights: on Windows, the health that Windows keeps of the disk (what `Get-PhysicalDisk` shows); on Linux, what udisks2 read of its SMART data. A device that reports a warning or a failure, such as "predicting failure" or "bad sectors", gives a device alert at once: in the window above the progress, on the command line before the progress. The operation goes on; cancel it if you would rather copy the archives off that device first. Many USB enclosures pass no health on: the report then says "cannot be read", which is no alert. `veriarchive-cli media list` shows each device's health at any time.
+- **Reading slower.** A FULL verification times how fast it reads each hundredth of the archive's content, and compares that with the last FULL verification of the same archive on the same device whose speed was usual. The whole read 30% slower or more, or a part of the content 50% slower or more, is a device alert, which says where ("from 0% to 12% of the content, 55% slower"). Another program reading the same device, or another device read through the same port or hub at the same time, also makes reading slower: to tell, verify the device again with nothing else reading. Every FULL verification's report gives its read speed ("Read speed: 182 MiB/s; the last FULL verification of this archive on this device read 180 MiB/s"). A verification is compared only with one of the same content on the same device: the first FULL verification with this version of VeriArchive, after moving the disk to another enclosure, after a relocation, or after a new revision with other content, is compared with nothing.
+
+The Archive List then shows "⚠ device reports a problem" or "⚠ reading slower" beside the archive's last verification, until a later verification gives none, and the Verification History marks the run. What to do: copy the archives on that device to another device soon, and verify the copies.
+
 ## Archive list and OVERDUE
 
 ![Archive List](images/en/02-archive-list.png)

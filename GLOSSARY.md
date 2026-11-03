@@ -87,6 +87,10 @@ _Avoid_: using it as a synonym for archive
 **Media evidence**:
 One observation of media at register or verify time, compared against registered archives to decide which archive is present.
 
+**Device alert**:
+A sign that a device may be failing, told beside a run result and never changing it: the device reports its own health as failing, or a FULL verification read the archive markedly slower than the last usual one on that device. It stays marked beside the archive's last verification until a later one gives none. In the interface: 裝置警訊.
+_Avoid_: warning (a warning caps the run result at PASSED_WITH_WARNINGS), device error
+
 ### Bookkeeping
 
 **Repository**:
