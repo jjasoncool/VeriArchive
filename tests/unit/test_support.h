@@ -48,6 +48,7 @@ void sha256sums_tests();
 void rebuild_index_tests();
 void transfer_tests();
 void relocate_tests();
+void read_speed_tests();
 void text_tests();
 void local_time_tests();
 void session_tests();

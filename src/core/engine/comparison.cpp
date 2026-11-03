@@ -448,6 +448,27 @@ ComparisonResult compare_with_manifest(
         const auto& scanned_file = *to_hash[index].second;
         jobs.push_back({index, scanned_file.native, scanned_file.entry.size.value_or(0)});
     }
+    // Decision 0044: the time spent on each hundredth of the revision's
+    // content (every file and stream it records with hashes, in canonical
+    // order) as the files are read, a resumed run's skipped files in their
+    // place.
+    std::vector<std::uint64_t> content_offsets;  // by the index of the recorded entry
+    content_offsets.reserve(recorded.size());
+    std::uint64_t content_bytes = 0;
+    for (const auto& entry : recorded) {
+        content_offsets.push_back(content_bytes);
+        if ((entry.type == 'f' || entry.type == 's') && !entry.b3.empty()) {
+            content_bytes += entry.size.value_or(0);
+        }
+    }
+    std::vector<ReadSpeedMeter::File> read_files;
+    read_files.reserve(to_hash.size());
+    for (const auto& [was, now] : to_hash) {
+        read_files.push_back({content_offsets[static_cast<std::size_t>(was - recorded.data())],
+            was->b3.empty() ? 0 : was->size.value_or(0), now->entry.size.value_or(0)});
+    }
+    ReadSpeedMeter meter(progress, content_bytes, std::move(read_files), input.clock);
+    result.content_bytes = content_bytes;
     HashPipelineOptions hash_options;
     hash_options.readers = default_reader_count(input.rotational);
     // Compared by chunk, a file's chunk hashes come from the read that hashes
@@ -497,7 +518,8 @@ ComparisonResult compare_with_manifest(
         held.clear();
     };
 
-    const auto hashed = hash_files(files, jobs, hash_options, cancel, progress, [&](HashResult&& hash) {
+    meter.start();
+    const auto hashed = hash_files(files, jobs, hash_options, cancel, meter, [&](HashResult&& hash) {
         const auto& was = *to_hash[hash.id].first;
         const auto& is = to_hash[hash.id].second->entry;
         const bool known = !was.unreadable.empty(); // decision 0010
@@ -571,6 +593,7 @@ ComparisonResult compare_with_manifest(
         }
         return true;
     });
+    result.read_parts = meter.finish();
     // The last matches, also of a run that stops: a resume skips them.
     if (!flush_checkpoint() || !hashed) {
         result.incomplete = true;

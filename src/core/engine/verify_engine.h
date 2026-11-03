@@ -11,6 +11,7 @@
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/candidates.h"
 #include "core/engine/device_alerts.h"
+#include "core/engine/read_speed.h"
 #include "core/identity/matcher.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
@@ -40,6 +41,9 @@ struct VerifyRequest {
     std::uint64_t chunk_size = default_chunk_size;
     // Decision 0044: told of the devices' health before the archive is read.
     DevicesObserved devices_observed = {};
+    // The clock that times the read of each hundredth of the content
+    // (decision 0044); unset, the steady clock. Tests give their own.
+    ReadSpeedMeter::Clock read_clock = {};
 };
 
 struct VerifyServices {
@@ -70,6 +74,13 @@ struct VerifyOutcome {
     // run started (decision 0044): a device alert is told beside the result
     // and never changes it. Empty where the run read no media.
     std::vector<PhysicalDeviceInfo> devices;
+    // Decision 0044, once the verification reached a result: how fast it
+    // read the content, with the runs it resumed, and how that compares with
+    // the last FULL verification of the archive on this device whose speed
+    // was as usual; reading markedly slower is a device alert. Nothing where
+    // it read nothing, or the history holds nothing to compare with.
+    std::optional<ReadSpeed> read_speed;
+    std::optional<SpeedComparison> read_compared;
     // Informational, never part of the result (decision 0006): "driver:
     // ntfs-3g" where a FUSE program read the media instead of the kernel's
     // driver of its format.

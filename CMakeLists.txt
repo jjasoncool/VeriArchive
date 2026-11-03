@@ -81,6 +81,7 @@ add_library(veriarchive_core
     src/core/engine/comparison.cpp
     src/core/engine/device_alerts.cpp
     src/core/engine/item_rules.cpp
+    src/core/engine/read_speed.cpp
     src/core/engine/rebuild_index.cpp
     src/core/engine/recorded_manifest.cpp
     src/core/engine/register_engine.cpp
@@ -314,6 +315,7 @@ if(BUILD_TESTING)
         tests/unit/manifest_test.cpp
         tests/unit/merkle_test.cpp
         tests/unit/plain_words_test.cpp
+        tests/unit/read_speed_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
         tests/unit/vpd_test.cpp

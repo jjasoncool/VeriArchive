@@ -2,6 +2,7 @@
 // Compares a validated manifest with what is on the media now: scan, merge the
 // two sorted entry lists (R-43), re-hash every recorded file, and classify each
 // entry with an item status (§A6). Used by verification and by relocation.
+#include "core/engine/read_speed.h"
 #include "core/engine/volume_watch.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
@@ -66,6 +67,9 @@ struct ComparisonInput {
     // file was read. Unset, only an error that names a removed device stops
     // the comparison.
     VolumeWatch* watch = nullptr;
+    // The clock that times the read of each hundredth of the content
+    // (decision 0044); unset, the steady clock. Tests give their own.
+    ReadSpeedMeter::Clock clock = {};
 };
 
 struct ComparisonResult {
@@ -88,6 +92,11 @@ struct ComparisonResult {
     // (decision 0010): the entries of a relocated revision (decisions 0004,
     // 0032). Canonical order.
     std::vector<Entry> current_entries;
+    // Decision 0044: the revision's content in bytes (every file and stream
+    // it records with hashes), and the time spent reading each hundredth of
+    // it that this comparison read, resumed files being skipped.
+    std::uint64_t content_bytes = 0;
+    std::vector<ReadPart> read_parts;
 };
 
 ComparisonResult compare_with_manifest(

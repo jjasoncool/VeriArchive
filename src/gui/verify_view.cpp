@@ -37,6 +37,11 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
     for (const auto& line : app::health_alert_lines(text, outcome.devices)) {
         body += line + "\n";
     }
+    if (outcome.read_compared) {
+        if (const auto line = app::slower_alert_line(text, *outcome.read_compared)) {
+            body += *line + "\n";
+        }
+    }
     if (!outcome.media_read) {
         // Decision 0028: failed on its manifest before the media was looked for.
         body += text("Media: not read, as the manifest of this revision cannot be used") + "\n";
@@ -48,7 +53,11 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
         }
         body += text.format("Coverage: {} of {} registered bytes read and matched",
                     format_bytes(outcome.coverage_bytes), format_bytes(outcome.registered_bytes)) +
-                "\n" + text("Items:");
+                "\n";
+        if (const auto speed = app::read_speed_words(text, outcome.read_speed, outcome.read_compared)) {
+            body += text.format("Read speed: {}", *speed) + "\n";
+        }
+        body += text("Items:");
         for (const auto& [status, count] : outcome.counts) {
             body += "  " + text(status) + " " + std::to_string(count);
         }

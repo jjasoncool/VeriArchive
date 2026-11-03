@@ -29,6 +29,7 @@ int main()
     rebuild_index_tests();
     transfer_tests();
     relocate_tests();
+    read_speed_tests();
     text_tests();
     local_time_tests();
     session_tests();

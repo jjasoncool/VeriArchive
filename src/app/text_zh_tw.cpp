@@ -228,6 +228,23 @@ constexpr CatalogEntry entries[] = {
         "裝置警訊：{} 回報的健康狀態為「{}」。請盡快把其中的封存複製到另一個裝置，並驗證這些副本。", Match::FormatOnly},
     {"device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
     {"Device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
+    // src/app/device_alerts.cpp: how fast a FULL verification read (decision 0044).
+    {"read speed: {}", "讀取速度：{}", Match::FormatOnly},
+    {"Read speed: {}", "讀取速度：{}", Match::FormatOnly},
+    {"{}; the last FULL verification of this archive on this device read {} ({})",
+        "{}；此封存上次在此裝置上的完整驗證為{}（{}）", Match::FormatOnly},
+    {"Device alert: reading was {}% slower than the last FULL verification of this archive on this device ({} "
+     "against {}, {})",
+        "裝置警訊：讀取速度比此封存上次在此裝置上的完整驗證慢了 {}%（這次{}，上次{}，{}）", Match::FormatOnly},
+    {"Device alert: parts of the content read markedly slower than in the last FULL verification of this archive on "
+     "this device ({})",
+        "裝置警訊：部分內容的讀取速度明顯比此封存上次在此裝置上的完整驗證慢（{}）", Match::FormatOnly},
+    {"; from {}% to {}% of the content, {}% slower", "；內容的 {}% 至 {}% 處慢了 {}%", Match::FormatOnly},
+    {"; and {} more such stretches", "；另有 {} 處這樣變慢", Match::FormatOnly},
+    {". A device that reads markedly slower than before may be failing; another program reading it at the same time, "
+     "or another device read through the same port or hub, also makes reading slower.",
+        "。讀取明顯比以前慢的裝置可能即將故障；同時有其他程式在讀取它，或接在同一個連接埠或集線器上的另一個裝置也在被"
+        "讀取，也會讓讀取變慢。"},
     // src/cli/register_commands.cpp
     {"Registered {} ({}) revision {}", "已註冊 {}（{}）版次 {}"},
     {"root: {}", "根目錄：{}"},

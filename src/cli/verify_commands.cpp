@@ -55,6 +55,11 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
     for (const auto& line : app::health_alert_lines(text, outcome.devices)) {
         std::cout << "\n  " << line;
     }
+    if (outcome.read_compared) {
+        if (const auto line = app::slower_alert_line(text, *outcome.read_compared)) {
+            std::cout << "\n  " << *line;
+        }
+    }
     if (!outcome.media_read) {
         // Decision 0028: failed on its manifest before the media was looked for.
         std::cout << "\n  " << text("media: not read, as the manifest of this revision cannot be used") << '\n';
@@ -69,8 +74,11 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
                              ? text.format("coverage: {} of {} registered byte read and matched",
                                    outcome.coverage_bytes, outcome.registered_bytes)
                              : text.format("coverage: {} of {} registered bytes read and matched",
-                                   outcome.coverage_bytes, outcome.registered_bytes))
-                  << "\n  " << text("items:");
+                                   outcome.coverage_bytes, outcome.registered_bytes));
+        if (const auto speed = app::read_speed_words(text, outcome.read_speed, outcome.read_compared)) {
+            std::cout << "\n  " << text.format("read speed: {}", *speed);
+        }
+        std::cout << "\n  " << text("items:");
         for (const auto& [status, count] : outcome.counts) {
             std::cout << "  " << text(status) << " " << count;
         }
@@ -144,8 +152,14 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
         {"warnings", outcome.warnings},
         {"notes", outcome.notes},
         {"counts", outcome.counts},
-        // Decision 0044: each device's health, as the run's counts keep it.
+        // Decision 0044: each device's health, as the run's counts keep it;
+        // how fast the verification read, and how that compares.
         {"device_health", device_health_json(outcome.devices)},
+        {"read_speed", outcome.read_speed ? nlohmann::json{{"bytes", outcome.read_speed->bytes()},
+                                                {"milliseconds", outcome.read_speed->milliseconds()}}
+                                          : nlohmann::json(nullptr)},
+        {"read_compared",
+            outcome.read_compared ? speed_comparison_json(*outcome.read_compared) : nlohmann::json(nullptr)},
         {"items", std::move(items)},
         {"coverage_bytes", outcome.coverage_bytes},
         {"registered_bytes", outcome.registered_bytes},

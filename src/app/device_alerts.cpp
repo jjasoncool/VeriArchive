@@ -1,5 +1,7 @@
 #include "app/device_alerts.h"
 
+#include "app/local_time.h"
+#include "app/progress_estimate.h"
 #include "core/engine/device_alerts.h"
 
 #include <array>
@@ -89,6 +91,54 @@ std::vector<std::string> health_alert_lines(const Text& text, const std::vector<
         }
     }
     return lines;
+}
+
+std::string speed_words(const Text& text, std::uint64_t bytes_per_second)
+{
+    return text.format("{}/s", format_size(bytes_per_second));
+}
+
+std::optional<std::string> read_speed_words(
+    const Text& text, const std::optional<ReadSpeed>& speed, const std::optional<SpeedComparison>& compared)
+{
+    if (compared) {
+        return text.format("{}; the last FULL verification of this archive on this device read {} ({})",
+            speed_words(text, compared->bytes_per_second), speed_words(text, compared->baseline_bytes_per_second),
+            local_time(compared->baseline_finished, text));
+    }
+    if (!speed || speed->milliseconds() == 0) {
+        return std::nullopt;
+    }
+    return speed_words(text, speed->bytes() * 1000 / speed->milliseconds());
+}
+
+std::optional<std::string> slower_alert_line(const Text& text, const SpeedComparison& compared)
+{
+    if (!compared.alerts()) {
+        return std::nullopt;
+    }
+    const auto when = local_time(compared.baseline_finished, text);
+    auto line = compared.whole_compared && compared.slower_percent >= whole_slower_alert_percent
+                    ? text.format("Device alert: reading was {}% slower than the last FULL verification of this "
+                                  "archive on this device ({} against {}, {})",
+                          compared.slower_percent, speed_words(text, compared.bytes_per_second),
+                          speed_words(text, compared.baseline_bytes_per_second), when)
+                    : text.format("Device alert: parts of the content read markedly slower than in the last FULL "
+                                  "verification of this archive on this device ({})",
+                          when);
+    // Where in the content, as shares of it: hundredth n is from n% to n+1%.
+    constexpr std::size_t named = 5;
+    for (std::size_t index = 0; index < compared.slower_parts.size() && index < named; ++index) {
+        const auto& stretch = compared.slower_parts[index];
+        line += text.format("; from {}% to {}% of the content, {}% slower", stretch.from, stretch.to + 1,
+            stretch.slower_percent);
+    }
+    if (compared.slower_parts.size() > named) {
+        line += text.format("; and {} more such stretches", compared.slower_parts.size() - named);
+    }
+    return std::string(alert_mark) + line +
+           text(". A device that reads markedly slower than before may be failing; another program reading it at "
+                "the same time, or another device read through the same port or hub, also makes reading slower.");
 }
 
 } // namespace va::app

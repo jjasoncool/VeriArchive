@@ -952,6 +952,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         // still attached at the root and its device still answers.
         VolumeWatch watch(services.media, located->root, located->volume);
         input.watch = &watch;
+        input.clock = request.read_clock;
         comparison = compare_with_manifest(services.archive_files, input, cancel, heartbeat);
         if (!comparison.scan_error.empty()) {
             outcome.failure_classes.push_back("FilesystemAccessError");
@@ -1069,6 +1070,31 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     if (const auto health = device_health_json(outcome.devices); !health.empty()) {
         counts["device_health"] = health;
+    }
+    // Decision 0044: how fast this run read each hundredth of the content it
+    // read; and, once the verification reached a result, how its read (with
+    // the runs it resumed) compares with the last FULL verification of the
+    // archive on this device whose speed was as usual.
+    if (!comparison.read_parts.empty()) {
+        ReadSpeed own;
+        own.content_bytes = comparison.content_bytes;
+        set_device(own, located->volume);
+        own.parts = comparison.read_parts;
+        counts["read_speed"] = read_speed_json(own);
+        if (outcome.result != "INCOMPLETE") {
+            const auto runs = store.verify_runs(outcome.archive_uuid);
+            const auto history = runs ? *runs : std::vector<VerifyRunRecord>{};
+            auto whole = whole_verification(own, outcome.resumed_from, history);
+            if (const auto baseline = speed_baseline(whole, resumed_runs(outcome.resumed_from, history), history)) {
+                if (auto compared = compare_read_speed(whole, baseline->speed)) {
+                    compared->baseline_run = baseline->run_id;
+                    compared->baseline_finished = baseline->finished;
+                    counts["read_compared"] = speed_comparison_json(*compared);
+                    outcome.read_compared = std::move(*compared);
+                }
+            }
+            outcome.read_speed = std::move(whole);
+        }
     }
     VerifyRunRecord run;
     run.run_id = outcome.run_id;

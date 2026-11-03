@@ -1,9 +1,14 @@
 #pragma once
 // Device alerts in the words of the interfaces (decision 0044): what a device
-// reports of its own health. The repository and --json keep the codes.
+// reports of its own health, and a FULL verification that read markedly
+// slower than the last one of the archive on that device. The repository and
+// --json keep the codes and numbers.
 #include "app/text.h"
 #include "common/types.h"
+#include "core/engine/read_speed.h"
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -34,5 +39,20 @@ std::string device_health_words(const Text& text, const PhysicalDeviceInfo& devi
 // line each, led by alert_mark: what it reports, and to copy its archives to
 // another device and verify the copies. None where no device alerts.
 std::vector<std::string> health_alert_lines(const Text& text, const std::vector<PhysicalDeviceInfo>& devices);
+
+// A speed as progress shows one: "182 MiB/s".
+std::string speed_words(const Text& text, std::uint64_t bytes_per_second);
+
+// How fast a FULL verification read the content, said after "Read speed: ":
+// "182 MiB/s", and where it was compared, "182 MiB/s; the last FULL
+// verification of this archive on this device read 180 MiB/s (2026-11-01
+// 14:03)". Nothing where it read nothing.
+std::optional<std::string> read_speed_words(
+    const Text& text, const std::optional<ReadSpeed>& speed, const std::optional<SpeedComparison>& compared);
+
+// The device alert of a verification that read markedly slower than the one
+// it was compared with, led by alert_mark: how much slower, where in the
+// content, and what else makes reading slower; nothing where it did not.
+std::optional<std::string> slower_alert_line(const Text& text, const SpeedComparison& compared);
 
 } // namespace va::app
