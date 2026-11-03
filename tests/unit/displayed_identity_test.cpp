@@ -149,6 +149,26 @@ void sample_keeps_where_the_volume_is_attached()
     }
 }
 
+// The devices that an operation read, as its report and its device alert
+// name them (decision 0044): as read in normal use; in the screenshot mode
+// each as the sample device, nothing read but its health.
+void devices_read_are_shown_as_sample()
+{
+    auto read = recorded_volume().devices;
+    read[0].health = va::DeviceHealth{va::HealthStatus::Warning, {"predicting-failure"}};
+    CHECK(va::gui::displayed_devices(read, IdentityShown::Recorded).front().serial == "RECORDED-SERIAL-1");
+    const auto shown = va::gui::displayed_devices(read, IdentityShown::Sample);
+    CHECK(shown.size() == 2);
+    for (const auto& device : shown) {
+        CHECK(device.model == "SAMPLE-DEVICE" && device.serial == "SAMPLE0001" && device.wwn == "SAMPLE-WWN" &&
+              device.device_ref.empty() && device.bus == "sample");
+    }
+    CHECK(shown[0].health && shown[0].health->status == va::HealthStatus::Warning &&
+          shown[0].health->conditions == std::vector<std::string>{"predicting-failure"});
+    CHECK(!shown[1].health);
+    CHECK(va::gui::displayed_devices({}, IdentityShown::Sample).empty());
+}
+
 } // namespace
 
 void displayed_identity_tests()
@@ -158,4 +178,5 @@ void displayed_identity_tests()
     sample_holds_nothing_recorded();
     sample_identity_is_fixed();
     sample_keeps_where_the_volume_is_attached();
+    devices_read_are_shown_as_sample();
 }

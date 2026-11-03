@@ -143,7 +143,7 @@ void hide_alert(GtkWidget* label)
     gtk_widget_set_visible(label, FALSE);
 }
 
-DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text)
+DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text, IdentityShown shown)
 {
     // The operation holds the label for as long as it may show an alert in
     // it, also after its window has closed; the reference, taken here on the
@@ -156,13 +156,13 @@ DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text)
             },
             widget);
     });
-    return [held, text](const std::vector<PhysicalDeviceInfo>& devices) {
-        std::string shown;
-        for (const auto& line : app::health_alert_lines(text, devices)) {
-            shown += (shown.empty() ? "" : "\n") + line;
+    return [held, text, shown](const std::vector<PhysicalDeviceInfo>& devices) {
+        std::string alert;
+        for (const auto& line : app::health_alert_lines(text, displayed_devices(devices, shown))) {
+            alert += (alert.empty() ? "" : "\n") + line;
         }
-        if (!shown.empty()) {
-            show_alert_soon(held.get(), std::move(shown));
+        if (!alert.empty()) {
+            show_alert_soon(held.get(), std::move(alert));
         }
     };
 }

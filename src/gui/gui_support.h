@@ -6,6 +6,7 @@
 #include "app/text.h"
 #include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
+#include "gui/displayed_identity.h"
 
 #include <gtk/gtk.h>
 
@@ -57,8 +58,9 @@ void show_alert_soon(GtkWidget* label, std::string text);
 void hide_alert(GtkWidget* label);
 
 // What an operation of a view is told of the devices it reads: the alert of
-// each device whose health alerts, worded in `text`, shown in `label`.
-DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text);
+// each device whose health alerts, worded in `text`, shown in `label`, each
+// device named as `shown` says (the screenshot mode's sample identity).
+DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text, IdentityShown shown);
 
 // The folder or volume root to register or verify, typed in (or chosen into)
 // an entry, made into a root exactly as the command line makes one

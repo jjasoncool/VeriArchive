@@ -248,7 +248,7 @@ void run_verification(GuiState& state, VerifyRequest request)
     // Decision 0044: a device alert shows above the progress as soon as the
     // devices were asked; the operator may cancel, or let the run go on.
     hide_alert(view.alert);
-    request.devices_observed = alert_above_progress(view.alert, state.text);
+    request.devices_observed = alert_above_progress(view.alert, state.text, state.identity_shown);
     // Filled by the worker; read by `done`, which runs only after the worker finished.
     struct Interrupted {
         std::string run_id;
@@ -318,6 +318,9 @@ void run_verification(GuiState& state, VerifyRequest request)
                     return text.format("Not verified: {}", text(message));
                 };
             }
+            // The devices as the view names them: the sample identity in the
+            // screenshot mode, whose pictures are published.
+            outcome->devices = displayed_devices(outcome->devices, state.identity_shown);
             if (outcome->result == "INCOMPLETE") {
                 *interrupted = Interrupted{outcome->run_id, outcome->archive_uuid};
             } else if (request.resume_run && !outcome->media_read) {

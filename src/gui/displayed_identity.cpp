@@ -47,4 +47,18 @@ VolumeInfo displayed_identity(const VolumeInfo& recorded, IdentityShown shown)
     return sample;
 }
 
+std::vector<PhysicalDeviceInfo> displayed_devices(const std::vector<PhysicalDeviceInfo>& read, IdentityShown shown)
+{
+    if (shown == IdentityShown::Recorded) {
+        return read;
+    }
+    std::vector<PhysicalDeviceInfo> devices;
+    for (const auto& device : read) {
+        auto sample = sample_identity().devices.front();
+        sample.health = device.health;
+        devices.push_back(std::move(sample));
+    }
+    return devices;
+}
+
 } // namespace va::gui

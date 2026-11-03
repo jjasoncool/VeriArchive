@@ -139,7 +139,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     // Decision 0044: a device alert shows above the progress as soon as the
     // devices were asked; the operator may cancel, or let it go on.
     hide_alert(view.alert);
-    request.devices_observed = alert_above_progress(view.alert, state.text);
+    request.devices_observed = alert_above_progress(view.alert, state.text, state.identity_shown);
     // Filled by the worker where a resume waits for the operator's word, as
     // it takes up a registration that an older version left, which may still
     // run it (decision 0022, point 7); read by `done`, which runs only after
@@ -192,6 +192,9 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                     return text.format("Not registered: {}", text(message));
                 };
             }
+            // The devices as the view names them: the sample identity in the
+            // screenshot mode, whose pictures are published.
+            outcome->devices = displayed_devices(outcome->devices, state.identity_shown);
             return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
         },
         [&state, request, typed, unconfirmed](const Report& result) {
