@@ -262,7 +262,7 @@ UnfinishedOperation registration_operation(const PendingRegistration& registrati
     const auto plan = nlohmann::json::parse(registration.plan, nullptr, false);
     operation.process = recorded_attempt(plan);
     if (attempts.processes && !operation.recorded_stopped) {
-        operation.attempt = judge_attempt(plan, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+        operation.attempt = judge_attempt(plan, *attempts.processes, attempts.host, attempts.runs_this_operation).state;
     }
     return operation;
 }
@@ -296,7 +296,7 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
     operation.process = recorded_attempt(record);
     if (attempts.processes && !operation.recorded_stopped) {
         operation.attempt =
-            judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+            judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_this_operation).state;
     }
     return operation;
 }
@@ -329,7 +329,7 @@ UnfinishedOperation verification_operation(const UnfinishedVerification& verific
         operation.process = recorded_attempt(record);
         if (attempts.processes && !operation.recorded_stopped) {
             operation.attempt =
-                judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_an_operation).state;
+                judge_attempt(record, *attempts.processes, attempts.host, attempts.runs_this_operation).state;
         }
     }
     return operation;

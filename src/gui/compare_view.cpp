@@ -92,30 +92,31 @@ void show_report(GuiState& state, Report report)
     state.compare_view.shown_report = std::move(report);
 }
 
-void set_running(GuiState& state, bool running)
-{
-    auto& view = state.compare_view;
-    gtk_widget_set_sensitive(view.start, !running);
-    gtk_widget_set_sensitive(view.cancel, running);
-    lock_language(state, running);
-}
-
-// Shows an unexpected error of a Compare handler (see guarded). A start that
-// failed leaves the buttons as they are when nothing runs.
+// Shows an unexpected error of a Compare handler (see guarded).
 void show_error(GuiState& state, Report report)
 {
-    if (!state.job.running()) {
-        set_running(state, false);
-    }
     show_report(state, std::move(report));
+}
+
+// An archive as a job's title names it: its label, or the start of its uuid.
+std::string label_of(const GuiState& state, const Uuid& archive_uuid)
+{
+    if (state.session) {
+        if (auto store = ArchiveStore::open_read_only(state.session->context.repo)) {
+            if (const auto archive = store->find_archive(archive_uuid); archive && *archive &&
+                                                                        !(*archive)->label.empty()) {
+                return (*archive)->label;
+            }
+        }
+    }
+    return archive_uuid.substr(0, 8);
 }
 
 void start_comparison(GuiState& state)
 {
     auto& view = state.compare_view;
-    if (!state.session || state.job.running()) {
-        show_report(state, fixed_message(state.session ? "Another operation is running."
-                                                        : "Open a repository first (Settings)."));
+    if (!state.session) {
+        show_report(state, fixed_message("Open a repository first (Settings)."));
         return;
     }
     const auto reference = chosen_archive(view.reference, view.archive_uuids, 0);
@@ -131,12 +132,16 @@ void start_comparison(GuiState& state)
         return;
     }
 
-    set_running(state, true);
     show_report(state, fixed_message("Comparing the manifests of A and B ..."));
     // The worker returns its report unworded; it is worded when shown, in the
-    // language in use then.
-    state.job.start(state.text, view.progress,
-        [&state, a = *reference, b = *copy](CancelToken& cancel, IProgressSink& progress) -> Report {
+    // language in use then. A comparison reads no media: it waits for no
+    // device (decision 0045).
+    JobSpec job;
+    job.title = [a = label_of(state, *reference), b = label_of(state, *copy)](const app::Text& text) {
+        return text.format("Compare {} with {}", a, b);
+    };
+    job.counting = Counting::Entries;
+    job.work = [&state, a = *reference, b = *copy](JobContext& context) -> Report {
             auto& session = *state.session;
             auto store = ArchiveStore::open(session.context.repo);
             if (!store) {
@@ -145,8 +150,8 @@ void start_comparison(GuiState& state)
                 };
             }
             const auto repository_files = platform::make_file_system_access();
-            auto comparison =
-                compare_archives(*store, *repository_files, session.context.repo, a, b, cancel, progress);
+            auto comparison = compare_archives(
+                *store, *repository_files, session.context.repo, a, b, context.cancel, context.progress);
             if (!comparison) {
                 return [failure = comparison.error()](const app::Text& text) { return failure_report(text, failure); };
             }
@@ -157,18 +162,19 @@ void start_comparison(GuiState& state)
                 differences.resize(listed_differences);
             }
             return [shown = std::move(shown)](const app::Text& text) { return report(text, shown); };
-        },
-        [&state](const Report& result) {
-            guarded(
-                [&] {
-                    set_running(state, false);
-                    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(state.compare_view.progress),
-                        state.text("Done").c_str());
+        };
+    job.done = [&state](std::uint64_t ended, const Report& result) {
+        guarded(
+            [&] {
+                // The view shows the report of the job it shows.
+                if (state.compare_view.job == ended) {
                     show_report(state, result);
-                },
-                [&](Report error) { show_error(state, std::move(error)); });
-        },
-        Counting::Entries);
+                }
+            },
+            [&](Report error) { show_error(state, std::move(error)); });
+    };
+    view.job = state.jobs.start(state.text, std::move(job));
+    job_changed(state, view.job);
 }
 
 } // namespace
@@ -208,8 +214,10 @@ GtkWidget* build_compare_view(GuiState& state)
             guarded([&] { start_comparison(state); }, [&](Report error) { show_error(state, std::move(error)); });
         }),
         &state);
-    g_signal_connect(view.cancel, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { static_cast<GuiState*>(data)->job.cancel(); }), &state);
+    g_signal_connect(view.cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        state.jobs.stop(state.compare_view.job);
+    }), &state);
     gtk_box_append(GTK_BOX(buttons), view.start);
     gtk_box_append(GTK_BOX(buttons), view.cancel);
     gtk_box_append(GTK_BOX(box), buttons);

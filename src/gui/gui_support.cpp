@@ -1,6 +1,5 @@
 #include "gui/gui_support.h"
 
-#include "app/device_alerts.h"
 #include "app/keep_awake.h"
 #include "app/plain_words.h"
 #include "app/progress_estimate.h"
@@ -114,57 +113,21 @@ GtkWidget* make_alert_label()
     return label;
 }
 
-void show_alert_soon(GtkWidget* label, std::string text)
+void show_alert(GtkWidget* label, const std::string& text)
 {
-    struct Alert {
-        GtkWidget* label;  // a reference of its own, given back on the main thread
-        std::string text;
-    };
-    g_idle_add(
-        +[](gpointer data) -> gboolean {
-            std::unique_ptr<Alert> alert(static_cast<Alert*>(data));
-            gchar* escaped = g_markup_escape_text(alert->text.c_str(), -1);
-            // Red, as GNOME's palette has it for errors, and bold: it must
-            // stand out from the progress in either theme.
-            const std::string markup = std::string("<span foreground=\"#e01b24\" weight=\"bold\">") + escaped +
-                                       "</span>";
-            g_free(escaped);
-            gtk_label_set_markup(GTK_LABEL(alert->label), markup.c_str());
-            gtk_widget_set_visible(alert->label, TRUE);
-            g_object_unref(alert->label);
-            return G_SOURCE_REMOVE;
-        },
-        new Alert{GTK_WIDGET(g_object_ref(label)), std::move(text)});
+    gchar* escaped = g_markup_escape_text(text.c_str(), -1);
+    // Red, as GNOME's palette has it for errors, and bold: it must stand out
+    // from the progress in either theme.
+    const std::string markup = std::string("<span foreground=\"#e01b24\" weight=\"bold\">") + escaped + "</span>";
+    g_free(escaped);
+    gtk_label_set_markup(GTK_LABEL(label), markup.c_str());
+    gtk_widget_set_visible(label, TRUE);
 }
 
 void hide_alert(GtkWidget* label)
 {
     gtk_label_set_text(GTK_LABEL(label), "");
     gtk_widget_set_visible(label, FALSE);
-}
-
-DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text, IdentityShown shown)
-{
-    // The operation holds the label for as long as it may show an alert in
-    // it, also after its window has closed; the reference, taken here on the
-    // main thread, is given back there.
-    std::shared_ptr<GtkWidget> held(GTK_WIDGET(g_object_ref(label)), [](GtkWidget* widget) {
-        g_idle_add(
-            +[](gpointer data) -> gboolean {
-                g_object_unref(data);
-                return G_SOURCE_REMOVE;
-            },
-            widget);
-    });
-    return [held, text, shown](const std::vector<PhysicalDeviceInfo>& devices) {
-        std::string alert;
-        for (const auto& line : app::health_alert_lines(text, displayed_devices(devices, shown))) {
-            alert += (alert.empty() ? "" : "\n") + line;
-        }
-        if (!alert.empty()) {
-            show_alert_soon(held.get(), std::move(alert));
-        }
-    };
 }
 
 std::filesystem::path entry_root(GtkWidget* entry)
@@ -337,19 +300,62 @@ void guarded(const std::function<void()>& work, const std::function<void(Report)
     }
 }
 
+// ---- Progress, notifications -----------------------------------------------
+
+std::optional<BarState> ProgressWording::update(const Progress& progress)
+{
+    const auto now = std::chrono::steady_clock::now();
+    estimate_.update(progress, now);
+    const bool complete = progress.items_total > 0 && progress.items_done == progress.items_total;
+    if (!complete && now - last_ < std::chrono::milliseconds(200)) {
+        return std::nullopt;
+    }
+    last_ = now;
+    BarState bar;
+    if (progress.items_total == 0) {
+        bar.pulse = true;
+        bar.text = text_.format("Scanning: {}", app::count_of(text_, progress.items_done, app::Counted::Entry));
+    } else if (counting_ == Counting::Entries) {
+        bar.fraction = static_cast<double>(progress.items_done) / static_cast<double>(progress.items_total);
+        // Two calls: the compiler checks each literal template against its values.
+        bar.text = progress.items_total == 1
+                       ? text_.format("Comparing: {} / {} entry", progress.items_done, progress.items_total)
+                       : text_.format("Comparing: {} / {} entries", progress.items_done, progress.items_total);
+    } else {
+        bar.fraction = estimate_.fraction().value_or(0);
+        bar.text = text_.format("Hashing: {}", app::describe_progress(text_, estimate_));
+    }
+    return bar;
+}
+
+void notify_if_away(const std::string& report, const std::string& id)
+{
+    GApplication* application = g_application_get_default();
+    if (!application || !GTK_IS_APPLICATION(application)) {
+        return;
+    }
+    for (GList* window = gtk_application_get_windows(GTK_APPLICATION(application)); window;
+         window = window->next) {
+        if (gtk_window_is_active(GTK_WINDOW(window->data))) {
+            return;
+        }
+    }
+    // GLib's GNotification: shown on Windows from the notification area, on
+    // Linux by the desktop's notification service. A later one with the same
+    // id replaces it.
+    GNotification* notification = g_notification_new("VeriArchive");
+    g_notification_set_body(notification, ended_notification_body(report).c_str());
+    g_application_send_notification(application, id.c_str(), notification);
+    g_object_unref(notification);
+}
+
 // ---- Job ------------------------------------------------------------------
 
-// Throttled progress: at most five updates a second are posted to the main loop.
-// The update that completes the count always is, so a finished operation's bar
-// ends full rather than where the last update before it happened to leave it.
-// Hashing fills the bar by bytes and shows the speed and the time left
-// (app::ProgressEstimate), worded as on the command line.
+// The bar of the job's progress, updated at most five times a second
+// (ProgressWording), on the main thread.
 class Job::BarProgress final : public IProgressSink {
 public:
-    BarProgress(const app::Text& text, GtkWidget* bar, Counting counting)
-        : text_(text), bar_(bar), counting_(counting)
-    {
-    }
+    BarProgress(const app::Text& text, GtkWidget* bar, Counting counting) : bar_(bar), wording_(text, counting) {}
 
     void on_progress(const Progress& progress) override
     {
@@ -366,92 +372,41 @@ public:
 private:
     void show(const Progress& progress)
     {
-        const auto now = std::chrono::steady_clock::now();
-        // Every report feeds the estimate, also those not shown.
-        estimate_.update(progress, now);
-        const bool complete = progress.items_total > 0 && progress.items_done == progress.items_total;
-        if (!complete && now - last_ < std::chrono::milliseconds(200)) {
+        // The text is worded here, on the worker thread: the estimate lives
+        // here. Each update holds its own reference to the bar: it may arrive
+        // after the window was closed. (The job's reference keeps the bar
+        // alive until then, so taking one here on the worker thread is safe.)
+        auto state = wording_.update(progress);
+        if (!state) {
             return;
         }
-        last_ = now;
-        // The text is worded here, on the worker thread: the estimate lives here.
-        // Each update holds its own reference to the bar: it may arrive after
-        // the window was closed. (The job's reference keeps the bar alive
-        // until then, so taking one here on the worker thread is safe.)
-        auto update = std::make_unique<Update>(GTK_WIDGET(g_object_ref(bar_)));
-        if (progress.items_total == 0) {
-            update->pulse = true;
-            update->text = text_.format("Scanning: {}", app::count_of(text_, progress.items_done, app::Counted::Entry));
-        } else if (counting_ == Counting::Entries) {
-            update->fraction = static_cast<double>(progress.items_done) / static_cast<double>(progress.items_total);
-            // Two calls: the compiler checks each literal template against its values.
-            update->text = progress.items_total == 1
-                               ? text_.format("Comparing: {} / {} entry", progress.items_done, progress.items_total)
-                               : text_.format("Comparing: {} / {} entries", progress.items_done, progress.items_total);
-        } else {
-            update->fraction = estimate_.fraction().value_or(0);
-            update->text = text_.format("Hashing: {}", app::describe_progress(text_, estimate_));
-        }
+        auto update = std::make_unique<Update>(GTK_WIDGET(g_object_ref(bar_)), std::move(*state));
         g_idle_add(
             +[](gpointer data) -> gboolean {
                 std::unique_ptr<Update> update(static_cast<Update*>(data));
                 auto* bar = GTK_PROGRESS_BAR(update->bar);
-                if (update->pulse) {
+                if (update->state.pulse) {
                     gtk_progress_bar_pulse(bar);
                 } else {
-                    gtk_progress_bar_set_fraction(bar, update->fraction);
+                    gtk_progress_bar_set_fraction(bar, update->state.fraction);
                 }
-                gtk_progress_bar_set_text(bar, update->text.c_str());
+                gtk_progress_bar_set_text(bar, update->state.text.c_str());
                 return G_SOURCE_REMOVE;
             },
             update.release());
     }
 
     struct Update {
-        explicit Update(GtkWidget* widget) : bar(widget) {}
+        Update(GtkWidget* widget, BarState shown) : bar(widget), state(std::move(shown)) {}
         ~Update() { g_object_unref(bar); }
         Update(const Update&) = delete;
         Update& operator=(const Update&) = delete;
         GtkWidget* bar;  // a reference of its own, given back on the main thread
-        bool pulse = false;
-        double fraction = 0;
-        std::string text;
+        BarState state;
     };
-    app::Text text_;
     GtkWidget* bar_;
-    Counting counting_;
-    // The engines report regularly (hashing five times a second), so a long
-    // silence is a pause, such as the computer sleeping.
-    app::ProgressEstimate estimate_{app::ProgressEstimate::Reports::regular};
-    std::chrono::steady_clock::time_point last_{};
+    ProgressWording wording_;
 };
-
-namespace {
-
-// Says in a notification of the system that the window's operation ended,
-// unless a window of the program is the active one, where the operator reads
-// its report (decision 0043): GLib's GNotification, shown on Windows from the
-// notification area, on Linux by the desktop's notification service.
-void notify_if_away(const std::string& report)
-{
-    GApplication* application = g_application_get_default();
-    if (!application || !GTK_IS_APPLICATION(application)) {
-        return;
-    }
-    for (GList* window = gtk_application_get_windows(GTK_APPLICATION(application)); window;
-         window = window->next) {
-        if (gtk_window_is_active(GTK_WINDOW(window->data))) {
-            return;
-        }
-    }
-    GNotification* notification = g_notification_new("VeriArchive");
-    g_notification_set_body(notification, ended_notification_body(report).c_str());
-    // One at a time: the next operation's notification replaces this one.
-    g_application_send_notification(application, "operation-ended", notification);
-    g_object_unref(notification);
-}
-
-} // namespace
 
 Job::~Job()
 {

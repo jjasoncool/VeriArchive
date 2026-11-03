@@ -49,6 +49,12 @@ int main(int argc, char* argv[])
     // Nobody watches the screenshot mode or the smoke test from another
     // window: their operations end without a notification (decision 0043).
     state.job.set_notifying(!smoke_test && !state.screenshot_folder);
+    state.jobs.set_notifying(!smoke_test && !state.screenshot_folder);
+    state.jobs.set_identity_shown(state.identity_shown);
+    // What the window shows of the jobs follows each change (decision 0045).
+    state.jobs.on_change([&state](std::uint64_t job) {
+        va::gui::guarded([&] { va::gui::job_changed(state, job); }, [](const va::gui::Report&) {});
+    });
     state.application = gtk_application_new("io.veriarchive.Gui", G_APPLICATION_NON_UNIQUE);
     g_signal_connect(state.application, "activate",
         G_CALLBACK(+[](GtkApplication*, gpointer data) {
@@ -63,11 +69,12 @@ int main(int argc, char* argv[])
                 });
         }),
         &state);
-    // Closing the window cancels a running operation and waits for it, so an
-    // interrupted run ends as INCOMPLETE with its checkpoints saved.
+    // Closing the window stops every job and the window's step, and waits for
+    // them, so an interrupted run ends as INCOMPLETE with its checkpoints saved.
     g_signal_connect(state.application, "shutdown",
         G_CALLBACK(+[](GApplication*, gpointer data) {
             auto& state = *static_cast<va::gui::GuiState*>(data);
+            va::gui::guarded([&] { state.jobs.shut_down(); }, [](const va::gui::Report&) {});
             va::gui::guarded([&] { state.job.shut_down(); }, [](const va::gui::Report&) {});
             // The window is gone. GLib still runs the callbacks already queued
             // (a language change, say); they check this and do nothing.

@@ -256,6 +256,9 @@ public:
                         }
                     }
                 }},
+            // The jobs the tour started, the verification and the comparison,
+            // ended (decision 0045); taken before the language list opens.
+            {"08-jobs.png", [this] { show("jobs"); }, {}},
             {"07-language.png",
                 [this] {
                     show("settings");
@@ -315,7 +318,7 @@ private:
             }
             return true;
         case Phase::Job:
-            if (state_.job.running()) {
+            if (state_.jobs.active()) {
                 if (now - since_ > job_timeout) {
                     throw std::runtime_error("the operation did not finish in time");
                 }
@@ -370,7 +373,7 @@ private:
     void start(GtkWidget* button, GtkWidget* report, const char* what)
     {
         click(button);
-        if (!state_.job.running()) {
+        if (!state_.jobs.active()) {
             throw std::runtime_error(std::string("the ") + what + " did not start: " + text_of(report));
         }
     }

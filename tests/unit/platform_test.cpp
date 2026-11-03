@@ -518,11 +518,11 @@ void process_table_tells_running_from_ended()
         va::record_attempt(plan, {process, "this-computer"});
         return plan;
     };
-    // `runs_an_operation`: whether this process runs an operation now.
-    const auto judged = [&](const va::ProcessIdentity& process, bool runs_an_operation) {
-        return va::judge_attempt(naming(process), *processes, "this-computer", [runs_an_operation] {
-            return runs_an_operation;
-        }).state;
+    // `runs_this_operation`: whether this process runs the plan's operation now.
+    const auto judged = [&](const va::ProcessIdentity& process, bool runs_this_operation) {
+        return va::judge_attempt(naming(process), *processes, "this-computer",
+            [runs_this_operation](const nlohmann::json&) { return runs_this_operation; })
+            .state;
     };
     CHECK(judged(*self, true) == va::AttemptState::Running);
     CHECK(judged(*self, false) == va::AttemptState::Ended);

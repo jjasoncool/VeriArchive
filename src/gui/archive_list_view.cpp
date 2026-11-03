@@ -361,16 +361,18 @@ void start_poll(GuiState& state, bool when_due = false)
             try {
                 // Whether the process that runs each registration's attempt
                 // still runs (decision 0024). A plan that names this window's
-                // process is of an attempt that has ended while this window
-                // runs no operation; while it runs one, that may be its
-                // registration. Asked as such a plan is judged, so after the
-                // read: Job::running is set before an operation's work
-                // starts, and so before its registration writes a plan. The
-                // window's state outlives this thread (OperationsPoll, which
-                // joins it, goes first), and Job::running is safe on any thread.
+                // process is of an attempt that has ended unless a job of this
+                // window works on its root or archive (decision 0045). Asked as
+                // such a plan is judged, so after the read: a job's root and
+                // archive are known before its work starts, and so before its
+                // operation writes a plan. The window's state outlives this
+                // thread (OperationsPoll, which joins it, goes first), and
+                // Jobs::runs_operation is safe on any thread.
                 const auto processes = platform::make_process_table();
                 const app::AttemptCheck attempts{processes.get(), result->host,
-                    [state = result->state] { return state->job.running(); }};
+                    [state = result->state](const nlohmann::json& record) {
+                        return state->jobs.runs_operation(record);
+                    }};
                 auto read = app::read_unfinished_operations(
                     result->layout, result->previous, app::volume_used_bytes, attempts);
                 result->took = std::chrono::steady_clock::now() - now;
@@ -509,34 +511,34 @@ void show_message(GuiState& state, const Report& report)
     g_object_unref(dialog);
 }
 
-// Whether the window can run a step of abandoning now, as its one operation;
-// otherwise says why not.
+// Whether the window can run a step of abandoning now, one at a time besides
+// the jobs; otherwise says why not.
 bool can_abandon(GuiState& state)
 {
     if (state.session && !state.job.running() && state.archive_list.abandoning) {
         return true;
     }
-    show_message(state, fixed_message(state.session ? "Another operation is running."
+    show_message(state, fixed_message(state.session ? "Another step of abandoning is running."
                                                     : "Open a repository first (Settings)."));
     return false;
 }
 
 // A step of abandoning (reading what it removes, or abandoning) runs as the
-// window's one operation (Job), with `doing` on its bar: counting or deleting
-// the saved progress of millions of files takes a while, and no registration
-// may start in this window meanwhile (judge_attempt). `work` runs on the Job's
-// thread, `done` on the main thread once the bar is gone again.
+// window's step (Job), one at a time, with `doing` on its bar: counting or
+// deleting the saved progress of millions of files takes a while. It never
+// takes an operation that a job of the window works on
+// (refused_while_a_job_reads). `work` runs on the Job's thread, `done` on the
+// main thread once the bar is gone again.
 void run_abandon_step(GuiState& state, const std::string& doing, Job::Work work,
     std::function<void(const Report&)> done)
 {
     auto& view = state.archive_list;
-    lock_language(state, true);
     gtk_widget_set_visible(view.abandoning, TRUE);
     state.job.start(state.text, view.abandoning, std::move(work),
         [&state, done = std::move(done)](const Report& report) {
             guarded(
                 [&] {
-                    lock_language(state, false);
+                    lock_language(state);
                     if (state.archive_list.abandoning) {
                         gtk_widget_set_visible(state.archive_list.abandoning, FALSE);
                     }
@@ -545,6 +547,7 @@ void run_abandon_step(GuiState& state, const std::string& doing, Job::Work work,
                 [&](const Report& failure) { show_message(state, failure); });
         });
     gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.abandoning), doing.c_str());
+    lock_language(state);
 }
 
 // Abandons the registration the operator confirmed, after the same checks
@@ -880,6 +883,13 @@ void ask_to_abandon(GuiState& state, const std::string& key)
     const auto& watches = state.operations.watches;
     const auto found = std::ranges::find(watches, key,
         [](const app::OperationWatch& watch) -> const std::string& { return watch.operation().key; });
+    // Never an operation that a job of this window works on (decision 0045):
+    // the check that abandons it would take this process's attempt for one
+    // that has ended.
+    if (!key.empty() && found != watches.end() &&
+        refused_while_a_job_reads(state, found->operation().root, found->operation().archive_uuid)) {
+        return;
+    }
     if (!key.empty() && found != watches.end() && found->operation().kind == app::OperationKind::Relocation) {
         ask_to_abandon_relocation(state, found->operation());
         return;
@@ -930,14 +940,14 @@ void ask_to_abandon(GuiState& state, const std::string& key)
 
 // ---- Resuming a verification or registration (decision 0022, point 7) -------
 
-// Whether the window can resume an operation now, as its one operation;
-// otherwise says why not.
+// Whether the window can resume an operation now, as a job: not while a step
+// of abandoning runs, which may be abandoning it; otherwise says why not.
 bool can_resume(GuiState& state)
 {
     if (state.session && !state.job.running()) {
         return true;
     }
-    show_message(state, fixed_message(state.session ? "Another operation is running."
+    show_message(state, fixed_message(state.session ? "Another step of abandoning is running."
                                                     : "Open a repository first (Settings)."));
     return false;
 }
@@ -982,7 +992,8 @@ void resume_from_list(GuiState& state, const std::string& key)
     if (!can_resume(state)) {
         return;
     }
-    if (const auto operation = listed_for_resume(state, key)) {
+    if (const auto operation = listed_for_resume(state, key);
+        operation && !refused_while_a_job_reads(state, operation->root, operation->archive_uuid)) {
         resume_operation(state, *operation);
     }
 }
@@ -1005,13 +1016,13 @@ void ask_to_resume(GuiState& state, const std::string& key)
         return;
     }
     const auto operation = listed_for_resume(state, key);
-    if (!operation) {
+    if (!operation || refused_while_a_job_reads(state, operation->root, operation->archive_uuid)) {
         return;
     }
     const auto label = operation->label.empty() ? operation->archive_uuid.substr(0, 8) : operation->label;
     ask_before_resuming(state, label, operation->root, [asked = *operation](GuiState& state) {
-        // Another operation may have started while the question was shown.
-        if (can_resume(state)) {
+        // A job may have started on it while the question was shown.
+        if (can_resume(state) && !refused_while_a_job_reads(state, asked.root, asked.archive_uuid)) {
             resume_operation(state, asked, true);
         }
     });

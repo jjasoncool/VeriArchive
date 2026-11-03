@@ -71,21 +71,9 @@ void show_report(GuiState& state, Report report)
     state.register_view.shown_report = std::move(report);
 }
 
-void set_running(GuiState& state, bool running)
-{
-    auto& view = state.register_view;
-    gtk_widget_set_sensitive(view.start, !running);
-    gtk_widget_set_sensitive(view.cancel, running);
-    lock_language(state, running);
-}
-
-// Shows an unexpected error of a Register handler (see guarded). A start that
-// failed leaves the buttons as they are when nothing runs.
+// Shows an unexpected error of a Register handler (see guarded).
 void show_error(GuiState& state, Report report)
 {
-    if (!state.job.running()) {
-        set_running(state, false);
-    }
     show_report(state, std::move(report));
 }
 
@@ -96,18 +84,18 @@ bool media_copy(const GuiState& state)
     return gtk_check_button_get_active(GTK_CHECK_BUTTON(state.register_view.media_copy));
 }
 
-// Runs `request` as the window's one operation, its progress and report in
-// this view. `typed`: for Resume in the Archive List (decision 0022, point 7),
-// the root as its plan names it; its root is then checked as `register <root>
-// --resume` checks it (app::root_not_taken), also that it is a folder.
+// Runs `request` as a job (decision 0045), its progress and report shown in
+// this view until it starts another. `typed`: for Resume in the Archive List
+// (decision 0022, point 7), the root as its plan names it; its root is then
+// checked as `register <root> --resume` checks it (app::root_not_taken), also
+// that it is a folder.
 void run_registration(GuiState& state, RegisterRequest request, std::optional<std::string> typed);
 
 void start_registration(GuiState& state)
 {
     auto& view = state.register_view;
-    if (!state.session || state.job.running()) {
-        show_report(state, fixed_message(state.session ? "Another operation is running."
-                                                        : "Open a repository first (Settings)."));
+    if (!state.session) {
+        show_report(state, fixed_message("Open a repository first (Settings)."));
         return;
     }
     RegisterRequest request;
@@ -132,14 +120,9 @@ void start_registration(GuiState& state)
 void run_registration(GuiState& state, RegisterRequest request, std::optional<std::string> typed)
 {
     auto& view = state.register_view;
-    set_running(state, true);
-    show_report(state, [root = path_to_utf8(request.root)](const app::Text& text) {
-        return text.format("Registering {} ...", root);
-    });
-    // Decision 0044: a device alert shows above the progress as soon as the
-    // devices were asked; the operator may cancel, or let it go on.
+    const auto root = path_to_utf8(request.root);
+    show_report(state, [root](const app::Text& text) { return text.format("Registering {} ...", root); });
     hide_alert(view.alert);
-    request.devices_observed = alert_above_progress(view.alert, state.text, state.identity_shown);
     // Filled by the worker where a resume waits for the operator's word, as
     // it takes up a registration that an older version left, which may still
     // run it (decision 0022, point 7); read by `done`, which runs only after
@@ -147,8 +130,11 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     auto unconfirmed = std::make_shared<std::optional<OlderVersionRegistration>>();
     // The worker returns its report unworded; it is worded when shown, in the
     // language in use then.
-    state.job.start(state.text, view.progress,
-        [&state, request, typed, unconfirmed](CancelToken& cancel, IProgressSink& progress) -> Report {
+    JobSpec job;
+    job.title = [root](const app::Text& text) { return text.format("Register {}", root); };
+    job.target.root = request.root;
+    job.devices = [root = request.root] { return devices_of_root(root); };
+    job.work = [&state, request, typed, unconfirmed](JobContext& context) -> Report {
             // Decision 0029: a root on a network share, or one written in the
             // \\?\ form, is refused before anything of it is read, and a
             // resumed one that is no folder too, as on the command line. Asked
@@ -171,7 +157,11 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
             const auto processes = platform::make_process_table();
             RegisterServices services{*archive_files, *repository_files, *session.writer, *session.writer,
                 *media, *store, session.context.repo, state.host, *processes, platform::final_path};
-            auto outcome = register_archive(services, request, cancel, progress);
+            // Decision 0044: a device alert shows in the job as soon as the
+            // devices were asked; the operator may stop it, or let it go on.
+            auto asked = request;
+            asked.devices_observed = context.devices_observed;
+            auto outcome = register_archive(services, asked, context.cancel, context.progress);
             if (!outcome) {
                 // A resume of a registration that an older version left,
                 // which changed nothing: the window asks the operator, as the
@@ -196,14 +186,14 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
             // screenshot mode, whose pictures are published.
             outcome->devices = displayed_devices(outcome->devices, state.identity_shown);
             return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
-        },
-        [&state, request, typed, unconfirmed](const Report& result) {
+        };
+    job.done = [&state, request, typed, unconfirmed](std::uint64_t ended, const Report& result) {
             guarded(
                 [&] {
-                    set_running(state, false);
-                    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(state.register_view.progress),
-                        state.text("Done").c_str());
-                    show_report(state, result);
+                    // The view shows the report of the job it shows.
+                    if (state.register_view.job == ended) {
+                        show_report(state, result);
+                    }
                     refresh_archive_list(state);
                     refresh_archive_choices(state);
                     if (!*unconfirmed) {
@@ -216,10 +206,12 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                     const auto label = registration.label.empty() ? registration.archive_uuid.substr(0, 8)
                                                                   : registration.label;
                     ask_before_resuming(state, label, registration.root, [request, typed](GuiState& state) {
-                        // Another operation may have started while the question was shown.
-                        if (!state.session || state.job.running()) {
-                            show_report(state, fixed_message(state.session ? "Another operation is running."
-                                                                            : "Open a repository first (Settings)."));
+                        // A job may have started on it while the question was shown.
+                        if (!state.session) {
+                            show_report(state, fixed_message("Open a repository first (Settings)."));
+                            return;
+                        }
+                        if (refused_while_a_job_reads(state, path_to_utf8(request.root), {})) {
                             return;
                         }
                         auto confirmed = request;
@@ -228,7 +220,9 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                     });
                 },
                 [&](Report error) { show_error(state, std::move(error)); });
-        });
+        };
+    view.job = state.jobs.start(state.text, std::move(job));
+    job_changed(state, view.job);
 }
 
 } // namespace
@@ -302,8 +296,10 @@ GtkWidget* build_register_view(GuiState& state)
             guarded([&] { start_registration(state); }, [&](Report error) { show_error(state, std::move(error)); });
         }),
         &state);
-    g_signal_connect(view.cancel, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { static_cast<GuiState*>(data)->job.cancel(); }), &state);
+    g_signal_connect(view.cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        state.jobs.stop(state.register_view.job);
+    }), &state);
     gtk_box_append(GTK_BOX(buttons), view.start);
     gtk_box_append(GTK_BOX(buttons), view.cancel);
     gtk_box_append(GTK_BOX(box), buttons);

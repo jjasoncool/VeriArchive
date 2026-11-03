@@ -14,6 +14,7 @@ int main()
     device_health_tests();
     displayed_identity_tests();
     ended_notification_tests();
+    job_queue_tests();
     hash_tests();
     merkle_tests();
     fs_access_tests();

@@ -214,6 +214,9 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/gui_app.cpp
         src/gui/gui_support.cpp
         src/gui/history_view.cpp
+        src/gui/job_queue.cpp
+        src/gui/jobs.cpp
+        src/gui/jobs_view.cpp
         src/gui/main.cpp
         src/gui/screenshots.cpp
         src/gui/register_view.cpp
@@ -309,6 +312,7 @@ if(BUILD_TESTING)
         tests/unit/hash_test.cpp
         tests/unit/identity_test.cpp
         tests/unit/interrupt_test.cpp
+        tests/unit/job_queue_test.cpp
         tests/unit/keep_awake_test.cpp
         tests/unit/local_time_test.cpp
         tests/unit/progress_estimate_test.cpp
@@ -361,10 +365,11 @@ if(BUILD_TESTING)
             src/platform/windows/long_path.cpp src/platform/windows/root_kind.cpp
             src/platform/windows/subst_drive.cpp)
     endif()
-    # The GUI's choice of the media identity it shows, and the body of its
-    # notification that an operation ended, are plain C++ without GTK, so they
-    # are tested also where the GUI is not built.
-    target_sources(veriarchive_tests PRIVATE src/gui/displayed_identity.cpp src/gui/ended_notification.cpp)
+    # The GUI's choice of the media identity it shows, the body of its
+    # notification that an operation ended, and the queue of its jobs, are
+    # plain C++ without GTK, so they are tested also where the GUI is not built.
+    target_sources(veriarchive_tests PRIVATE src/gui/displayed_identity.cpp src/gui/ended_notification.cpp
+        src/gui/job_queue.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
         # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.

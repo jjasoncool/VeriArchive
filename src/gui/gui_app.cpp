@@ -1,4 +1,4 @@
-// Window layout: a sidebar to switch between the six views, and the session
+// Window layout: a sidebar to switch between the seven views, and the session
 // (repository) shared by all of them.
 #include "gui/gui_app.h"
 
@@ -58,7 +58,43 @@ void open_repository_session(GuiState& state, bool initialise)
 
 namespace {
 
-// Creates the window with the sidebar and the six views, in state.text's language.
+// Closing the window while jobs wait or work asks first (decision 0045):
+// closing stops them, each resumable. Confirmed, the window closes and the
+// application's shutdown stops them and waits for each to record where it
+// stopped. Without jobs, the window closes.
+gboolean ask_before_closing(GtkWindow* closing, gpointer data)
+{
+    auto& state = *static_cast<GuiState*>(data);
+    const auto active = state.jobs.active_count();
+    if (active == 0) {
+        return FALSE;
+    }
+    const auto& text = state.text;
+    const auto question =
+        active == 1 ? text("1 job is still running.") : text.format("{} jobs are still running.", active);
+    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s", question.c_str());
+    gtk_alert_dialog_set_detail(dialog,
+        text("Closing the window stops them. Each can be resumed later, without reading again what it read.").c_str());
+    const auto keep = text("Keep the window open");
+    const auto stop = text("Stop them and close");
+    const char* buttons[] = {keep.c_str(), stop.c_str(), nullptr};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    gtk_alert_dialog_choose(dialog, closing, nullptr,
+        +[](GObject* source, GAsyncResult* result, gpointer window) {
+            const int chosen = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, nullptr);
+            if (chosen == 1) {
+                gtk_window_destroy(GTK_WINDOW(window));
+            }
+            g_object_unref(window);
+        },
+        g_object_ref(closing));
+    g_object_unref(dialog);
+    return TRUE;
+}
+
+// Creates the window with the sidebar and the seven views, in state.text's language.
 void build_window(GuiState& state)
 {
     const auto& text = state.text;
@@ -73,6 +109,7 @@ void build_window(GuiState& state)
     gtk_widget_set_vexpand(stack, TRUE);
     gtk_stack_add_titled(GTK_STACK(stack), build_archive_list_view(state), "archives",
         text("Archive List").c_str());
+    gtk_stack_add_titled(GTK_STACK(stack), build_jobs_view(state), "jobs", text("Jobs").c_str());
     gtk_stack_add_titled(GTK_STACK(stack), build_register_view(state), "register",
         text("Register Archive").c_str());
     gtk_stack_add_titled(GTK_STACK(stack), build_verify_view(state), "verify",
@@ -126,6 +163,8 @@ void build_window(GuiState& state)
     gtk_box_append(GTK_BOX(layout), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
     gtk_box_append(GTK_BOX(layout), stack);
     gtk_window_set_child(state.window, layout);
+
+    g_signal_connect(window, "close-request", G_CALLBACK(ask_before_closing), &state);
 }
 
 // What the user typed and chose in the window, carried over when a language
@@ -316,7 +355,7 @@ bool open_with_upgrade_notice(GuiState& state, bool initialise)
 {
     // The sample repository of the screenshots is new; and a job running
     // already (none runs while no repository is open) keeps the open as it is.
-    if (state.screenshot_folder || state.job.running() || !upgrade_ahead(initialise)) {
+    if (state.screenshot_folder || state.job.running() || state.jobs.active() || !upgrade_ahead(initialise)) {
         return false;
     }
     const auto& text = state.text;
@@ -478,10 +517,10 @@ void change_language(GuiState& state, app::Language language)
     if (!state.window || language == state.text.language()) {
         return;
     }
-    if (state.job.running()) {
-        // An operation started after the choice was made (the drop-down is
-        // locked while one runs). It reports into this window, so the window
-        // stays and the drop-down shows the language in use again.
+    if (state.job.running() || state.jobs.active()) {
+        // A job started after the choice was made (the drop-down is locked
+        // while one waits or works). It reports into this window, so the
+        // window stays and the drop-down shows the language in use again.
         show_language_in_use(state);
         return;
     }
@@ -500,7 +539,9 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
     use_gtk_language(language);
 
     // The new window is built before the old one closes, so the application
-    // always has a window and keeps running.
+    // always has a window and keeps running. A job's window of details
+    // belongs to the old one.
+    close_job_details(state);
     GtkWindow* old_window = state.window;
     build_window(state);
     const auto replace_old_window = [&] {
@@ -515,6 +556,13 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
         refresh_archive_list(state);
         refresh_archive_choices(state);
         restore(state, kept);
+        // The views show the jobs they show, as they are now.
+        for (const auto job : {state.register_view.job, state.verify_view.job, state.compare_view.job}) {
+            if (job != 0) {
+                job_changed(state, job);
+            }
+        }
+        lock_language(state);
     } catch (...) {
         // `state` already points at the new window, so it replaces the old
         // one even when filling it failed; the caller reports the error.

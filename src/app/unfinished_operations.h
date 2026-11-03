@@ -95,11 +95,12 @@ struct UnfinishedOperation {
 struct AttemptCheck {
     IProcessTable* processes = nullptr;
     std::string host;  // this computer (HostInfo::host)
-    // Whether this process runs an operation now (judge_attempt): asked only
-    // for a plan that names this process, as it is judged after the read, so
-    // a registration that this window started while the read ran is never
-    // taken for one that has ended. Without it, this process runs none.
-    std::function<bool()> runs_an_operation;
+    // Whether this process runs the operation that a plan or record is of
+    // (judge_attempt): asked only for one that names this process, as it is
+    // judged after the read, so a job that this window started while the read
+    // ran is never taken for one that has ended. Without it, this process
+    // runs none.
+    std::function<bool(const nlohmann::json& plan)> runs_this_operation;
 };
 
 // What one read of the repository found.

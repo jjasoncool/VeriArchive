@@ -102,13 +102,17 @@ void show_language_in_use(GuiState& state)
     gtk_drop_down_set_selected(GTK_DROP_DOWN(state.settings_view.language), index_of(state.text.language()));
 }
 
-void lock_language(GuiState& state, bool locked)
+void lock_language(GuiState& state)
 {
     GtkWidget* language = state.settings_view.language;
+    if (!language) {
+        return;
+    }
+    const bool locked = state.jobs.active() || state.job.running();
     gtk_widget_set_sensitive(language, !locked);
     // GTK 4 shows a tooltip on an unavailable widget too, so it can say why.
     gtk_widget_set_tooltip_text(language,
-        locked ? state.text("Finish or cancel the running operation before changing the language.").c_str()
+        locked ? state.text("Wait for the jobs to end, or stop them, before changing the language.").c_str()
                : nullptr);
 }
 
@@ -148,9 +152,9 @@ GtkWidget* build_settings_view(GuiState& state)
                     if (language == state.text.language()) {
                         return;
                     }
-                    if (state.job.running()) {
+                    if (state.jobs.active() || state.job.running()) {
                         // lock_language keeps this from happening; should it
-                        // anyway, the running operation keeps its window.
+                        // anyway, the jobs keep their window.
                         show_language_in_use(state);
                         return;
                     }

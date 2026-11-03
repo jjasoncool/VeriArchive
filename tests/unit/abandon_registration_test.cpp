@@ -574,11 +574,14 @@ void judges_the_attempt_a_plan_names()
         return plan;
     };
     using va::AttemptState;
-    // Whether this process runs an operation, and how often that was asked.
+    // Whether this process runs the operation of the plan, how often that was
+    // asked, and of which plan.
     bool runs_an_operation = false;
     int asked = 0;
-    const std::function<bool()> operation = [&] {
+    nlohmann::json asked_of;
+    const std::function<bool(const nlohmann::json&)> operation = [&](const nlohmann::json& judged_plan) {
         ++asked;
+        asked_of = judged_plan;
         return runs_an_operation;
     };
     const auto judged = [&](const nlohmann::json& plan) {
@@ -618,7 +621,7 @@ void judges_the_attempt_a_plan_names()
     // operation now, asked as the plan is judged; without the question, it
     // runs none.
     const auto own = plan_naming(4242, "boot-1:4242", "test-host");
-    CHECK(judged(own) == AttemptState::Ended && asked == 1);
+    CHECK(judged(own) == AttemptState::Ended && asked == 1 && asked_of == own);
     runs_an_operation = true;
     CHECK(judged(own) == AttemptState::Running && asked == 2);
     CHECK(va::judge_attempt(own, processes, "test-host").state == AttemptState::Ended);

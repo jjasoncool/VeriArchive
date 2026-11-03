@@ -3,14 +3,14 @@
 // which runs a long operation on a worker thread while progress and completion
 // are delivered on the GTK main thread (the only thread allowed to touch
 // widgets), and the guard that keeps an exception from ending the program.
+#include "app/progress_estimate.h"
 #include "app/text.h"
-#include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
-#include "gui/displayed_identity.h"
 
 #include <gtk/gtk.h>
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -47,20 +47,12 @@ void set_text(GtkWidget* text_view, const std::string& text);
 void set_margins(GtkWidget* widget, int margin);
 void clear_grid(GtkWidget* grid);
 
-// A device alert above an operation's progress (decision 0044): a label in
-// bold red, hidden until an alert is shown in it. show_alert_soon may be
-// called from the operation's thread, while something holds the label: it is
-// changed on the main thread, also after its window has closed (the change
-// holds the label until then). hide_alert hides it again, on the main
-// thread, when the next operation starts.
+// A device alert above a job's progress (decision 0044): a label in bold
+// red, hidden until an alert is shown in it, and hidden again when the job it
+// shows has none. On the main thread.
 GtkWidget* make_alert_label();
-void show_alert_soon(GtkWidget* label, std::string text);
+void show_alert(GtkWidget* label, const std::string& text);
 void hide_alert(GtkWidget* label);
-
-// What an operation of a view is told of the devices it reads: the alert of
-// each device whose health alerts, worded in `text`, shown in `label`, each
-// device named as `shown` says (the screenshot mode's sample identity).
-DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text, IdentityShown shown);
 
 // The folder or volume root to register or verify, typed in (or chosen into)
 // an entry, made into a root exactly as the command line makes one
@@ -96,6 +88,40 @@ void log_failure(std::string_view what) noexcept;
 // What the items of a progress update are: files read and hashed (register,
 // verify), or manifest entries compared, with no bytes read.
 enum class Counting { Files, Entries };
+
+// A progress bar as an operation's progress shows it: moving to and fro while
+// it scans, otherwise how far it is, with what it did and, hashing, the speed
+// and the time left (app::ProgressEstimate), worded as on the command line.
+struct BarState {
+    bool pulse = false;
+    double fraction = 0;
+    std::string text;
+};
+
+// Words an operation's progress for a bar, at most five times a second, and
+// always for the report that completes the count, so a finished operation's
+// bar ends full rather than where the update before left it. Every report
+// feeds the estimate, also those not shown.
+class ProgressWording {
+public:
+    ProgressWording(const app::Text& text, Counting counting) : text_(text), counting_(counting) {}
+    std::optional<BarState> update(const Progress& progress);
+
+private:
+    app::Text text_;
+    Counting counting_;
+    // The engines report regularly (hashing five times a second), so a long
+    // silence is a pause, such as the computer sleeping.
+    app::ProgressEstimate estimate_{app::ProgressEstimate::Reports::regular};
+    std::chrono::steady_clock::time_point last_{};
+};
+
+// Says in a notification of the system that an operation of the window
+// ended, unless a window of the program is the active one, where the
+// operator reads its report (decision 0043): its body the report's first two
+// lines and its device alerts (ended_notification_body), under `id`: a later
+// notification of the same id replaces it. On the main thread.
+void notify_if_away(const std::string& report, const std::string& id = "operation-ended");
 
 // One long operation at a time. `work` runs on a worker thread and returns the
 // report; `done` then runs on the main thread. Progress goes to `bar`, worded in

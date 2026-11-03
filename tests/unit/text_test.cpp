@@ -1225,8 +1225,12 @@ void translation_tests()
     CHECK(chinese.format("repo_selected_by: {}", chinese("first-run:exe-dir")) ==
           "儲存庫選定方式：第一次使用（程式所在資料夾）");
     CHECK(chinese("error: Trusted keys must be an array") == "錯誤：設定檔中的 trusted_keys 必須是 JSON 陣列");
-    CHECK(chinese("Finish or cancel the running operation before changing the language.") ==
-          "請先完成或取消正在執行的作業，再切換語言。");
+    CHECK(chinese("Wait for the jobs to end, or stop them, before changing the language.") ==
+          "請等工作結束或先停止它們，再切換語言。");
+    // The window's jobs (decision 0045).
+    CHECK(chinese.format("Waiting: {} reads the same device", "註冊 H:\\") == "等候中：註冊 H:\\ 正在讀取同一個裝置");
+    CHECK(chinese.format("{} jobs are still running.", 2) == "還有 2 個工作在執行。");
+    CHECK(chinese("Stopped before it started, while it waited for the device.") == "在等候裝置時就停止了，尚未開始。");
     // Register and Verify name their target a folder or volume: a volume root
     // registers the whole volume.
     CHECK(chinese("Choose the folder or volume to register.") == "請選擇要註冊的資料夾或磁碟區。");

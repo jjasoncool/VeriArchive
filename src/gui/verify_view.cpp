@@ -121,23 +121,30 @@ std::optional<app::RunToResume> resume_target(const GuiState& state)
     return app::run_to_resume(interrupted_here, view.chosen_adding);
 }
 
-void set_running(GuiState& state, bool running)
+// Resume, offered while there is a run to continue.
+void offer_resume(GuiState& state)
 {
-    auto& view = state.verify_view;
-    gtk_widget_set_sensitive(view.start, !running);
-    gtk_widget_set_sensitive(view.cancel, running);
-    gtk_widget_set_sensitive(view.resume, !running && resume_target(state));
-    lock_language(state, running);
+    gtk_widget_set_sensitive(state.verify_view.resume, resume_target(state).has_value());
 }
 
-// Shows an unexpected error of a Verify handler (see guarded). A start that
-// failed leaves the buttons as they are when nothing runs.
+// Shows an unexpected error of a Verify handler (see guarded).
 void show_error(GuiState& state, Report report)
 {
-    if (!state.job.running()) {
-        set_running(state, false);
-    }
     show_report(state, std::move(report));
+}
+
+// The archive as a job's title names it: its label, or the start of its uuid.
+std::string archive_name(const GuiState& state, const Uuid& archive_uuid)
+{
+    if (state.session) {
+        if (auto store = ArchiveStore::open_read_only(state.session->context.repo)) {
+            if (const auto archive = store->find_archive(archive_uuid); archive && *archive &&
+                                                                        !(*archive)->label.empty()) {
+                return (*archive)->label;
+            }
+        }
+    }
+    return archive_uuid.substr(0, 8);
 }
 
 // Whether a verification started in the window fails metadata differences
@@ -149,8 +156,9 @@ bool strict_metadata(const GuiState& state)
            state.session->context.config.policy.strict_metadata;
 }
 
-// Runs `request` as the window's one operation, its progress and report in
-// this view. A run left INCOMPLETE is offered for Resume here.
+// Runs `request` as a job (decision 0045), its progress and report shown in
+// this view until it starts another. A run left INCOMPLETE is offered for
+// Resume here.
 void run_verification(GuiState& state, VerifyRequest request);
 
 // What the view offers for the archive chosen in the drop-down (decision
@@ -180,8 +188,8 @@ void offer_for_chosen_archive(GuiState& state)
                     *store, *repository_files, state.session->context.repo, **archive);
                 offered = refused && !*refused;
                 const auto processes = platform::make_process_table();
-                const app::AttemptCheck attempts{
-                    processes.get(), state.host.host, [&state] { return state.job.running(); }};
+                const app::AttemptCheck attempts{processes.get(), state.host.host,
+                    [&state](const nlohmann::json& record) { return state.jobs.runs_operation(record); }};
                 const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
                 if (auto stopped = app::resumable_adding_verification(*store, *selected, attempts, now)) {
                     view.chosen_adding = std::move(*stopped);
@@ -194,16 +202,15 @@ void offer_for_chosen_archive(GuiState& state)
     }
     gtk_widget_set_sensitive(view.add_chunk_hashes, offered);
     if (view.resume) {
-        gtk_widget_set_sensitive(view.resume, !state.job.running() && resume_target(state));
+        offer_resume(state);
     }
 }
 
 void start_verification(GuiState& state, bool resume)
 {
     auto& view = state.verify_view;
-    if (!state.session || state.job.running()) {
-        show_report(state, fixed_message(state.session ? "Another operation is running."
-                                                        : "Open a repository first (Settings)."));
+    if (!state.session) {
+        show_report(state, fixed_message("Open a repository first (Settings)."));
         return;
     }
     VerifyRequest request;
@@ -214,9 +221,11 @@ void start_verification(GuiState& state, bool resume)
     request.add_chunk_hashes = !resume && gtk_widget_get_sensitive(view.add_chunk_hashes) &&
                                gtk_check_button_get_active(GTK_CHECK_BUTTON(view.add_chunk_hashes));
     if (resume) {
-        // Resume is offered only with a run to continue (set_running).
+        // Resume is offered only with a run to continue (offer_resume), and
+        // never while a job of the window works on it.
         const auto target = resume_target(state);
-        if (!target) {
+        if (!target || refused_while_a_job_reads(state, target->root ? path_to_utf8(*target->root) : std::string{},
+                           target->archive_uuid)) {
             return;
         }
         request.resume_run = target->run_id;
@@ -243,12 +252,8 @@ void start_verification(GuiState& state, bool resume)
 void run_verification(GuiState& state, VerifyRequest request)
 {
     auto& view = state.verify_view;
-    set_running(state, true);
     show_report(state, fixed_message("Verifying (reading every registered byte) ..."));
-    // Decision 0044: a device alert shows above the progress as soon as the
-    // devices were asked; the operator may cancel, or let the run go on.
     hide_alert(view.alert);
-    request.devices_observed = alert_above_progress(view.alert, state.text, state.identity_shown);
     // Filled by the worker; read by `done`, which runs only after the worker finished.
     struct Interrupted {
         std::string run_id;
@@ -257,8 +262,22 @@ void run_verification(GuiState& state, VerifyRequest request)
     auto interrupted = std::make_shared<std::optional<Interrupted>>();
     // The worker returns its report unworded; it is worded when shown, in the
     // language in use then.
-    state.job.start(state.text, view.progress,
-        [&state, request, interrupted](CancelToken& cancel, IProgressSink& progress) -> Report {
+    JobSpec job;
+    const auto name = request.root ? path_to_utf8(*request.root) : archive_name(state, *request.archive_uuid);
+    if (request.resume_run) {
+        job.title = [name](const app::Text& text) { return text.format("Resume the FULL verification of {}", name); };
+    } else {
+        job.title = [name](const app::Text& text) { return text.format("FULL verify {}", name); };
+    }
+    job.target = {request.root, request.root ? std::nullopt : request.archive_uuid};
+    if (request.root) {
+        job.devices = [root = *request.root] { return devices_of_root(root); };
+    } else {
+        job.devices = [layout = state.session->context.repo, archive = *request.archive_uuid] {
+            return devices_of_archive(layout, archive);
+        };
+    }
+    job.work = [&state, request, interrupted](JobContext& context) -> Report {
             // Decision 0029: a root on a network share, or one written in the
             // \\?\ form, is refused before anything of it is read. Asked here,
             // off the window's thread: on Linux it reads the root's filesystem.
@@ -282,7 +301,11 @@ void run_verification(GuiState& state, VerifyRequest request)
             const auto processes = platform::make_process_table();
             VerifyServices services{*archive_files, *repository_files, *media, *store, session.context.repo,
                 session.context.repository_uuid, state.host, *session.writer, *processes};
-            auto outcome = verify_full(services, request, cancel, progress);
+            // Decision 0044: a device alert shows in the job as soon as the
+            // devices were asked; the operator may stop it, or let it go on.
+            auto asked = request;
+            asked.devices_observed = context.devices_observed;
+            auto outcome = verify_full(services, asked, context.cancel, context.progress);
             if (!outcome) {
                 // Decision 0022, point 7: a chosen archive that more than one
                 // attached volume holds. The verification names their roots;
@@ -330,8 +353,8 @@ void run_verification(GuiState& state, VerifyRequest request)
                 *interrupted = Interrupted{*request.resume_run, outcome->archive_uuid};
             }
             return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
-        },
-        [&state, request, interrupted](const Report& result) {
+        };
+    job.done = [&state, request, interrupted](std::uint64_t ended, const Report& result) {
             guarded(
                 [&] {
                     auto& view = state.verify_view;
@@ -339,19 +362,22 @@ void run_verification(GuiState& state, VerifyRequest request)
                         view.incomplete_run = (*interrupted)->run_id;
                         view.incomplete_root = request.root;
                         view.incomplete_archive = (*interrupted)->archive_uuid;
-                    } else {
+                    } else if (request.resume_run && *request.resume_run == view.incomplete_run) {
                         view.incomplete_run.clear();
                     }
-                    set_running(state, false);
-                    gtk_progress_bar_set_text(GTK_PROGRESS_BAR(view.progress), state.text("Done").c_str());
-                    show_report(state, result);
+                    // The view shows the report of the job it shows.
+                    if (view.job == ended) {
+                        show_report(state, result);
+                    }
                     refresh_archive_list(state);
                     // A revision with chunk hashes may have been recorded, or
                     // a verification that adds them may have stopped.
                     offer_for_chosen_archive(state);
                 },
                 [&](Report error) { show_error(state, std::move(error)); });
-        });
+        };
+    view.job = state.jobs.start(state.text, std::move(job));
+    job_changed(state, view.job);
 }
 
 } // namespace
@@ -500,8 +526,10 @@ GtkWidget* build_verify_view(GuiState& state)
                 [&](Report error) { show_error(state, std::move(error)); });
         }),
         &state);
-    g_signal_connect(view.cancel, "clicked",
-        G_CALLBACK(+[](GtkButton*, gpointer data) { static_cast<GuiState*>(data)->job.cancel(); }), &state);
+    g_signal_connect(view.cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        state.jobs.stop(state.verify_view.job);
+    }), &state);
     gtk_box_append(GTK_BOX(buttons), view.start);
     gtk_box_append(GTK_BOX(buttons), view.cancel);
     gtk_box_append(GTK_BOX(buttons), view.resume);

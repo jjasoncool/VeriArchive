@@ -43,7 +43,7 @@ std::optional<AttemptProcess> recorded_attempt(const nlohmann::json& plan)
 }
 
 AttemptJudgement judge_attempt(const nlohmann::json& plan, IProcessTable& processes, std::string_view host,
-    const std::function<bool()>& runs_an_operation)
+    const std::function<bool(const nlohmann::json& plan)>& runs_this_operation)
 {
     AttemptJudgement judgement;
     judgement.attempt = recorded_attempt(plan);
@@ -57,11 +57,10 @@ AttemptJudgement judge_attempt(const nlohmann::json& plan, IProcessTable& proces
         return judgement; // Unknown
     }
     const auto& recorded = judgement.attempt->process;
-    // This very process: the attempt has ended, unless this process runs an
-    // operation now, which may be that registration; the process table then
-    // finds this process running.
+    // This very process: the attempt has ended, unless this process runs that
+    // operation now; the process table then finds this process running.
     if (const auto self = processes.current(); self && self->id == recorded.id && self->start == recorded.start &&
-                                               !(runs_an_operation && runs_an_operation())) {
+                                               !(runs_this_operation && runs_this_operation(plan))) {
         judgement.state = AttemptState::Ended;
         return judgement;
     }

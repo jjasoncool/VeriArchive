@@ -1763,7 +1763,7 @@ void what_resume_continues()
     window.self = {5151, "boot-1:2000", "veriarchive-gui.exe"};
     window.others = {command_line};
     bool window_runs = false;
-    const va::app::AttemptCheck attempts{&window, "test-host", [&] { return window_runs; }};
+    const va::app::AttemptCheck attempts{&window, "test-host", [&](const nlohmann::json&) { return window_runs; }};
     const auto timestamp = [](std::chrono::sys_seconds time) { return std::format("{:%Y-%m-%dT%H:%M:%SZ}", time); };
     // The record of a run of revision `revision` that adds chunk hashes (or
     // none), last working `silent` ago in `process` on `host`.

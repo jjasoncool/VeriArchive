@@ -1113,10 +1113,11 @@ struct PlannedRegistration {
         CHECK(store.set_setting("registration:" + archive_uuid, plan.dump()));
     }
 
-    // `runs_an_operation`: whether the reading window runs an operation.
-    va::app::UnfinishedOperation read(va::IProcessTable* processes, std::function<bool()> runs_an_operation = {})
+    // `runs_this_operation`: whether the reading window runs the operation of a plan.
+    va::app::UnfinishedOperation read(
+        va::IProcessTable* processes, std::function<bool(const nlohmann::json&)> runs_this_operation = {})
     {
-        const va::app::AttemptCheck attempts{processes, "test-host", std::move(runs_an_operation)};
+        const va::app::AttemptCheck attempts{processes, "test-host", std::move(runs_this_operation)};
         const auto read = va::app::read_unfinished_operations(repository.context.repo, {},
             [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
         CHECK(read && read->operations.size() == 1);
@@ -1184,11 +1185,15 @@ void a_registration_whose_process_runs_is_held_up_not_stopped()
     test::FakeProcessTable processes;
     processes.self = {4242, "boot-1:4242", "veriarchive-gui.exe"};
     processes.others = {{1000, "boot-1:1000", "veriarchive-cli.exe"}};
-    // Whether the window runs an operation, and how often a read asked.
+    // Whether the window runs the operation of the plan, how often a read
+    // asked, and of which root (decision 0045: a job of the window is told by
+    // its root and archive).
     bool window_runs = false;
     int asked = 0;
-    const auto window = [&] {
+    std::string asked_of;
+    const auto window = [&](const nlohmann::json& plan) {
         ++asked;
+        asked_of = plan.value("root", std::string{});
         return window_runs;
     };
     const auto operation = planned.read(&processes, window);
@@ -1221,7 +1226,7 @@ void a_registration_whose_process_runs_is_held_up_not_stopped()
     // registration it started while a read ran shows running, not stopped.
     processes.self = {1000, "boot-1:1000", "veriarchive-gui.exe"};
     processes.others.clear();
-    CHECK(planned.read(&processes, window).attempt == va::AttemptState::Ended && asked == 1);
+    CHECK(planned.read(&processes, window).attempt == va::AttemptState::Ended && asked == 1 && asked_of == "Z:\\");
     window_runs = true;
     CHECK(planned.read(&processes, window).attempt == va::AttemptState::Running && asked == 2);
     CHECK(planned.read(&processes).attempt == va::AttemptState::Ended);  // without the question: it runs none

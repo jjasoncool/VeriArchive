@@ -1,17 +1,19 @@
 #pragma once
-// The GUI's state and its six views: the five of HANDOFF §B17 (Archive List,
-// Register Archive, Verify Archive, Verification History, Settings) and
-// Compare Archives (decision 0020).
+// The GUI's state and its seven views: the five of HANDOFF §B17 (Archive List,
+// Register Archive, Verify Archive, Verification History, Settings), Compare
+// Archives (decision 0020) and Jobs (decision 0045).
 #include "app/adding_chunk_hashes.h"
 #include "app/refusal_in_window.h"
 #include "app/unfinished_operations.h"
 #include "app/session.h"
 #include "gui/displayed_identity.h"
 #include "gui/gui_support.h"
+#include "gui/jobs.h"
 
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <thread>
@@ -54,12 +56,18 @@ struct OperationsPoll {
 struct GuiState {
     GtkApplication* application = nullptr;
     GtkWindow* window = nullptr;
-    GtkWidget* stack = nullptr;            // the six views
+    GtkWidget* stack = nullptr;            // the seven views
     app::Text text;                        // interface language (decision 0017)
     HostInfo host;
     std::optional<app::Session> session;   // empty until a repository is open
     Report session_error;                  // why no repository is open
-    Job job;                               // the one long operation running, if any
+    // The registrations, verifications and comparisons started in the
+    // window, each a job of its own (decision 0045).
+    Jobs jobs;
+    // A step that runs besides the jobs, one at a time: the upgrade of the
+    // repository's database as it opens (decision 0032), and abandoning an
+    // unfinished operation (decisions 0025, 0026, 0033).
+    Job job;
     OperationsPoll operations;             // every unfinished operation, for the Archive List
     int exit_status = 0;                   // 1 when an unexpected error cut the smoke test, the start or the screenshots short
     // Set from VERIARCHIVE_GUI_SCREENSHOTS: take the documentation screenshots
@@ -96,6 +104,7 @@ struct GuiState {
         GtkWidget* progress = nullptr;
         GtkWidget* report = nullptr;
         Report shown_report;
+        std::uint64_t job = 0;             // the job the view shows: the last it started (0: none)
     } register_view;
 
     struct {
@@ -110,6 +119,7 @@ struct GuiState {
         GtkWidget* progress = nullptr;
         GtkWidget* report = nullptr;
         Report shown_report;
+        std::uint64_t job = 0;             // the job the view shows: the last it started (0: none)
         std::vector<Uuid> archive_uuids;   // index i+1 of the drop-down
         std::string incomplete_run;        // last INCOMPLETE run, for Resume
         std::optional<std::filesystem::path> incomplete_root;
@@ -129,8 +139,34 @@ struct GuiState {
         GtkWidget* progress = nullptr;
         GtkWidget* report = nullptr;
         Report shown_report;
+        std::uint64_t job = 0;             // the job the view shows: the last it started (0: none)
         std::vector<Uuid> archive_uuids;   // index i of both drop-downs
     } compare_view;
+
+    // The Jobs page (decision 0045): a row for each job, and the window of
+    // details of each job whose Details was opened.
+    struct JobRow {
+        GtkWidget* title = nullptr;
+        GtkWidget* state = nullptr;
+        GtkWidget* bar = nullptr;
+        GtkWidget* alert = nullptr;
+        GtkWidget* stop = nullptr;
+    };
+    struct JobDetails {
+        GtkWidget* window = nullptr;
+        GtkWidget* state = nullptr;
+        GtkWidget* bar = nullptr;
+        GtkWidget* alert = nullptr;
+        GtkWidget* report = nullptr;
+        GtkWidget* stop = nullptr;
+    };
+    struct {
+        GtkWidget* list = nullptr;
+        GtkWidget* empty = nullptr;        // "No jobs yet."
+        GtkWidget* clear = nullptr;        // "Clear ended jobs"
+        std::map<std::uint64_t, JobRow> rows;
+        std::map<std::uint64_t, JobDetails> details;
+    } jobs_view;
 
     struct {
         GtkWidget* archive = nullptr;
@@ -156,6 +192,29 @@ GtkWidget* build_verify_view(GuiState& state);
 GtkWidget* build_compare_view(GuiState& state);
 GtkWidget* build_history_view(GuiState& state);
 GtkWidget* build_settings_view(GuiState& state);
+GtkWidget* build_jobs_view(GuiState& state);
+
+// What the window does once a job changed (Jobs::on_change; 0: jobs were
+// added or removed): the Jobs page, the job's window of details, and the
+// view that started it show it as it is now, and the language drop-down is
+// locked while a job waits or works.
+void job_changed(GuiState& state, std::uint64_t job);
+
+// Closes every window of a job's details (before a language change replaces
+// the main window).
+void close_job_details(GuiState& state);
+
+// The devices that a job of `root`, or of the archive `archive_uuid`, reads
+// (device_keys, recorded_device_keys), as the device queue compares them;
+// asked on the job's thread. None where they cannot be told: the job then
+// waits for nothing, and its operation says what is wrong.
+std::vector<std::string> devices_of_root(const std::filesystem::path& root);
+std::vector<std::string> devices_of_archive(const RepositoryLayout& layout, const Uuid& archive_uuid);
+
+// Whether a job of the window waits or works on the operation with `root`
+// or `archive` (either may be empty), which a step that abandons or resumes
+// it must not take over (decision 0045); if so, says so in a message.
+bool refused_while_a_job_reads(GuiState& state, const std::string& root, const Uuid& archive);
 
 // Reload data shown by the views (after the repository changes).
 // refresh_archive_list also shows the unfinished operations of the latest
@@ -171,10 +230,11 @@ void show_runs(GuiState& state);
 // (decision 0022, point 7): continues it exactly as its command-line resume
 // does, with the request that app::verification_resume and
 // app::registration_resume make, as they make it: no check box of the views
-// takes part. It runs as the window's one operation, in the view where an
+// takes part. It runs as a job (decision 0045), shown in the view where an
 // operation of its kind started in the window shows its progress and report
 // (Verify Archive, Register Archive), which it brings into view. The caller
-// has made sure that a repository is open and that no operation runs.
+// has made sure that a repository is open and that no job of the window
+// reads the operation (refused_while_a_job_reads).
 // `confirmed`: the operator chose Resume in the question that a resume of a
 // registration an older version left asks first (ask_before_resuming), as
 // `register <root> --resume --confirm`; a resume of such a registration that
@@ -194,10 +254,11 @@ void ask_before_resuming(GuiState& state, const std::string& label, const std::s
     std::function<void(GuiState&)> resume);
 
 // The Settings language drop-down. show_language_in_use selects the language
-// in use. lock_language makes the drop-down unavailable while an operation
-// runs, because a language change rebuilds the window the operation reports into.
+// in use. lock_language makes the drop-down unavailable while a job waits or
+// works, or a step of the window runs, and available again once none does,
+// because a language change rebuilds the window they report into.
 void show_language_in_use(GuiState& state);
-void lock_language(GuiState& state, bool locked);
+void lock_language(GuiState& state);
 
 // Opens the repository (or initialises it on first run) and refreshes every view.
 void open_repository_session(GuiState& state, bool initialise);

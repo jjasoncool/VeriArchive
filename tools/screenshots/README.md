@@ -11,6 +11,7 @@
 | `05-history.png` | Verification History of archive A, with the history chain checked |
 | `06-compare.png` | Compare Archives: A (`原始資料`) against its copy B (`備份資料`) |
 | `07-language.png` | Settings with the language list open |
+| `08-jobs.png` | Jobs: the verification and the comparison that the tour started, ended |
 
 The pictures are 1100 × 720 and show the window only, title bar included. GTK draws them itself from what the window drew, so other windows on the desktop never appear in them.
 

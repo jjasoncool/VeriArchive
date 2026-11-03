@@ -51,19 +51,22 @@ struct AttemptJudgement {
 // `host`. A process that has the recorded id but another start is a later
 // process given the same id: the attempt's process has ended.
 //
-// A plan that names this very process is of an attempt that has ended while
-// this process runs no operation: a process runs one registration at a time
-// (the CLI one command, the GUI one operation at a time), so such a plan is
-// of an attempt that this process cancelled, but whose stop mark it could not
-// write. `runs_an_operation` says whether this process runs an operation now,
-// which may be the registration that wrote the plan; it is asked only for a
-// plan that names this process, as that plan is judged, so after the plan
-// was read (the Archive List reads on a thread of its own, while the window
-// may start an operation). Without it, this process runs none, as where the
-// program judges an attempt for itself: only before it starts one (a resume),
-// or while it runs no registration (abandoning, decision 0025).
+// A plan that names this very process is of an attempt that has ended unless
+// this process runs that very operation now: the command line runs one
+// command, so such a plan is of an attempt that this process cancelled, but
+// whose stop mark it could not write; the window runs several jobs at once,
+// never two of one archive or of one device (decision 0045), and knows which
+// of them runs. `runs_this_operation` says whether this process runs the
+// operation that `plan` (a registration's plan, a verification's or a
+// relocation's record) is of, by its root and its archive; it is asked only
+// for a plan that names this process, as that plan is judged, so after the
+// plan was read (the Archive List reads on a thread of its own, while the
+// window may start a job). Without it, this process runs none, as where the
+// program judges an attempt for itself: before it starts one (a resume), or
+// while it runs no registration (abandoning, decision 0025), which the window
+// refuses for an operation that one of its jobs runs.
 AttemptJudgement judge_attempt(const nlohmann::json& plan, IProcessTable& processes, std::string_view host,
-    const std::function<bool()>& runs_an_operation = {});
+    const std::function<bool(const nlohmann::json& plan)>& runs_this_operation = {});
 
 // How long a registration's plan may say nothing before an attempt that it
 // does not name (judged Unknown) is no longer taken to work: the plan of an
