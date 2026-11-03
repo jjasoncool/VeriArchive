@@ -92,6 +92,7 @@ struct GuiState {
         GtkWidget* resume = nullptr;
         GtkWidget* start = nullptr;
         GtkWidget* cancel = nullptr;
+        GtkWidget* alert = nullptr;        // a device alert, above the progress (decision 0044)
         GtkWidget* progress = nullptr;
         GtkWidget* report = nullptr;
         Report shown_report;
@@ -105,6 +106,7 @@ struct GuiState {
         GtkWidget* start = nullptr;
         GtkWidget* resume = nullptr;
         GtkWidget* cancel = nullptr;
+        GtkWidget* alert = nullptr;        // a device alert, above the progress (decision 0044)
         GtkWidget* progress = nullptr;
         GtkWidget* report = nullptr;
         Report shown_report;

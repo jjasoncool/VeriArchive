@@ -1376,6 +1376,42 @@ void an_interrupted_attempt_is_recorded_incomplete()
 // the last "relocation from r1", in both languages, from what the relocation
 // wrote into their counts; the verification reads nothing. A run whose counts
 // say nothing of a relocation, or cannot be read, is no relocation's.
+// Decision 0044: a relocation asks each device of the new carrier for its
+// health before it reads it, keeps what it reported with its media evidence
+// and in the counts of its runs, an interrupted attempt's included, and its
+// report names it beside a result that stays what the content says.
+void a_relocation_asks_the_new_carriers_devices()
+{
+    RelocationFixture fixture(true);
+    fixture.media.health["NEW-DISK"] = {va::HealthStatus::Unhealthy, {"hardware-error"}};
+    const auto failing = [](const std::vector<va::PhysicalDeviceInfo>& devices) {
+        return devices.size() == 1 && devices[0].serial == "NEW-DISK" && devices[0].health &&
+               devices[0].health->status == va::HealthStatus::Unhealthy &&
+               devices[0].health->conditions == std::vector<std::string>{"hardware-error"};
+    };
+    fixture.interrupted_relocation(fixture.processes.self, false);
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(resumed && resumed->result == "PASSED" && failing(resumed->devices));
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 2);
+    if (runs) {
+        for (const auto& run : *runs) {
+            CHECK(failing(va::recorded_device_health(run.counts_json)));
+        }
+    }
+    CHECK(fixture.repository.query(
+              "SELECT COUNT(*) FROM media_evidence WHERE volume_json LIKE '%\"hardware-error\"%'") == "2");
+    if (resumed) {
+        const va::app::Text english;
+        const auto report = va::app::relocation_report(english, *resumed, "/vol/new");
+        CHECK(report.find("\n  ⚠ Device alert: Test Disk (serial NEW-DISK) reports its health as unhealthy "
+                          "(hardware error).") != std::string::npos);
+        CHECK(report.find("\n  device health: Test Disk (serial NEW-DISK): unhealthy (hardware error)\n") !=
+              std::string::npos);
+        CHECK(va::app::relocation_json(*resumed)["device_health"][0]["health"]["status"] == "unhealthy");
+    }
+}
+
 void the_history_marks_the_runs_of_a_relocation()
 {
     RelocationFixture fixture(true);
@@ -3009,16 +3045,21 @@ void what_the_command_line_says_of_a_relocation()
         const auto& uuid = relocated->archive_uuid;
         const auto& run = relocated->run_id;
         const auto label = relocated->label;
+        // The new carrier's device tells nothing of its health (decision 0044).
         CHECK(va::app::relocation_report(english, *relocated, "K:/SAMPLE") ==
               "Relocated " + label + " (" + uuid + ") to K:/SAMPLE as revision 2\n  FULL VERIFY PASSED_WITH_WARNINGS "
-              "of the new carrier (run " + run + ")\n  warning: " + unreliable_file_hash("BLAKE3") + "\n");
+              "of the new carrier (run " + run + ")\n  device health: Test Disk (serial NEW-DISK): cannot be read\n"
+              "  warning: " + unreliable_file_hash("BLAKE3") + "\n");
         CHECK(va::app::relocation_report(chinese, *relocated, "K:/SAMPLE") ==
               "已將 " + label + "（" + uuid + "）搬移至 K:/SAMPLE，成為版次 2\n  新載體的完整驗證：通過（有警告）（執行 " + run +
-                  "）\n  警告：big1.bin 的整個檔案 BLAKE3 雜湊不可靠：它不符，但檔案的 3 個區塊都與各自的區塊雜湊相符；"
+                  "）\n  裝置健康狀態：Test Disk（序號 NEW-DISK）：無法讀取\n"
+                  "  警告：big1.bin 的整個檔案 BLAKE3 雜湊不可靠：它不符，但檔案的 3 個區塊都與各自的區塊雜湊相符；"
                   "檔案本身沒有問題，建立新版次即可修正\n");
+        const nlohmann::json device_health = nlohmann::json::array({{{"model", "Test Disk"}, {"serial", "NEW-DISK"},
+            {"wwn", ""}, {"health", {{"status", "unknown"}, {"conditions", nlohmann::json::array()}}}}});
         const nlohmann::json expected{{"archive_uuid", uuid}, {"revision", 2}, {"result", "PASSED_WITH_WARNINGS"},
             {"run_id", run}, {"manifest", va::path_to_utf8(relocated->manifest)}, {"counts", relocated->counts},
-            {"warnings", {unreliable_file_hash("BLAKE3")}}, {"resumed", false}};
+            {"warnings", {unreliable_file_hash("BLAKE3")}}, {"device_health", device_health}, {"resumed", false}};
         CHECK(va::app::relocation_json(*relocated) == expected);
     }
     ChunkedRelocation fixture;
@@ -3099,6 +3140,7 @@ void relocate_tests()
     a_resume_needs_the_volume_it_started_on();
     a_resumed_relocation_names_where_it_reads_and_keeps_its_start();
     an_interrupted_attempt_is_recorded_incomplete();
+    a_relocation_asks_the_new_carriers_devices();
     the_history_marks_the_runs_of_a_relocation();
     a_resume_needs_the_revision_it_verifies();
     a_relocation_replaces_a_record_that_can_no_longer_finish();

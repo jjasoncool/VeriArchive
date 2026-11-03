@@ -5,6 +5,7 @@
 // device and answer here is sample data made up for the test.
 #include "test_support.h"
 
+#include "engine_fixture.h"
 #include "fakes.h"
 
 #include "app/device_alerts.h"
@@ -198,6 +199,124 @@ void words()
           "健康狀態：不健康");
 }
 
+// A registration and a verification ask each device of the volume for its
+// health before they read anything of the archive, tell it at once, keep it
+// with their media evidence (a verification also in its counts, in the hash
+// chain), and their result stays what the content says.
+void operations_ask_the_devices()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("SAMPLE.txt", "sample content");
+    fixture.media.health["SERIAL-1"] = {HealthStatus::Warning, {"predicting-failure"}};
+    std::vector<va::PhysicalDeviceInfo> told;
+    std::uint64_t read_when_told = 999;
+    std::size_t times_told = 0;
+    const auto observed = [&](const std::vector<va::PhysicalDeviceInfo>& devices) {
+        told = devices;
+        read_when_told = fixture.archive.bytes_read;
+        ++times_told;
+    };
+    const auto warned = [](const std::vector<va::PhysicalDeviceInfo>& devices) {
+        return devices.size() == 1 && devices[0].serial == "SERIAL-1" && devices[0].health &&
+               devices[0].health->status == HealthStatus::Warning &&
+               devices[0].health->conditions == std::vector<std::string>{"predicting-failure"};
+    };
+    const auto last_evidence = [&] {
+        return fixture.repository.query("SELECT volume_json FROM media_evidence ORDER BY id DESC LIMIT 1");
+    };
+
+    va::RegisterRequest registration;
+    registration.root = fixture.archive.root();
+    registration.devices_observed = observed;
+    const auto registered = fixture.register_root(registration);
+    CHECK(registered && warned(registered->devices));
+    CHECK(times_told == 1 && warned(told) && read_when_told == 0);
+    CHECK(last_evidence().find(R"("health":{"conditions":["predicting-failure"],"status":"warning"})") !=
+          std::string::npos);
+
+    va::VerifyRequest verification;
+    verification.root = fixture.archive.root();
+    verification.devices_observed = observed;
+    const auto read_before = fixture.archive.bytes_read;
+    const auto verified = fixture.verify(verification);
+    CHECK(verified && verified->result == "PASSED");
+    CHECK(verified && warned(verified->devices));
+    CHECK(times_told == 2 && warned(told) && read_when_told == read_before);
+    if (verified) {
+        const auto counts = fixture.repository.query(
+            "SELECT counts_json FROM verify_runs WHERE run_id = '" + verified->run_id + "'");
+        CHECK(warned(va::recorded_device_health(counts)));
+        CHECK(fixture.repository
+                  .query("SELECT volume_json FROM media_evidence WHERE run_id = '" + verified->run_id + "'")
+                  .find("predicting-failure") != std::string::npos);
+    }
+    CHECK(fixture.media.health_asked == 2);
+}
+
+// What a run's counts give back: nothing of a run recorded before decision
+// 0044, and only what is written as it is written of counts changed by hand.
+void recorded_health()
+{
+    CHECK(va::recorded_device_health(R"({"items":{"Verified":3}})").empty());
+    CHECK(va::recorded_device_health("not json").empty());
+    const auto changed = va::recorded_device_health(
+        R"({"device_health":[{"model":5,"serial":"SAMPLE","health":{"status":7}},"x",{"wwn":"0x5000"}]})");
+    CHECK(changed.size() == 2);
+    if (changed.size() == 2) {
+        CHECK(changed[0].model.empty() && changed[0].serial == "SAMPLE");
+        CHECK(changed[0].health && changed[0].health->status == HealthStatus::Unknown);
+        CHECK(changed[1].wwn == "0x5000" && changed[1].health && changed[1].health->status == HealthStatus::Unknown);
+    }
+    va::PhysicalDeviceInfo asked;
+    asked.model = "SAMPLE DISK";
+    asked.serial = "SAMPLE-SERIAL";
+    asked.health = va::DeviceHealth{HealthStatus::Unhealthy, {"hardware-error"}};
+    va::PhysicalDeviceInfo not_asked = asked;
+    not_asked.health.reset();
+    CHECK(va::device_health_json({asked, not_asked}).size() == 1);
+    const auto back = va::recorded_device_health(nlohmann::json{{"device_health", va::device_health_json({asked})}}.dump());
+    CHECK(back.size() == 1 && back[0].model == "SAMPLE DISK" && back[0].health &&
+          back[0].health->status == HealthStatus::Unhealthy);
+    CHECK(va::any_health_alerts(back) && !va::any_health_alerts({not_asked}));
+}
+
+void alert_words()
+{
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    va::PhysicalDeviceInfo device;
+    device.model = "SAMPLE DISK";
+    device.serial = "SAMPLE-SERIAL-2";
+    device.health = va::DeviceHealth{HealthStatus::Warning, {"predicting-failure"}};
+    const auto english_lines = va::app::health_alert_lines(english, {device});
+    CHECK(english_lines == std::vector<std::string>{
+                               "⚠ Device alert: SAMPLE DISK (serial SAMPLE-SERIAL-2) reports its health as warning "
+                               "(predicting failure). Copy the archives on it to another device soon, and verify the "
+                               "copies."});
+    CHECK(va::app::health_alert_lines(chinese, {device}) ==
+          std::vector<std::string>{"⚠ 裝置警訊：SAMPLE DISK（序號 SAMPLE-SERIAL-2） 回報的健康狀態為「警告（預測即將故障）」。"
+                                   "請盡快把其中的封存複製到另一個裝置，並驗證這些副本。"});
+    // A healthy device, one that cannot tell, and one never asked are no alert.
+    auto healthy = device;
+    healthy.health = va::DeviceHealth{HealthStatus::Healthy, {}};
+    auto untold = device;
+    untold.health = va::DeviceHealth{};
+    auto never_asked = device;
+    never_asked.health.reset();
+    CHECK(va::app::health_alert_lines(english, {healthy, untold, never_asked}).empty());
+
+    CHECK(va::app::device_health_words(english, healthy) == "SAMPLE DISK (serial SAMPLE-SERIAL-2): healthy");
+    CHECK(va::app::device_health_words(chinese, untold) == "SAMPLE DISK（序號 SAMPLE-SERIAL-2）：無法讀取");
+    auto by_wwn = device;
+    by_wwn.serial.clear();
+    by_wwn.wwn = "0x5000c500a1b2c3d4";
+    CHECK(va::app::device_name(english, by_wwn) == "SAMPLE DISK (WWN 0x5000c500a1b2c3d4)");
+    auto unnamed = by_wwn;
+    unnamed.wwn.clear();
+    unnamed.model.clear();
+    CHECK(va::app::device_name(english, unnamed) == "?");
+}
+
 // The platform's own question, of the devices that hold the test's temporary
 // folder: it answers for each, whatever the device says (a CI runner's
 // virtual disk may say nothing), and a device it cannot know is Unknown.
@@ -226,5 +345,8 @@ void device_health_tests()
     which_health_alerts();
     observed_and_kept();
     words();
+    operations_ask_the_devices();
+    recorded_health();
+    alert_words();
     asked_of_this_computer();
 }

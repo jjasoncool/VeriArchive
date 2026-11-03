@@ -10,6 +10,7 @@
 // the same entries and their chunk hashes when every entry matched.
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/candidates.h"
+#include "core/engine/device_alerts.h"
 #include "core/identity/matcher.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
@@ -37,6 +38,8 @@ struct VerifyRequest {
     // The chunk size at which they are added: 64 MiB, as a registration's
     // (decision 0032); tests use 64 KiB.
     std::uint64_t chunk_size = default_chunk_size;
+    // Decision 0044: told of the devices' health before the archive is read.
+    DevicesObserved devices_observed = {};
 };
 
 struct VerifyServices {
@@ -63,6 +66,10 @@ struct VerifyOutcome {
     MatchOutcome identity;
     std::vector<std::string> failure_classes;   // §A6 run-level failure classes
     std::vector<std::string> warnings;
+    // The devices of the volume read, with the health each reported when the
+    // run started (decision 0044): a device alert is told beside the result
+    // and never changes it. Empty where the run read no media.
+    std::vector<PhysicalDeviceInfo> devices;
     // Informational, never part of the result (decision 0006): "driver:
     // ntfs-3g" where a FUSE program read the media instead of the kernel's
     // driver of its format.

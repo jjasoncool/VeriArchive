@@ -797,6 +797,14 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             });
         }
     }
+    // Decision 0044: what each device of the volume reports of its health,
+    // asked before anything of the archive is read, kept with the run's media
+    // evidence and in its counts, and told at once.
+    observe_device_health(services.media, evidence.volume);
+    outcome.devices = evidence.volume.devices;
+    if (request.devices_observed) {
+        request.devices_observed(outcome.devices);
+    }
     Heartbeat heartbeat(store, run_setting(outcome.run_id), std::move(run_record), progress);
     // However a run that adds chunk hashes returns without recording itself
     // (its revision's manifest or its record could not be written), its
@@ -1058,6 +1066,9 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     nlohmann::json counts{{"items", outcome.counts}};
     if (!outcome.resumed_from.empty()) {
         counts["resumed_from"] = outcome.resumed_from;
+    }
+    if (const auto health = device_health_json(outcome.devices); !health.empty()) {
+        counts["device_health"] = health;
     }
     VerifyRunRecord run;
     run.run_id = outcome.run_id;

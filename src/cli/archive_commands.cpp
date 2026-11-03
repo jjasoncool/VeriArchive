@@ -1016,6 +1016,8 @@ int relocate(const Arguments& arguments, Opened& opened)
     CancelToken cancel;
     const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments);
+    // Decision 0044: printed as soon as the devices were asked; it goes on.
+    request.devices_observed = progress.device_alerts();
     const auto outcome = relocate_archive(services, request, cancel, progress);
     progress.finish();
 

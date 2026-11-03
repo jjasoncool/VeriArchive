@@ -17,6 +17,7 @@
 // an attempt found that the new carrier does not hold the recorded content
 // (its record then says "differs", and the relocation waits to be abandoned).
 #include "core/engine/candidates.h"
+#include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
 #include "core/repository/archive_store.h"
 
@@ -33,6 +34,8 @@ struct RelocateRequest {
     std::optional<bool> rotational;         // --io hdd|ssd (R-111)
     bool resume = false;                    // continue the archive's unfinished relocation (decision 0026)
     std::map<std::string, bool> rotational_override = {}; // io.rotational_override of the config, by serial (R-111)
+    // Decision 0044: told of the new carrier's devices' health before it is read.
+    DevicesObserved devices_observed = {};
 };
 
 struct RelocateServices {
@@ -60,6 +63,9 @@ struct RelocateOutcome {
     std::vector<std::string> warnings;
     std::map<std::string, std::uint64_t> counts;
     std::vector<VerifyItemRecord> items;
+    // The new carrier's devices, with the health each reported when this
+    // attempt started (decision 0044).
+    std::vector<PhysicalDeviceInfo> devices;
     std::filesystem::path manifest;
     bool resumed = false;                   // it continued an unfinished relocation (decision 0026)
 };

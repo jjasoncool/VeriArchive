@@ -1144,6 +1144,14 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     Heartbeat heartbeat(store, pending_key(plan.archive_uuid), std::move(plan_record), progress);
     heartbeat.only_while_planned(plan.archive_uuid, plan.revision, plan.created);
     heartbeat.beat();
+    // Decision 0044: what each device of the volume reports of its health,
+    // asked before anything of the root is read, kept with the
+    // registration's media evidence, and told at once.
+    auto observed = *volume;
+    observe_device_health(services.media, observed);
+    if (request.devices_observed) {
+        request.devices_observed(observed.devices);
+    }
     // However this attempt returns without finishing (cancelled, the device
     // removed, a failure), the plan says last that it stopped ("stopped"), so
     // the Archive List shows it stopped at once and not working for minutes.
@@ -1374,6 +1382,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     outcome.label = plan.label;
     outcome.revision = plan.revision;
     outcome.lost_revision = plan.lost_revision;
+    outcome.devices = observed.devices;
 
     ManifestHeader header;
     header.archive_uuid = plan.archive_uuid;
@@ -1513,7 +1522,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         // A registration over a lost manifest matched nothing: the archive's
         // carrier was the lost manifest's to record (decision 0028, point 8).
-        EvidenceRecord evidence_record{plan.archive_uuid, "", evidence.seen_at, volume_to_json_text(*volume),
+        EvidenceRecord evidence_record{plan.archive_uuid, "", evidence.seen_at, volume_to_json_text(observed),
             plan.new_archive || plan.lost_revision ? "UNKNOWN" : "MATCH",
             plan.lost_revision ? "registered over the lost manifest of revision " + std::to_string(*plan.lost_revision)
                                : std::string("registered")};

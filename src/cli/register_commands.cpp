@@ -7,6 +7,7 @@
 // point 7).
 #include "cli/commands.h"
 
+#include "app/device_alerts.h"
 #include "app/local_time.h"
 #include "app/unfinished_operations.h"
 #include "common/utf8.h"
@@ -159,11 +160,18 @@ int unconfirmed_resume(const Arguments& arguments, const RegisterFailure& failur
 void print_outcome(const app::Text& text, const RegisterOutcome& outcome, const std::filesystem::path& root)
 {
     std::cout << text.format("Registered {} ({}) revision {}", outcome.label, outcome.archive_uuid,
-                     outcome.revision)
-              << "\n  " << text.format("root: {}", path_to_utf8(root))
+                     outcome.revision);
+    // Decision 0044: a device alert comes right below the result line.
+    for (const auto& line : app::health_alert_lines(text, outcome.devices)) {
+        std::cout << "\n  " << line;
+    }
+    std::cout << "\n  " << text.format("root: {}", path_to_utf8(root))
               << "\n  " << text.format("files: {}  empty directories: {}  links: {}  hashed bytes: {}",
                      outcome.counts.files, outcome.counts.dirs, outcome.counts.links, outcome.counts.bytes)
               << "\n  " << text.format("manifest: {}", path_to_utf8(outcome.manifest)) << '\n';
+    for (const auto& device : outcome.devices) {
+        std::cout << "  " << text.format("device health: {}", app::device_health_words(text, device)) << '\n';
+    }
     if (!outcome.unreadable.empty()) {
         std::cout << "  "
                   << text.format("unreadable at registration ({}; recorded without hashes, never reported "
@@ -221,6 +229,8 @@ nlohmann::json outcome_json(const RegisterOutcome& outcome)
         {"unreadable", std::move(unreadable)},
         {"skipped_mount_points", std::move(mount_points)},
         {"warnings", outcome.warnings},
+        // Decision 0044: each device's health, as the media evidence keeps it.
+        {"device_health", device_health_json(outcome.devices)},
         {"manifest", path_to_utf8(outcome.manifest)},
         {"media_copy", path_to_utf8(outcome.media_copy)},
     };
@@ -335,6 +345,8 @@ int register_command(const Arguments& arguments)
     CancelToken cancel;
     const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments);
+    // Decision 0044: printed as soon as the devices were asked; it goes on.
+    request.devices_observed = progress.device_alerts();
     const auto outcome = register_archive(services, request, cancel, progress);
     progress.finish();
     if (!outcome) {

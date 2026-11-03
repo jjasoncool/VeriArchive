@@ -14,7 +14,8 @@ namespace va::gui {
 // hold text, as shown in the view, which name the result and what it is of
 // ("FULL VERIFY PASSED", then the archive's label, uuid and revision; a
 // registration's label and revision, then what it hashed; a refusal's
-// reason).
+// reason), and after them every line of a device alert, which app::alert_mark
+// leads (decision 0044): an operator away from the computer learns of it too.
 std::string ended_notification_body(std::string_view report);
 
 } // namespace va::gui

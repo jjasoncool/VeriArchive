@@ -1,5 +1,6 @@
 #include "gui/gui_support.h"
 
+#include "app/device_alerts.h"
 #include "app/keep_awake.h"
 #include "app/plain_words.h"
 #include "app/progress_estimate.h"
@@ -104,6 +105,66 @@ void clear_grid(GtkWidget* grid)
     while (GtkWidget* child = gtk_widget_get_first_child(grid)) {
         gtk_grid_remove(GTK_GRID(grid), child);
     }
+}
+
+GtkWidget* make_alert_label()
+{
+    GtkWidget* label = make_label("", true);
+    gtk_widget_set_visible(label, FALSE);
+    return label;
+}
+
+void show_alert_soon(GtkWidget* label, std::string text)
+{
+    struct Alert {
+        GtkWidget* label;  // a reference of its own, given back on the main thread
+        std::string text;
+    };
+    g_idle_add(
+        +[](gpointer data) -> gboolean {
+            std::unique_ptr<Alert> alert(static_cast<Alert*>(data));
+            gchar* escaped = g_markup_escape_text(alert->text.c_str(), -1);
+            // Red, as GNOME's palette has it for errors, and bold: it must
+            // stand out from the progress in either theme.
+            const std::string markup = std::string("<span foreground=\"#e01b24\" weight=\"bold\">") + escaped +
+                                       "</span>";
+            g_free(escaped);
+            gtk_label_set_markup(GTK_LABEL(alert->label), markup.c_str());
+            gtk_widget_set_visible(alert->label, TRUE);
+            g_object_unref(alert->label);
+            return G_SOURCE_REMOVE;
+        },
+        new Alert{GTK_WIDGET(g_object_ref(label)), std::move(text)});
+}
+
+void hide_alert(GtkWidget* label)
+{
+    gtk_label_set_text(GTK_LABEL(label), "");
+    gtk_widget_set_visible(label, FALSE);
+}
+
+DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text)
+{
+    // The operation holds the label for as long as it may show an alert in
+    // it, also after its window has closed; the reference, taken here on the
+    // main thread, is given back there.
+    std::shared_ptr<GtkWidget> held(GTK_WIDGET(g_object_ref(label)), [](GtkWidget* widget) {
+        g_idle_add(
+            +[](gpointer data) -> gboolean {
+                g_object_unref(data);
+                return G_SOURCE_REMOVE;
+            },
+            widget);
+    });
+    return [held, text](const std::vector<PhysicalDeviceInfo>& devices) {
+        std::string shown;
+        for (const auto& line : app::health_alert_lines(text, devices)) {
+            shown += (shown.empty() ? "" : "\n") + line;
+        }
+        if (!shown.empty()) {
+            show_alert_soon(held.get(), std::move(shown));
+        }
+    };
 }
 
 std::filesystem::path entry_root(GtkWidget* entry)

@@ -7,6 +7,7 @@
 #include "app/typed_path.h" // IWYU pragma: export (paths and roots typed on the command line, as in the GUI)
 #include "core/interfaces.h"
 #include "core/engine/candidates.h"
+#include "core/engine/device_alerts.h"
 #include "core/repository/archive_store.h"
 #include "core/repository/repository.h"
 
@@ -120,6 +121,14 @@ public:
     // Shows a message for a step that reports no progress of its own, such as
     // loading manifests; the next report replaces it.
     void show(const std::string& message);
+    // Writes `line` on a line of its own above the progress, which the next
+    // report shows again: something the operator should see while the
+    // operation runs, such as a device alert (decision 0044).
+    void say(const std::string& line);
+    // What an operation is told of the devices it reads: the alert of each
+    // device whose health alerts, said as above (decision 0044). Nothing in
+    // --json mode, whose document gives each device's health.
+    DevicesObserved device_alerts();
     void finish();
 
 private:

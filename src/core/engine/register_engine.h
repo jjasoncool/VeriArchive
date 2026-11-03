@@ -3,6 +3,7 @@
 // new) revision's manifest, and index it in the repository.
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/candidates.h"
+#include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
 #include "core/repository/archive_store.h"
@@ -47,6 +48,8 @@ struct RegisterRequest {
     // keeps it, and a resumed registration the one its plan fixed. 0
     // registers without chunk lines, as V1 did; tests use 64 KiB.
     std::uint64_t chunk_size = default_chunk_size;
+    // Decision 0044: told of the devices' health before the root is read.
+    DevicesObserved devices_observed = {};
 };
 
 struct RegisterServices {
@@ -74,6 +77,9 @@ struct RegisterOutcome {
     std::vector<Entry> unreadable;          // decision 0010: listed, exit code 2
     std::vector<ArchivePath> skipped_mount_points;
     std::vector<std::string> warnings;
+    // The devices of the volume read, with the health each reported when
+    // this attempt started (decision 0044).
+    std::vector<PhysicalDeviceInfo> devices;
     std::filesystem::path manifest;
     std::filesystem::path media_copy;       // set when the media copy was written (R-89)
     // A registration over a lost manifest (decision 0028, point 8): the

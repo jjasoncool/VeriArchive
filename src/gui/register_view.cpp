@@ -4,6 +4,7 @@
 // 0022, point 7).
 #include "gui/gui_app.h"
 
+#include "app/device_alerts.h"
 #include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "common/utf8.h"
@@ -24,11 +25,18 @@ std::string report(const app::Text& text, const RegisterOutcome& outcome)
 {
     std::string body =
         text.format("Registered {} ({}) revision {}", outcome.label, outcome.archive_uuid, outcome.revision) +
-        "\n\n" +
-        text.format("{}, {}, {}, {} hashed", app::count_of(text, outcome.counts.files, app::Counted::File),
-            app::count_of(text, outcome.counts.dirs, app::Counted::EmptyDirectory),
-            app::count_of(text, outcome.counts.links, app::Counted::Link), format_bytes(outcome.counts.bytes)) +
-        "\n" + text.format("Manifest: {}", path_to_utf8(outcome.manifest)) + "\n";
+        "\n\n";
+    // Decision 0044: a device alert comes first, below the result line.
+    for (const auto& line : app::health_alert_lines(text, outcome.devices)) {
+        body += line + "\n";
+    }
+    body += text.format("{}, {}, {}, {} hashed", app::count_of(text, outcome.counts.files, app::Counted::File),
+                app::count_of(text, outcome.counts.dirs, app::Counted::EmptyDirectory),
+                app::count_of(text, outcome.counts.links, app::Counted::Link), format_bytes(outcome.counts.bytes)) +
+            "\n" + text.format("Manifest: {}", path_to_utf8(outcome.manifest)) + "\n";
+    for (const auto& device : outcome.devices) {
+        body += text.format("Device health: {}", app::device_health_words(text, device)) + "\n";
+    }
     if (!outcome.unreadable.empty()) {
         body += "\n" + text("Unreadable at registration (recorded without hashes, never reported as verified):") +
                 "\n";
@@ -128,6 +136,10 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     show_report(state, [root = path_to_utf8(request.root)](const app::Text& text) {
         return text.format("Registering {} ...", root);
     });
+    // Decision 0044: a device alert shows above the progress as soon as the
+    // devices were asked; the operator may cancel, or let it go on.
+    hide_alert(view.alert);
+    request.devices_observed = alert_above_progress(view.alert, state.text);
     // Filled by the worker where a resume waits for the operator's word, as
     // it takes up a registration that an older version left, which may still
     // run it (decision 0022, point 7); read by `done`, which runs only after
@@ -293,6 +305,8 @@ GtkWidget* build_register_view(GuiState& state)
     gtk_box_append(GTK_BOX(buttons), view.cancel);
     gtk_box_append(GTK_BOX(box), buttons);
 
+    view.alert = make_alert_label();
+    gtk_box_append(GTK_BOX(box), view.alert);
     view.progress = gtk_progress_bar_new();
     gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(view.progress), TRUE);
     gtk_box_append(GTK_BOX(box), view.progress);

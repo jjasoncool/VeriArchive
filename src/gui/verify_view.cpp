@@ -5,6 +5,7 @@
 // (decision 0033).
 #include "gui/gui_app.h"
 
+#include "app/device_alerts.h"
 #include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "app/verify_report.h"
@@ -31,13 +32,21 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
     std::string body = text.format("FULL VERIFY {}", text(outcome.result)) + "\n\n" +
                        text.format("{} ({}) revision {}", outcome.label, outcome.archive_uuid, outcome.revision) +
                        "\n";
+    // Decision 0044: a device alert comes right below the archive, beside the
+    // result, which it does not change.
+    for (const auto& line : app::health_alert_lines(text, outcome.devices)) {
+        body += line + "\n";
+    }
     if (!outcome.media_read) {
         // Decision 0028: failed on its manifest before the media was looked for.
         body += text("Media: not read, as the manifest of this revision cannot be used") + "\n";
     } else {
         body += text.format("Root: {}", path_to_utf8(outcome.root)) + "\n" +
-                text.format("Identity: {}", text(to_string(outcome.identity.result))) + "\n" +
-                text.format("Coverage: {} of {} registered bytes read and matched",
+                text.format("Identity: {}", text(to_string(outcome.identity.result))) + "\n";
+        for (const auto& device : outcome.devices) {
+            body += text.format("Device health: {}", app::device_health_words(text, device)) + "\n";
+        }
+        body += text.format("Coverage: {} of {} registered bytes read and matched",
                     format_bytes(outcome.coverage_bytes), format_bytes(outcome.registered_bytes)) +
                 "\n" + text("Items:");
         for (const auto& [status, count] : outcome.counts) {
@@ -227,6 +236,10 @@ void run_verification(GuiState& state, VerifyRequest request)
     auto& view = state.verify_view;
     set_running(state, true);
     show_report(state, fixed_message("Verifying (reading every registered byte) ..."));
+    // Decision 0044: a device alert shows above the progress as soon as the
+    // devices were asked; the operator may cancel, or let the run go on.
+    hide_alert(view.alert);
+    request.devices_observed = alert_above_progress(view.alert, state.text);
     // Filled by the worker; read by `done`, which runs only after the worker finished.
     struct Interrupted {
         std::string run_id;
@@ -482,6 +495,8 @@ GtkWidget* build_verify_view(GuiState& state)
     gtk_box_append(GTK_BOX(buttons), view.resume);
     gtk_box_append(GTK_BOX(box), buttons);
 
+    view.alert = make_alert_label();
+    gtk_box_append(GTK_BOX(box), view.alert);
     view.progress = gtk_progress_bar_new();
     gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(view.progress), TRUE);
     gtk_box_append(GTK_BOX(box), view.progress);

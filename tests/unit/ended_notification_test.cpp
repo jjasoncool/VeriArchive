@@ -1,6 +1,7 @@
 // The body of the notification that an operation of the window ended
-// (decision 0043): the first two lines of its report that hold text. The
-// reports below are sample data, worded as the views word theirs.
+// (decision 0043): the first two lines of its report that hold text, and its
+// device alerts (decision 0044). The reports below are sample data, worded as
+// the views word theirs.
 #include "test_support.h"
 
 #include "gui/ended_notification.h"
@@ -27,4 +28,18 @@ void ended_notification_tests()
     CHECK(ended_notification_body("\n  \nARCHIVES IDENTICAL\n \t\nEvery entry of A is in B.\nA (reference): x\n") ==
           "ARCHIVES IDENTICAL\nEvery entry of A is in B.");
     CHECK(ended_notification_body("").empty());
+    // A device alert follows the two lines, wherever the report has it
+    // (decision 0044); a registration's may be its second line.
+    CHECK(ended_notification_body("FULL VERIFY PASSED\n\nARCH-SAMPLE (c0ffee00-0000-4000-8000-000000000001) "
+                                  "revision 1\n\u26a0 Device alert: SAMPLE DISK reports its health as warning.\n"
+                                  "Root: D:\\va-sample\n\u26a0 Device alert: SAMPLE DISK 2 reports its health as "
+                                  "unhealthy.\n") ==
+          "FULL VERIFY PASSED\nARCH-SAMPLE (c0ffee00-0000-4000-8000-000000000001) revision 1\n"
+          "\u26a0 Device alert: SAMPLE DISK reports its health as warning.\n"
+          "\u26a0 Device alert: SAMPLE DISK 2 reports its health as unhealthy.");
+    CHECK(ended_notification_body("Registered ARCH-SAMPLE (c0ffee00-0000-4000-8000-000000000001) revision 1\n\n"
+                                  "\u26a0 Device alert: SAMPLE DISK reports its health as warning.\n"
+                                  "3 files, 0 empty folders, 0 links, 1.0 KiB hashed\n") ==
+          "Registered ARCH-SAMPLE (c0ffee00-0000-4000-8000-000000000001) revision 1\n"
+          "\u26a0 Device alert: SAMPLE DISK reports its health as warning.");
 }

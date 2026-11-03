@@ -6,6 +6,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace va::app {
 
@@ -21,5 +22,17 @@ std::string health_condition_words(std::string_view condition);
 // (Unknown), "warning", "unhealthy", followed by its conditions in brackets:
 // "warning (predicting failure, bad sectors)".
 std::string health_words(const Text& text, const DeviceHealth& health);
+
+// A device as people tell it apart: its model and its serial, or its WWN
+// where it has no serial: "WDC WD80EFZZ (serial WD-SAMPLE)".
+std::string device_name(const Text& text, const PhysicalDeviceInfo& device);
+
+// "WDC WD80EFZZ (serial WD-SAMPLE): healthy", for a device that was asked.
+std::string device_health_words(const Text& text, const PhysicalDeviceInfo& device);
+
+// The device alert of each device whose health alerts (health_alerts), one
+// line each, led by alert_mark: what it reports, and to copy its archives to
+// another device and verify the copies. None where no device alerts.
+std::vector<std::string> health_alert_lines(const Text& text, const std::vector<PhysicalDeviceInfo>& devices);
 
 } // namespace va::app

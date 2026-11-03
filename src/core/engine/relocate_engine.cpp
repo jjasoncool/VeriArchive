@@ -453,6 +453,15 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     Heartbeat heartbeat(store, key, std::move(record), progress);
     heartbeat.only_while_relocating(uuid, run_id, creates);
     heartbeat.beat();
+    // Decision 0044: what each device of the new carrier reports of its
+    // health, asked before anything of it is read, kept with the
+    // relocation's media evidence and in its runs' counts, and told at once.
+    auto observed = *volume;
+    observe_device_health(services.media, observed);
+    if (request.devices_observed) {
+        request.devices_observed(observed.devices);
+    }
+    const auto health = device_health_json(observed.devices);
     // However this attempt returns without finishing, the record says last
     // that it stopped, so the Archive List shows it stopped at once; not once
     // the relocation has ended (recorded, refused for good, or gone).
@@ -626,7 +635,11 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         run.finished = current_timestamp();
         run.result = "INCOMPLETE";
         run.coverage_bytes = compared.coverage_bytes;
-        run.counts_json = nlohmann::json{{"items", compared.counts}, {"relocation", run_id}}.dump();
+        nlohmann::json counts{{"items", compared.counts}, {"relocation", run_id}};
+        if (!health.empty()) {
+            counts["device_health"] = health;
+        }
+        run.counts_json = counts.dump();
         run.host = services.host.host;
         run.app_version = services.host.app_version;
         auto items = compared.items;
@@ -634,7 +647,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             item.run_id = run.run_id;
         }
         (void)store.write_transaction([&]() -> std::expected<void, IoError> {
-            EvidenceRecord seen{uuid, run.run_id, evidence.seen_at, volume_to_json_text(*volume),
+            EvidenceRecord seen{uuid, run.run_id, evidence.seen_at, volume_to_json_text(observed),
                 std::string(to_string(own_match)), "relocation interrupted"};
             if (auto inserted = store.insert_evidence(seen); !inserted) {
                 return inserted;
@@ -749,6 +762,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     outcome.archive_uuid = uuid;
     outcome.label = archive.label;
     outcome.revision = creates;
+    outcome.devices = observed.devices;
     // §A6, R-42 (decision 0013): the portability warnings that the new
     // revision records, as every FULL verification of it reports them; and a
     // file whose hash cannot be relied on (decision 0032), as in a FULL
@@ -897,7 +911,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             !indexed) {
             return indexed;
         }
-        EvidenceRecord evidence_record{uuid, outcome.run_id, evidence.seen_at, volume_to_json_text(*volume),
+        EvidenceRecord evidence_record{uuid, outcome.run_id, evidence.seen_at, volume_to_json_text(observed),
             std::string(to_string(own_match)), "relocated"};
         if (auto inserted = store.insert_evidence(evidence_record); !inserted) {
             return inserted;
@@ -920,6 +934,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         nlohmann::json counts{{"items", outcome.counts}, {"relocated_from_revision", previous_revision}};
         if (resumes > 0) {
             counts["resumed"] = resumes;
+        }
+        if (!health.empty()) {
+            counts["device_health"] = health;
         }
         run.counts_json = counts.dump();
         run.host = services.host.host;

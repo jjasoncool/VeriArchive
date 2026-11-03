@@ -1,5 +1,6 @@
 #include "app/relocation_report.h"
 
+#include "app/device_alerts.h"
 #include "app/plain_words.h"
 #include "common/utf8.h"
 
@@ -24,6 +25,13 @@ std::string relocation_report(const Text& text, const RelocateOutcome& outcome, 
                          text.format("FULL VERIFY {} of the new carrier (run {})", text(outcome.result),
                              outcome.run_id) +
                          "\n";
+    // Decision 0044: a device alert of the new carrier, beside the result.
+    for (const auto& line : health_alert_lines(text, outcome.devices)) {
+        report += "  " + line + "\n";
+    }
+    for (const auto& device : outcome.devices) {
+        report += "  " + text.format("device health: {}", device_health_words(text, device)) + "\n";
+    }
     // A file whose whole-file hash or chunk hashes cannot be relied on, as a
     // FULL verify warns of it (decision 0032).
     for (const auto& warning : outcome.warnings) {
@@ -45,6 +53,7 @@ nlohmann::json relocation_json(const RelocateOutcome& outcome)
         {"manifest", path_to_utf8(outcome.manifest)},
         {"counts", outcome.counts},
         {"warnings", outcome.warnings},
+        {"device_health", device_health_json(outcome.devices)},
         {"resumed", outcome.resumed},
     };
 }

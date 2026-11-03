@@ -98,7 +98,8 @@ nlohmann::json health_to_json(const DeviceHealth& health)
 DeviceHealth health_from_json(const nlohmann::json& json)
 {
     DeviceHealth health;
-    const auto status = json.value("status", std::string{});
+    const auto found = json.find("status");
+    const auto status = found != json.end() && found->is_string() ? found->get<std::string>() : std::string{};
     for (const auto known : {HealthStatus::Healthy, HealthStatus::Warning, HealthStatus::Unhealthy}) {
         if (status == health_status_code(known)) {
             health.status = known;

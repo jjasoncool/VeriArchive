@@ -4,6 +4,7 @@
 // are delivered on the GTK main thread (the only thread allowed to touch
 // widgets), and the guard that keeps an exception from ending the program.
 #include "app/text.h"
+#include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
 
 #include <gtk/gtk.h>
@@ -45,6 +46,20 @@ void set_text(GtkWidget* text_view, const std::string& text);
 void set_margins(GtkWidget* widget, int margin);
 void clear_grid(GtkWidget* grid);
 
+// A device alert above an operation's progress (decision 0044): a label in
+// bold red, hidden until an alert is shown in it. show_alert_soon may be
+// called from the operation's thread, while something holds the label: it is
+// changed on the main thread, also after its window has closed (the change
+// holds the label until then). hide_alert hides it again, on the main
+// thread, when the next operation starts.
+GtkWidget* make_alert_label();
+void show_alert_soon(GtkWidget* label, std::string text);
+void hide_alert(GtkWidget* label);
+
+// What an operation of a view is told of the devices it reads: the alert of
+// each device whose health alerts, worded in `text`, shown in `label`.
+DevicesObserved alert_above_progress(GtkWidget* label, const app::Text& text);
+
 // The folder or volume root to register or verify, typed in (or chosen into)
 // an entry, made into a root exactly as the command line makes one
 // (app::typed_root): '/' and '\', "." and "..", the separators it ends with
@@ -85,8 +100,8 @@ enum class Counting { Files, Entries };
 // the language of `text`. While `work` runs, the computer stays awake
 // (app::keep_awake, decision 0043). Once `done` has run, an operation that
 // ended while no window of the program is the active one is told in a
-// notification of the system, its body the report's first two lines
-// (ended_notification_body), unless notifications are off.
+// notification of the system, its body the report's first two lines and its
+// device alerts (ended_notification_body), unless notifications are off.
 class Job {
 public:
     using Work = std::function<Report(CancelToken&, IProgressSink&)>;

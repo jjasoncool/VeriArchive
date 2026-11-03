@@ -220,6 +220,14 @@ constexpr CatalogEntry entries[] = {
     {"reliability degraded", "可靠度下降"},
     {"turned read-only", "已轉為唯讀"},
     {"volatile memory backup failed", "揮發性記憶體備援失效"},
+    {"{} (serial {})", "{}（序號 {}）", Match::FormatOnly},
+    {"{} (WWN {})", "{}（WWN {}）", Match::FormatOnly},
+    {"{}: {}", "{}：{}", Match::FormatOnly},
+    {"Device alert: {} reports its health as {}. Copy the archives on it to another device soon, and verify the "
+     "copies.",
+        "裝置警訊：{} 回報的健康狀態為「{}」。請盡快把其中的封存複製到另一個裝置，並驗證這些副本。", Match::FormatOnly},
+    {"device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
+    {"Device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
     // src/cli/register_commands.cpp
     {"Registered {} ({}) revision {}", "已註冊 {}（{}）版次 {}"},
     {"root: {}", "根目錄：{}"},

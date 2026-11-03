@@ -1,5 +1,6 @@
 #include "cli/cli_support.h"
 
+#include "app/device_alerts.h"
 #include "app/plain_words.h"
 #include "app/session.h"
 #include "common/utf8.h"
@@ -235,6 +236,25 @@ void CliProgress::show(const std::string& message)
     }
     write(message);
     last_ = {}; // long ago: the next report is shown at once, not held back by the rate limit
+}
+
+void CliProgress::say(const std::string& line)
+{
+    if (quiet_) {
+        return;
+    }
+    finish();
+    std::cerr << line << std::endl;
+    last_ = {};
+}
+
+DevicesObserved CliProgress::device_alerts()
+{
+    return [this](const std::vector<PhysicalDeviceInfo>& devices) {
+        for (const auto& line : app::health_alert_lines(text_, devices)) {
+            say(line);
+        }
+    };
 }
 
 void CliProgress::finish()

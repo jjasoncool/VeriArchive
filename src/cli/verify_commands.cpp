@@ -6,6 +6,7 @@
 #include "cli/commands.h"
 
 #include "app/adding_chunk_hashes.h"
+#include "app/device_alerts.h"
 #include "app/plain_words.h"
 #include "app/verify_report.h"
 
@@ -49,13 +50,21 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
     // R-21: the mode stays on the result line in every language.
     std::cout << text.format("FULL VERIFY {}  {} ({}) revision {}", text(outcome.result), outcome.label,
                      outcome.archive_uuid, outcome.revision);
+    // Decision 0044: a device alert comes right below the result, which it
+    // does not change.
+    for (const auto& line : app::health_alert_lines(text, outcome.devices)) {
+        std::cout << "\n  " << line;
+    }
     if (!outcome.media_read) {
         // Decision 0028: failed on its manifest before the media was looked for.
         std::cout << "\n  " << text("media: not read, as the manifest of this revision cannot be used") << '\n';
     } else {
         std::cout << "\n  " << text.format("root: {}", path_to_utf8(outcome.root))
-                  << "\n  " << text.format("identity: {}", text(to_string(outcome.identity.result)))
-                  << "\n  "
+                  << "\n  " << text.format("identity: {}", text(to_string(outcome.identity.result)));
+        for (const auto& device : outcome.devices) {
+            std::cout << "\n  " << text.format("device health: {}", app::device_health_words(text, device));
+        }
+        std::cout << "\n  "
                   << (outcome.registered_bytes == 1
                              ? text.format("coverage: {} of {} registered byte read and matched",
                                    outcome.coverage_bytes, outcome.registered_bytes)
@@ -135,6 +144,8 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
         {"warnings", outcome.warnings},
         {"notes", outcome.notes},
         {"counts", outcome.counts},
+        // Decision 0044: each device's health, as the run's counts keep it.
+        {"device_health", device_health_json(outcome.devices)},
         {"items", std::move(items)},
         {"coverage_bytes", outcome.coverage_bytes},
         {"registered_bytes", outcome.registered_bytes},
@@ -248,6 +259,8 @@ int verify_command(const Arguments& arguments)
     CancelToken cancel;
     const platform::CancelOnInterrupt interrupt(cancel);
     CliProgress progress(arguments);
+    // Decision 0044: printed as soon as the devices were asked; it goes on.
+    request.devices_observed = progress.device_alerts();
     const auto outcome = verify_full(services, request, cancel, progress);
     progress.finish();
     if (!outcome) {
