@@ -2,10 +2,10 @@
 // VERIARCHIVE_GUI_SCREENSHOTS=<folder> set, the GUI tours its views once the
 // window is shown, as a reader of the user guide would: it fills in forms,
 // opens Register Archive, the comparison dialog and the relocation dialog,
-// starts a verification and a comparison through the buttons' own handlers,
-// saves each view as a PNG in the folder, and quits.
+// starts a registration, a verification and a comparison through the
+// buttons' own handlers, saves each view as a PNG in the folder, and quits.
 //
-// The archives and the folder come from the environment:
+// The archives and the folders come from the environment:
 //   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: selected in Archives, verified by its
 //                                     folder, compared, its runs in History, the result page of
 //                                     its FULL verification shown
@@ -15,7 +15,9 @@
 //                                     earlier version registered archives: its details shown in
 //                                     Archives with the menu of FULL verify open, which offers
 //                                     "FULL verify, and add chunk hashes"
-//   VERIARCHIVE_SCREENSHOT_FOLDER     archive A's folder: typed into Register Archive, verified
+//   VERIARCHIVE_SCREENSHOT_FOLDER     archive A's folder: verified by its folder
+//   VERIARCHIVE_SCREENSHOT_NEW_FOLDER a sample folder that no archive holds: typed into Register
+//                                     Archive with a sample label, then registered there
 //
 // GTK renders the pictures itself from what the window drew, so they show only
 // the window, never other windows on the desktop, and need no screen access.
@@ -59,6 +61,13 @@ constexpr int picture_height = 720;
 // the first of the sample volumes (sample_volumes), SAMPLE DATA, never a
 // folder of this computer.
 constexpr const char* sample_new_root = "/media/SAMPLE-VOLUME-1/備份資料";
+
+// The label typed into Register Archive for the sample folder that no archive
+// holds (VERIARCHIVE_SCREENSHOT_NEW_FOLDER): a sample label (SAMPLE DATA),
+// not the repository's next one, ARCH-0004 after the sample archives'
+// ARCH-0001 to ARCH-0003, which the page proposes for an empty field: the
+// picture then shows a label typed in, not the one proposed.
+constexpr const char* sample_label = "ARCH-0009";
 
 // After a view changes, GTK lays it out and draws it over the next frames; the
 // picture is taken once a frame was drawn and this much time has passed, so
@@ -205,6 +214,7 @@ public:
         copy_ = environment("VERIARCHIVE_SCREENSHOT_COPY");
         earlier_ = environment("VERIARCHIVE_SCREENSHOT_EARLIER");
         folder_ = environment("VERIARCHIVE_SCREENSHOT_FOLDER");
+        new_folder_ = environment("VERIARCHIVE_SCREENSHOT_NEW_FOLDER");
         std::error_code error;
         std::filesystem::create_directories(*state_.screenshot_folder, error);
         if (error) {
@@ -264,9 +274,10 @@ public:
                 }},
             {"03-register.png",
                 [this] {
-                    // Register Archive as the sidebar's + opens it, archive
-                    // A's folder typed in on its first page, then Next,
-                    // which reads it off the window's thread.
+                    // Register Archive as the sidebar's + opens it, the
+                    // sample folder that no archive holds typed in on its
+                    // first page, then Next, which reads it off the window's
+                    // thread.
                     show("archives");
                     select(reference_);
                     click(state_.shell.add);
@@ -274,14 +285,12 @@ public:
                     if (!wizard.dialog || !wizard.folder || !wizard.source_next) {
                         throw std::runtime_error("Register Archive did not open");
                     }
-                    gtk_editable_set_text(GTK_EDITABLE(wizard.folder), folder_.c_str());
+                    gtk_editable_set_text(GTK_EDITABLE(wizard.folder), new_folder_.c_str());
                     click(wizard.source_next);
                 },
                 {},
-                // Its Options page for A's folder with Create a new revision
-                // of A on, as its details' Create a new revision... opens it
-                // (not started): ready for Next. (A typed label needs a
-                // folder that no sample archive holds.)
+                // Its Options page for that folder, the sample label typed
+                // in: ready for Next.
                 [this] {
                     const auto& wizard = state_.register_wizard;
                     if (!wizard.dialog) {
@@ -299,15 +308,48 @@ public:
                 },
                 [this] {
                     auto& wizard = state_.register_wizard;
-                    // A's folder is A's root: a new revision of A applies.
-                    if (!gtk_widget_get_visible(wizard.new_revision)) {
-                        throw std::runtime_error("Register Archive does not offer a new revision of archive " +
-                                                 reference_);
+                    // No archive holds the folder: a new archive, its label
+                    // to be given, and neither a new revision nor a resume.
+                    if (!gtk_widget_get_visible(wizard.label_group) || gtk_widget_get_visible(wizard.new_revision) ||
+                        gtk_widget_get_visible(wizard.another_archive) || gtk_widget_get_visible(wizard.resume)) {
+                        throw std::runtime_error("Register Archive does not take " + new_folder_ +
+                                                 " for a folder that no archive holds");
                     }
-                    adw_switch_row_set_active(ADW_SWITCH_ROW(wizard.new_revision), TRUE);
+                    gtk_editable_set_text(GTK_EDITABLE(wizard.label), sample_label);
                     if (!wizard.options_next || !gtk_widget_get_sensitive(wizard.options_next)) {
-                        throw std::runtime_error("Register Archive does not offer Next with a new revision of " +
-                                                 label_of(reference_));
+                        throw std::runtime_error(std::string("Register Archive does not offer Next with the label ") +
+                                                 sample_label);
+                    }
+                    // As the reader sees it once the label is typed: the
+                    // focus on Next, the label not shown selected.
+                    gtk_widget_grab_focus(wizard.options_next);
+                }},
+            // Then Next and Start registration (no picture): the folder
+            // registered as a job, and listed in Archives once it ended.
+            {"",
+                [this] {
+                    auto& wizard = state_.register_wizard;
+                    click(wizard.options_next);
+                    if (!wizard.confirm_page || !wizard.start) {
+                        throw std::runtime_error("Register Archive did not show its Confirm page");
+                    }
+                    click(wizard.start);
+                    if (!state_.jobs.active() || state_.register_wizard.dialog) {
+                        throw std::runtime_error("the registration did not start");
+                    }
+                    registration_ = state_.jobs.shown().back().id;
+                },
+                [this] {
+                    const auto* job = state_.jobs.find(registration_);
+                    expect(job ? job->report : Report{}, std::string("Registered ") + sample_label + " (",
+                        "registration");
+                    const auto& statuses = state_.archives_page.statuses;
+                    if (std::ranges::none_of(statuses, [&](const ArchiveStatus& status) {
+                            return status.archive.label == sample_label && status.archive.archive_uuid != reference_ &&
+                                   status.archive.archive_uuid != copy_ && status.archive.archive_uuid != earlier_;
+                        })) {
+                        throw std::runtime_error(std::string("Archives does not list the archive registered as ") +
+                                                 sample_label);
                     }
                 }},
             {"04-verify.png",
@@ -316,7 +358,7 @@ public:
                     // "Verify a folder or volume..." in its details starts
                     // one, rather than by its uuid: by uuid the verification
                     // looks through every attached volume, the folder needs
-                    // only its own. Register Archive goes first.
+                    // only its own.
                     close_dialogs(state_);
                     show("archives");
                     select(reference_);
@@ -464,8 +506,9 @@ public:
                     gtk_widget_grab_focus(dialog.start);
                     gtk_editable_select_region(GTK_EDITABLE(dialog.folder), -1, -1);
                 }},
-            // The jobs the tour started, the verification and the comparison,
-            // ended (decision 0045); taken before the language list opens.
+            // The jobs the tour started, the registration, the verification
+            // and the comparison, ended (decision 0045); taken before the
+            // language list opens.
             {"08-jobs.png",
                 [this] {
                     close_dialogs(state_);
@@ -665,19 +708,6 @@ private:
         }
     }
 
-    std::string label_of(const Uuid& archive) const
-    {
-        auto store = ArchiveStore::open(state_.session->context.repo);
-        if (!store) {
-            throw std::runtime_error("cannot open the repository: " + store.error().message);
-        }
-        const auto record = store->find_archive(archive);
-        if (!record || !*record) {
-            throw std::runtime_error("archive " + archive + " is not in the repository");
-        }
-        return (*record)->label;
-    }
-
     void take(const std::string& file)
     {
         GtkWidget* window = GTK_WIDGET(state_.window);
@@ -697,11 +727,13 @@ private:
     Uuid copy_;
     Uuid earlier_;
     std::string folder_;
+    std::string new_folder_;
     std::vector<Stop> stops_;
     std::size_t next_ = 0;
     Phase phase_ = Phase::Act;
     Clock::time_point since_{};
     gint64 frame_before_ = 0;
+    std::uint64_t registration_ = 0; // the registration after 03-register
     std::uint64_t job_ = 0;          // the verification of 04-verify
     std::uint64_t comparison_ = 0;   // the comparison after 06-compare
     GtkWidget* popover_ = nullptr;   // the popover drawn over the picture (a reference of its own)

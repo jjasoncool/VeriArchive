@@ -788,6 +788,7 @@ void push_confirm(GuiState& state)
         auto& state = *static_cast<GuiState*>(data);
         guarded([&] { start_from_wizard(state); }, [&](const Report& report) { show_message(state, report); });
     }), &state);
+    wizard.start = start;
     wizard.confirm_page = wizard_page(text, "Confirm", 3, content, back_button(state), start);
     adw_navigation_view_push(ADW_NAVIGATION_VIEW(wizard.navigation), ADW_NAVIGATION_PAGE(wizard.confirm_page));
     gtk_widget_grab_focus(start);
@@ -1035,7 +1036,7 @@ void open_wizard(GuiState& state, std::optional<Uuid> preset_archive = std::null
                                                                   gpointer data) {
         auto& wizard = static_cast<GuiState*>(data)->register_wizard;
         if (GTK_WIDGET(page) == wizard.confirm_page) {
-            wizard.confirm_page = nullptr;
+            wizard.confirm_page = wizard.start = nullptr;
         } else if (GTK_WIDGET(page) == wizard.options_page) {
             wizard.options_page = nullptr;
             wizard.label = wizard.label_group = wizard.new_revision = wizard.another_archive = nullptr;

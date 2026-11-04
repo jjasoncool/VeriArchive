@@ -35,6 +35,7 @@ Rejected alternatives:
 
 ## Consequences
 
+- Amended by decision 0046: a relocation and an export are operations of the window too, run as jobs (decision 0045): each keeps the computer awake while it works and is told in a notification when it ends while no window of the program is active; retiring an archive, and reading first what it would do, run as the window's step, as abandoning does.
 - HANDOFF §B9: the platform offers `KeepAwake` beside the interfaces of the core; the core never uses it.
 - HANDOFF §B17: the window keeps the computer awake while an operation runs, and tells an operation's end in a notification as above.
 - The Linux build links GIO's `gio-unix-2.0`, which every distribution's GLib development package already holds.

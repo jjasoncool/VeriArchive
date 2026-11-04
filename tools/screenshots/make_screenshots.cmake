@@ -1,8 +1,9 @@
 # Makes the screenshots of the user guide (see README.md next to this file):
 # builds sample data, registers it as two archives with veriarchive-cli and
 # imports a third one registered without chunk hashes, as an earlier version
-# registered archives, then runs veriarchive-gui in its screenshot mode, which
-# tours the views and saves one PNG per view.
+# registered archives, leaves a fourth sample folder that no archive holds,
+# then runs veriarchive-gui in its screenshot mode, which tours the views,
+# registers that folder through Register Archive, and saves one PNG per view.
 #
 #   cmake -DCLI=<veriarchive-cli> -DGUI=<veriarchive-gui> -DWORK=<scratch dir>
 #         -DOUT=<png folder> [-DLANG=zh-TW|en] -P make_screenshots.cmake
@@ -145,6 +146,15 @@ if(NOT imported STREQUAL earlier)
     message(FATAL_ERROR "archive C was imported as ${imported}")
 endif()
 
+# A sample folder that no archive holds: the tour types it into Register
+# Archive with a sample label and registers it there, as the guide's reader
+# registers a folder (sample data, as every folder here).
+set(new_folder "${WORK}/新的資料")
+file(WRITE "${new_folder}/readme.txt"
+    "VeriArchive sample data: a folder that the screenshot tour registers in the window.\n")
+file(WRITE "${new_folder}/文件/範例說明.txt" "範例文件\n")
+file(WRITE "${new_folder}/文件/清單.csv" "item,count\n範例,1\n")
+
 set(pictures 01-settings.png 02-archive-list.png 03-register.png 04-verify.png 05-history.png
     06-compare.png 07-language.png 08-jobs.png 09-result.png 10-devices.png 11-relocate.png)
 file(MAKE_DIRECTORY "${OUT}")
@@ -154,6 +164,7 @@ endforeach()
 
 # The window appears on the desktop for a minute while the tour runs.
 file(TO_NATIVE_PATH "${reference_folder}" reference_folder_native)
+file(TO_NATIVE_PATH "${new_folder}" new_folder_native)
 message(STATUS "Taking the screenshots in ${LANG} ...")
 execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env --unset=VERIARCHIVE_REPOSITORY --unset=VERIARCHIVE_GUI_SMOKE_TEST
@@ -164,6 +175,7 @@ execute_process(
         "VERIARCHIVE_SCREENSHOT_COPY=${copy}"
         "VERIARCHIVE_SCREENSHOT_EARLIER=${earlier}"
         "VERIARCHIVE_SCREENSHOT_FOLDER=${reference_folder_native}"
+        "VERIARCHIVE_SCREENSHOT_NEW_FOLDER=${new_folder_native}"
         "${GUI}"
     ENCODING UTF-8
     RESULT_VARIABLE code

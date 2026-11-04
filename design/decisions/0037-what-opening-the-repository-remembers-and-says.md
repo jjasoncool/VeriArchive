@@ -31,6 +31,7 @@ Rejected alternatives:
 
 ## Consequences
 
+- Amended by decision 0046 (point 4): the GUI's Settings shows the program's version in its last group, About, beside R-02's sentence, where it was the first line, also while no repository is open; the owner approved that layout in the prototype of the window. `01-settings.png` and `07-language.png` show the page from its top.
 - `--repository` and `VERIARCHIVE_REPOSITORY` no longer write the config file at all: neither the record nor, as before, the pin.
 - The user guide's example of an import into another repository names that repository with `--repository`, which it lacked, and works without a later warning.
 - Tests of point 4: the CLI end to end: `--version` in either language and in `--json`, and `repo info` in either language and in `--json`, each showing the build's version, which the test is given. A mutation check removed `--version` and the version from `repo info` in turn, and each removal failed the test. The Settings view has no test of its own (GTK); its screenshots in the guides (`01-settings.png`, `07-language.png`) still show it without the version until `tools/screenshots` takes them again.

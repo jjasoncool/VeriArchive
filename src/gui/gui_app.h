@@ -368,6 +368,8 @@ struct GuiState {
         GtkWidget* blocked_words = nullptr;
         GtkWidget* options_next = nullptr;      // Next
         std::vector<Uuid> copy_of_uuids;        // item i + 1 of copy_of
+        // Confirm.
+        GtkWidget* start = nullptr;             // Start registration
         // What the reads found: the archives' names, as Archives names them;
         // the source chosen, which options apply to it, and what was chosen.
         std::vector<ArchiveName> names;

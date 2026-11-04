@@ -19,16 +19,20 @@ manifests) is not part of this version.
 
 ## Screenshots
 
-The views of the graphical interface, showing sample data made by
+The pages of the graphical interface, showing sample data made by
 [`tools/screenshots/`](tools/screenshots/README.md).
 
-| Archive List | Register Archive |
+| Archives | Verifying an archive |
 |---|---|
-| ![Archive List](docs/images/en/02-archive-list.png) | ![Register Archive](docs/images/en/03-register.png) |
-| **Verify Archive** | **Compare Archives** |
-| ![Verify Archive](docs/images/en/04-verify.png) | ![Compare Archives](docs/images/en/06-compare.png) |
-| **Verification History** | **Settings** |
-| ![Verification History](docs/images/en/05-history.png) | ![Settings](docs/images/en/01-settings.png) |
+| ![Archives](docs/images/en/02-archive-list.png) | ![Verifying an archive](docs/images/en/04-verify.png) |
+| **A verification's result** | **Register Archive** |
+| ![A verification's result](docs/images/en/09-result.png) | ![Register Archive](docs/images/en/03-register.png) |
+| **Devices** | **Jobs** |
+| ![Devices](docs/images/en/10-devices.png) | ![Jobs](docs/images/en/08-jobs.png) |
+| **History** | **Compare Archives** |
+| ![History](docs/images/en/05-history.png) | ![Compare Archives](docs/images/en/06-compare.png) |
+| **Relocate to a new carrier** | **Settings** |
+| ![Relocate to a new carrier](docs/images/en/11-relocate.png) | ![Settings](docs/images/en/01-settings.png) |
 
 ## Documentation
 
@@ -94,8 +98,8 @@ The Windows presets name the compiler by its target (`x86_64-w64-mingw32-g++`, t
 veriarchive-cli repo init                       # create the repository (first run)
 veriarchive-cli repo info
 veriarchive-cli media list                      # volumes and the disks behind them
-veriarchive-cli register E:\Backups\2026        # baseline a folder or volume root
-veriarchive-cli verify --full E:\Backups\2026   # re-read and compare everything
+veriarchive-cli register K:\Backups\2026        # baseline a folder or volume root
+veriarchive-cli verify --full K:\Backups\2026   # re-read and compare everything
 veriarchive-cli verify --full <archive_uuid>    # find the archive on attached disks
 veriarchive-cli archive list                    # last FULL verify, last verify, OVERDUE
 veriarchive-cli archive compare <uuid_a> <uuid_b>   # does copy B hold what archive A holds?
@@ -126,20 +130,22 @@ loses the verification history.
 
 ## Graphical interface
 
-`veriarchive-gui` has six views: Archive List, Register Archive, Verify Archive, Compare Archives,
-Verification History and Settings. Long operations show progress and can be cancelled;
-interrupted registrations and verifications can be resumed, and unfinished registrations and
-relocations abandoned. The GUI runs unprivileged.
+`veriarchive-gui` is built with GTK4 and libadwaita (decision 0046). Its pages are Archives (the
+unfinished operations, the archives with where each is attached now and the details of the one
+chosen, from which it is verified, compared, given a new revision, exported, relocated or
+retired), Devices (the attached devices, their health, volumes and archives), Jobs, History (the
+runs of every archive, each with its result page) and Settings; Register Archive and Compare
+Archives are dialogs. Every registration, verification, comparison, relocation and export runs as
+a job with its progress, which Stop ends; interrupted registrations, verifications and relocations
+can be resumed, and unfinished ones abandoned. The GUI runs unprivileged.
 
-Only the command line shows an archive's details and every revision (`archive show`), relocates an
-archive (`archive relocate`, also with `--resume`), retires one (`archive retire`), exports and
-imports manifests (`export`, `import`), writes a list for `sha256sum -c` (`export-sha256sums`),
-rebuilds the index (`repo rebuild-index`), lists the media (`media list`), registers over a lost
-manifest (`register --lost-manifest`), records a copy (`register --copy-of`), chooses the reading
-strategy (`--io hdd|ssd`) and writes `--json`.
+Only the command line shows every revision of an archive (`archive show`), imports manifests
+(`import`), writes a list for `sha256sum -c` (`export-sha256sums`), rebuilds the index
+(`repo rebuild-index`), registers over a lost manifest (`register --lost-manifest`), chooses the
+reading strategy (`--io hdd|ssd`) and writes `--json`.
 
 ## Interface language
 
 The CLI and the GUI speak English and Traditional Chinese (decision 0017): `--lang en|zh-TW`,
-then `VERIARCHIVE_LANG`, then `"language"` in the config file (the GUI's Settings view sets it),
+then `VERIARCHIVE_LANG`, then `"language"` in the config file (the GUI's Settings page sets it),
 then the system's display language. `--json` output and exit codes are always English.

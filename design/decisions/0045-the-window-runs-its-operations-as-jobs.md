@@ -30,6 +30,7 @@ Rejected alternatives:
 
 ## Consequences
 
+- Amended by decision 0046: a relocation and an export are jobs too, an export waiting for no device, as a comparison. Jobs is a page of the sidebar after Devices, its jobs grouped Running, Waiting and Ended, and the header of every page has the jobs button, a ring of the running jobs' progress with their number, whose popover lists the jobs that run and wait and the last three that ended. Register Archive and Compare Archives are dialogs that close once their job starts, so it is not the view that started a job that shows it: Jobs shows every job, the archive's details show a verification's or relocation's job as a card with Stop and Details, and a toast says when a registration, comparison or export started and how a job ended, leading to its details or its result.
 - HANDOFF §B9: `judge_attempt(plan, processes, host, runs_this_operation)` asks of the plan or record whether this process runs its operation; `AttemptCheck::runs_this_operation` likewise.
 - HANDOFF §B17: views as point 1; the page Jobs and the window of a job's details as point 3; the question on closing as point 4; the Archive List as point 6. The screenshot tour also takes `08-jobs.png`.
 - The user guides: "Jobs", after "While an operation runs".

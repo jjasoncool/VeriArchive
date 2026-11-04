@@ -100,6 +100,7 @@ The catalog is C++ (`src/app/text_zh_tw.cpp`), not gettext `.po`/`.mo`: no extra
 
 ## Consequences
 
+- Amended by decision 0046: the window's pages are Archives (封存) and History (歷程), where the table above says Archive List (封存列表) and the catalog said Verification History (驗證歷程), whose entries left the catalog; the language drop-down is a row of the Settings page, locked while a job waits or works (decision 0045), which says why; the terms of the new pages and controls are in decision 0046's table.
 - Amended by decision 0042: the words for `MediaIdentityMismatch` and for what matching noted compare the media with the identity that the verified revision records, which a relocation or a verification adding chunk hashes may have recorded: "the media is not the one recorded", "identity: the volume label differs from the one recorded" (and so the capacity, the filesystem type and the device model), where they said "registered". The words quoted above say so.
 - Config gains `"language"` (`"en"`, `"zh-TW"`; absent = follow the system).
 - A new English message needs a catalog entry to appear in Chinese; until then it appears in English, never broken.

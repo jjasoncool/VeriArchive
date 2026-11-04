@@ -47,6 +47,7 @@ Rejected alternatives:
 
 ## Consequences
 
+- Amended by decision 0046: the report's comparison names when the compared run finished, in the window and on the command line: "Read speed: 182 MiB/s; the last FULL verification of this archive on this device, which finished 2026-11-01 14:03:00 (UTC+8), read 180 MiB/s", where point 3 quotes it with "(date)" at its end. In the window an alert shows on the job's card and in Jobs, in the archive's details and as a mark of its row in Archives, on the run's result page, which also charts each hundredth's speed against the run compared with (only for a run that timed at least 1 s of reading), and among the notes of the run's row in History; Devices shows each attached device's health, asked once per device each time it reads them, through the function `media list` uses.
 - HANDOFF §A6: a device alert is told beside the result and never changes it.
 - HANDOFF §B1.2: `HealthStatus`, `DeviceHealth`, and `PhysicalDeviceInfo::health`, runtime only, never identity.
 - HANDOFF §B8: a run's counts may hold `device_health`, `read_speed` and `read_compared`; `media_evidence.volume_json` holds each asked device's `health`.

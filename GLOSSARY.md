@@ -15,16 +15,16 @@ The directory where an archive's file tree starts; recorded relative to its volu
 _Avoid_: mount point (a mount point is runtime-only)
 
 **Retired archive**:
-An archive the operator no longer expects to verify; it takes no new revision and keeps its history. It is still recognised when its media reappears, unless its latest manifest is lost so that identity matching cannot use it (not only in its body): then it is no longer taken for a possible owner of a folder or volume.
-_Avoid_: deleted, removed archive
+An archive the operator no longer expects to verify; it takes no new revision and keeps its history. It is still recognised when its media reappears, unless its latest manifest is lost so that identity matching cannot use it (not only in its body): then it is no longer taken for a possible owner of a folder or volume. In the interface: 停用 (to retire), 已停用 (retired).
+_Avoid_: deleted, removed, archived (every archive is one), disabled archive
 
 **Carrier**:
 The media an archive currently lives on. An archive has exactly one carrier at a time; earlier carriers are its previous carriers.
 _Avoid_: location, disk
 
 **Relocation**:
-Moving an archive to a new carrier while keeping its identity and history; accepted only when every entry on the new carrier matches the latest revision, and it produces the next revision.
-_Avoid_: migration (reserved for the same filesystem seen through different hardware), re-registration
+Moving an archive to a new carrier while keeping its identity and history; accepted only when every entry on the new carrier matches the latest revision, and it produces the next revision. VeriArchive copies nothing: the operator copies the files, and the relocation reads the new carrier in full. In the interface: 搬移.
+_Avoid_: migration (reserved for the same filesystem seen through different hardware), re-registration, move as its name (VeriArchive moves no file)
 
 **Copy**:
 Another archive registered from the same content on different media. Copies are separate archives, linked only for display.
@@ -87,6 +87,10 @@ _Avoid_: using it as a synonym for archive
 **Media evidence**:
 One observation of media at register or verify time, compared against registered archives to decide which archive is present.
 
+**Attached**:
+Of a device or volume: present on this computer now, as the system lists it. Of an archive: on an attached volume whose identity matches the archive's carrier, at its root there. A runtime state, read again whenever it is shown, and never identity: nothing records it, and an archive that is not attached keeps its identity and history. In the interface: 已連接 (not attached: 未連接).
+_Avoid_: online, mounted (a volume may be attached without a mount point), present (matching's results say which archive is present), connected archive
+
 **Device alert**:
 A sign that a device may be failing, told beside a run result and never changing it: the device reports its own health as failing, or a FULL verification read the archive markedly slower than the last usual one on that device. It stays marked beside the archive's last verification until a later one gives none. In the interface: 裝置警訊.
 _Avoid_: warning (a warning caps the run result at PASSED_WITH_WARNINGS), device error
@@ -124,3 +128,25 @@ _Avoid_: cancelled verification (a cancelled one can be resumed)
 **Comparison**:
 Confirming from their manifests alone that two archives' current revisions hold the same entries with the same content, such as a copy against its original; no media is read, so it says nothing about what the media hold now.
 _Avoid_: diff, verification
+
+**Export**:
+Writing the manifest of an archive's latest revision, with its identity file, into a folder outside the repository, from which an import takes it into this repository or another. It copies a baseline, never the archive's files. In the interface: 匯出.
+_Avoid_: backup (VeriArchive makes none), save, report (a report says what a run found)
+
+**Unfinished operation**:
+A registration, relocation or verification recorded in the repository that has not finished, wherever it was started (the window or the command line): still running, stopped and resumable, or one that can no longer finish and waits to be abandoned. It lives in the repository, not in a program. In the interface: 未完成的作業.
+_Avoid_: pending job (a job is the window's), interrupted run (a run is one verification), incomplete operation (INCOMPLETE is a run result)
+
+**Job**:
+An operation that the window runs in the background: a registration, verification, comparison, relocation or export started there, shown with its state, progress and result until it is cleared. Jobs that read the same device wait for one another. Stopping a job ends its operation; a stopped registration, verification or relocation stays an unfinished operation, which can be resumed. The job itself is gone when the window closes. In the interface: 工作.
+_Avoid_: task, activity, process (a process runs the program), unfinished operation (it stays in the repository after the job)
+
+### In the window
+
+**Archives**:
+The window's page of the archives: their unfinished operations, the list of archives and the details of the one chosen, from which an archive is verified, relocated, exported and retired. In the interface: 封存.
+_Avoid_: Archive List (封存列表), the page's name before
+
+**History**:
+The window's page of the recorded verifications of every archive, newest first, or of the archive chosen, with the check of the history chain. In the interface: 歷程.
+_Avoid_: Verification History (驗證歷程), the page's name before; log
