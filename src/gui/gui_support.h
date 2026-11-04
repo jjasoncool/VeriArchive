@@ -29,8 +29,6 @@ inline constexpr const char* guarantee =
     "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) "
     "is not part of this version.";
 
-std::string format_bytes(std::uint64_t bytes);
-
 GtkWidget* make_label(const std::string& text, bool selectable = false);
 // A short caption beside other widgets in a row ("Archive:"). It stays on one
 // line: a wrapping label there is given its narrowest width and would show as
@@ -77,7 +75,7 @@ void tell(GtkWindow* parent, const app::Text& text, const std::string& message);
 std::filesystem::path entry_root(GtkWidget* entry);
 
 // The archive chosen in a drop-down whose item `offset + i` is uuids[i], or
-// nothing when another item (such as "The folder or volume above") is chosen.
+// nothing when another item is chosen.
 std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset);
 
 // Chooses `archive` again, if the drop-down still lists it.

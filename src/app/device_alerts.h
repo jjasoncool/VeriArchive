@@ -62,7 +62,7 @@ std::optional<std::string> slower_alert_line(const Text& text, const SpeedCompar
 // each run of the history.
 std::vector<std::string> alert_marks(const Text& text, const RunAlerts& alerts);
 
-// The device alerts that the Archive List marks an archive with, beside its
+// The device alerts that Archives marks an archive with, beside its
 // last verification, until a later one gives none: the health that the
 // devices reported in its latest run (an INCOMPLETE one included: it asked
 // them as it started), and the read of its latest FULL verification that

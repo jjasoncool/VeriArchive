@@ -2029,7 +2029,8 @@ void an_abandoned_attempt_leaves_the_next_registration_alone()
 // The ways on that the row of a stopped registration offers in the Archive
 // List, which Register Archive names first when the registration refuses it
 // (decision 0033): Resume (decision 0022, point 7) and Abandon....
-const std::string on_its_row = "with Resume, or abandon it with Abandon..., on its row in the Archive List";
+const std::string on_its_row =
+    "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives";
 
 // Register Archive's ways on for the registration of the very root entered:
 // the list's, then its checkbox, ticked, and Register again.
@@ -2397,10 +2398,10 @@ void a_registration_made_for_an_older_revision_never_records()
               (*failure).error().refusing->kind == va::RefusingOperation::Kind::Registration &&
               (*failure).error().refusing->later_revision == 3u && (*failure).error().refusing->revision == 2 &&
               va::app::register_message_in_window((*failure).error(), false) ==
-                  in_window + ": abandon it with Abandon... in the Archive List" &&
+                  in_window + ": abandon it with Abandon... under Unfinished operations in Archives" &&
               va::app::register_message_in_window((*failure).error(), true) ==
-                  in_window + ", and is still running: wait for it to stop, then abandon it with Abandon... in the "
-                              "Archive List");
+                  in_window + ", and is still running: wait for it to stop, then abandon it with Abandon... under "
+                              "Unfinished operations in Archives");
     }
     CHECK(!resumed && resumed.error().refusing && resumed.error().refusing->this_root && !other_path &&
           other_path.error().refusing && !other_path.error().refusing->this_root);

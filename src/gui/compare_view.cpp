@@ -7,8 +7,11 @@
 
 #include "app/local_time.h"
 #include "app/plain_words.h"
+#include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
 #include "platform/file_system.h"
+
+#include <chrono>
 
 namespace va::gui {
 namespace {
@@ -184,6 +187,82 @@ void start_comparison(GuiState& state)
 }
 
 } // namespace
+
+void refresh_archive_choices(GuiState& state)
+{
+    std::vector<std::string> labels;
+    std::vector<Uuid> uuids;
+    if (state.session) {
+        if (auto store = ArchiveStore::open(state.session->context.repo)) {
+            const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+            const auto repository_files = platform::make_file_system_access();
+            // Labels only: no manifest is read, so one that cannot be used
+            // keeps no other archive from being chosen.
+            if (const auto statuses = archive_statuses(*store, *repository_files, state.session->context.repo,
+                    state.session->context.config.policy, now, StatusSelection{std::nullopt, false})) {
+                for (const auto& status : *statuses) {
+                    labels.push_back(display_label(status) + "  " + status.archive.archive_uuid.substr(0, 8));
+                    uuids.push_back(status.archive.archive_uuid);
+                }
+            }
+        }
+    }
+    const auto set_choices = [](GtkWidget* drop_down, const std::vector<std::string>& items) {
+        if (!drop_down) {
+            return;
+        }
+        std::vector<const char*> pointers;
+        for (const auto& item : items) {
+            pointers.push_back(item.c_str());
+        }
+        pointers.push_back(nullptr);
+        GtkStringList* model = gtk_string_list_new(pointers.data());
+        gtk_drop_down_set_model(GTK_DROP_DOWN(drop_down), G_LIST_MODEL(model));
+        g_object_unref(model);
+    };
+
+    set_choices(state.history_view.archive, labels);
+    state.history_view.archive_uuids = uuids;
+
+    // The comparison keeps the two archives chosen when the list is reloaded
+    // (after a registration, say). Otherwise B suggests the second archive, so
+    // A and B start out different.
+    auto& compare = state.compare_view;
+    const auto reference = compare.reference ? chosen_archive(compare.reference, compare.archive_uuids, 0)
+                                             : std::nullopt;
+    const auto copy = compare.copy ? chosen_archive(compare.copy, compare.archive_uuids, 0) : std::nullopt;
+    set_choices(compare.reference, labels);
+    set_choices(compare.copy, labels);
+    compare.archive_uuids = uuids;
+    if (compare.copy && uuids.size() > 1) {
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(compare.copy), 1);
+    }
+    if (compare.reference) {
+        choose_archive(compare.reference, uuids, 0, reference);
+        choose_archive(compare.copy, uuids, 0, copy);
+    }
+}
+
+void compare_with(GuiState& state, const Uuid& reference, const std::optional<Uuid>& copy)
+{
+    auto& view = state.compare_view;
+    if (!view.reference) {
+        return;
+    }
+    choose_archive(view.reference, view.archive_uuids, 0, reference);
+    if (copy) {
+        choose_archive(view.copy, view.archive_uuids, 0, copy);
+    } else if (chosen_archive(view.copy, view.archive_uuids, 0) == reference) {
+        // B another archive than A: the first other one.
+        for (const auto& other : view.archive_uuids) {
+            if (other != reference) {
+                choose_archive(view.copy, view.archive_uuids, 0, other);
+                break;
+            }
+        }
+    }
+    show_page(state, "compare");
+}
 
 GtkWidget* build_compare_view(GuiState& state)
 {

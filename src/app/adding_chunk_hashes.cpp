@@ -14,29 +14,6 @@ nlohmann::json optional_text(const std::string& value)
     return value.empty() ? nlohmann::json(nullptr) : nlohmann::json(value);
 }
 
-// Whether the verification that adds chunk hashes `adding`, recorded
-// INCOMPLETE or not, has stopped, judged as the Archive List judges its row
-// from one read: from what its record and the history say, and the process
-// its record names; its progress plays no part.
-bool judged_stopped(const AddingVerification& adding, bool recorded_incomplete, const AttemptCheck& attempts,
-    std::chrono::sys_seconds wall_now)
-{
-    UnfinishedVerification verification;
-    verification.run_id = adding.run_id;
-    verification.archive_uuid = adding.archive_uuid;
-    verification.root = adding.root;
-    verification.revision = adding.revision;
-    verification.started = adding.started;
-    verification.recorded_incomplete = recorded_incomplete;
-    const auto updated = adding.record.find("updated");
-    if (updated != adding.record.end() && updated->is_string()) {
-        verification.updated = updated->get<std::string>();
-    }
-    verification.adds_chunk_hashes = adding.chunk_size;
-    verification.record = adding.record.dump();
-    return has_stopped(state_of_one_read(verification_operation(verification, attempts), wall_now));
-}
-
 } // namespace
 
 std::string chunk_hashes_line(const Text& text, const VerifyOutcome& outcome, bool sentence)
@@ -115,45 +92,6 @@ nlohmann::json abandonable_verification_json(const AbandonableVerification& veri
 nlohmann::json abandonable_verification_member(const AbandonableVerification& verification)
 {
     return {{"verification", abandonable_verification_json(verification)}};
-}
-
-std::expected<std::optional<RunToResume>, IoError> resumable_adding_verification(
-    ArchiveStore& store, const Uuid& archive_uuid, const AttemptCheck& attempts, std::chrono::sys_seconds wall_now)
-{
-    std::optional<AddingVerification> adding;
-    bool recorded_incomplete = false;
-    const auto read = store.read_transaction([&]() -> std::expected<void, IoError> {
-        auto found = unfinished_adding_verification(store, archive_uuid);
-        if (!found) {
-            return std::unexpected(found.error());
-        }
-        adding = std::move(*found);
-        if (!adding) {
-            return {};
-        }
-        const auto recorded = store.verify_run(adding->run_id);
-        if (!recorded) {
-            return std::unexpected(recorded.error());
-        }
-        recorded_incomplete = *recorded && (*recorded)->result == "INCOMPLETE";
-        return {};
-    });
-    if (!read) {
-        return std::unexpected(read.error());
-    }
-    if (!adding || !judged_stopped(*adding, recorded_incomplete, attempts, wall_now)) {
-        return std::optional<RunToResume>{};
-    }
-    return std::optional<RunToResume>(RunToResume{adding->run_id, std::nullopt, archive_uuid});
-}
-
-std::optional<RunToResume> run_to_resume(
-    const std::optional<RunToResume>& interrupted_here, const std::optional<RunToResume>& chosen)
-{
-    if (chosen && !(interrupted_here && interrupted_here->archive_uuid == chosen->archive_uuid)) {
-        return chosen;
-    }
-    return interrupted_here;
 }
 
 } // namespace va::app

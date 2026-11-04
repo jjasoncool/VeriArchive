@@ -210,7 +210,9 @@ option(VERIARCHIVE_BUILD_GUI "Build the GTK4 GUI" ${GTK4_FOUND})
 if(VERIARCHIVE_BUILD_GUI)
     pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET libadwaita-1>=1.5)
     add_executable(veriarchive_gui
-        src/gui/archive_list_view.cpp
+        src/gui/archive_detail.cpp
+        src/gui/archive_rows.cpp
+        src/gui/archives_page.cpp
         src/gui/compare_view.cpp
         src/gui/displayed_identity.cpp
         src/gui/ended_notification.cpp
@@ -222,11 +224,13 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/jobs.cpp
         src/gui/jobs_page.cpp
         src/gui/main.cpp
+        src/gui/operations_poll.cpp
         src/gui/report.cpp
         src/gui/screenshots.cpp
         src/gui/register_view.cpp
         src/gui/settings_page.cpp
-        src/gui/verify_view.cpp
+        src/gui/unfinished_actions.cpp
+        src/gui/verification.cpp
         src/gui/window.cpp
         src/gui/window_words.cpp)
     set_target_properties(veriarchive_gui PROPERTIES OUTPUT_NAME veriarchive-gui WIN32_EXECUTABLE TRUE)
@@ -311,6 +315,7 @@ if(BUILD_TESTING)
         tests/unit/test_main.cpp
         tests/unit/abandon_registration_test.cpp
         tests/unit/add_chunk_hashes_test.cpp
+        tests/unit/archive_rows_test.cpp
         tests/unit/archive_path_test.cpp
         tests/unit/archive_status_test.cpp
         tests/unit/compare_archives_test.cpp
@@ -383,10 +388,12 @@ if(BUILD_TESTING)
     endif()
     # The GUI's choice of the media identity it shows, the body of its
     # notification that an operation ended, the queue of its jobs and what it
-    # says of them, and what the window says around its pages, are plain C++
-    # without GTK, so they are tested also where the GUI is not built.
-    target_sources(veriarchive_tests PRIVATE src/gui/displayed_identity.cpp src/gui/ended_notification.cpp
-        src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/report.cpp src/gui/window_words.cpp)
+    # says of them, what the window says around its pages, and what Archives
+    # says of each archive, are plain C++ without GTK, so they are tested also
+    # where the GUI is not built.
+    target_sources(veriarchive_tests PRIVATE src/gui/archive_rows.cpp src/gui/displayed_identity.cpp
+        src/gui/ended_notification.cpp src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/report.cpp
+        src/gui/window_words.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
         # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.

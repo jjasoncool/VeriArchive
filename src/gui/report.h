@@ -6,6 +6,7 @@
 // Plain C++ without GTK, so the unit tests can use it.
 #include "app/text.h"
 
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -18,5 +19,8 @@ Report fixed_message(std::string english);
 
 // "Unexpected error: ..." for an exception's message.
 Report unexpected_error(std::string what);
+
+// A size as the views show it: "173.0 B", "1.2 GiB", "9.4 TiB".
+std::string format_bytes(std::uint64_t bytes);
 
 } // namespace va::gui

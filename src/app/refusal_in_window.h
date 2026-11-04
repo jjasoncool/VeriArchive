@@ -1,19 +1,20 @@
 #pragma once
-// What the windows say when Register Archive or Verify Archive is refused
-// because another operation that creates the archive's next revision is
-// unfinished (decisions 0025, 0026, 0033): a registration, a relocation, or a
-// FULL verify that adds chunk hashes. The command line names its commands;
-// the windows name their own ways on in their place (decision 0033): first
-// "Resume" and "Abandon..." on the operation's row in the Archive List
-// (decision 0022, point 7), then Register Archive's "Resume an interrupted
-// registration of this folder or volume" or Verify Archive's "Resume
-// interrupted run"; a relocation, which has no window and no Resume in the
-// list, keeps its command line for continuing, and a registration made for an
-// older revision can only be abandoned. While the operation that refuses still
-// runs or is held up, as the Archive List judges its row from one read, they
-// say so, and to wait for it: the window offers no way on for it then. Where
-// one read cannot tell, as for a record that says nothing of its state, they
-// name the ways on.
+// What the window says when Register Archive or a verification started in
+// Archives is refused because another operation that creates the archive's
+// next revision is unfinished (decisions 0025, 0026, 0033): a registration, a
+// relocation, or a FULL verify that adds chunk hashes. The command line names
+// its commands; the window names its own ways on in their place (decisions
+// 0033, 0046): first "Resume" and "Abandon..." on the operation's row under
+// Unfinished operations in Archives (decision 0022, point 7), then Register
+// Archive's "Resume an interrupted registration of this folder or volume" or
+// "Resume" in the archive's details, where its stopped verification shows; a
+// relocation, which has no window and no Resume in the list, keeps its
+// command line for continuing, and a registration made for an older revision
+// can only be abandoned. While the operation that refuses still runs or is
+// held up, as Archives judges its row from one read, they say so, and to wait
+// for it: the window offers no way on for it then. Where one read cannot
+// tell, as for a record that says nothing of its state, they name the ways
+// on.
 #include "app/unfinished_operations.h"
 #include "common/error.h"
 #include "core/engine/add_chunk_hashes.h"
@@ -27,8 +28,9 @@
 
 namespace va::app {
 
-// The view that shows a refusal.
-enum class RefusedIn { RegisterArchive, VerifyArchive };
+// Where a refusal is shown: Register Archive, or Archives, where an archive's
+// verifications start.
+enum class RefusedIn { RegisterArchive, Archives };
 
 // What `view` says, an English sentence translated where it is shown, of an
 // operation refused because `refusing` is unfinished: the command line's
@@ -41,23 +43,23 @@ std::string refusal_in_window(const RefusingOperation& refusing, RefusedIn view,
 // next revision refuses it (RegisterFailure::refusing), refusal_in_window.
 std::string register_message_in_window(const RegisterFailure& failure, bool runs);
 
-// What Verify Archive says of a verification that does not begin: the stop's
+// What Archives says of a verification that does not begin: the stop's
 // message, or, where another operation that creates the archive's next
 // revision refuses it (VerifyStop::refusing), refusal_in_window.
 std::string stop_message_in_window(const VerifyStop& stop, bool runs);
 
-// Whether `refusing`, as the refusal found it, still runs, as the Archive List
+// Whether `refusing`, as the refusal found it, still runs, as Archives
 // would show it from one read (state_of_one_read), its attempt judged as
 // `attempts` says (decision 0024): running, as its record said a moment ago or
 // as the process its record names runs, or held up, that process running
-// while its record has said nothing for minutes. Then the Archive List offers
+// while its record has said nothing for minutes. Then Archives offers
 // no Abandon... for it, and a resume would be refused or take over an attempt
 // that works. False once it has stopped (its record saying so, a
 // verification recorded INCOMPLETE, the process its record names ended, or,
 // where no process can be checked, its record silent for minutes), and where
 // one read cannot tell: a record that says nothing of its state, as a plan
 // that a version before decision 0022 wrote without "updated" or a process,
-// which the Archive List shows waiting for progress. Reads whether a
+// which Archives shows waiting for progress. Reads whether a
 // verification's run is recorded INCOMPLETE.
 std::expected<bool, IoError> refusing_operation_runs(ArchiveStore& store, const RefusingOperation& refusing,
     const AttemptCheck& attempts, std::chrono::sys_seconds wall_now);
@@ -76,7 +78,7 @@ std::expected<bool, IoError> refusing_operation_runs(ArchiveStore& store, const 
 std::string register_message_in_window(const RegisterFailure& failure, ArchiveStore& store,
     IProcessTable& processes, const std::string& host, std::chrono::sys_seconds now);
 
-// What Verify Archive says of a verification that does not begin: as
+// What Archives says of a verification that does not begin: as
 // stop_message_in_window says it, the operation that refuses it judged as
 // Register Archive judges it (register_message_in_window). The window's one
 // operation is then the verification refused, which wrote no record.

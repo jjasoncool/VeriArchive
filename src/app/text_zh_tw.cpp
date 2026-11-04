@@ -229,7 +229,7 @@ constexpr CatalogEntry entries[] = {
     {"device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
     {"Device health: {}", "裝置健康狀態：{}", Match::FormatOnly},
     // src/app/device_alerts.cpp: how fast a FULL verification read (decision 0044).
-    // The marks of a run's device alerts (Archive List, history).
+    // The marks of a run's device alerts (Archives, history).
     {"device reports a problem", "裝置回報異常"},
     {"reading slower", "讀取變慢"},
     {"read speed: {}", "讀取速度：{}", Match::FormatOnly},
@@ -285,7 +285,7 @@ constexpr CatalogEntry entries[] = {
     // A resume of a registration that an older version left, before it is
     // confirmed (decision 0022, point 7): "Unfinished registration of ...",
     // "root: {}" and "started: {}" are abandon-registration's, and the warning
-    // is the Archive List's question's.
+    // is the question of Resume under Unfinished operations.
     {"run the command again with --confirm to resume it", "若要繼續，請加上 --confirm 再執行一次"},
     {"--io takes hdd or ssd", "--io 只接受 hdd 或 ssd"},
     {"not a directory: {}", "不是資料夾：{}"},
@@ -375,7 +375,7 @@ constexpr CatalogEntry entries[] = {
     {"chunk size 0: whole-file hashes only", "區塊大小 0：只有整個檔案的雜湊"},
     {"chunk size {}, {} chunks, Merkle root {}", "區塊大小 {}，{} 個區塊，總碼 {}"},
     // The archive's unfinished registration and relocation in archive list and show (decision 0026), from
-    // src/app/unfinished_operations.cpp; the progress and state are the Archive List's words.
+    // src/app/unfinished_operations.cpp; the progress and state are the words of Unfinished operations.
     {"Unfinished registration of revision {} from \"{}\": {}; {}", "未完成的註冊（版次 {}，根目錄「{}」）：{}；{}",
         Match::FormatOnly},
     {"Unfinished relocation of revision {} to \"{}\": {}; {}", "未完成的搬移（版次 {}，至「{}」）：{}；{}",
@@ -518,7 +518,6 @@ constexpr CatalogEntry entries[] = {
     {"Archives", "封存"},
     {"History", "歷程"},
     {"Register Archive", "註冊封存"},
-    {"Verify Archive", "驗證封存"},
     {"Compare Archives", "比較封存"},
     {"Settings", "設定"},
     // src/gui/gui_app.cpp
@@ -535,31 +534,127 @@ constexpr CatalogEntry entries[] = {
     {"Comparing: {} / {} entry", "比較中：{} / {} 個項目"},
     {"Starting...", "正在啟動……"},
     {"Unexpected error: {}", "未預期的錯誤：{}"},
-    // src/gui/archive_list_view.cpp
-    {"never", "從未"},
+    // src/gui/archives_page.cpp, src/gui/archive_rows.cpp: Archives
+    // (decision 0046), its list of archives and what it says when there are
+    // none.
     {"Problem: {}", "問題：{}", Match::FormatOnly},  // an archive whose manifest cannot be used (decision 0028)
     // A retired archive whose latest manifest is lost (decision 0028, point 9).
     {"Manifest lost: {}", "清單檔無法取回：{}", Match::FormatOnly},
     {"No repository is open; see Settings.", "目前沒有開啟的儲存庫；請參閱「設定」。"},
     {"{} archive", "{} 個封存", Match::FormatOnly},
     {"{} archives", "{} 個封存", Match::FormatOnly},
-    {"Label", "標籤"},
-    {"UUID", "UUID"},
-    {"Volume", "磁碟區"},
-    {"Model", "型號"},
-    {"Capacity", "容量"},
-    {"Last FULL verify", "上次完整驗證"},
-    {"Last verify", "上次驗證"},
-    {"Overdue", "逾期"},
-    {"Rev", "版次"},
-    {"Status", "狀態"},
-    {"Each archive shows when it was last read in full (FULL verify) and when it was last "
-        "verified at all. A result is only as current as its date.",
-        "每個封存都會顯示上次完整讀取（完整驗證）的時間，以及上次進行任何驗證的時間。"
-        "結果只反映其日期當時的狀態。"},
     {"Refresh", "重新整理"},
-    // src/gui/archive_list_view.cpp, src/app/unfinished_operations.cpp: unfinished
-    // operations (decision 0022)
+    {"Last FULL verify {}", "上次完整驗證 {}", Match::FormatOnly},
+    {"Never verified", "從未驗證"},
+    {"No archives yet", "還沒有封存"},
+    {"Register a folder or volume: VeriArchive records the fingerprints of each of its files. A FULL verification "
+     "later tells whether any of them was modified, corrupted, deleted or added.",
+        "註冊一個資料夾或磁碟區：VeriArchive 會記下其中每個檔案的指紋。之後進行完整驗證，就能查出是否有檔案被修改、"
+        "損毀、刪除，或多了檔案。"},
+    {"Register the first archive", "註冊第一個封存"},
+    // How long ago a verification ended, and how long a run took.
+    {"less than an hour ago", "不到 1 小時前"},
+    {"1 hour ago", "1 小時前"},
+    {"{} hours ago", "{} 小時前", Match::FormatOnly},
+    {"1 day ago", "1 天前"},
+    {"{} days ago", "{} 天前", Match::FormatOnly},
+    {"{} weeks ago", "{} 週前", Match::FormatOnly},
+    {"{} months ago", "{} 個月前", Match::FormatOnly},
+    {"1 year ago", "1 年前"},
+    {"{} years ago", "{} 年前", Match::FormatOnly},
+    {"1 year 1 month ago", "1 年 1 個月前"},
+    {"1 year {} months ago", "1 年 {} 個月前", Match::FormatOnly},
+    {"{} years 1 month ago", "{} 年 1 個月前", Match::FormatOnly},
+    {"{} years {} months ago", "{} 年 {} 個月前", Match::FormatOnly},
+    {"{} s", "{} 秒", Match::FormatOnly},
+    {"{} min {} s", "{} 分 {} 秒", Match::FormatOnly},
+    {"{} h {} min", "{} 小時 {} 分", Match::FormatOnly},
+    // src/gui/archive_detail.cpp, src/gui/archive_rows.cpp: the details of
+    // an archive (decision 0046): its menu, the banner of its last FULL
+    // verification (R-21, R-105), FULL verify and its menu (decision 0033),
+    // and its groups.
+    {"Menu of {}", "{} 的選單", Match::FormatOnly},
+    {"Compare with another archive...", "與另一個封存比較…"},
+    {"Compares the manifests in the repository; no media is read.", "比較儲存庫中的清單檔；不讀取媒體。"},
+    {"The repository has no other archive to compare with.", "儲存庫中沒有可以比較的其他封存。"},
+    {"Create a new revision...", "建立新版次…"},
+    {"After an intended change of its content: reads the whole archive again and takes what it holds now as the "
+     "new baseline.",
+        "內容有意更改之後：重新讀取整個封存，以它現在的內容作為新的基準。"},
+    {"The archive's root is not known: choose its folder or volume in Register Archive.",
+        "不知道此封存的根目錄：請在「註冊封存」選擇它的資料夾或磁碟區。"},
+    {"A retired archive takes no new revisions.", "已停用的封存不再接受新的版次。"},
+    {"Copy archive UUID", "複製封存 UUID"},
+    {"Archive UUID copied", "已複製封存 UUID"},
+    {"Last FULL verify: {}, {}", "上次完整驗證：{}，{}", Match::FormatOnly},
+    {"Last verify: {}, {}, {}", "上次驗證：{}，{}，{}", Match::FormatOnly},
+    {"No FULL verification yet. A FULL verification tells whether the media still holds the content that the "
+     "archive's current revision recorded.",
+        "還沒有完整驗證過。完整驗證一次，就能查出媒體是否仍保有目前版次所記錄的內容。"},
+    {"OVERDUE: no FULL verify for more than 1 day", "逾期：超過 1 天沒有完整驗證"},
+    {"OVERDUE: no FULL verify for more than {} days", "逾期：超過 {} 天沒有完整驗證", Match::FormatOnly},
+    {"OVERDUE: no verify of any mode for more than 1 day", "逾期：超過 1 天沒有任何模式的驗證"},
+    {"OVERDUE: no verify of any mode for more than {} days", "逾期：超過 {} 天沒有任何模式的驗證", Match::FormatOnly},
+    {"Retired: this archive is no longer expected to be verified, and takes no new revisions.",
+        "已停用：這個封存不必再驗證，也不再接受新的版次。"},
+    {"FULL verify", "完整驗證"},
+    {"Other ways to verify", "其他驗證方式"},
+    {"Every file is read once; when every entry matches, the next revision records the same entries with their "
+     "chunk hashes. Any difference records the verification alone.",
+        "每個檔案只讀取一次；所有項目都相符時，下一個版次會記錄相同的項目及其區塊雜湊。有任何不同時，只記錄這次驗證的"
+        "結果。"},
+    {"Cannot tell whether chunk hashes can be added: {}", "無法判斷能否加入區塊雜湊：{}", Match::FormatOnly},
+    {"A verification of this archive that adds chunk hashes is unfinished: resume it, or abandon it under "
+     "Unfinished operations.",
+        "此封存有一個加入區塊雜湊的未完成驗證：請繼續它，或在「未完成的作業」中放棄它。"},
+    {"FULL verify with strict metadata", "以嚴格中繼資料完整驗證"},
+    {"Timestamp and attribute differences fail the run", "時間戳記與屬性差異會使執行失敗"},
+    {"Verify a folder or volume...", "驗證一個資料夾或磁碟區…"},
+    {"Verifies the archive on the folder or volume you choose, for when more than one attached volume holds this "
+     "archive",
+        "驗證您選擇的資料夾或磁碟區上的封存；用於有多個已連接的磁碟區都存放此封存時"},
+    // Its dialog: the folder or volume typed, pasted or chosen, and strict
+    // metadata ("Strict metadata" is Settings').
+    {"Verify a folder or volume", "驗證一個資料夾或磁碟區"},
+    {"Folder or volume", "資料夾或磁碟區"},
+    // No second verification while the archive's job waits or works (decision 0045).
+    {"{} already has a job that waits or works: stop it in Jobs first, or wait for it to end.",
+        "{} 已經有一個工作在等候或執行；請先在「工作」停止它，或等它結束。", Match::FormatOnly},
+    {"The last FULL verification of this archive stopped at {}. Resume continues it without reading again what it "
+     "read.",
+        "此封存上次的完整驗證停止於 {}。按「繼續」即可接續，已讀過的不必重讀。", Match::FormatOnly},
+    {"The last FULL verification of this archive that adds chunk hashes stopped at {}. Resume continues it without "
+     "reading again what it read.",
+        "此封存上次加入區塊雜湊的完整驗證停止於 {}。按「繼續」即可接續，已讀過的不必重讀。", Match::FormatOnly},
+    {"Device", "裝置"},
+    {"Volume", "磁碟區"},
+    {"Capacity", "容量"},
+    {"Model", "型號"},
+    {"Bus", "匯流排"},
+    {"Serial", "序號"},
+    {"WWN", "WWN"},
+    {"Health in the last verification", "上次驗證時的健康狀態"},
+    {"Read speed of the last FULL verify", "上次完整驗證的讀取速度"},
+    {"Content", "內容"},
+    {"Files", "檔案"},
+    {"{}, recorded {}", "{}，記錄於 {}", Match::FormatOnly},
+    {"Chunk hashes", "區塊雜湊"},
+    {"yes (chunk size {})", "有（區塊大小 {}）", Match::FormatOnly},
+    {"none", "沒有"},
+    {"Archive UUID", "封存 UUID"},
+    {"The next FULL verification can add chunk hashes (in the menu beside FULL verify), so that a verification can "
+     "tell which part of a large file differs.",
+        "下一次完整驗證時可以一併加入區塊雜湊（在「完整驗證」旁的選單中），讓驗證能指出大檔案是哪一個區塊不同。"},
+    {"Copies", "副本"},
+    {"This archive is recorded as a copy of it", "此封存記錄為它的副本"},
+    {"Recorded as a copy of this archive", "記錄為此封存的副本"},
+    {"not in this repository", "不在這個儲存庫中"},
+    {"Compare...", "比較…"},
+    {"Recent verifications", "最近的驗證"},
+    {"Cannot read the verifications of this archive: {}", "無法讀取此封存的驗證：{}", Match::FormatOnly},
+    {"Every verification of this archive in History ({})", "在「歷程」中查看此封存的全部驗證（{}）", Match::FormatOnly},
+    // src/gui/archives_page.cpp, src/gui/unfinished_actions.cpp,
+    // src/app/unfinished_operations.cpp: unfinished operations (decision 0022)
     {"Unfinished operations", "未完成的作業"},
     {"Registrations, verifications and relocations that have not finished, also those started from the "
         "command line. The numbers move each time an operation saves its progress: after every 1000 files, "
@@ -567,8 +662,6 @@ constexpr CatalogEntry entries[] = {
         "尚未完成的註冊、驗證與搬移，包括從命令列啟動的。每當作業儲存進度，數字就會更新：每 1000 個檔案一次，"
         "或在檔案完成時每分鐘一次；掃描期間不會更新。"},
     {"Root", "根目錄"},
-    {"Operation", "作業"},
-    {"Progress", "進度"},
     {"Registration", "註冊"},
     {"Verification", "驗證"},
     {"Verification adding chunk hashes", "驗證（加入區塊雜湊）"},
@@ -782,7 +875,7 @@ constexpr CatalogEntry entries[] = {
     {"Resume an interrupted registration of this folder or volume", "繼續此資料夾或磁碟區中斷的註冊"},
     {"Register", "註冊"},
     {"Cancel", "取消"},
-    // src/gui/verify_view.cpp
+    // src/gui/verification.cpp: a FULL verification and its report.
     {"FULL VERIFY {}", "完整驗證 {}"},
     {"{} ({}) revision {}", "{}（{}）版次 {}", Match::FormatOnly},
     {"Root: {}", "根目錄：{}"},
@@ -792,34 +885,24 @@ constexpr CatalogEntry entries[] = {
     {"Items:", "項目："},
     {"Media: not read, as the manifest of this revision cannot be used", "媒體：未讀取，因為這個版次的清單檔無法使用"},
     {"Failure: {}", "失敗：{}"},
-    {"The run was interrupted; use Resume to continue without re-reading verified files.",
-        "此次執行已中斷；使用「繼續中斷的執行」即可接續，不必重新讀取已驗證的檔案。"},
+    {"The run was interrupted; continue it with Resume in the archive's details in Archives, without reading again "
+     "the files verified.",
+        "此次執行已中斷；在「封存」頁此封存的詳細資料中按「繼續」即可接續，不必重新讀取已驗證的檔案。"},
     {"Resumed from run: {}", "已從執行 {} 繼續"},
     {"Run: {}", "執行：{}"},
-    {"Choose the folder or volume to verify, or pick a registered archive.",
-        "請選擇要驗證的資料夾或磁碟區，或挑選已註冊的封存。"},
-    {"Verifying (reading every registered byte) ...", "正在驗證（讀取每個已註冊的位元組）……"},
+    {"Choose the folder or volume to verify.", "請選擇要驗證的資料夾或磁碟區。"},
     {"Not verified: {}", "未能驗證：{}"},
-    // A chosen archive that more than one attached volume holds (decision 0022, point 7).
+    // An archive that more than one attached volume holds (decision 0022,
+    // point 7), verified in Archives by its uuid: "Verify a folder or
+    // volume..." verifies the one meant.
     {"Not verified: archive {} is on more than one attached volume, as a device and a sector-by-sector clone of it "
-        "would be:{}\nVeriArchive cannot tell which one to verify. Type the folder of the one to verify above, or "
-        "choose it with \"Choose...\", choose \"The folder or volume above\" under \"Verify:\" and press \"Verify "
-        "(FULL)\"; or detach the other volumes and verify the archive again.",
+        "would be:{}\nVeriArchive cannot tell which one to verify. Choose \"Verify a folder or volume...\" in the "
+        "menu beside \"FULL verify\" in the archive's details, and choose the folder of the one to verify; or detach "
+        "the other volumes and verify the archive again.",
         "未能驗證：封存 {} 位於多個已連接的磁碟區上，例如一個裝置和它逐磁區複製出來的複本：{}\n程式無法判斷要驗證哪一個。"
-        "請在上方輸入要驗證的那一個的資料夾，或按「選擇…」挑選它，在「驗證：」選擇「上方的資料夾或磁碟區」，"
-        "再按「完整驗證」；或讓其他磁碟區中斷連線後，再驗證一次這個封存。",
+        "請在此封存的詳細資料中，從「完整驗證」旁的選單選擇「驗證一個資料夾或磁碟區…」，再選擇要驗證的那一個的資料夾；"
+        "或讓其他磁碟區中斷連線後，再驗證一次這個封存。",
         Match::FormatOnly},
-    {"The folder or volume above", "上方的資料夾或磁碟區"},
-    {"FULL verification re-reads every registered file from the medium and compares it with "
-        "the baseline. Only FULL VERIFY PASSED means 100% of the registered content was read and "
-        "matched.",
-        "完整驗證會從媒體重新讀取每個已註冊的檔案，並與基準比對。"
-        "只有「完整驗證 通過」才代表 100% 的已註冊內容都已讀取且相符。"},
-    {"Verify:", "驗證："},
-    {"Strict metadata (timestamp and attribute differences fail the run)",
-        "嚴格中繼資料（時間戳記與屬性差異會使執行失敗）"},
-    {"Verify (FULL)", "完整驗證"},
-    {"Resume interrupted run", "繼續中斷的執行"},
     // src/app/verify_report.cpp: how to take a baseline for Unbaselined
     // entries (decision 0010), on the command line and in the window.
     {"The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. To "
@@ -833,14 +916,9 @@ constexpr CatalogEntry entries[] = {
         "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：在"
         "「註冊封存」頁選擇它的資料夾或磁碟區（{}），勾選「{}」，再按「{}」。",
         Match::FormatOnly},
-    // Adding chunk hashes (decision 0033): the checkbox, offered for a
-    // registered archive without them, and the report's line.
-    {"Full verify, and add chunk hashes", "完整驗證，並加入區塊雜湊"},
-    {"For a registered archive without chunk hashes, chosen above. Every file is read once; when every entry "
-        "matches, the next revision records the same entries with their chunk hashes. Any difference records the "
-        "verification alone.",
-        "適用於上方選擇、尚無區塊雜湊的已註冊封存。每個檔案只讀取一次；所有項目都相符時，"
-        "下一個版次會記錄相同的項目及其區塊雜湊。有任何不同時，只記錄這次驗證的結果。"},
+    // Adding chunk hashes (decision 0033): the item of the menu of FULL
+    // verify, offered for an archive without them, and the report's line.
+    {"FULL verify, and add chunk hashes", "完整驗證，並加入區塊雜湊"},
     {"Chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
         "已加入區塊雜湊：由版次 {} 記錄（區塊大小 {}，{} 個區塊，總碼 {}）"},
     {"Chunk hashes not added: {}", "未加入區塊雜湊：{}", Match::Cause},
@@ -1117,108 +1195,115 @@ constexpr CatalogEntry entries[] = {
         "abandon-verification {}`)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先以 "
         "`verify --full {3} --resume {4}` 完成它，或以 `archive abandon-verification {5}` 放棄它）"},
-    // The same refusal in Verify Archive, which names the window's own ways
-    // on in place of the command lines: Resume and Abandon... on its row in
-    // the Archive List first, then the view's Resume interrupted run.
+    // The same refusal of a verification in Archives (decision 0046), which
+    // names the window's own ways on in place of the command lines: Resume
+    // and Abandon... on its row under Unfinished operations first, then
+    // Resume in the archive's details, where its stopped verification shows.
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
-        "was changed (finish it first with Resume, or abandon it with Abandon..., on its row in the Archive List; "
-        "or finish it with Resume interrupted run once the archive is chosen above)",
-        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存列表」按它那一列"
-        "的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方選擇該封存，再按「繼續中斷的執行」完成它）"},
+        "was changed (finish it first with Resume, or abandon it with Abandon..., on its row under Unfinished "
+        "operations in Archives; or finish it with Resume in the archive's details)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存」頁的"
+        "「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在此封存的詳細資料中按"
+        "「繼續」完成它）"},
     // ... while that verification still runs, when none of them is offered yet.
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {} and is still "
         "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with "
-        "Abandon..., on its row in the Archive List; or finish it with Resume interrupted run once the archive is "
-        "chosen above)",
+        "Abandon..., on its row under Unfinished operations in Archives; or finish it with Resume in the archive's "
+        "details)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方選擇該封存，"
-        "再按「繼續中斷的執行」完成它）"},
+        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "也可以在此封存的詳細資料中按「繼續」完成它）"},
     // The same refusal of a registration in Register Archive (decision 0033).
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
-        "was changed (finish it first with Resume, or abandon it with Abandon..., on its row in the Archive List; "
-        "or finish it with Resume interrupted run in Verify Archive once the archive is chosen there)",
-        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存列表」按它那一列"
-        "的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它）"},
+        "was changed (finish it first with Resume, or abandon it with Abandon..., on its row under Unfinished "
+        "operations in Archives; or finish it with Resume in the archive's details there)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存」頁的"
+        "「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在該頁此封存的詳細資料中按"
+        "「繼續」完成它）"},
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {} and is still "
         "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with "
-        "Abandon..., on its row in the Archive List; or finish it with Resume interrupted run in Verify Archive once "
-        "the archive is chosen there)",
+        "Abandon..., on its row under Unfinished operations in Archives; or finish it with Resume in the archive's "
+        "details there)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「驗證封存」"
-        "選擇該封存，再按「繼續中斷的執行」完成它）"},
-    // The refusal of Register Archive and Verify Archive while a registration
-    // of the archive is unfinished, in the windows' own words (decisions
-    // 0025, 0030, 0033): Resume and Abandon... on its row in the Archive List
-    // first, then Register Archive's checkbox; of the root entered, of another
-    // root of the archive, or one made for an older revision, which can only
-    // be abandoned; once it has stopped, and while it runs.
+        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "也可以在該頁此封存的詳細資料中按「繼續」完成它）"},
+    // The refusal of Register Archive and of a verification in Archives while
+    // a registration of the archive is unfinished, in the windows' own words
+    // (decisions 0025, 0030, 0033, 0046): Resume and Abandon... on its row
+    // under Unfinished operations first, then Register Archive's checkbox; of
+    // the root entered, of another root of the archive, or one made for an
+    // older revision, which can only be abandoned; once it has stopped, and
+    // while it runs.
     {"an interrupted registration of this root exists (archive {}); finish it with Resume, or abandon it with "
-        "Abandon..., on its row in the Archive List; or finish it by ticking Resume an interrupted registration of "
-        "this folder or volume and pressing Register again",
-        "此根目錄有一個中斷的註冊（封存 {}）；請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
-        "也可以勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」完成它"},
-    {"a registration of this root (archive {}) is still running; wait for it to finish; if it stops, finish it with "
-        "Resume, or abandon it with Abandon..., on its row in the Archive List; or finish it by ticking Resume an "
+        "Abandon..., on its row under Unfinished operations in Archives; or finish it by ticking Resume an "
         "interrupted registration of this folder or volume and pressing Register again",
-        "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請在「封存列表」按它那一列的「繼續」完成它，"
+        "此根目錄有一個中斷的註冊（封存 {}）；請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，"
         "或按該列的「放棄…」放棄它；也可以勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」完成它"},
+    {"a registration of this root (archive {}) is still running; wait for it to finish; if it stops, finish it with "
+        "Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or finish it by "
+        "ticking Resume an interrupted registration of this folder or volume and pressing Register again",
+        "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的"
+        "「繼續」完成它，或按該列的「放棄…」放棄它；也可以勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」"
+        "完成它"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
-        "it first with Resume, or abandon it with Abandon..., on its row in the Archive List; or finish it by "
-        "entering its root above, ticking Resume an interrupted registration of this folder or volume and pressing "
-        "Register)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存列表」按它那一列的"
-        "「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，"
-        "再按「註冊」完成它）"},
-    {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
-        "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
-        "its row in the Archive List; or finish it by entering its root above, ticking Resume an interrupted "
-        "registration of this folder or volume and pressing Register)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方輸入它的"
-        "根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
-    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
-        "it first with Resume, or abandon it with Abandon..., on its row in the Archive List; or finish it in "
-        "Register Archive by entering its root, ticking Resume an interrupted registration of this folder or volume "
+        "it first with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or "
+        "finish it by entering its root above, ticking Resume an interrupted registration of this folder or volume "
         "and pressing Register)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存列表」按它那一列的"
-        "「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」輸入它的根目錄，勾選「繼續此資料夾或磁碟區"
-        "中斷的註冊」，再按「註冊」完成它）"},
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存」頁的「未完成的作業」"
+        "中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方輸入它的根目錄，勾選「繼續此資料夾或"
+        "磁碟區中斷的註冊」，再按「註冊」完成它）"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
         "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
-        "its row in the Archive List; or finish it in Register Archive by entering its root, ticking Resume an "
+        "its row under Unfinished operations in Archives; or finish it by entering its root above, ticking Resume an "
         "interrupted registration of this folder or volume and pressing Register)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」"
-        "輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
+        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "也可以在上方輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
+        "it first with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or "
+        "finish it in Register Archive by entering its root, ticking Resume an interrupted registration of this "
+        "folder or volume and pressing Register)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存」頁的「未完成的作業」"
+        "中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」輸入它的根目錄，勾選「繼續此"
+        "資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
+    {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
+        "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
+        "its row under Unfinished operations in Archives; or finish it in Register Archive by entering its root, "
+        "ticking Resume an interrupted registration of this folder or volume and pressing Register)",
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
+        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "也可以在「註冊封存」輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
     {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
-        "later revision ({}); the registration can no longer finish: abandon it with Abandon... in the Archive List",
+        "later revision ({}); the registration can no longer finish: abandon it with Abandon... under Unfinished "
+        "operations in Archives",
         "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成："
-        "請在「封存列表」按「放棄…」放棄它"},
+        "請在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
     {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
         "later revision ({}); the registration can no longer finish, and is still running: wait for it to stop, then "
-        "abandon it with Abandon... in the Archive List",
+        "abandon it with Abandon... under Unfinished operations in Archives",
         "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成，"
-        "而且仍在執行：請等它停止，再在「封存列表」按「放棄…」放棄它"},
+        "而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
     // ... and while a relocation of the archive is unfinished: a relocation
     // has no window, so it is continued on the command line (decision 0026).
     {"an unfinished relocation of archive {} (to \"{}\") exists; resume it on the command line with `archive "
-        "relocate {} {} --resume`, or abandon it with Abandon... in the Archive List",
+        "relocate {} {} --resume`, or abandon it with Abandon... under Unfinished operations in Archives",
         "封存 {} 有一個未完成的搬移（至「{}」）；請在命令列以 `archive relocate {} {} --resume` 繼續，"
-        "或在「封存列表」按「放棄…」放棄它"},
+        "或在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
     {"an unfinished relocation of archive {} (to \"{}\") exists and is still running; wait for it to finish; if it "
         "stops, resume it on the command line with `archive relocate {} {} --resume`, or abandon it with "
-        "Abandon... in the Archive List",
+        "Abandon... under Unfinished operations in Archives",
         "封存 {} 有一個未完成的搬移（至「{}」），而且仍在執行；請等它完成；若它停止了，請在命令列以 "
-        "`archive relocate {} {} --resume` 繼續，或在「封存列表」按「放棄…」放棄它"},
+        "`archive relocate {} {} --resume` 繼續，或在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
     {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
-        "content and cannot be resumed; abandon it with Abandon... in the Archive List, then relocate again",
-        "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，無法繼續；請在「封存列表」按「放棄…」放棄它，"
-        "再重新搬移"},
+        "content and cannot be resumed; abandon it with Abandon... under Unfinished operations in Archives, then "
+        "relocate again",
+        "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，無法繼續；請在「封存」頁的「未完成的作業」中"
+        "按「放棄…」放棄它，再重新搬移"},
     {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
-        "content and is still running; wait for it to end; if it is then still listed in the Archive List, abandon "
-        "it there with Abandon..., then relocate again",
+        "content and is still running; wait for it to end; if it is then still listed under Unfinished operations "
+        "in Archives, abandon it there with Abandon..., then relocate again",
         "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，而且仍在執行；請等它結束；結束後若它仍列在"
-        "「封存列表」中，請在那裡按「放棄…」放棄它，再重新搬移"},
+        "「封存」頁的「未完成的作業」中，請在那裡按「放棄…」放棄它，再重新搬移"},
     {"this verification is still running in process {} ({}) on this computer; resume it once that process has "
         "ended",
         "此驗證仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再繼續"},

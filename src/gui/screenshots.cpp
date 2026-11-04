@@ -5,19 +5,21 @@
 // saves each view as a PNG in the folder, and quits.
 //
 // The archives and the folder come from the environment:
-//   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: verified, its history shown, compared
+//   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: selected in Archives, verified by its
+//                                     folder, its history shown, compared
 //   VERIARCHIVE_SCREENSHOT_COPY       uuid of archive B: compared with A
 //   VERIARCHIVE_SCREENSHOT_EARLIER    uuid of archive C, registered without chunk hashes as an
-//                                     earlier version registered archives: chosen in Verify
-//                                     Archive with "Full verify, and add chunk hashes" ticked
-//   VERIARCHIVE_SCREENSHOT_FOLDER     archive A's folder: typed into Register and Verify
+//                                     earlier version registered archives: its details shown in
+//                                     Archives with the menu of FULL verify open, which offers
+//                                     "FULL verify, and add chunk hashes"
+//   VERIARCHIVE_SCREENSHOT_FOLDER     archive A's folder: typed into Register, verified
 //
 // GTK renders the pictures itself from what the window drew, so they show only
 // the window, never other windows on the desktop, and need no screen access.
 //
 // The pictures are published, and the sample archives are folders on a real
-// volume, whose label, device model and capacity the Archive List would show.
-// So while this mode runs, the views show a fixed sample identity instead
+// volume, whose label, device model and capacity Archives would show. So
+// while this mode runs, the views show a fixed sample identity instead
 // (displayed_identity; main turns it on together with the mode).
 #include "gui/gui_app.h"
 
@@ -182,6 +184,10 @@ void save_picture(GtkWindow* window, GtkWidget* popover, const std::filesystem::
 
 class Tour {
 public:
+    Tour(const Tour&) = delete;
+    Tour& operator=(const Tour&) = delete;
+    ~Tour() { close_popover(); }
+
     explicit Tour(GuiState& state) : state_(state)
     {
         if (!state_.session) {
@@ -205,7 +211,13 @@ public:
 
         stops_ = {
             {"01-settings.png", [this] { show("settings"); }, {}},
-            {"02-archive-list.png", [this] { show("archives"); }, {}},
+            // Archives with archive A selected, its details beside the list.
+            {"02-archive-list.png",
+                [this] {
+                    show("archives");
+                    select(reference_);
+                },
+                {}},
             {"03-register.png",
                 [this] {
                     // How archive A was registered: its folder and label, not started.
@@ -216,26 +228,36 @@ public:
                 {}},
             {"04-verify.png",
                 [this] {
-                    // The folder rather than the archive from the list: by uuid
-                    // the verification looks through every attached volume,
-                    // the folder needs only its own.
-                    show("verify");
-                    gtk_editable_set_text(GTK_EDITABLE(state_.verify_view.folder), folder_.c_str());
-                    gtk_drop_down_set_selected(GTK_DROP_DOWN(state_.verify_view.archive), 0);
-                    start(state_.verify_view.start, state_.verify_view.report, "verification");
+                    // A FULL verification of archive A by its folder, as
+                    // "Verify a folder or volume..." in its details starts
+                    // one, rather than by its uuid: by uuid the verification
+                    // looks through every attached volume, the folder needs
+                    // only its own.
+                    show("archives");
+                    select(reference_);
+                    verify_root(state_, reference_, path_from_utf8(folder_));
+                    const auto job = state_.verification_jobs.find(reference_);
+                    if (!state_.jobs.active() || job == state_.verification_jobs.end()) {
+                        throw std::runtime_error("the verification did not start");
+                    }
+                    job_ = job->second;
                 },
                 [this] {
-                    expect(state_.verify_view.shown_report, "FULL VERIFY ", "verification");
-                    // Then archive C chosen in the list, which an earlier
-                    // version registered without chunk hashes, and "Full
-                    // verify, and add chunk hashes" ticked, as the operator's
-                    // own archives registered by V1 show it (not started).
-                    choose(state_.verify_view.archive, state_.verify_view.archive_uuids, 1, earlier_);
-                    if (!gtk_widget_get_sensitive(state_.verify_view.add_chunk_hashes)) {
-                        throw std::runtime_error("\"Full verify, and add chunk hashes\" is not offered for archive " +
+                    const auto* job = state_.jobs.find(job_);
+                    expect(job ? job->report : Report{}, "FULL VERIFY ", "verification");
+                    // Then the details of archive C, which an earlier version
+                    // registered without chunk hashes, with the menu of FULL
+                    // verify open, as the operator's own archives registered by
+                    // V1 show it: "FULL verify, and add chunk hashes" is offered
+                    // (not started). The toast says the result of A's.
+                    select(earlier_);
+                    auto& page = state_.archives_page;
+                    if (!page.adding || !gtk_widget_get_sensitive(page.adding) || !page.verify_menu) {
+                        throw std::runtime_error("\"FULL verify, and add chunk hashes\" is not offered for archive " +
                                                  earlier_);
                     }
-                    gtk_check_button_set_active(GTK_CHECK_BUTTON(state_.verify_view.add_chunk_hashes), TRUE);
+                    open_popover(page.verify_menu);
+                    gtk_popover_popup(GTK_POPOVER(popover_));
                 }},
             {"05-history.png",
                 [this] {
@@ -274,7 +296,7 @@ public:
             {"07-language.png",
                 [this] {
                     show("settings");
-                    popover_ = open_list(state_.settings_page.language);
+                    open_popover(open_list(state_.settings_page.language));
                 },
                 {}},
         };
@@ -348,12 +370,13 @@ private:
                 return true;
             }
             take(stop.file);
+            // The next picture shows neither the popover of this one nor
+            // its toast.
+            close_popover();
+            dismiss_toast(state_);
             phase_ = Phase::Act;
             if (++next_ < stops_.size()) {
                 return true;
-            }
-            if (popover_) {
-                gtk_popover_popdown(GTK_POPOVER(popover_));
             }
             g_application_quit(G_APPLICATION(state_.application));
             return false;
@@ -379,6 +402,32 @@ private:
     void show(const char* view)
     {
         show_page(state_, view);
+    }
+
+    // Selects `archive` in Archives; it must be listed.
+    void select(const Uuid& archive)
+    {
+        select_archive(state_, archive);
+        if (state_.archive_selected != archive) {
+            throw std::runtime_error("archive " + archive + " is not in Archives");
+        }
+    }
+
+    // The popover drawn over the next picture, held until it is closed: a
+    // read of the repository may make the view it belongs to again.
+    void open_popover(GtkWidget* popover)
+    {
+        close_popover();
+        popover_ = GTK_WIDGET(g_object_ref(popover));
+    }
+
+    void close_popover()
+    {
+        if (popover_) {
+            gtk_popover_popdown(GTK_POPOVER(popover_));
+            g_object_unref(popover_);
+            popover_ = nullptr;
+        }
     }
 
     // Starts an operation with its button; it must then be running.
@@ -438,7 +487,8 @@ private:
     Phase phase_ = Phase::Act;
     Clock::time_point since_{};
     gint64 frame_before_ = 0;
-    GtkWidget* popover_ = nullptr;  // the open language list, for the last picture
+    std::uint64_t job_ = 0;          // the verification of 04-verify
+    GtkWidget* popover_ = nullptr;   // the popover drawn over the picture (a reference of its own)
 };
 
 } // namespace

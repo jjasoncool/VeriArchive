@@ -5,9 +5,9 @@
 | File | What it shows |
 |---|---|
 | `01-settings.png` | Settings: the repository, the config file, the policy |
-| `02-archive-list.png` | Archive List with the three sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB) |
+| `02-archive-list.png` | Archives with the three sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB), archive A selected and its details beside the list |
 | `03-register.png` | Register Archive with archive A's folder and label typed in (not started) |
-| `04-verify.png` | Verify Archive after a FULL verification of archive A by its folder, then with archive C chosen in "Verify:" and the checkbox "Full verify, and add chunk hashes" ticked (not started), as an archive registered by an earlier version shows it |
+| `04-verify.png` | Archives after a FULL verification of archive A by its folder (its toast at the bottom), then the details of archive C with the menu of FULL verify open, which offers "FULL verify, and add chunk hashes" (not started), as an archive registered by an earlier version shows it |
 | `05-history.png` | Verification History of archive A, with the history chain checked |
 | `06-compare.png` | Compare Archives: A (`原始資料`) against its copy B (`備份資料`) |
 | `07-language.png` | Settings with the language list open |
@@ -47,6 +47,7 @@ The repository is public, and so are these pictures. The script makes its own sa
 - A portable install (a `config.json` next to `veriarchive-gui`) would use its own repository instead, so the script refuses such a GUI.
 - The sample folders lie on a real volume, the one `WORK` is on, so what the registrations record about their carrier is that volume's own identity: its label, its device's model and serial, its capacity. The screenshot mode never shows it: every view shows a fixed sample identity instead (see below).
 - The pictures still show the paths under `WORK`, its drive letter included, and the computer's time zone. Check them before publishing.
+- The identity in the pictures is sample data, but what the tour's own runs measured is not: the health that the device under `WORK` reported, the read speed and the duration of the verification (in the details of archive A, under Device and Recent verifications), and every time shown come from the machine that took the pictures, as do the roots, which are the sample folders' real paths under `WORK`. Check them before publishing too.
 
 ## The screenshot mode
 
@@ -57,10 +58,10 @@ The script sets these variables for the GUI. Setting them by hand works too, aga
 | `VERIARCHIVE_GUI_SCREENSHOTS` | Folder for the PNG files; turns the mode on |
 | `VERIARCHIVE_SCREENSHOT_REFERENCE` | uuid of archive A: verified, its history shown, compared |
 | `VERIARCHIVE_SCREENSHOT_COPY` | uuid of archive B: compared with A |
-| `VERIARCHIVE_SCREENSHOT_EARLIER` | uuid of archive C, registered without chunk hashes: chosen in Verify Archive with "Full verify, and add chunk hashes" ticked |
-| `VERIARCHIVE_SCREENSHOT_FOLDER` | archive A's folder: typed into Register Archive and Verify Archive |
+| `VERIARCHIVE_SCREENSHOT_EARLIER` | uuid of archive C, registered without chunk hashes: its details shown in Archives with the menu of FULL verify open, which offers "FULL verify, and add chunk hashes" |
+| `VERIARCHIVE_SCREENSHOT_FOLDER` | archive A's folder: typed into Register Archive, and verified as "Verify a folder or volume..." verifies one |
 | `VERIARCHIVE_LANG` | The interface language of the pictures |
 
 While the mode runs, every view shows the same sample media identity in place of the recorded one, in every language: volume label `SAMPLE-VOLUME`, device model `SAMPLE-DEVICE`, serial `SAMPLE0001`, capacity 1.0 TiB, and sample values in every other identity field (filesystem type and id, volume GUID, WWN, bus); whether the device rotates (HDD or SSD) is unknown. One function decides which identity the views show: `displayed_identity` in `src/gui/displayed_identity.cpp`. Normal use always shows what was recorded, and the smoke test (`VERIARCHIVE_GUI_SMOKE_TEST`), which takes precedence, shows nothing.
 
-The GUI exits with status 1 and writes the reason to stderr when a step fails, for example when an archive is not in the repository, the verification does not reach a result, or "Full verify, and add chunk hashes" is not offered for archive C. The tour is in `src/gui/screenshots.cpp`.
+The GUI exits with status 1 and writes the reason to stderr when a step fails, for example when an archive is not in the repository, the verification does not reach a result, or "FULL verify, and add chunk hashes" is not offered for archive C. The tour is in `src/gui/screenshots.cpp`.

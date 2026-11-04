@@ -55,9 +55,10 @@ std::optional<std::string> root_absent(const std::filesystem::path& root, std::s
 // refused (root_refusal), not there (root_absent), or no folder, "not a
 // directory: <typed>", the root named as it was typed. Nothing when it is
 // taken. The command line asks it of the root of these commands, the GUI of
-// the root of Register Archive and Verify Archive, and the Archive List's
-// Resume of a stopped registration of the root its plan names, as `register
-// <root> --resume` asks it (decision 0022, point 7).
+// the root of Register Archive and of a verification by folder in Archives,
+// and Resume under Unfinished operations of a stopped registration of the
+// root its plan names, as `register <root> --resume` asks it (decision 0022,
+// point 7).
 std::optional<std::string> root_not_taken(const std::filesystem::path& root, std::string_view typed);
 
 } // namespace va::app

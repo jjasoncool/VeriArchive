@@ -468,50 +468,53 @@ void translation_tests()
     // Adding chunk hashes (decision 0033): the refusal, the revision that
     // records them, why none does, and a run that keeps its saved progress.
     const std::string sample = "c0ffee00-0000-4000-8000-000000000001";
-    // Verify Archive's refusal while such a verification is unfinished names
-    // the window's own ways on: Resume and Abandon... on its row in the
-    // Archive List first, then the view's Resume interrupted run; the command
-    // line's names its commands.
+    // The refusal of a verification in Archives while such a verification is
+    // unfinished names the window's own ways on (decision 0046): Resume and
+    // Abandon... on its row under Unfinished operations first, then Resume in
+    // the archive's details; the command line's names its commands.
     const std::string adding_run = "c0ffee00-0000-4000-8000-0000000000aa";
-    const std::string on_its_row = "with Resume, or abandon it with Abandon..., on its row in the Archive List";
-    const std::string on_its_row_chinese = "在「封存列表」按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以";
+    const std::string on_its_row =
+        "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives";
+    const std::string on_its_row_chinese =
+        "在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以";
     CHECK(chinese.format("Not verified: {}",
               chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                       ") is creating revision 2; nothing was changed (finish it first " + on_its_row +
-                      "; or finish it with Resume interrupted run once the archive is chosen above)")) ==
+                      "; or finish it with Resume in the archive's details)")) ==
           "未能驗證：封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
-              "）正在建立版次 2；未做任何變更（請先" + on_its_row_chinese + "在上方選擇該封存，再按「繼續中斷的執行」完成它）");
+              "）正在建立版次 2；未做任何變更（請先" + on_its_row_chinese + "在此封存的詳細資料中按「繼續」完成它）");
     // ... and while that verification still runs, to wait for it.
     CHECK(chinese.format("Not verified: {}",
               chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                       ") is creating revision 2 and is still running; nothing was changed (wait for it to finish; if it "
                       "stops, finish it " + on_its_row +
-                      "; or finish it with Resume interrupted run once the archive is chosen above)")) ==
+                      "; or finish it with Resume in the archive's details)")) ==
           "未能驗證：封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
               "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
-              "在上方選擇該封存，再按「繼續中斷的執行」完成它）");
-    // Register Archive's words for the same refusal, which name the list's
-    // Resume and Verify Archive's Resume interrupted run, once it has stopped
-    // and while it runs.
+              "在此封存的詳細資料中按「繼續」完成它）");
+    // Register Archive's words for the same refusal, which name the row's
+    // Resume and Resume in the archive's details, once it has stopped and
+    // while it runs.
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2; nothing was changed (finish it first " + on_its_row +
-                  "; or finish it with Resume interrupted run in Verify Archive once the archive is chosen there)") ==
+                  "; or finish it with Resume in the archive's details there)") ==
           "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run + "）正在建立版次 2；未做任何變更（請先" +
-              on_its_row_chinese + "在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它）");
+              on_its_row_chinese + "在該頁此封存的詳細資料中按「繼續」完成它）");
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2 and is still running; nothing was changed (wait for it to finish; if it "
                   "stops, finish it " + on_its_row +
-                  "; or finish it with Resume interrupted run in Verify Archive once the archive is chosen there)") ==
+                  "; or finish it with Resume in the archive's details there)") ==
           "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
               "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
-              "在「驗證封存」選擇該封存，再按「繼續中斷的執行」完成它）");
-    // The windows' words while a registration of the archive is unfinished
-    // (decision 0033): Resume and Abandon... on its row in the Archive List
-    // first, then Register Archive's checkbox; of the root entered, of another
-    // root, in Register Archive and in Verify Archive, made for an older
-    // revision; once it has stopped and while it runs.
+              "在該頁此封存的詳細資料中按「繼續」完成它）");
+    // The window's words while a registration of the archive is unfinished
+    // (decisions 0033, 0046): Resume and Abandon... on its row under
+    // Unfinished operations first, then Register Archive's checkbox; of the
+    // root entered, of another root, in Register Archive and for a
+    // verification in Archives, made for an older revision; once it has
+    // stopped and while it runs.
     const std::string tick = "勾選「繼續此資料夾或磁碟區中斷的註冊」";
-    const std::string in_list = "或在「封存列表」按「放棄…」放棄它";
+    const std::string in_list = "或在「封存」頁的「未完成的作業」中按「放棄…」放棄它";
     CHECK(chinese.format("Not registered: {}",
               chinese("an interrupted registration of this root exists (archive " + sample + "); finish it " +
                       on_its_row +
@@ -555,16 +558,17 @@ void translation_tests()
     const std::string older_chinese = "封存 " + sample +
                                       " 未完成的註冊（根目錄「Z:\\範例」）原本要建立版次 2，但封存現在已有較新的版次（3）；"
                                       "這個註冊再也無法完成";
-    CHECK(chinese(older + ": abandon it with Abandon... in the Archive List") ==
-          older_chinese + "：請在「封存列表」按「放棄…」放棄它");
-    CHECK(chinese(older + ", and is still running: wait for it to stop, then abandon it with Abandon... in the Archive "
-                          "List") == older_chinese + "，而且仍在執行：請等它停止，再在「封存列表」按「放棄…」放棄它");
+    CHECK(chinese(older + ": abandon it with Abandon... under Unfinished operations in Archives") ==
+          older_chinese + "：請在「封存」頁的「未完成的作業」中按「放棄…」放棄它");
+    CHECK(chinese(older + ", and is still running: wait for it to stop, then abandon it with Abandon... under "
+                          "Unfinished operations in Archives") ==
+          older_chinese + "，而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它");
     // ... and while a relocation is unfinished: it is continued on the command line.
     const std::string relocation = "an unfinished relocation of archive " + sample + " (to \"K:\\SAMPLE\") exists";
     const std::string relocation_chinese = "封存 " + sample + " 有一個未完成的搬移（至「K:\\SAMPLE」）";
     const std::string resume_on_command_line = "resume it on the command line with `archive relocate " + sample +
-                                               " K:\\SAMPLE --resume`, or abandon it with Abandon... in the Archive "
-                                               "List";
+                                               " K:\\SAMPLE --resume`, or abandon it with Abandon... under "
+                                               "Unfinished operations in Archives";
     const std::string resume_chinese = "請在命令列以 `archive relocate " + sample + " K:\\SAMPLE --resume` 繼續，" + in_list;
     CHECK(chinese.format("Not verified: {}", chinese(relocation + "; " + resume_on_command_line)) ==
           "未能驗證：" + relocation_chinese + "；" + resume_chinese);
@@ -573,11 +577,13 @@ void translation_tests()
     const std::string differs = "the unfinished relocation of archive " + sample +
                                 " (to \"K:\\SAMPLE\") found that the new carrier does not hold the recorded content";
     const std::string differs_chinese = "封存 " + sample + " 未完成的搬移（至「K:\\SAMPLE」）發現新載體上的內容與記錄不符";
-    CHECK(chinese(differs + " and cannot be resumed; abandon it with Abandon... in the Archive List, then relocate "
-                            "again") == differs_chinese + "，無法繼續；請在「封存列表」按「放棄…」放棄它，再重新搬移");
-    CHECK(chinese(differs + " and is still running; wait for it to end; if it is then still listed in the Archive List, "
-                            "abandon it there with Abandon..., then relocate again") ==
-          differs_chinese + "，而且仍在執行；請等它結束；結束後若它仍列在「封存列表」中，請在那裡按「放棄…」放棄它，再重新搬移");
+    CHECK(chinese(differs + " and cannot be resumed; abandon it with Abandon... under Unfinished operations in "
+                            "Archives, then relocate again") ==
+          differs_chinese + "，無法繼續；請在「封存」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移");
+    CHECK(chinese(differs + " and is still running; wait for it to end; if it is then still listed under Unfinished "
+                            "operations in Archives, abandon it there with Abandon..., then relocate again") ==
+          differs_chinese + "，而且仍在執行；請等它結束；結束後若它仍列在「封存」頁的「未完成的作業」中，請在那裡按「放棄…」"
+                            "放棄它，再重新搬移");
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2; nothing was changed (finish it with `verify --full " + sample +
                   " --resume " + adding_run + "` first, or abandon it with `archive abandon-verification " + sample +
@@ -764,7 +770,8 @@ void translation_tests()
           "<root_path> --resume " + run + "` 從執行 " + run + " 讀取的那個磁碟區上的根目錄繼續，或讓其他磁碟區中斷連線後再"
           "繼續一次");
     // A verification by the archive's uuid that is not a resume stops the same
-    // way, and Verify Archive says what to do in it (decision 0022, point 7).
+    // way, and Archives says what to do in it (decisions 0022, point 7, and
+    // 0046): "Verify a folder or volume..." in the menu beside FULL verify.
     CHECK(chinese("error: AMBIGUOUS: archive " + uuid + " is on more than one attached volume (cloned media): " +
                   clones + "; verify it at the root on one of them with `verify --full <root_path>`, or detach the "
                   "other volumes and verify it again") ==
@@ -772,15 +779,18 @@ void translation_tests()
               "；請以 `verify --full <root_path>` 驗證其中一個磁碟區上的根目錄，或讓其他磁碟區中斷連線後再驗證一次");
     const std::string roots_found = "\n  K:\\SAMPLE\n  X:\\SAMPLE";
     CHECK(chinese.format("Not verified: archive {} is on more than one attached volume, as a device and a "
-                         "sector-by-sector clone of it would be:{}\nVeriArchive cannot tell which one to verify. Type "
-                         "the folder of the one to verify above, or choose it with \"Choose...\", choose \"The folder "
-                         "or volume above\" under \"Verify:\" and press \"Verify (FULL)\"; or detach the other volumes "
-                         "and verify the archive again.",
+                         "sector-by-sector clone of it would be:{}\nVeriArchive cannot tell which one to verify. Choose "
+                         "\"Verify a folder or volume...\" in the menu beside \"FULL verify\" in the archive's details, "
+                         "and choose the folder of the one to verify; or detach the other volumes and verify the archive "
+                         "again.",
               "ARCH-0002" + chinese.parenthesized(uuid.substr(0, 8)), roots_found) ==
           "未能驗證：封存 ARCH-0002（" + uuid.substr(0, 8) +
               "） 位於多個已連接的磁碟區上，例如一個裝置和它逐磁區複製出來的複本：" + roots_found +
-              "\n程式無法判斷要驗證哪一個。請在上方輸入要驗證的那一個的資料夾，或按「選擇…」挑選它，在「驗證：」選擇"
-              "「上方的資料夾或磁碟區」，再按「完整驗證」；或讓其他磁碟區中斷連線後，再驗證一次這個封存。");
+              "\n程式無法判斷要驗證哪一個。請在此封存的詳細資料中，從「完整驗證」旁的選單選擇「驗證一個資料夾或磁碟區…」，"
+              "再選擇要驗證的那一個的資料夾；或讓其他磁碟區中斷連線後，再驗證一次這個封存。");
+    // The controls it names, in the same words.
+    CHECK(chinese("FULL verify") == "完整驗證");
+    CHECK(chinese("Verify a folder or volume...") == "驗證一個資料夾或磁碟區…");
     // An import that loses its revision, or leaves it to a registration with
     // saved files (decision 0030).
     CHECK(chinese("error: revision 2 of archive " + uuid + " was recorded by another operation while this import ran; "
@@ -1236,7 +1246,21 @@ void translation_tests()
     CHECK(chinese("Choose the folder or volume to register.") == "請選擇要註冊的資料夾或磁碟區。");
     CHECK(chinese("Register as a separate archive even though this folder or volume is registered") ==
           "即使此資料夾或磁碟區已註冊，仍註冊為另一個封存");
-    CHECK(chinese("The folder or volume above") == "上方的資料夾或磁碟區");
+    // Archives (decision 0046): the page, the menu of FULL verify of an
+    // archive's details, which holds adding chunk hashes (decision 0033), and
+    // the report of an interrupted run, which names Resume there.
+    CHECK(chinese("Archives") == "封存");
+    CHECK(chinese("Unfinished operations") == "未完成的作業");
+    CHECK(chinese("No archives yet") == "還沒有封存");
+    CHECK(chinese("Register the first archive") == "註冊第一個封存");
+    CHECK(chinese("FULL verify, and add chunk hashes") == "完整驗證，並加入區塊雜湊");
+    CHECK(chinese("FULL verify with strict metadata") == "以嚴格中繼資料完整驗證");
+    CHECK(chinese("Compare with another archive...") == "與另一個封存比較…");
+    CHECK(chinese("Create a new revision...") == "建立新版次…");
+    CHECK(chinese("Copy archive UUID") == "複製封存 UUID");
+    CHECK(chinese("The run was interrupted; continue it with Resume in the archive's details in Archives, without "
+                  "reading again the files verified.") ==
+          "此次執行已中斷；在「封存」頁此封存的詳細資料中按「繼續」即可接續，不必重新讀取已驗證的檔案。");
     // English stays byte-identical.
     CHECK(english("cannot run SQL: database is locked") == "cannot run SQL: database is locked");
     CHECK(english("first-run:home") == "first-run:home");

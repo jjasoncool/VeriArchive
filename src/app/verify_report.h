@@ -1,7 +1,7 @@
 #pragma once
 // What the report of a FULL verification says besides its result and items,
-// on the command line (`verify --full`) and in the GUI's Verify Archive, each
-// in its own words.
+// on the command line (`verify --full`) and in the GUI's report of a
+// verification started in Archives, each in its own words.
 #include "app/text.h"
 #include "core/engine/verify_engine.h"
 

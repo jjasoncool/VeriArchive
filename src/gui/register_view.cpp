@@ -85,8 +85,8 @@ bool media_copy(const GuiState& state)
 }
 
 // Runs `request` as a job (decision 0045), its progress and report shown in
-// this view until it starts another. `typed`: for Resume in the Archive List
-// (decision 0022, point 7), the root as its plan names it; its root is then
+// this view until it starts another. `typed`: for Resume under Unfinished
+// operations (decision 0022, point 7), the root as its plan names it; its root is then
 // checked as `register <root> --resume` checks it (app::root_not_taken), also
 // that it is a folder.
 void run_registration(GuiState& state, RegisterRequest request, std::optional<std::string> typed);
@@ -178,7 +178,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                 // Refused while another operation that creates the archive's
                 // next revision is unfinished, it names the window's own ways
                 // on, or says that that operation still runs, judged now as
-                // the Archive List judges its row (decisions 0025, 0033).
+                // Archives judges its row (decisions 0025, 0033).
                 // Stopped, or cut short by a device that went away: it can be
                 // resumed.
                 if (outcome.error().kind == RegisterFailure::Kind::Incomplete) {
@@ -205,7 +205,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                     if (state.register_view.job == ended) {
                         show_report(state, result);
                     }
-                    refresh_archive_list(state);
+                    refresh_archives(state);
                     refresh_archive_choices(state);
                     if (!*unconfirmed) {
                         return;
@@ -237,6 +237,21 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
 }
 
 } // namespace
+
+void register_new_revision(GuiState& state, const std::string& root)
+{
+    auto& view = state.register_view;
+    if (!view.folder) {
+        return;
+    }
+    gtk_editable_set_text(GTK_EDITABLE(view.folder), root.c_str());
+    // The new revision keeps the archive's label.
+    gtk_editable_set_text(GTK_EDITABLE(view.label), "");
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(view.new_revision), TRUE);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(view.force_new_archive), FALSE);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(view.resume), FALSE);
+    show_page(state, "register");
+}
 
 void resume_registration(GuiState& state, const app::UnfinishedOperation& registration, bool confirmed)
 {

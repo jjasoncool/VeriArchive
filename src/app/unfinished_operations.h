@@ -1,7 +1,7 @@
 #pragma once
 // Unfinished registrations, verifications and relocations, for showing their
 // progress while they run, whoever runs them: this window, another one, or the
-// command line. The GUI's Archive List polls the repository every few seconds
+// command line. The GUI's Archives page polls the repository every few seconds
 // (read_unfinished_operations), follows each operation from poll to poll
 // (OperationWatch) and shows one row per operation (describe_operations).
 //
@@ -106,7 +106,7 @@ struct AttemptCheck {
 // What one read of the repository found.
 struct OperationsRead {
     std::vector<UnfinishedOperation> operations;  // newest first
-    // Changes whenever what the Archive List shows of the archives may have
+    // Changes whenever what Archives shows of the archives may have
     // changed: an archive added, a revision or a status recorded, a
     // verification recorded (ArchiveStore::archive_list_mark). Read in the
     // same read transaction as the operations, so the two agree.
@@ -277,7 +277,7 @@ void follow(std::vector<OperationWatch>& watches, std::vector<UnfinishedOperatio
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
 
 // The state of an operation from one read alone, as the command line shows it
-// (--json), with nothing seen before: as the Archive List judges its first read.
+// (--json), with nothing seen before: as Archives judges its first read.
 OperationState state_of_one_read(const UnfinishedOperation& operation, std::chrono::sys_seconds wall_now);
 
 // The share done, from 0 to 1: by bytes when their total is known, else by
@@ -287,7 +287,7 @@ OperationState state_of_one_read(const UnfinishedOperation& operation, std::chro
 // ProgressEstimate.
 std::optional<double> share_done(const UnfinishedOperation& operation);
 
-// One row of the Archive List's unfinished operations, worded in `text`'s language.
+// One row of the unfinished operations that Archives lists, worded in `text`'s language.
 struct OperationRow {
     std::string label;
     std::string root;
@@ -333,7 +333,7 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
 std::vector<OperationRow> describe_operations(const Text& text, const std::vector<OperationWatch>& watches,
     OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now);
 
-// What Resume on a row of the Archive List runs (decision 0022, point 7): the
+// What Resume on a row of the unfinished operations runs (decision 0022, point 7): the
 // operation continued exactly as its command-line resume continues it given
 // no option, the whole request made here. The GUI runs it as it is: the check
 // boxes of the views where operations start take no part, as they are not
@@ -363,7 +363,7 @@ RegisterRequest registration_resume(const UnfinishedOperation& registration, con
 
 // What a resume of a registration that an older version of VeriArchive left,
 // and that may still run it, says before the operator confirms it: the
-// Archive List's question (OperationRow::resume_asks_first), and `register
+// question of Resume on its row (OperationRow::resume_asks_first), and `register
 // <root> --resume` without --confirm (decision 0022, point 7, operator,
 // 2026-10-20). That version never records when it last worked, so nothing
 // tells whether it still runs the registration: it may be reading a large
@@ -387,7 +387,7 @@ inline constexpr std::string_view older_version_resume_warning =
 // verification the command line shows there), for `archive list` and
 // `archive show`: the revision it creates or verifies, where it reads, what
 // it has done and its state, judged from one read as --json judges it
-// (state_of_one_read), and worded in `text`'s language as the Archive List
+// (state_of_one_read), and worded in `text`'s language as Archives
 // words its row; no speed or time left, which one read cannot tell.
 std::string describe_for_archive(const Text& text, const UnfinishedOperation& operation,
     std::chrono::sys_seconds wall_now);

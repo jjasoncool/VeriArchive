@@ -84,7 +84,7 @@ public:
     // Removes every job that ended.
     void clear_ended();
     // Whether a job that waits or works reads the root or archive of
-    // `record` (runs_operation_of). Safe on any thread: the Archive List asks
+    // `record` (runs_operation_of). Safe on any thread: Archives asks
     // it on a thread of its own.
     bool runs_operation(const nlohmann::json& record) const;
     // Whether a job that waits or works reads `root` or `archive`, which a

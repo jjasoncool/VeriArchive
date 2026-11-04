@@ -5,8 +5,9 @@
 // progress and, once it ended, its report; an ended job's result shows in its
 // tone. The header's jobs button shows how far the jobs that run are on a
 // ring, counts the jobs that run or wait and lists them, with the last ended
-// ones, in its popover. The view that started a job shows it too, as it did
-// when the window ran one operation.
+// ones, in its popover. The view that started a job shows it too: Register
+// Archive and Compare Archives its bar, an archive's details in Archives a
+// card of its row.
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -136,7 +137,8 @@ void update_details(GuiState& state, const JobShown& job)
                                  : text("The report shows here once the job has ended."));
 }
 
-// The view that started `job`, as it showed its one operation before.
+// The view that started `job`: Register Archive and Compare Archives as they
+// showed their one operation before, an archive's details its card.
 void update_view(GuiState& state, const JobShown& job)
 {
     const auto show = [&](std::uint64_t shown, GtkWidget* bar, GtkWidget* alert, GtkWidget* cancel) {
@@ -151,8 +153,12 @@ void update_view(GuiState& state, const JobShown& job)
     };
     show(state.register_view.job, state.register_view.progress, state.register_view.alert,
         state.register_view.cancel);
-    show(state.verify_view.job, state.verify_view.progress, state.verify_view.alert, state.verify_view.cancel);
     show(state.compare_view.job, state.compare_view.progress, nullptr, state.compare_view.cancel);
+    // The card shows the job in whichever group it is now.
+    const auto& card = state.archives_page.card.rows;
+    if (const auto found = card.find(job.id); found != card.end()) {
+        update_row(state, found->second, job);
+    }
 }
 
 struct JobButton {
@@ -393,6 +399,11 @@ void draw_ring(GtkDrawingArea* area, cairo_t* cairo, int width, int height, gpoi
 }
 
 } // namespace
+
+GtkWidget* make_job_card(GuiState& state, GuiState::JobList& list, const JobShown& job)
+{
+    return make_row(state, list, job, false);
+}
 
 void open_job_details(GuiState& state, std::uint64_t id)
 {

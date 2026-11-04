@@ -37,6 +37,7 @@ void ended_notification_tests();
 void job_queue_tests();
 void job_words_tests();
 void window_words_tests();
+void archive_rows_tests();
 void hash_tests();
 void merkle_tests();
 void fs_access_tests();

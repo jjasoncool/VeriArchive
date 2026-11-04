@@ -7,7 +7,7 @@ namespace va::gui {
 namespace {
 
 // A round size, plainly made up (a disk sold as 1 TB holds about 0.9 TiB):
-// "1.0 TiB" in the Archive List.
+// "1.0 TiB" in Archives.
 constexpr std::uint64_t sample_capacity = std::uint64_t{1} << 40;
 
 // The sample identity: one volume on one device, every value plainly made up.

@@ -20,18 +20,6 @@
 
 namespace va::gui {
 
-std::string format_bytes(std::uint64_t bytes)
-{
-    const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
-    double value = static_cast<double>(bytes);
-    int unit = 0;
-    while (value >= 1024.0 && unit < 4) {
-        value /= 1024.0;
-        ++unit;
-    }
-    return std::format("{:.1f} {}", value, units[unit]);
-}
-
 GtkWidget* make_label(const std::string& text, bool selectable)
 {
     GtkWidget* label = gtk_label_new(text.c_str());

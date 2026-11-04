@@ -101,6 +101,17 @@ void show_runs(GuiState& state)
     }
 }
 
+void show_history_of(GuiState& state, const Uuid& archive)
+{
+    auto& view = state.history_view;
+    if (!view.archive) {
+        return;
+    }
+    choose_archive(view.archive, view.archive_uuids, 0, archive);
+    show_runs(state);
+    show_page(state, "history");
+}
+
 GtkWidget* build_history_view(GuiState& state)
 {
     auto& view = state.history_view;

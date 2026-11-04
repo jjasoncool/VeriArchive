@@ -1,10 +1,11 @@
 // The window (decision 0046): an AdwApplicationWindow whose
 // AdwNavigationSplitView puts a sidebar of the pages beside the page shown,
 // each under a header bar of its own: above the sidebar VeriArchive, the
-// folder of the open repository and Register Archive; above the page its title
-// and the jobs button. A narrow window (AdwBreakpoint) shows one of the two at
-// a time. Toasts come over the whole window. Closing it while jobs run asks
-// first.
+// folder of the open repository and Register Archive (an icon, so that the
+// title beside it is never cut); above the page its title and the jobs
+// button. A narrow window (AdwBreakpoint) shows one of the two at a time, and
+// Archives its list or the details of an archive. Toasts come over the whole
+// window. Closing it while jobs run asks first.
 #include "gui/gui_app.h"
 
 #include "gui/window_words.h"
@@ -33,8 +34,7 @@ constexpr Page pages[] = {
     {"jobs", jobs_icon, "Jobs", true, false},
     {"history", "document-open-recent-symbolic", "History", true, false},
     {"settings", "emblem-system-symbolic", "Settings", true, false},
-    // Until the later steps of decision 0046 take them into Archives.
-    {"verify", "object-select-symbolic", "Verify Archive", true, true},
+    // Until a later step of decision 0046 takes it into Archives.
     {"compare", "view-dual-symbolic", "Compare Archives", true, true},
     {"register", "list-add-symbolic", "Register Archive", false, false},
 };
@@ -51,19 +51,100 @@ const Page* page_named(std::string_view name)
 
 // The window's own style (decision 0046), in the theme's named colours, so it
 // follows the light and the dark style: the count of jobs that run or wait,
-// and the colour of how far they are on the jobs button's ring; Register
-// Archive above the sidebar with less space around its words, so the title
-// beside it fits in either language.
+// and the colour of how far they are on the jobs button's ring; in Archives
+// the status dot of an archive, the pills of results and marks, the banner of
+// an archive's result and the lines of its device alerts and notices, each in
+// the colour of its tone (tone_class); the list's pane on the page's own
+// background, and the items of the details' menus.
 constexpr const char* style = R"css(
 .va-ring {
     color: @accent_color;
 }
-.va-register {
-    padding-left: 6px;
-    padding-right: 8px;
+.va-dot {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 999px;
+    background-color: alpha(@window_fg_color, 0.35);
 }
-.va-register > buttoncontent > box {
-    border-spacing: 4px;
+.va-dot.va-success {
+    background-color: @success_color;
+}
+.va-dot.va-warning {
+    background-color: @warning_color;
+}
+.va-dot.va-error {
+    background-color: @error_color;
+}
+.va-pill {
+    border-radius: 999px;
+    padding: 1px 9px;
+    font-size: smaller;
+    font-weight: bold;
+    background-color: alpha(@window_fg_color, 0.08);
+    color: alpha(@window_fg_color, 0.7);
+}
+.va-pill.va-success {
+    background-color: alpha(@success_color, 0.16);
+    color: @success_color;
+}
+.va-pill.va-warning {
+    background-color: alpha(@warning_color, 0.18);
+    color: @warning_color;
+}
+.va-pill.va-error {
+    background-color: alpha(@error_color, 0.14);
+    color: @error_color;
+}
+.va-banner {
+    border-radius: 12px;
+    padding: 14px 16px 14px 18px;
+    background-color: alpha(@window_fg_color, 0.05);
+}
+.va-banner.va-success {
+    background-color: alpha(@success_color, 0.12);
+}
+.va-banner.va-warning {
+    background-color: alpha(@warning_color, 0.14);
+}
+.va-banner.va-error {
+    background-color: alpha(@error_color, 0.11);
+}
+.va-banner-icon {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 999px;
+    background-color: alpha(@window_fg_color, 0.45);
+    color: @window_bg_color;
+}
+.va-banner-icon.va-success {
+    background-color: @success_bg_color;
+    color: @success_fg_color;
+}
+.va-banner-icon.va-warning {
+    background-color: @warning_bg_color;
+    color: @warning_fg_color;
+}
+.va-banner-icon.va-error {
+    background-color: @error_bg_color;
+    color: @error_fg_color;
+}
+.va-line {
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+.va-line.va-error {
+    background-color: alpha(@error_color, 0.11);
+}
+.va-line.va-neutral {
+    background-color: alpha(@window_fg_color, 0.06);
+}
+navigation-split-view.va-archives > .sidebar-pane {
+    background-color: transparent;
+    color: inherit;
+    box-shadow: none;
+}
+.va-menu-item {
+    padding: 6px 10px;
 }
 .va-count {
     background-color: @accent_bg_color;
@@ -204,13 +285,13 @@ GtkWidget* build_sidebar(GuiState& state)
     GtkWidget* header = adw_header_bar_new();
     state.shell.title = adw_window_title_new("VeriArchive", "");
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), state.shell.title);
-    GtkWidget* add = gtk_button_new();
-    GtkWidget* face = adw_button_content_new();
-    adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(face), "list-add-symbolic");
-    adw_button_content_set_label(ADW_BUTTON_CONTENT(face), text("Register Archive").c_str());
-    gtk_button_set_child(GTK_BUTTON(add), face);
+    // An icon, named to a tooltip and a screen reader: the sidebar's title
+    // beside it is never cut; Archives has Register Archive in words.
+    GtkWidget* add = gtk_button_new_from_icon_name("list-add-symbolic");
     gtk_widget_add_css_class(add, "flat");
-    gtk_widget_add_css_class(add, "va-register");
+    gtk_widget_set_tooltip_text(add, text("Register Archive").c_str());
+    gtk_accessible_update_property(
+        GTK_ACCESSIBLE(add), GTK_ACCESSIBLE_PROPERTY_LABEL, text("Register Archive").c_str(), -1);
     g_signal_connect(add, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
         guarded([&] { show_page(state, "register"); }, [](const Report&) {});
@@ -236,14 +317,6 @@ void page_changed(GuiState& state)
     const auto* page = shown ? page_named(shown) : nullptr;
     adw_navigation_page_set_title(
         ADW_NAVIGATION_PAGE(state.shell.content), page ? state.text(page->title).c_str() : "VeriArchive");
-}
-
-// Sets `property` of `object` to `value` while the window is narrow.
-void set_while_narrow(AdwBreakpoint* narrow, GtkWidget* object, const char* property, const GValue& value)
-{
-    if (object) {
-        adw_breakpoint_add_setter(narrow, G_OBJECT(object), property, &value);
-    }
 }
 
 // Closing the window while jobs wait or work asks first (decision 0045):
@@ -284,7 +357,13 @@ void build_window(GuiState& state)
 {
     load_style();
     const auto& text = state.text;
+    if (state.shell.toast) {
+        g_object_remove_weak_pointer(G_OBJECT(state.shell.toast), reinterpret_cast<gpointer*>(&state.shell.toast));
+    }
     state.shell = {};
+    // Made first, so that the pages can say what changes in a narrow window
+    // as they are built (set_while_narrow).
+    state.shell.narrow = adw_breakpoint_new(adw_breakpoint_condition_parse("max-width: 860sp"));
     GtkWidget* window = adw_application_window_new(state.application);
     state.window = GTK_WINDOW(window);
     gtk_window_set_title(state.window, "VeriArchive");
@@ -311,10 +390,9 @@ void build_window(GuiState& state)
         gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), view);
         return scroller;
     };
-    add_page(scrolling(build_archive_list_view(state)), "archives");
+    add_page(build_archives_page(state), "archives");
     add_page(build_jobs_page(state), "jobs");
     add_page(scrolling(build_register_view(state)), "register");
-    add_page(scrolling(build_verify_view(state)), "verify");
     add_page(scrolling(build_compare_view(state)), "compare");
     add_page(scrolling(build_history_view(state)), "history");
     add_page(build_settings_page(state), "settings");
@@ -342,21 +420,13 @@ void build_window(GuiState& state)
     // A narrow window shows the sidebar or the page, with a button back to
     // the sidebar above the page; the jobs button shows its ring and count
     // without its word, and its popover fits in the window.
-    AdwBreakpoint* narrow = adw_breakpoint_new(adw_breakpoint_condition_parse("max-width: 860sp"));
-    GValue yes = G_VALUE_INIT;
-    g_value_init(&yes, G_TYPE_BOOLEAN);
-    g_value_set_boolean(&yes, TRUE);
-    set_while_narrow(narrow, state.shell.split, "collapsed", yes);
-    g_value_unset(&yes);
-    GValue no = G_VALUE_INIT;
-    g_value_init(&no, G_TYPE_BOOLEAN);
-    g_value_set_boolean(&no, FALSE);
-    set_while_narrow(narrow, state.jobs_page.word, "visible", no);
-    g_value_unset(&no);
+    AdwBreakpoint* narrow = state.shell.narrow;
+    set_while_narrow(state, state.shell.split, "collapsed", true);
+    set_while_narrow(state, state.jobs_page.word, "visible", false);
     GValue width = G_VALUE_INIT;
     g_value_init(&width, G_TYPE_INT);
     g_value_set_int(&width, jobs_popover_narrow_width);
-    set_while_narrow(narrow, state.jobs_page.popover_box, "width-request", width);
+    adw_breakpoint_add_setter(narrow, G_OBJECT(state.jobs_page.popover_box), "width-request", &width);
     g_value_unset(&width);
     adw_application_window_add_breakpoint(ADW_APPLICATION_WINDOW(window), narrow);
 
@@ -367,7 +437,7 @@ void build_window(GuiState& state)
             guarded([&] { page_changed(state); }, [](const Report&) {});
         }),
         &state);
-    // Switching back to the list shows the latest results.
+    // Switching back to Archives shows the latest results.
     g_signal_connect(stack, "notify::visible-child",
         G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
             auto& state = *static_cast<GuiState*>(data);
@@ -375,12 +445,10 @@ void build_window(GuiState& state)
                 [&] {
                     const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
                     if (name && std::string_view(name) == "archives") {
-                        refresh_archive_list(state);
+                        refresh_archives(state);
                     }
                 },
-                [&](const Report& report) {
-                    gtk_label_set_text(GTK_LABEL(state.archive_list.status), report(state.text).c_str());
-                });
+                [&](const Report& report) { show_archives_status(state, report); });
         }),
         &state);
     // Switching to Settings reads again which copies of the database kept
@@ -416,6 +484,18 @@ void show_page(GuiState& state, const char* page)
     if (state.shell.split) {
         adw_navigation_split_view_set_show_content(ADW_NAVIGATION_SPLIT_VIEW(state.shell.split), TRUE);
     }
+}
+
+void set_while_narrow(GuiState& state, GtkWidget* object, const char* property, bool value)
+{
+    if (!state.shell.narrow || !object) {
+        return;
+    }
+    GValue shown = G_VALUE_INIT;
+    g_value_init(&shown, G_TYPE_BOOLEAN);
+    g_value_set_boolean(&shown, value ? TRUE : FALSE);
+    adw_breakpoint_add_setter(state.shell.narrow, G_OBJECT(object), property, &shown);
+    g_value_unset(&shown);
 }
 
 void refresh_shell(GuiState& state)
@@ -454,7 +534,20 @@ void show_toast(GuiState& state, const std::string& text, std::optional<ToastAct
             new Pressed{&state, std::move(action->run)},
             +[](gpointer data, GClosure*) { delete static_cast<Pressed*>(data); }, GConnectFlags{});
     }
+    // Kept until it goes, for dismiss_toast; the overlay holds it.
+    if (state.shell.toast) {
+        g_object_remove_weak_pointer(G_OBJECT(state.shell.toast), reinterpret_cast<gpointer*>(&state.shell.toast));
+    }
+    state.shell.toast = toast;
+    g_object_add_weak_pointer(G_OBJECT(toast), reinterpret_cast<gpointer*>(&state.shell.toast));
     adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(state.shell.toasts), toast);
+}
+
+void dismiss_toast(GuiState& state)
+{
+    if (state.shell.toast) {
+        adw_toast_dismiss(state.shell.toast);
+    }
 }
 
 } // namespace va::gui

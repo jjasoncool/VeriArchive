@@ -96,8 +96,8 @@ string(JSON copy GET "${last_output}" archive_uuid)
 
 # Archive C stands for one that an earlier version of VeriArchive registered,
 # as the operator's own archives are: its manifest has no chunk hashes (chunk
-# size 0), so Verify Archive offers "Full verify, and add chunk hashes" for it
-# (decision 0033). This program registers every archive with chunk hashes,
+# size 0), so its details in Archives offer "FULL verify, and add chunk hashes"
+# for it (decision 0033). This program registers every archive with chunk hashes,
 # so C is registered in a scratch repository, and its manifest, exported, is
 # written again as such a version wrote it, chunk size 0 and no Merkle root,
 # under a sample uuid, then imported (sample data, as its folder is). Its

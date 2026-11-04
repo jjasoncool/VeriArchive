@@ -54,7 +54,7 @@ void open_repository_session(GuiState& state, bool initialise)
     }
     refresh_shell(state);
     refresh_settings(state);
-    refresh_archive_list(state);
+    refresh_archives(state);
     refresh_archive_choices(state);
 }
 
@@ -70,6 +70,7 @@ struct Kept {
     bool maximized = false;
     std::string page;                    // the page shown (a child of state.stack)
     bool page_shown = false;             // a narrow window shows the page, not the sidebar
+    bool details_shown = false;          // ... and of Archives the details of an archive, not the list
     std::string register_folder;
     std::string register_label;
     bool new_revision = false;
@@ -78,12 +79,6 @@ struct Kept {
     bool resume = false;
     double register_fraction = 0.0;
     bool register_finished = false;
-    std::string verify_folder;
-    bool strict = false;
-    bool add_chunk_hashes = false;
-    std::optional<Uuid> verify_archive;  // empty: "The folder or volume above"
-    double verify_fraction = 0.0;
-    bool verify_finished = false;
     std::optional<Uuid> compare_reference;
     std::optional<Uuid> compare_copy;
     double compare_fraction = 0.0;
@@ -122,6 +117,8 @@ Kept keep(const GuiState& state)
     }
     kept.page_shown =
         adw_navigation_split_view_get_show_content(ADW_NAVIGATION_SPLIT_VIEW(state.shell.split)) != FALSE;
+    kept.details_shown =
+        adw_navigation_split_view_get_show_content(ADW_NAVIGATION_SPLIT_VIEW(state.archives_page.split)) != FALSE;
 
     const auto& registering = state.register_view;
     kept.register_folder = entry_text(registering.folder);
@@ -132,14 +129,6 @@ Kept keep(const GuiState& state)
     kept.resume = checked(registering.resume);
     kept.register_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(registering.progress));
     kept.register_finished = finished(registering.progress);
-
-    const auto& verifying = state.verify_view;
-    kept.verify_folder = entry_text(verifying.folder);
-    kept.strict = checked(verifying.strict);
-    kept.add_chunk_hashes = checked(verifying.add_chunk_hashes);
-    kept.verify_archive = chosen_archive(verifying.archive, verifying.archive_uuids, 1);
-    kept.verify_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(verifying.progress));
-    kept.verify_finished = finished(verifying.progress);
 
     const auto& comparing = state.compare_view;
     kept.compare_reference = chosen_archive(comparing.reference, comparing.archive_uuids, 0);
@@ -177,22 +166,6 @@ void restore(GuiState& state, const Kept& kept)
     }
     if (registering.shown_report) {
         set_text(registering.report, registering.shown_report(text));
-    }
-
-    auto& verifying = state.verify_view;
-    gtk_editable_set_text(GTK_EDITABLE(verifying.folder), kept.verify_folder.c_str());
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(verifying.strict), kept.strict);
-    choose_archive(verifying.archive, verifying.archive_uuids, 1, kept.verify_archive);
-    // Choosing the archive offered the checkbox again, where it may be chosen.
-    if (gtk_widget_get_sensitive(verifying.add_chunk_hashes)) {
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(verifying.add_chunk_hashes), kept.add_chunk_hashes);
-    }
-    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(verifying.progress), kept.verify_fraction);
-    if (kept.verify_finished) {
-        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(verifying.progress), text("Done").c_str());
-    }
-    if (verifying.shown_report) {
-        set_text(verifying.report, verifying.shown_report(text));
     }
 
     auto& comparing = state.compare_view;
@@ -328,7 +301,7 @@ bool open_with_upgrade_notice(GuiState& state, bool initialise)
                     shown = true;
                     refresh_shell(state);
                     refresh_settings(state);
-                    refresh_archive_list(state);
+                    refresh_archives(state);
                     refresh_archive_choices(state);
                     // Settings says once where the copy of the database is.
                     if (!state.session->notes.empty()) {
@@ -465,6 +438,8 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
         // when none was.
         gtk_stack_set_visible_child_name(GTK_STACK(state.stack), kept.page.empty() ? "settings" : kept.page.c_str());
         adw_navigation_split_view_set_show_content(ADW_NAVIGATION_SPLIT_VIEW(state.shell.split), kept.page_shown);
+        adw_navigation_split_view_set_show_content(
+            ADW_NAVIGATION_SPLIT_VIEW(state.archives_page.split), kept.details_shown);
         if (show) {
             gtk_window_present(state.window);
         }
@@ -473,11 +448,12 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
     try {
         refresh_shell(state);
         refresh_settings(state);
-        refresh_archive_list(state);
+        refresh_archives(state);
         refresh_archive_choices(state);
         restore(state, kept);
-        // The views show the jobs they show, as they are now.
-        for (const auto job : {state.register_view.job, state.verify_view.job, state.compare_view.job}) {
+        // The views show the jobs they show, as they are now; the details of
+        // an archive, made anew, show its job as it is.
+        for (const auto job : {state.register_view.job, state.compare_view.job}) {
             if (job != 0) {
                 job_changed(state, job);
             }
