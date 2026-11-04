@@ -165,6 +165,7 @@ endif()
 # Composition-root helpers shared by the CLI and the GUI (R-05).
 add_library(veriarchive_app
     src/app/adding_chunk_hashes.cpp
+    src/app/attached_devices.cpp
     src/app/device_alerts.cpp
     src/app/history.cpp
     src/app/local_time.cpp
@@ -216,6 +217,9 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/archives_page.cpp
         src/gui/compare_choices.cpp
         src/gui/compare_dialog.cpp
+        src/gui/device_rows.cpp
+        src/gui/devices_page.cpp
+        src/gui/devices_poll.cpp
         src/gui/displayed_identity.cpp
         src/gui/ended_notification.cpp
         src/gui/gui_app.cpp
@@ -323,6 +327,7 @@ if(BUILD_TESTING)
         tests/unit/add_chunk_hashes_test.cpp
         tests/unit/archive_rows_test.cpp
         tests/unit/attached_test.cpp
+        tests/unit/attached_devices_test.cpp
         tests/unit/archive_path_test.cpp
         tests/unit/archive_status_test.cpp
         tests/unit/compare_archives_test.cpp
@@ -331,6 +336,7 @@ if(BUILD_TESTING)
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
         tests/unit/device_health_test.cpp
+        tests/unit/device_rows_test.cpp
         tests/unit/displayed_identity_test.cpp
         tests/unit/ended_notification_test.cpp
         tests/unit/file_writer_test.cpp
@@ -401,13 +407,13 @@ if(BUILD_TESTING)
     # notification that an operation ended, the queue of its jobs and what it
     # says of them, what the window says around its pages, what Archives says
     # of each archive, what History lists, what the result page of a run says,
-    # and what Register Archive and the comparison dialog offer and say, are
-    # plain C++ without GTK, so they are tested also where the GUI is not
-    # built.
+    # what Register Archive and the comparison dialog offer and say, and what
+    # Devices and Archives say of the devices attached now, are plain C++
+    # without GTK, so they are tested also where the GUI is not built.
     target_sources(veriarchive_tests PRIVATE src/gui/archive_rows.cpp src/gui/compare_choices.cpp
-        src/gui/displayed_identity.cpp src/gui/ended_notification.cpp src/gui/history_rows.cpp src/gui/job_queue.cpp
-        src/gui/job_words.cpp src/gui/register_choices.cpp src/gui/report.cpp src/gui/run_result.cpp
-        src/gui/window_words.cpp)
+        src/gui/device_rows.cpp src/gui/displayed_identity.cpp src/gui/ended_notification.cpp src/gui/history_rows.cpp
+        src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/register_choices.cpp src/gui/report.cpp
+        src/gui/run_result.cpp src/gui/window_words.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
         # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.

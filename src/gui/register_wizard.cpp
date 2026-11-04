@@ -137,6 +137,9 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     job.done = [&state, request, typed, unconfirmed, registered, root](std::uint64_t ended, const Report&) {
         guarded(
             [&] {
+                // Devices offers its volume again where nothing was registered.
+                state.registering.erase(ended);
+                refresh_devices(state);
                 // The archive it registered, or the revision; its unfinished
                 // operation gone, or stopped.
                 refresh_archives(state);
@@ -182,6 +185,9 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     const auto& text = state.text;
     const auto title = job.title(text);
     const auto id = state.jobs.start(text, std::move(job));
+    // Devices names its root on its volume in place of Register this volume.
+    state.registering[id] = request.root;
+    refresh_devices(state);
     job_changed(state, id);
     // Nowhere else in the window shows it until it ends: the toast leads to it.
     show_toast(state, text.format("{}: started", title),
@@ -1167,6 +1173,21 @@ void register_new_revision(GuiState& state, const Uuid& archive, const std::stri
     // The volumes are read first (open_wizard), then the source where they
     // hold the archive (read_preset_source).
     open_wizard(state, archive, root);
+}
+
+void register_volume(GuiState& state, const std::string& root)
+{
+    open_wizard(state);
+    auto& wizard = state.register_wizard;
+    if (!wizard.dialog || !wizard.folder) {
+        return;  // not opened: it said why
+    }
+    // Typed as the volume's root: once the volumes are read, its row is
+    // chosen (show_volumes); Next reads it as any root typed.
+    wizard.filling = true;
+    gtk_editable_set_text(GTK_EDITABLE(wizard.folder), root.c_str());
+    wizard.filling = false;
+    show_source_next(state);
 }
 
 void resume_registration(GuiState& state, const app::UnfinishedOperation& registration, bool confirmed)

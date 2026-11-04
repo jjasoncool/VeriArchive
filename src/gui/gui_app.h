@@ -3,7 +3,8 @@
 // page shown, the header's jobs button) and its pages: Archives (the list of
 // archives beside the details of the one selected, where verifications start,
 // and the unfinished operations above them), History (the runs of every
-// archive) and Settings of HANDOFF §B17, and Jobs (decision 0045); the result
+// archive) and Settings of HANDOFF §B17, Devices (the devices attached now,
+// decision 0046) and Jobs (decision 0045); the result
 // page of a run, which Archives and History open over themselves; and the
 // dialogs of Register Archive and of a comparison (decision 0020).
 #include "app/adding_chunk_hashes.h"
@@ -12,6 +13,7 @@
 #include "app/session.h"
 #include "core/engine/archive_status.h"
 #include "gui/archive_rows.h"
+#include "gui/device_rows.h"
 #include "gui/displayed_identity.h"
 #include "gui/gui_support.h"
 #include "gui/history_rows.h"
@@ -66,6 +68,47 @@ struct OperationsPoll {
     }
 };
 
+// The devices and volumes attached now, with where each archive is attached
+// (devices_poll.cpp), read while Archives or Devices is shown: when either
+// comes on screen, when its Refresh is pressed, and every 30 seconds while one
+// of them is shown; never once the window is gone. No platform tells of a
+// device attached or removed, so reading again is the only way to see one.
+// Each read runs on a thread of its own, which asks each device for its
+// health once (on Linux a udisks call of up to a few seconds), so it never
+// holds up the window; a slow read spaces out the next ones. Kept across
+// windows, so a language change words the same read anew.
+struct DevicesPoll {
+    std::thread thread;                         // the read in flight, or the last one
+    bool busy = false;                          // a read is in flight (main thread only)
+    bool again = false;                         // Refresh was pressed, or the archives changed, meanwhile:
+                                                // read once more once it is back
+    std::chrono::steady_clock::time_point started{};  // when the last read began
+    std::chrono::steady_clock::duration took{};       // how long the last read took
+    guint timer = 0;                            // the GLib timeout; 0 while neither page is shown
+    GtkWidget* served = nullptr;                // the page (Archives or Devices) the timer serves
+    // The RepositoryRoot whose archives the latest read matched (none: no
+    // repository was open), the read, and why the latest read failed.
+    std::optional<std::filesystem::path> repository;
+    std::optional<AttachedRead> read;
+    Report error;
+    // A language chosen in Settings while a read was in flight, which
+    // change_language makes once the read is back: on Linux the read asks
+    // udisks, which reads the environment, and the change writes it
+    // (use_gtk_language). The window is not held up meanwhile.
+    std::optional<app::Language> language_after;
+
+    DevicesPoll() = default;
+    DevicesPoll(const DevicesPoll&) = delete;
+    DevicesPoll& operator=(const DevicesPoll&) = delete;
+    // The program waits for a read still in flight before it ends.
+    ~DevicesPoll()
+    {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+};
+
 // The reads that the window's dialogs make off its thread (register_wizard.cpp):
 // the attached volumes, which a slow or sleeping device may hold up, and the
 // folder or volume chosen. Each runs on a thread of its own and hands its
@@ -107,9 +150,9 @@ struct OffThreadReads {
 struct GuiState {
     GtkApplication* application = nullptr;
     GtkWindow* window = nullptr;           // an AdwApplicationWindow
-    // The pages, each a child named as the sidebar names it (archives, jobs,
-    // history, settings): the one shown is the window's content, whichever
-    // way it was chosen.
+    // The pages, each a child named as the sidebar names it (archives,
+    // devices, jobs, history, settings): the one shown is the window's
+    // content, whichever way it was chosen.
     GtkWidget* stack = nullptr;
     app::Text text;                        // interface language (decision 0017)
     HostInfo host;
@@ -123,6 +166,10 @@ struct GuiState {
     // unfinished operation (decisions 0025, 0026, 0033).
     Job job;
     OperationsPoll operations;             // every unfinished operation, for Archives
+    DevicesPoll devices;                   // the devices attached now, for Devices and Archives
+    // The roots of the registration jobs that wait or work, by job, which
+    // Devices names on their volumes in place of Register this volume.
+    std::map<std::uint64_t, std::filesystem::path> registering;
     OffThreadReads reads;                  // what Register Archive reads off the window's thread
     int exit_status = 0;                   // 1 when an unexpected error cut the smoke test, the start or the screenshots short
     // Set from VERIARCHIVE_GUI_SCREENSHOTS: take the documentation screenshots
@@ -217,6 +264,16 @@ struct GuiState {
         GtkWidget* state = nullptr;
     };
 
+    // Where an archive of the list of Archives is attached (archive_attached):
+    // the first line of its row, which a read of the attached devices changes
+    // in place, with the row and its words for a screen reader without it.
+    struct AttachedLineShown {
+        GtkWidget* row = nullptr;
+        GtkWidget* line = nullptr;
+        std::string said;
+        std::optional<AttachedLine> shown;
+    };
+
     // Archives (decision 0046): the page's head; the unfinished operations
     // (decision 0022) above the archives, hidden when there are none; the
     // list of archives beside the details of the one selected, or, without
@@ -227,6 +284,8 @@ struct GuiState {
         GtkWidget* root = nullptr;             // its first page (AdwNavigationPage), which holds `page`
         GtkWidget* page = nullptr;             // the page: the operations are read while it is shown
         GtkWidget* status = nullptr;           // how many archives, or why none can be listed
+        GtkWidget* devices_problem = nullptr;  // that the attached devices cannot be read (Devices says why);
+                                               // hidden while they can
         GtkWidget* refresh = nullptr;          // Refresh, which holds the focus while what had it is made anew
         GtkWidget* abandoning = nullptr;       // progress while a step of abandoning a registration
                                                // (decision 0025), a relocation (decision 0026) or a
@@ -247,6 +306,19 @@ struct GuiState {
                                                // latest read of the unfinished operations
         std::optional<std::string> notice_key; // the operation `notice` shows, once it shows one
         GtkWidget* notice_words = nullptr;     // its words, which a later read of it changes in place
+        std::map<Uuid, AttachedLineShown> attached_lines;  // where each archive listed is attached
+        // In the details: the notice of an archive not attached as recorded;
+        // the group Device, whose one row holds the fields of its carrier as
+        // recorded (`device_fields`) and where it is attached, as the latest
+        // read found it (attached_shown); and whether FULL verify is not
+        // offered because the archive's job waits or works.
+        GtkWidget* attached_notice = nullptr;
+        GtkWidget* attached_words = nullptr;
+        GtkWidget* device_group = nullptr;
+        GtkWidget* device_row = nullptr;
+        std::vector<Field> device_fields;
+        std::optional<ArchiveAttached> attached_shown;
+        bool verify_busy = false;
         GtkWidget* verify = nullptr;           // FULL verify (AdwSplitButton)
         GtkWidget* view_result = nullptr;      // View result of the last FULL verification, where there is one
         GtkWidget* verify_menu = nullptr;      // the popover of the menu of FULL verify
@@ -376,6 +448,19 @@ struct GuiState {
         bool filling = false;              // the filter is being filled: a choice is not the operator's
     } history_page;
 
+    // Devices (decision 0046): the devices attached now, as the latest read
+    // found them, each a card with its volumes and the archives on them.
+    struct {
+        GtkWidget* page = nullptr;         // the page: the devices are read while it is shown
+        GtkWidget* status = nullptr;       // how many devices are attached, or that none is
+        GtkWidget* reading = nullptr;      // GtkSpinner while a read is in flight
+        GtkWidget* refresh = nullptr;      // Refresh, which holds the focus while what had it is made anew
+        GtkWidget* problem = nullptr;      // why the latest read failed, or why the archives cannot be told;
+        GtkWidget* problem_words = nullptr;  // hidden while there is nothing to say
+        GtkWidget* cards = nullptr;        // GtkBox: a card for each device, or what is read
+        std::optional<std::vector<DeviceCard>> shown;  // what the cards show, once a read was drawn
+    } devices_page;
+
     // Settings, an AdwPreferencesPage (decision 0046): its groups, and the
     // rows that refresh_settings put into them.
     struct {
@@ -391,6 +476,7 @@ struct GuiState {
 // Archives and History are each an AdwNavigationView (their `navigation`)
 // whose first page is the page itself, over which a result page opens.
 GtkWidget* build_archives_page(GuiState& state);
+GtkWidget* build_devices_page(GuiState& state);
 GtkWidget* build_history_page(GuiState& state);
 GtkWidget* build_settings_page(GuiState& state);
 GtkWidget* build_jobs_page(GuiState& state);
@@ -514,6 +600,47 @@ void show_operations(GuiState& state);
 // Says `report` in the head of Archives, where an unexpected error of its
 // handlers shows.
 void show_archives_status(GuiState& state, const Report& report);
+
+// The part of Archives that the reads of the attached devices change
+// (archive_attached): the first line of each row, where its archive is
+// attached now, or that it is not; and in the details the notice of an
+// archive not attached as recorded, the tooltip of FULL verify, and where the
+// archive is attached in its group Device (show_details_attached). Each
+// changes only where the read changed it, so the keyboard focus stays.
+void show_attached(GuiState& state);
+void show_details_attached(GuiState& state);
+
+// ---- The attached devices (devices_poll.cpp) and Devices (devices_page.cpp) --
+
+// Why the attached devices are read now: Archives or Devices came on screen;
+// the operator pressed Refresh there, or the archives changed (a read in
+// flight is followed by another once it is back); the timer ticked (a slow
+// read spaces it out, read_due).
+enum class DevicesReadWhy { Shown, Refresh, Due };
+
+// Reads the attached devices and volumes on a thread, unless a read is in
+// flight or the window is gone, and the candidates of the repository's
+// archives to tell which lies where; the result comes back to the main
+// thread, which shows it in Archives and Devices. In the screenshot mode
+// Devices gets the fixed sample list (sample_volumes), and both where the
+// sample archives are on the volumes of the sample archives' folders, the only
+// volumes of this computer then read, shown through the sample identity.
+void read_devices(GuiState& state, DevicesReadWhy why);
+
+// Archives or Devices came on screen (`page`): reads now, then every 30
+// seconds. It left the screen (another page, or its window closed): no more
+// reads for it.
+void watch_devices(GuiState& state, GtkWidget* page);
+void stop_watching_devices(GuiState& state, GtkWidget* page);
+
+// The latest read, where it matched the archives of the repository open now
+// (or none open); null before the first read, after one that failed, and once
+// another repository was opened.
+const AttachedRead* attached_now(const GuiState& state);
+
+// Draws Devices from the latest read: a card for each device, the problem of
+// the read, or that it is being read.
+void refresh_devices(GuiState& state);
 
 // Before a part of Archives (`part`) is made anew: where it holds the
 // keyboard focus, the focus goes to the page's Refresh, so that it never goes
@@ -715,6 +842,11 @@ void open_register_wizard(GuiState& state);
 // registered now or another archive is there.
 void register_new_revision(GuiState& state, const Uuid& archive, const std::string& root);
 
+// Register this volume of Devices: Register Archive on its first page with
+// the volume at `root` (its mount point or GUID path) chosen, once the
+// attached volumes were read, ready for Next.
+void register_volume(GuiState& state, const std::string& root);
+
 // The comparison dialog with `reference` as A and `copy` as B, where the
 // repository lists them; without `copy`, B is a copy of A, or another
 // archive. Not started: Compare starts its job. Says in a message why it does
@@ -771,7 +903,9 @@ void start_screenshot_tour(GuiState& state);
 void use_gtk_language(app::Language language);
 
 // Switches the interface language: remembers it in the config file, then
-// rebuilds the window in the new language and shows it, on Settings.
+// rebuilds the window in the new language and shows it, on Settings. While
+// a read of the attached devices is in flight, once it is back
+// (DevicesPoll::language_after).
 void change_language(GuiState& state, app::Language language);
 
 // Replaces the window with one in `language`, keeping what the user typed,

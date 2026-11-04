@@ -348,7 +348,7 @@ void details()
 
     // The content, with and without chunk hashes.
     auto content = va::gui::content_fields(english, status);
-    CHECK(content.size() == 5 && content[0] == (va::gui::Field{"Root", "Q:/SAMPLE"}));
+    CHECK(content.size() == 5 && content[0] == (va::gui::Field{"Root", "Q:/SAMPLE", true}));
     CHECK(content.size() == 5 && content[1] == (va::gui::Field{"Files", "152 files · 2.0 TiB"}));
     CHECK(content.size() == 5 && content[2].value == "1, recorded " + va::app::local_time(status.header->created, english));
     CHECK(content.size() == 5 && content[3] == (va::gui::Field{"Chunk hashes", "yes (chunk size 64.0 MiB)"}));

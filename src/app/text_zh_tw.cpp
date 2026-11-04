@@ -517,6 +517,7 @@ constexpr CatalogEntry entries[] = {
     // (decision 0046); Register Archive is the button above the sidebar, and
     // the title of its dialog; Compare Archives the comparison dialog's.
     {"Archives", "封存"},
+    {"Devices", "裝置"},
     {"History", "歷程"},
     {"Register Archive", "註冊封存"},
     {"Compare Archives", "比較封存"},
@@ -655,6 +656,83 @@ constexpr CatalogEntry entries[] = {
     {"See where it slowed", "查看變慢的位置"},
     {"Cannot read the verifications of this archive: {}", "無法讀取此封存的驗證：{}", Match::FormatOnly},
     {"Every verification of this archive in History ({})", "在「歷程」中查看此封存的全部驗證（{}）", Match::FormatOnly},
+    // src/gui/device_rows.cpp, src/gui/archives_page.cpp,
+    // src/gui/archive_detail.cpp: where an archive is attached now, as the
+    // latest read of the attached devices found it (decision 0046): the first
+    // line of its row, the notice of its details, the tooltip of FULL verify,
+    // and its rows in the group Device.
+    {"Not attached", "未連接"},
+    {"The device differs from the one recorded", "裝置與記錄中的不同"},
+    {"Several volumes look like this archive", "多個磁碟區都像這個封存"},
+    {"{}, serial {}", "{}，序號 {}", Match::FormatOnly},
+    {"{}, WWN {}", "{}，WWN {}", Match::FormatOnly},
+    {"The device of this archive ({}) is not attached now. Once it is attached, the archive can be verified.",
+        "這個封存的裝置（{}）目前沒有連接。接上之後就能驗證。", Match::FormatOnly},
+    {"The volume of this archive ({}) is not attached now. Once it is attached, the archive can be verified.",
+        "這個封存的磁碟區（{}）目前沒有連接。接上之後就能驗證。", Match::FormatOnly},
+    {"The volume of this archive is not attached now. Once it is attached, the archive can be verified.",
+        "這個封存的磁碟區目前沒有連接。接上之後就能驗證。"},
+    // MIGRATED: what it means; then, on a line of its own, how the archive is
+    // relocated to the new carrier.
+    {"The filesystem of this archive is attached at {}, but on another device than the one recorded (MIGRATED): the "
+     "archive's device in another enclosure, or a sector-by-sector clone of it. FULL verify does not read it there; a "
+     "clone is registered as a separate archive in Register Archive.",
+        "這個封存的檔案系統出現在 {}，但裝置與記錄中的不同（已遷移）：可能是封存的裝置換了外接盒，也可能是逐磁區複製"
+        "出來的複本。「完整驗證」不會讀取那裡；複本要在「註冊封存」中註冊為另一個封存。",
+        Match::FormatOnly},
+    {"If it is this archive's device in another enclosure, or you moved the archive to that device on purpose, "
+     "relocate the archive to it on the command line: `{}`",
+        "如果那是這個封存的裝置換了外接盒，或是您有意把封存移到那個裝置，請在命令列把封存搬移到這個新的載體：`{}`",
+        Match::FormatOnly},
+    {"More than one attached volume looks like this archive ({}), as a device and a sector-by-sector clone of it "
+     "would: a verification by its UUID cannot tell which one to read. Choose \"Verify a folder or volume...\" in "
+     "the menu beside \"FULL verify\", then choose the root of the one to verify, one of those above.",
+        "有多個已連接的磁碟區都像這個封存（{}），例如一個裝置和它逐磁區複製出來的複本：依封存 UUID 驗證無法判斷要讀取"
+        "哪一個。請從「完整驗證」旁的選單選擇「驗證一個資料夾或磁碟區…」，再從上面列出的根目錄中選擇要驗證的那一個。",
+        Match::FormatOnly},
+    // The tooltip of FULL verify, which stays offered: the read may be old.
+    {"This archive was not attached when the attached volumes were read last. FULL verify looks for it again.",
+        "上次讀取已連接的磁碟區時，這個封存沒有連接。「完整驗證」會再找一次。"},
+    {"The filesystem of this archive is on another device than the one recorded (MIGRATED): FULL verify does not "
+     "read it there.",
+        "這個封存的檔案系統在與記錄中不同的裝置上（已遷移）：「完整驗證」不會讀取那裡。"},
+    {"More than one attached volume looks like this archive: choose the one to verify with \"Verify a folder or "
+     "volume...\" in the menu.",
+        "有多個已連接的磁碟區都像這個封存：請用選單中的「驗證一個資料夾或磁碟區…」選擇要驗證的那一個。"},
+    // Beside the carrier as recorded in the group Device: where the archive
+    // is now.
+    {"Attached volume", "目前所在的磁碟區"},
+    {"Attached at", "目前的根目錄"},
+    {"not attached", "未連接"},
+    {"not as recorded: the filesystem is on another device ({})", "與記錄中的不同：檔案系統在另一個裝置上（{}）",
+        Match::FormatOnly},
+    // src/gui/devices_page.cpp, src/gui/device_rows.cpp,
+    // src/gui/devices_poll.cpp: Devices (decision 0046), the devices attached
+    // now with their volumes and the archives on them.
+    {"This page lists the devices attached to this computer now, the health each reports, the volumes on each, and "
+     "the archives whose roots lie on those volumes. It reads them again every 30 seconds while this page or "
+     "Archives is shown, and at once with Refresh. Reading them needs no administrator permission, and this page "
+     "writes nothing to them.",
+        "這裡列出目前連接到這部電腦的裝置、各裝置回報的健康狀態、裝置上的磁碟區，以及根目錄位於這些磁碟區上的封存。"
+        "顯示這一頁或「封存」時，每 30 秒會重新讀取一次；按「重新整理」會立即讀取。讀取時不需要系統管理員權限，這一頁"
+        "也不會寫入這些裝置。"},
+    {"Reading the attached devices...", "正在讀取已連接的裝置……"},
+    {"Still reading: a device may not be responding", "仍在讀取：可能有裝置沒有回應"},
+    {"1 device attached", "已連接 1 個裝置"},
+    {"{} devices attached", "已連接 {} 個裝置", Match::FormatOnly},
+    {"1 volume attached", "已連接 1 個磁碟區"},
+    {"{} volumes attached", "已連接 {} 個磁碟區", Match::FormatOnly},
+    {"No device is attached.", "沒有已連接的裝置。"},
+    {"Cannot tell which archives are on them: {}", "無法判斷這些磁碟區上有哪些封存：{}", Match::FormatOnly},
+    {"not reported", "裝置沒有回報"},
+    {"no mount point", "沒有掛載點"},
+    {"Volumes whose device is not known", "裝置不明的磁碟區"},
+    {"The filesystem belongs to {}, but the device differs from the one recorded (MIGRATED)",
+        "檔案系統屬於 {}，但裝置與記錄中的不同（已遷移）", Match::FormatOnly},
+    {"Register this volume", "註冊這個磁碟區"},
+    {"Being registered: {}", "正在註冊 {}", Match::FormatOnly},
+    // The head of Archives, while the attached devices cannot be read.
+    {"Cannot read the attached devices; see Devices", "無法讀取已連接的裝置，詳情請看「裝置」"},
     // src/gui/archives_page.cpp, src/gui/unfinished_actions.cpp,
     // src/app/unfinished_operations.cpp: unfinished operations (decision 0022)
     {"Unfinished operations", "未完成的作業"},

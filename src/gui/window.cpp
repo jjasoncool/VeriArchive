@@ -30,6 +30,7 @@ struct Page {
 
 constexpr Page pages[] = {
     {"archives", "package-x-generic-symbolic", "Archives"},
+    {"devices", "drive-harddisk-symbolic", "Devices"},
     {"jobs", jobs_icon, "Jobs"},
     {"history", "document-open-recent-symbolic", "History"},
     {"settings", "emblem-system-symbolic", "Settings"},
@@ -50,10 +51,12 @@ const Page* page_named(std::string_view name)
 // and the colour of how far they are on the jobs button's ring; in Archives
 // the status dot of an archive, the pills of results and marks, the banner of
 // an archive's result and the lines of its device alerts and notices, each in
-// the colour of its tone (tone_class); the list's pane on the page's own
+// the colour of its tone (tone_class), as is a notice of an archive not
+// attached as recorded (va-warning); the list's pane on the page's own
 // background, and the items of the details' menus; on a result page the
 // colours of its read speed chart and of the swatches of its legend, which
-// the chart takes its colours from, and its metrics.
+// the chart takes its colours from, and its metrics; in Devices the model of
+// each device, at the head of its card.
 constexpr const char* style = R"css(
 .va-ring {
     color: @accent_color;
@@ -136,6 +139,9 @@ constexpr const char* style = R"css(
 .va-line.va-neutral {
     background-color: alpha(@window_fg_color, 0.06);
 }
+.va-line.va-warning {
+    background-color: alpha(@warning_color, 0.14);
+}
 .va-line.va-success {
     background-color: alpha(@success_color, 0.12);
 }
@@ -176,6 +182,9 @@ navigation-split-view.va-archives > .sidebar-pane {
 }
 .va-menu-item {
     padding: 6px 10px;
+}
+row.va-device-head label.title {
+    font-weight: bold;
 }
 .va-count {
     background-color: @accent_bg_color;
@@ -392,6 +401,7 @@ void build_window(GuiState& state)
         gtk_stack_add_titled(GTK_STACK(stack), child, name, text(page_named(name)->title).c_str());
     };
     add_page(build_archives_page(state), "archives");
+    add_page(build_devices_page(state), "devices");
     add_page(build_jobs_page(state), "jobs");
     add_page(build_history_page(state), "history");
     add_page(build_settings_page(state), "settings");
@@ -436,8 +446,9 @@ void build_window(GuiState& state)
             guarded([&] { page_changed(state); }, [](const Report&) {});
         }),
         &state);
-    // Switching back to Archives shows the latest results, and History the
-    // latest runs.
+    // Switching back to Archives shows the latest results, Devices the
+    // archives' labels as Archives read them last (its devices are read as it
+    // comes on screen), and History the latest runs.
     g_signal_connect(stack, "notify::visible-child",
         G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
             auto& state = *static_cast<GuiState*>(data);
@@ -449,6 +460,14 @@ void build_window(GuiState& state)
                     }
                 },
                 [&](const Report& report) { show_archives_status(state, report); });
+            guarded(
+                [&] {
+                    const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
+                    if (name && std::string_view(name) == "devices") {
+                        refresh_devices(state);
+                    }
+                },
+                [&](const Report& report) { show_message(state, report); });
             guarded(
                 [&] {
                     const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));

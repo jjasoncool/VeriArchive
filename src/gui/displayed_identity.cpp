@@ -64,27 +64,37 @@ std::vector<PhysicalDeviceInfo> displayed_devices(const std::vector<PhysicalDevi
 std::vector<SampleVolume> sample_volumes()
 {
     // SAMPLE DATA: made up for the screenshot mode's pictures.
-    const auto sample = [](std::string mount_point, std::string label, std::string number, std::uint64_t capacity,
-                            std::uint64_t used, std::string bus) {
+    constexpr std::uint64_t gib = std::uint64_t{1} << 30;
+    const auto device = [](std::string number, std::uint64_t capacity, std::string bus, DeviceHealth health) {
         PhysicalDeviceInfo device;
+        device.device_ref = "SAMPLE-DEVICE-REF-" + number;
         device.model = "SAMPLE-DEVICE-" + number;
         device.serial = "SAMPLE-SERIAL-" + number;
         device.capacity_bytes = capacity;
         device.bus = std::move(bus);
+        device.health = std::move(health);
+        return device;
+    };
+    const auto volume = [](const PhysicalDeviceInfo& on, std::string mount_point, std::string label,
+                            std::string number, std::uint64_t capacity, std::uint64_t used, bool read_only = false) {
         VolumeInfo volume;
         volume.mount_point = std::filesystem::path(mount_point);
         volume.filesystem_type = "sample";
         volume.filesystem_uuid = "c0ffee00-0000-4000-8000-0000000005" + number;
         volume.volume_label = std::move(label);
         volume.capacity_bytes = capacity;
-        volume.devices.push_back(std::move(device));
+        volume.read_only = read_only;
+        volume.devices.push_back(on);
         return SampleVolume{std::move(volume), used};
     };
-    constexpr std::uint64_t gib = std::uint64_t{1} << 30;
+    const auto first = device("01", 2 * sample_capacity, "sample-usb", {HealthStatus::Healthy, {}});
+    const auto second = device("02", sample_capacity, "sample-sata", {HealthStatus::Warning, {"predicting-failure"}});
+    const auto third = device("03", 64 * gib, "sample-usb", {});
     return {
-        sample("/media/SAMPLE-VOLUME-1", "SAMPLE-VOLUME-1", "01", 2 * sample_capacity, 1'370 * gib, "sample-usb"),
-        sample("/media/SAMPLE-VOLUME-2", "SAMPLE-VOLUME-2", "02", sample_capacity, 412 * gib, "sample-sata"),
-        sample("/media/SAMPLE-UNLABELLED", "", "03", 64 * gib, 18 * gib, "sample-usb"),
+        volume(first, "/media/SAMPLE-VOLUME-1", "SAMPLE-VOLUME-1", "01", 2 * sample_capacity, 1'370 * gib),
+        volume(second, "/media/SAMPLE-VOLUME-2", "SAMPLE-VOLUME-2", "02", 600 * gib, 412 * gib),
+        volume(second, "/media/SAMPLE-VOLUME-3", "SAMPLE-VOLUME-3", "03", 424 * gib, 96 * gib, true),
+        volume(third, "/media/SAMPLE-VOLUME-4", "", "04", 64 * gib, 18 * gib),
     };
 }
 

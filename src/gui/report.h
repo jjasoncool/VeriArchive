@@ -30,4 +30,8 @@ Report unexpected_error(std::string what);
 // A size as the views show it: "173.0 B", "1.2 GiB", "9.4 TiB".
 std::string format_bytes(std::uint64_t bytes);
 
+// A device's bus as the views show it: "usb" as USB, "sata" as SATA, "nvme" as
+// NVMe, "scsi" as SCSI (the names the enumerators give); any other as given.
+std::string bus_words(const std::string& bus);
+
 } // namespace va::gui

@@ -124,7 +124,7 @@ std::vector<Field> identity_fields(const app::Text& text, const RecordedRun& rec
         const auto& device = devices[index];
         fields.push_back({text("Model"), device.model.empty() ? text("not known") : device.model});
         if (!device.bus.empty()) {
-            fields.push_back({text("Bus"), device.bus});
+            fields.push_back({text("Bus"), bus_words(device.bus)});
         }
         if (!device.serial.empty()) {
             fields.push_back({text("Serial"), device.serial});

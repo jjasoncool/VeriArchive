@@ -9,7 +9,11 @@
 // the device alerts of its last verification (decision 0044); its job as a
 // card, with Stop and Details (decision 0045); a stopped verification that
 // Resume continues; and its device, its content, its copies and its recent
-// verifications, each of which opens its result page.
+// verifications, each of which opens its result page. Where it is attached
+// now, as the latest read of the attached devices found it
+// (devices_poll.cpp): a notice above the banner where it is not attached as
+// recorded, the tooltip of FULL verify, and its volume and root in the group
+// Device.
 #include "gui/gui_app.h"
 
 #include "core/engine/add_chunk_hashes.h"
@@ -465,6 +469,16 @@ GtkWidget* make_fields_row(const std::vector<Field>& fields)
         gtk_label_set_max_width_chars(GTK_LABEL(name), 24);
         gtk_widget_set_valign(name, GTK_ALIGN_START);
         GtkWidget* value = make_words(field.value, nullptr, true);
+        // A path fills its lines, broken at any character; and a value is
+        // data (a root, a serial, a uuid): wrapped without the hyphens Pango
+        // would add, which would read as part of it.
+        if (field.path) {
+            gtk_label_set_wrap_mode(GTK_LABEL(value), PANGO_WRAP_CHAR);
+        }
+        PangoAttrList* no_hyphens = pango_attr_list_new();
+        pango_attr_list_insert(no_hyphens, pango_attr_insert_hyphens_new(FALSE));
+        gtk_label_set_attributes(GTK_LABEL(value), no_hyphens);
+        pango_attr_list_unref(no_hyphens);
         gtk_widget_set_hexpand(value, TRUE);
         gtk_widget_set_valign(value, GTK_ALIGN_START);
         gtk_grid_attach(GTK_GRID(grid), name, 0, line, 1, 1);
@@ -500,6 +514,13 @@ void show_details(GuiState& state)
     page.verify_menu = nullptr;
     page.adding = nullptr;
     page.adding_note = nullptr;
+    page.attached_notice = nullptr;
+    page.attached_words = nullptr;
+    page.device_group = nullptr;
+    page.device_row = nullptr;
+    page.device_fields.clear();
+    page.attached_shown.reset();
+    page.verify_busy = false;
     const auto found = std::ranges::find_if(page.statuses, [&](const ArchiveStatus& status) {
         return state.archive_selected && status.archive.archive_uuid == *state.archive_selected;
     });
@@ -550,7 +571,14 @@ void show_details(GuiState& state)
         gtk_box_append(GTK_BOX(page.detail), words_label(row.problem, row.problem_alerts ? "error" : "dim-label", true));
     }
 
+    // Where the archive is not attached as recorded, from the latest read of
+    // the attached devices (show_details_attached fills it).
+    page.attached_notice = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_visible(page.attached_notice, FALSE);
+    gtk_box_append(GTK_BOX(page.detail), page.attached_notice);
+
     const auto* job = active_job_of(state, uuid);
+    page.verify_busy = job != nullptr;
     gtk_box_append(GTK_BOX(page.detail), banner(state, status, job != nullptr));
 
     // Decision 0044: the device alerts of its last verification; a slower
@@ -585,8 +613,14 @@ void show_details(GuiState& state)
     gtk_widget_set_visible(page.notice, FALSE);
     gtk_box_append(GTK_BOX(page.detail), page.notice);
 
-    if (const auto fields = device_fields(text, status, state.identity_shown); !fields.empty()) {
-        gtk_box_append(GTK_BOX(page.detail), fields_group(text("Device"), fields));
+    // Its one row of fields is made again with where the archive is attached
+    // (show_details_attached).
+    if (auto fields = device_fields(text, status, state.identity_shown); !fields.empty()) {
+        page.device_group = group(text("Device"));
+        page.device_row = make_fields_row(fields);
+        page.device_fields = std::move(fields);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(page.device_group), page.device_row);
+        gtk_box_append(GTK_BOX(page.detail), page.device_group);
     }
     GtkWidget* content = fields_group(text("Content"), content_fields(text, status));
     if (status.header && status.header->chunk_size == 0 && page.adding_refused && !*page.adding_refused) {
@@ -601,9 +635,73 @@ void show_details(GuiState& state)
     }
     gtk_box_append(GTK_BOX(page.detail), runs_group(state, uuid));
     show_details_operations(state);
+    show_details_attached(state);
     if (focused && page.verify) {
         gtk_widget_grab_focus(page.verify);
     }
+}
+
+void show_details_attached(GuiState& state)
+{
+    auto& page = state.archives_page;
+    if (!page.attached_notice || !state.archive_selected) {
+        return;
+    }
+    const auto found = std::ranges::find_if(page.statuses, [&](const ArchiveStatus& status) {
+        return status.archive.archive_uuid == *state.archive_selected;
+    });
+    if (found == page.statuses.end()) {
+        return;
+    }
+    const auto& text = state.text;
+    auto shown = archive_attached(text, attached_now(state), *found, state.identity_shown);
+    // As shown already: the keyboard focus on its words stays.
+    if (page.attached_shown == shown) {
+        return;
+    }
+
+    // The notice: not attached, dim; not as recorded, in the colour of
+    // warnings, which FULL verify by the archive's UUID then refuses.
+    keep_focus_from(state, page.attached_notice);
+    while (GtkWidget* child = gtk_widget_get_first_child(page.attached_notice)) {
+        gtk_box_remove(GTK_BOX(page.attached_notice), child);
+    }
+    page.attached_words = nullptr;
+    if (shown.notice && shown.line) {
+        const bool here_not = shown.line->state == Attached::Nowhere;
+        GtkWidget* notice = here_not ? line_box("va-neutral", "drive-harddisk-symbolic", "dim-label")
+                                     : line_box("va-warning", "dialog-warning-symbolic", "warning");
+        page.attached_words = words_label(*shown.notice, nullptr, true);
+        // It holds a command to copy, with a uuid and a root, which a hyphen
+        // that Pango adds where it breaks a line would read as part of.
+        PangoAttrList* no_hyphens = pango_attr_list_new();
+        pango_attr_list_insert(no_hyphens, pango_attr_insert_hyphens_new(FALSE));
+        gtk_label_set_attributes(GTK_LABEL(page.attached_words), no_hyphens);
+        pango_attr_list_unref(no_hyphens);
+        gtk_widget_set_hexpand(page.attached_words, TRUE);
+        gtk_box_append(GTK_BOX(notice), page.attached_words);
+        gtk_box_append(GTK_BOX(page.attached_notice), notice);
+    }
+    gtk_widget_set_visible(page.attached_notice, shown.notice.has_value());
+
+    // FULL verify stays offered: the read may be old, and the verification
+    // looks for the archive itself, refusing as it refuses. Its tooltip says
+    // what the read found, unless the archive's job holds it.
+    if (page.verify && !page.verify_busy) {
+        gtk_widget_set_tooltip_text(page.verify, shown.verify_tooltip ? shown.verify_tooltip->c_str() : nullptr);
+    }
+
+    // Where it is attached, under its carrier as recorded in the group
+    // Device, each name beside its value as theirs.
+    if (page.device_group && page.device_row) {
+        auto fields = page.device_fields;
+        fields.insert(fields.end(), shown.fields.begin(), shown.fields.end());
+        keep_focus_from(state, page.device_row);
+        adw_preferences_group_remove(ADW_PREFERENCES_GROUP(page.device_group), page.device_row);
+        page.device_row = make_fields_row(fields);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(page.device_group), page.device_row);
+    }
+    page.attached_shown = std::move(shown);
 }
 
 void show_details_operations(GuiState& state)

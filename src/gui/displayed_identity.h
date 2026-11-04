@@ -42,12 +42,16 @@ VolumeInfo displayed_identity(const VolumeInfo& recorded, IdentityShown shown);
 std::vector<PhysicalDeviceInfo> displayed_devices(const std::vector<PhysicalDeviceInfo>& read, IdentityShown shown);
 
 // The attached volumes that a view lists in the screenshot mode, in place of
-// this computer's, which IMediaEnumerator::volumes() is then never asked:
-// SAMPLE DATA, a fixed list made up for the pictures, the same in every
-// interface language. Each volume is plainly sample (SAMPLE-VOLUME-*,
-// SAMPLE-DEVICE-*, SAMPLE-SERIAL-*, c0ffee00-... ids), mounted under
-// /media/SAMPLE-*, never at a drive letter, with the space in use on it; one
-// has no label. No registered archive matches any of them.
+// this computer's, which are then never listed: SAMPLE DATA, a fixed list
+// made up for the pictures, the same in every interface language, as Register
+// Archive and Devices show them. Each volume is plainly sample
+// (SAMPLE-VOLUME-*, SAMPLE-DEVICE-*, SAMPLE-SERIAL-*, SAMPLE-DEVICE-REF-*,
+// c0ffee00-... ids), mounted under /media/SAMPLE-*, never at a drive letter,
+// with the space in use on it; one has no label, one is read-only, and two
+// are on one device. Each device has the health it "reported" (one healthy,
+// one warning that it predicts its failure, one that cannot be read), so
+// Devices asks no device for its own. No registered archive matches any of
+// them.
 struct SampleVolume {
     VolumeInfo volume;
     std::uint64_t used_bytes = 0;

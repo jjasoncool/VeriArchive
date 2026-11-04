@@ -273,6 +273,9 @@ GtkWidget* build_settings_page(GuiState& state)
                     }
                     const auto language = languages[selected];
                     if (language == state.text.language()) {
+                        // Chosen again while a change waited for a read of
+                        // the attached devices (change_language): no change.
+                        state.devices.language_after.reset();
                         return;
                     }
                     if (state.jobs.active() || state.job.running()) {

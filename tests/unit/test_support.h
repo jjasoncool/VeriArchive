@@ -43,6 +43,8 @@ void history_rows_tests();
 void register_choices_tests();
 void compare_choices_tests();
 void attached_tests();
+void attached_devices_tests();
+void device_rows_tests();
 void hash_tests();
 void merkle_tests();
 void fs_access_tests();

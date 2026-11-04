@@ -65,11 +65,14 @@ void apply_poll(GuiState& state, PollResult& result)
     // began, also one that did both between two reads (a small folder
     // registered from the command line, a verification of seconds). The
     // list shows its new revision, status or last verify.
+    // (refresh_archives also has the attached devices read anew.)
     if (result.archives_mark != poll.archives_shown) {
         refresh_archives(state);  // draws the operations too
     } else {
         show_operations(state);
     }
+    // Devices names the volumes that registrations are working on.
+    refresh_devices(state);
 }
 
 gboolean poll_tick(gpointer data)
@@ -130,8 +133,7 @@ void start_poll(GuiState& state, bool when_due)
         return;
     }
     const auto now = std::chrono::steady_clock::now();
-    const auto spacing = 10 * poll.took;
-    if (when_due && spacing > std::chrono::seconds(poll_seconds) && now - poll.started < spacing) {
+    if (when_due && !read_due(std::chrono::seconds(poll_seconds), poll.took, poll.started, now)) {
         return;
     }
     if (poll.thread.joinable()) {

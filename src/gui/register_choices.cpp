@@ -84,7 +84,7 @@ std::string models_of(const app::Text& text, const VolumeInfo& volume)
 
 std::string bus_of(const VolumeInfo& volume)
 {
-    return volume.devices.empty() ? std::string{} : volume.devices.front().bus;
+    return volume.devices.empty() ? std::string{} : bus_words(volume.devices.front().bus);
 }
 
 // The root of an archive at `root_subpath` on the source's volume, as the

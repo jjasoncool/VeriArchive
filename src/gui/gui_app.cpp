@@ -60,6 +60,13 @@ void open_repository_session(GuiState& state, bool initialise)
     refresh_settings(state);
     refresh_archives(state);
     refresh_history(state);
+    // The attached devices of the last read belong to the repository open
+    // before (attached_now): the archives of this one are matched anew, at
+    // once where Archives or Devices is shown.
+    refresh_devices(state);
+    if (state.devices.timer != 0) {
+        read_devices(state, DevicesReadWhy::Refresh);
+    }
 }
 
 namespace {
@@ -323,7 +330,8 @@ void use_gtk_language(app::Language language)
     // GTK translates its own texts with gettext, which takes LANGUAGE ahead of
     // the system language. The Windows package ships GTK's zh_TW catalogs.
     // (Changing the environment is unsafe while another thread reads it; a
-    // language change is refused while an operation runs.)
+    // language change is refused while an operation runs, and waits for a
+    // read of the attached devices in flight, change_language.)
     g_setenv("LANGUAGE", language == app::Language::TraditionalChinese ? "zh_TW" : "en", TRUE);
     // gettext keeps the translations it has already found and does not notice
     // a new LANGUAGE; setting the text domain again makes it look them up
@@ -333,8 +341,10 @@ void use_gtk_language(app::Language language)
 
 void change_language(GuiState& state, app::Language language)
 {
-    // No window: the application is shutting down (see main).
+    // No window: the application is shutting down (see main). The language in
+    // use chosen again: a change that waited for a read is not made.
     if (!state.window || language == state.text.language()) {
+        state.devices.language_after.reset();
         return;
     }
     if (state.job.running() || state.jobs.active()) {
@@ -344,6 +354,16 @@ void change_language(GuiState& state, app::Language language)
         show_language_in_use(state);
         return;
     }
+    if (state.devices.busy) {
+        // A read of the attached devices is in flight: on Linux it asks
+        // udisks, which reads the environment, and use_gtk_language writes
+        // it, which is unsafe while another thread reads it. The change comes
+        // once the read is back (devices_poll.cpp), without holding the
+        // window up meanwhile, as a device that does not answer would.
+        state.devices.language_after = language;
+        return;
+    }
+    state.devices.language_after.reset();
     state.settings_page.notice = nullptr;
     if (auto saved = app::save_language(language, std::nullopt); !saved) {
         state.settings_page.notice = fixed_message(saved.error());

@@ -30,4 +30,21 @@ std::string format_bytes(std::uint64_t bytes)
     return std::format("{:.1f} {}", value, units[unit]);
 }
 
+std::string bus_words(const std::string& bus)
+{
+    if (bus == "usb") {
+        return "USB";
+    }
+    if (bus == "sata") {
+        return "SATA";
+    }
+    if (bus == "nvme") {
+        return "NVMe";
+    }
+    if (bus == "scsi") {
+        return "SCSI";
+    }
+    return bus;
+}
+
 } // namespace va::gui

@@ -137,10 +137,13 @@ struct AlertLine {
 
 std::vector<AlertLine> device_alert_lines(const app::Text& text, const ArchiveStatus& status, IdentityShown shown);
 
-// A name and its value, a line of a group of the details.
+// A name and its value, a line of a group of the details. A value that is a
+// path (a root) wraps at any character, filling its lines; any other between
+// words where it can.
 struct Field {
     std::string name;
     std::string value;
+    bool path = false;
     bool operator==(const Field&) const = default;
 };
 

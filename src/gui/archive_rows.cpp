@@ -291,7 +291,7 @@ std::vector<Field> device_fields(const app::Text& text, const ArchiveStatus& sta
     for (const auto& device : identity.devices) {
         fields.push_back({text("Model"), device.model.empty() ? text("not known") : device.model});
         if (!device.bus.empty()) {
-            fields.push_back({text("Bus"), device.bus});
+            fields.push_back({text("Bus"), bus_words(device.bus)});
         }
         if (!device.serial.empty()) {
             fields.push_back({text("Serial"), device.serial});
@@ -333,7 +333,8 @@ std::vector<Field> content_fields(const app::Text& text, const ArchiveStatus& st
     const auto& archive = status.archive;
     if (status.header) {
         const auto& header = *status.header;
-        fields.push_back({text("Root"), header.root_hint.empty() ? text("not known") : header.root_hint});
+        fields.push_back({text("Root"), header.root_hint.empty() ? text("not known") : header.root_hint,
+            !header.root_hint.empty()});
         fields.push_back({text("Files"), joined(text, {app::count_of(text, header.counts.files, app::Counted::File),
                                                      format_bytes(header.counts.bytes)})});
         fields.push_back(

@@ -23,8 +23,13 @@
 // volume, whose label, device model and capacity Archives would show. So
 // while this mode runs, the views show a fixed sample identity instead
 // (displayed_identity; main turns it on together with the mode), and Register
-// Archive lists a fixed list of sample volumes (sample_volumes), never this
-// computer's.
+// Archive and Devices list a fixed list of sample volumes and devices
+// (sample_volumes), never this computer's. Where each sample archive is
+// attached is told on the volumes of the sample archives' folders, as normal
+// use tells it, and no other volume of this computer is read; Archives and
+// Devices show of that only the archives' roots, their sample folders, and
+// the sample identity (Devices lists such a volume as SAMPLE-VOLUME on
+// SAMPLE-DEVICE, with a sample health, attached_read).
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -203,13 +208,54 @@ public:
 
         stops_ = {
             {"01-settings.png", [this] { show("settings"); }, {}},
-            // Archives with archive A selected, its details beside the list.
+            // Archives with archive A selected, its details beside the list,
+            // once the attached devices were read: each row starts with where
+            // its archive is attached, the sample archives' folders.
             {"02-archive-list.png",
                 [this] {
                     show("archives");
                     select(reference_);
                 },
-                {}},
+                {}, [this] { return devices_read(); },
+                [this] {
+                    const auto* read = attached_now(state_);
+                    const auto* attachment = read ? attachment_of(*read, reference_) : nullptr;
+                    if (!attachment ||
+                        (attachment->result != MatchResult::Match && attachment->result != MatchResult::MatchWeak)) {
+                        throw std::runtime_error("archive " + reference_ + " is not attached at its folder");
+                    }
+                }},
+            // Devices with the screenshot mode's fixed sample list, never
+            // this computer's devices, and the sample archives on the volume
+            // of their folders, shown as the sample identity.
+            {"10-devices.png", [this] { show("devices"); }, {}, [this] { return devices_read(); },
+                [this] {
+                    const auto* read = attached_now(state_);
+                    if (!read || !read->sample) {
+                        throw std::runtime_error("Devices does not show the sample devices");
+                    }
+                    const auto& shown = state_.devices_page.shown;
+                    if (!shown || shown->empty()) {
+                        throw std::runtime_error("Devices shows no device");
+                    }
+                    const auto holding = std::ranges::find_if(*shown, [](const DeviceCard& card) {
+                        return std::ranges::any_of(
+                            card.volumes, [](const VolumeLine& volume) { return !volume.archives.empty(); });
+                    });
+                    if (holding == shown->end()) {
+                        throw std::runtime_error("Devices shows no archive on a volume");
+                    }
+                    // Its card scrolled into view, where its mount point sorts
+                    // after those of the sample list (a drive letter after
+                    // /media/SAMPLE-*), as little as shows it whole.
+                    GtkWidget* card = gtk_widget_get_first_child(state_.devices_page.cards);
+                    for (auto index = holding - shown->begin(); card && index > 0; --index) {
+                        card = gtk_widget_get_next_sibling(card);
+                    }
+                    if (GtkWidget* viewport = card ? gtk_widget_get_ancestor(card, GTK_TYPE_VIEWPORT) : nullptr) {
+                        gtk_viewport_scroll_to(GTK_VIEWPORT(viewport), card, nullptr);
+                    }
+                }},
             {"03-register.png",
                 [this] {
                     // Register Archive as the sidebar's + opens it, archive
@@ -516,6 +562,23 @@ private:
     void show(const char* view)
     {
         show_page(state_, view);
+    }
+
+    // Whether a read of the attached devices has come back, none being in
+    // flight: what Archives and Devices show of them is drawn.
+    bool devices_read() const
+    {
+        if (state_.devices.busy) {
+            return false;
+        }
+        if (!attached_now(state_)) {
+            if (state_.devices.error) {
+                throw std::runtime_error("the attached devices could not be read: " +
+                                         state_.devices.error(app::Text()));
+            }
+            return false;
+        }
+        return true;
     }
 
     // Selects `archive` in Archives; it must be listed.

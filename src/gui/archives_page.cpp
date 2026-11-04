@@ -7,10 +7,12 @@
 // verifications and relocations that have not finished, with their progress,
 // wherever they were started, read every few seconds while the page is shown
 // (operations_poll.cpp), with Resume and Abandon... where they have stopped
-// (unfinished_actions.cpp). Without archives, a page that leads to the first
-// registration. A narrow window shows the list, and the details of an archive
-// in its place. The result page of a run opens over the page
-// (result_page.cpp).
+// (unfinished_actions.cpp). Each row starts with where its archive is
+// attached now, or that it is not, as the reads of the attached devices find
+// it (devices_poll.cpp), which run while the page is shown too. Without
+// archives, a page that leads to the first registration. A narrow window
+// shows the list, and the details of an archive in its place. The result page
+// of a run opens over the page (result_page.cpp).
 #include "gui/gui_app.h"
 
 #include "app/plain_words.h"
@@ -260,9 +262,11 @@ GtkWidget* build_operations(GuiState& state)
 // ---- The list of archives ---------------------------------------------------
 
 // An archive's row (archive_row): its status dot, its label and volume label
-// with the result beside them, the line of its carrier and its last FULL
-// verification, its marks, and what is wrong with its manifest.
-GtkWidget* archive_list_row(const app::Text& text, const ArchiveRow& shown)
+// with the result beside them, where it is attached now (`attached`, filled
+// by show_attached once a read of the attached devices says), the line of
+// its carrier and its last FULL verification, its marks, and what is wrong
+// with its manifest.
+GtkWidget* archive_list_row(const app::Text& text, const ArchiveRow& shown, GuiState::AttachedLineShown& attached)
 {
     GtkWidget* row = gtk_list_box_row_new();
     g_object_set_data_full(G_OBJECT(row), "va-archive", g_strdup(shown.archive_uuid.c_str()), g_free);
@@ -298,6 +302,14 @@ GtkWidget* archive_list_row(const app::Text& text, const ArchiveRow& shown)
     gtk_widget_set_valign(result, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(line), result);
     gtk_box_append(GTK_BOX(words), line);
+    // Where it is attached: a long root is cut in its middle, whole in its
+    // tooltip; hidden until a read of the attached devices says.
+    attached.line = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(attached.line), 0.0f);
+    gtk_label_set_ellipsize(GTK_LABEL(attached.line), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_widget_add_css_class(attached.line, "caption");
+    gtk_widget_set_visible(attached.line, FALSE);
+    gtk_box_append(GTK_BOX(words), attached.line);
     if (!shown.subtitle.empty()) {
         GtkWidget* subtitle = make_label(shown.subtitle);
         gtk_label_set_wrap_mode(GTK_LABEL(subtitle), PANGO_WRAP_WORD_CHAR);
@@ -339,7 +351,51 @@ GtkWidget* archive_list_row(const app::Text& text, const ArchiveRow& shown)
         said = text.format("{} · {}", said, shown.problem);
     }
     gtk_accessible_update_property(GTK_ACCESSIBLE(row), GTK_ACCESSIBLE_PROPERTY_LABEL, said.c_str(), -1);
+    attached.row = row;
+    attached.said = std::move(said);
     return row;
+}
+
+// Gives each row's first line where its archive is attached, as the latest
+// read of the attached devices found it, where that changed.
+void show_attached_lines(GuiState& state)
+{
+    auto& page = state.archives_page;
+    const auto& text = state.text;
+    const auto* read = attached_now(state);
+    // The latest read failed: the rows say nothing of where their archives
+    // are attached, and the head says why, which Devices tells in full.
+    if (page.devices_problem) {
+        const bool failed = !read && state.devices.error && state.session;
+        gtk_label_set_text(
+            GTK_LABEL(page.devices_problem), failed ? text("Cannot read the attached devices; see Devices").c_str() : "");
+        gtk_widget_set_visible(page.devices_problem, failed);
+    }
+    for (auto& [archive, drawn] : page.attached_lines) {
+        const auto status = std::ranges::find_if(page.statuses, [&](const ArchiveStatus& status) {
+            return status.archive.archive_uuid == archive;
+        });
+        if (status == page.statuses.end()) {
+            continue;
+        }
+        const auto line = archive_attached(text, read, *status, state.identity_shown).line;
+        if (line == drawn.shown) {
+            continue;
+        }
+        drawn.shown = line;
+        gtk_label_set_text(GTK_LABEL(drawn.line), line ? line->words.c_str() : "");
+        gtk_widget_set_tooltip_text(drawn.line, line && !line->tooltip.empty() ? line->tooltip.c_str() : nullptr);
+        gtk_widget_set_visible(drawn.line, line.has_value());
+        // Attached: as the row's words; not attached, dim; not as recorded,
+        // in the colour of warnings.
+        const bool dim = line && line->state == Attached::Nowhere;
+        const bool warns = line && (line->state == Attached::Migrated || line->state == Attached::Ambiguous);
+        (dim ? gtk_widget_add_css_class : gtk_widget_remove_css_class)(drawn.line, "dim-label");
+        (warns ? gtk_widget_add_css_class : gtk_widget_remove_css_class)(drawn.line, "warning");
+        // A screen reader reads it after the label, as the row shows it.
+        const auto said = line ? text.format("{} · {}", drawn.said, line->words) : drawn.said;
+        gtk_accessible_update_property(GTK_ACCESSIBLE(drawn.row), GTK_ACCESSIBLE_PROPERTY_LABEL, said.c_str(), -1);
+    }
 }
 
 // A narrow window shows the details in place of the list, and the focus goes
@@ -612,11 +668,12 @@ void refresh_archives(GuiState& state)
     show_operations(state);
     // Nothing shown yet: a read of the operations that comes back draws the
     // list again (apply_poll), so one that could not be drawn now is retried.
-    state.operations.archives_shown.clear();
+    const auto shown_before = std::exchange(state.operations.archives_shown, std::string{});
     page.statuses.clear();
     const bool list_focused = keep_focus_from(state, page.list);
     page.filling = true;
     gtk_list_box_remove_all(GTK_LIST_BOX(page.list));
+    page.attached_lines.clear();
     page.filling = false;
     gtk_widget_remove_css_class(page.status, "error");
     if (!state.session) {
@@ -650,10 +707,18 @@ void refresh_archives(GuiState& state)
         failed(statuses.error().message);
         return;
     }
+    // The archives changed since they were drawn (a new archive, a new
+    // revision on another carrier, one abandoned), in this window or
+    // elsewhere: where each is attached is told anew while Archives or
+    // Devices is shown, after the read in flight if there is one.
+    const bool changed = mark && !shown_before.empty() && *mark != shown_before;
     if (mark) {
         state.operations.archives_shown = *mark;
     }
     page.statuses = std::move(*statuses);
+    if (changed && state.devices.timer != 0) {
+        read_devices(state, DevicesReadWhy::Refresh);
+    }
     // The comparison dialog lists the archives listed here, so that the
     // details open it on any of them, also on an archive registered
     // meanwhile from the command line or another window. (History reads
@@ -679,7 +744,8 @@ void refresh_archives(GuiState& state)
     }
     page.filling = true;
     for (const auto& status : page.statuses) {
-        GtkWidget* row = archive_list_row(text, archive_row(text, status, state.identity_shown, now));
+        GtkWidget* row = archive_list_row(text, archive_row(text, status, state.identity_shown, now),
+            page.attached_lines[status.archive.archive_uuid]);
         gtk_list_box_append(GTK_LIST_BOX(page.list), row);
         if (status.archive.archive_uuid == *state.archive_selected) {
             gtk_list_box_select_row(GTK_LIST_BOX(page.list), GTK_LIST_BOX_ROW(row));
@@ -689,7 +755,19 @@ void refresh_archives(GuiState& state)
         }
     }
     page.filling = false;
+    // Where each is attached, as the latest read of the attached devices
+    // found it; the details say it too.
+    show_attached_lines(state);
     show_details(state);
+}
+
+void show_attached(GuiState& state)
+{
+    if (!state.archives_page.list) {
+        return;
+    }
+    show_attached_lines(state);
+    show_details_attached(state);
 }
 
 void select_archive(GuiState& state, const Uuid& archive, bool show_content)
@@ -736,6 +814,14 @@ GtkWidget* build_archives_page(GuiState& state)
     gtk_widget_set_hexpand(page.status, TRUE);
     gtk_widget_set_valign(page.status, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(head), page.status);
+    // Shown only while the attached devices cannot be read, when the rows say
+    // nothing of where their archives are attached (show_attached_lines).
+    page.devices_problem = make_label("");
+    gtk_label_set_ellipsize(GTK_LABEL(page.devices_problem), PANGO_ELLIPSIZE_END);
+    gtk_widget_add_css_class(page.devices_problem, "dim-label");
+    gtk_widget_set_valign(page.devices_problem, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(page.devices_problem, FALSE);
+    gtk_box_append(GTK_BOX(head), page.devices_problem);
     // Shown only while a step of abandoning runs (decisions 0025, 0026, 0033).
     page.abandoning = gtk_progress_bar_new();
     gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(page.abandoning), TRUE);
@@ -766,6 +852,7 @@ GtkWidget* build_archives_page(GuiState& state)
             [&] {
                 refresh_archives(state);
                 start_poll(state);
+                read_devices(state, DevicesReadWhy::Refresh);
             },
             [&](const Report& report) { show_archives_status(state, report); });
     }), &state);
@@ -780,17 +867,19 @@ GtkWidget* build_archives_page(GuiState& state)
     gtk_stack_add_named(GTK_STACK(page.views), build_empty(state), "empty");
     gtk_box_append(GTK_BOX(box), page.views);
 
-    // The unfinished operations are read only while the page is on screen:
-    // "map" when it is shown (also when the window first appears on it),
-    // "unmap" when another page is chosen or the window closes, e.g. when a
-    // language change replaces it.
+    // The unfinished operations, and the attached devices, are read only
+    // while the page is on screen: "map" when it is shown (also when the
+    // window first appears on it), "unmap" when another page is chosen or the
+    // window closes, e.g. when a language change replaces it.
     g_signal_connect(box, "map", G_CALLBACK(+[](GtkWidget* shown, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
         guarded([&] { watch_operations(state, shown); }, [&](const Report& report) { show_poll_error(state, report); });
+        guarded([&] { watch_devices(state, shown); }, [&](const Report& report) { show_archives_status(state, report); });
     }), &state);
     g_signal_connect(box, "unmap", G_CALLBACK(+[](GtkWidget* hidden, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
         guarded([&] { stop_watching(state, hidden); }, [](const Report&) {});
+        guarded([&] { stop_watching_devices(state, hidden); }, [](const Report&) {});
     }), &state);
 
     // The page is the first of a navigation view, over which the result page

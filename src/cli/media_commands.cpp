@@ -5,6 +5,7 @@
 // no repository.
 #include "cli/commands.h"
 
+#include "app/attached_devices.h"
 #include "app/device_alerts.h"
 #include "app/session.h"
 #include "common/utf8.h"
@@ -14,7 +15,6 @@
 
 #include <format>
 #include <iostream>
-#include <map>
 
 namespace va::cli {
 namespace {
@@ -74,33 +74,24 @@ int media_command(const Arguments& arguments)
     if (const auto elevated = app::elevated_warning()) {
         print_warning(arguments.text, *elevated);
     }
-    const auto enumerator = platform::make_media_enumerator();
-    auto volumes = enumerator->volumes();
-    if (!volumes) {
-        return report_failure(arguments, {exit_code::repository, volumes.error().message});
-    }
     // What each device reports of its health, asked once for a device that
-    // holds several volumes (decision 0044).
-    std::map<std::string, DeviceHealth> asked;
-    for (auto& volume : *volumes) {
-        for (auto& device : volume.devices) {
-            auto known = asked.find(device.device_ref);
-            if (known == asked.end()) {
-                const auto health = enumerator->device_health(device);
-                known = asked.emplace(device.device_ref, health ? *health : DeviceHealth{}).first;
-            }
-            device.health = known->second;
-        }
+    // holds several volumes (decision 0044), as the window's Devices page
+    // asks it.
+    const auto enumerator = platform::make_media_enumerator();
+    const auto attached = app::attached_devices(*enumerator);
+    if (!attached) {
+        return report_failure(arguments, {exit_code::repository, attached.error().message});
     }
+    const auto& volumes = attached->volumes;
 
     if (arguments.json) {
         auto list = nlohmann::json::array();
-        for (const auto& volume : *volumes) {
+        for (const auto& volume : volumes) {
             list.push_back(volume_to_json(volume));
         }
         print_json({{"volumes", std::move(list)}});
     } else {
-        for (const auto& volume : *volumes) {
+        for (const auto& volume : volumes) {
             print_volume(arguments.text, volume);
         }
     }

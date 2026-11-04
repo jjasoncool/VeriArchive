@@ -12,6 +12,8 @@ int main()
     unicode_tests();
     identity_tests();
     attached_tests();
+    attached_devices_tests();
+    device_rows_tests();
     device_health_tests();
     displayed_identity_tests();
     ended_notification_tests();
