@@ -38,6 +38,13 @@ std::vector<ArchiveName> archive_names(const std::vector<ArchiveStatus>& statuse
 // An item of the filter: "ARCH-0001 · SAMPLE-VOLUME", or the label alone.
 std::string filter_words(const app::Text& text, const ArchiveName& name);
 
+// An archive as a list to choose it from names it (the comparison's A and B,
+// Register Archive's "Copy of which archive"): as the filter does, with the
+// start of its uuid, "ARCH-0001 · SAMPLE-VOLUME · 81dd9114". Labels are not
+// unique (GLOSSARY Label), and a sector-by-sector clone keeps its volume
+// label: two archives never read the same there.
+std::string choice_words(const app::Text& text, const ArchiveName& name);
+
 // A run in History.
 struct HistoryRow {
     std::string run_id;

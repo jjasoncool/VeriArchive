@@ -7,9 +7,8 @@
 // job's result shows in its tone. The header's jobs button shows how far the
 // jobs that run are on a ring, counts the jobs that run or wait and lists
 // them, with the last ended
-// ones, in its popover. The view that started a job shows it too: Register
-// Archive and Compare Archives its bar, an archive's details in Archives a
-// card of its row.
+// ones, in its popover. An archive's details in Archives show the job of its
+// verification too, as a card of its row.
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -147,23 +146,11 @@ void update_details(GuiState& state, const JobShown& job)
                                  : text("The report shows here once the job has ended."));
 }
 
-// The view that started `job`: Register Archive and Compare Archives as they
-// showed their one operation before, an archive's details its card.
+// The view that started `job`: an archive's details, its card. (Register
+// Archive and the comparison dialog close once their job starts: Jobs and the
+// header's popover show it.)
 void update_view(GuiState& state, const JobShown& job)
 {
-    const auto show = [&](std::uint64_t shown, GtkWidget* bar, GtkWidget* alert, GtkWidget* cancel) {
-        if (shown != job.id || !bar) {
-            return;
-        }
-        show_bar(state.text, job, bar);
-        if (alert) {
-            show_job_alert(job, alert);
-        }
-        gtk_widget_set_sensitive(cancel, job.state != JobState::Ended && !job.stopping);
-    };
-    show(state.register_view.job, state.register_view.progress, state.register_view.alert,
-        state.register_view.cancel);
-    show(state.compare_view.job, state.compare_view.progress, nullptr, state.compare_view.cancel);
     // The card shows the job in whichever group it is now.
     const auto& card = state.archives_page.card.rows;
     if (const auto found = card.find(job.id); found != card.end()) {

@@ -25,10 +25,16 @@ std::optional<std::string> unbaselined_advice(const Text& text, const VerifyOutc
                            "veriarchive-cli register {} --new-revision",
             shell_argument(root));
     }
+    // Decision 0046: the details' menu opens Register Archive on its options
+    // with the archive's root and a new revision chosen; the folder or volume
+    // verified may be another spelling of that root, chosen there itself,
+    // where the new revision is turned on. Either way Next leads to Confirm,
+    // whose Start registration starts it.
     return text.format("The Unbaselined entries could not be read when the archive was registered, so they have no "
-                       "baseline yet. To take one for them, register a new revision of the archive: in Register "
-                       "Archive, choose its folder or volume ({}), tick \"{}\" and press \"{}\".",
-        root, text("New revision of the archive registered at this folder or volume"), text("Register"));
+                       "baseline yet. To take one for them, register a new revision of the archive: choose \"{}\" in "
+                       "the menu of its details in Archives (or choose its folder or volume ({}) in Register Archive "
+                       "and turn on \"{}\"), then press \"{}\" and \"{}\".",
+        text("Create a new revision..."), root, text("Create a new revision"), text("Next"), text("Start registration"));
 }
 
 } // namespace va::app

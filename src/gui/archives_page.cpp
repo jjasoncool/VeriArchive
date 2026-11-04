@@ -380,7 +380,8 @@ void show_empty(GuiState& state, bool repository_open)
             text("Register a folder or volume: VeriArchive records the fingerprints of each of its files. A FULL "
                  "verification later tells whether any of them was modified, corrupted, deleted or added."));
         gtk_button_set_label(GTK_BUTTON(page.empty_button), text("Register the first archive").c_str());
-        g_object_set_data(G_OBJECT(page.empty_button), "va-page", const_cast<char*>("register"));
+        // Register Archive, a dialog, rather than a page (register_wizard.cpp).
+        g_object_set_data(G_OBJECT(page.empty_button), "va-page", nullptr);
     } else {
         // Why none is open (a repository configured whose disk is not
         // attached, say: rule 5), as Settings says it.
@@ -408,6 +409,8 @@ GtkWidget* build_empty(GuiState& state)
             [&] {
                 if (const char* name = static_cast<const char*>(g_object_get_data(G_OBJECT(clicked), "va-page"))) {
                     show_page(state, name);
+                } else {
+                    open_register_wizard(state);
                 }
             },
             [&](const Report& report) { show_archives_status(state, report); });
@@ -651,17 +654,11 @@ void refresh_archives(GuiState& state)
         state.operations.archives_shown = *mark;
     }
     page.statuses = std::move(*statuses);
-    // Compare Archives lists the archives listed here, so that the details
-    // open it on any of them, also on an archive registered meanwhile from
-    // the command line or another window. Both lists read archive_statuses,
-    // in the same order. (History reads them as it is shown.)
-    std::vector<Uuid> uuids;
-    for (const auto& status : page.statuses) {
-        uuids.push_back(status.archive.archive_uuid);
-    }
-    if (uuids != state.compare_view.archive_uuids) {
-        refresh_archive_choices(state);
-    }
+    // The comparison dialog lists the archives listed here, so that the
+    // details open it on any of them, also on an archive registered
+    // meanwhile from the command line or another window. (History reads
+    // them as it is shown.)
+    refresh_compare_dialog(state);
     gtk_label_set_text(
         GTK_LABEL(page.status), app::count_of(text, page.statuses.size(), app::Counted::Archive).c_str());
     if (page.statuses.empty()) {
@@ -726,8 +723,8 @@ GtkWidget* build_archives_page(GuiState& state)
     page.page = box;
 
     // The head: how many archives, the progress of a step of abandoning,
-    // Register Archive and Refresh. The page's name is the header bar's
-    // title above it, as on the other pages.
+    // Register Archive (its dialog) and Refresh. The page's name is the
+    // header bar's title above it, as on the other pages.
     GtkWidget* head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_margin_start(head, 24);
     gtk_widget_set_margin_end(head, 24);
@@ -754,7 +751,7 @@ GtkWidget* build_archives_page(GuiState& state)
     gtk_widget_set_valign(add, GTK_ALIGN_CENTER);
     g_signal_connect(add, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
-        guarded([&] { show_page(state, "register"); }, [&](const Report& report) { show_archives_status(state, report); });
+        guarded([&] { open_register_wizard(state); }, [&](const Report& report) { show_archives_status(state, report); });
     }), &state);
     gtk_box_append(GTK_BOX(head), add);
     GtkWidget* refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");

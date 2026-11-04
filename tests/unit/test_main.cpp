@@ -11,6 +11,7 @@ int main()
     platform_error_tests();
     unicode_tests();
     identity_tests();
+    attached_tests();
     device_health_tests();
     displayed_identity_tests();
     ended_notification_tests();
@@ -20,6 +21,8 @@ int main()
     archive_rows_tests();
     run_result_tests();
     history_rows_tests();
+    register_choices_tests();
+    compare_choices_tests();
     hash_tests();
     merkle_tests();
     fs_access_tests();

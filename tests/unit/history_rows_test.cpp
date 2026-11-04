@@ -89,6 +89,12 @@ void names_and_filter()
     CHECK(va::gui::filter_words(english, names[0]) == "ARCH-SAMPLE-1 · SAMPLE-VOLUME");
     CHECK(va::gui::filter_words(chinese, names[0]) == "ARCH-SAMPLE-1・SAMPLE-VOLUME");
     CHECK(va::gui::filter_words(english, names[1]) == "ARCH-SAMPLE-2");
+    // A list to choose an archive from adds the start of its uuid: two
+    // archives of one label and volume label (a clone) read apart there.
+    CHECK(va::gui::choice_words(english, names[0]) == "ARCH-SAMPLE-1 · SAMPLE-VOLUME · c0ffee00");
+    CHECK(va::gui::choice_words(chinese, names[1]) == "ARCH-SAMPLE-2・c0ffee00");
+    const va::gui::ArchiveName twin{"c0ffee01-0000-4000-8000-000000000003", "ARCH-SAMPLE-1", "SAMPLE-VOLUME"};
+    CHECK(va::gui::choice_words(english, twin) != va::gui::choice_words(english, names[0]));
     CHECK(va::gui::archive_names({sample_status(first_archive, "ARCH-SAMPLE-1")}, IdentityShown::Recorded)
               .front()
               .volume_label == "RECORDED-LABEL");

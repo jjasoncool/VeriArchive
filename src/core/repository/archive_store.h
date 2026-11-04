@@ -280,6 +280,10 @@ public:
     // (R-33), skipping the numbers of the labels it has already, whatever
     // gave them (decision 0036).
     std::expected<std::string, IoError> next_label();
+    // The label that next_label would give now, without taking it: what an
+    // empty label stands for in Register Archive (decision 0046). Reads only,
+    // so a store opened read-only gives it too.
+    std::expected<std::string, IoError> peek_next_label();
 
     std::expected<void, IoError> insert_archive(const ArchiveRecord& archive);
     std::expected<void, IoError> update_archive(const ArchiveRecord& archive);
@@ -508,6 +512,8 @@ private:
     explicit ArchiveStore(repository_detail::SqliteDatabase database);
     std::expected<void, IoError> write_file_rows(const char* verb, const Uuid& archive_uuid,
         std::uint32_t revision, const std::vector<Entry>& entries, std::uint64_t chunk_size);
+    // The number of the next automatic label (next_label, peek_next_label).
+    std::expected<std::uint64_t, IoError> free_label_number();
     repository_detail::SqliteDatabase database_;
 };
 

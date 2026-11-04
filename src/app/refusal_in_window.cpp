@@ -34,12 +34,17 @@ constexpr std::string_view on_its_row =
 // Where Abandon... is for an operation that can only be abandoned.
 constexpr std::string_view abandon_it = "abandon it with Abandon... under Unfinished operations in Archives";
 
+// Register Archive (decision 0046) offers only Resume the interrupted
+// registration for a root whose registration is unfinished, once that root is
+// chosen in it.
+constexpr std::string_view in_register_archive = "whose options then resume it";
+
 // A registration of the archive (decision 0025): finished with Resume on its
-// row under Unfinished operations, or with Register Archive's checkbox
-// "Resume an interrupted registration of this folder or volume", the
-// registration's root entered; made for an older revision (decision 0030), it
-// can only be abandoned.
-std::string registration_refusal(const RefusingOperation& refusing, RefusedIn view, bool runs)
+// row under Unfinished operations, or in Register Archive, the registration's
+// root chosen there, whose options then resume it; made for an older revision
+// (decision 0030), it can only be abandoned. Register Archive and Archives
+// name the same ways on.
+std::string registration_refusal(const RefusingOperation& refusing, bool runs)
 {
     const auto& uuid = refusing.archive_uuid;
     const auto creates = std::to_string(refusing.revision);
@@ -53,8 +58,8 @@ std::string registration_refusal(const RefusingOperation& refusing, RefusedIn vi
     // The registration of the very root entered: its plan is that root's.
     if (refusing.this_root) {
         const auto ways = "finish it " + std::string(on_its_row) +
-                          "; or finish it by ticking Resume an interrupted registration of this folder or volume and "
-                          "pressing Register again";
+                          "; or choose this folder or volume again in Register Archive, " +
+                          std::string(in_register_archive);
         return runs ? "a registration of this root (archive " + uuid +
                           ") is still running; wait for it to finish; if it stops, " + ways
                     : "an interrupted registration of this root exists (archive " + uuid + "); " + ways;
@@ -62,13 +67,8 @@ std::string registration_refusal(const RefusingOperation& refusing, RefusedIn vi
     // Of another root of the archive, such as a second mount point of its volume.
     const auto creating = "an unfinished registration of archive " + uuid + " (root \"" + refusing.root +
                           "\") is creating revision " + creates;
-    const std::string resume =
-        view == RefusedIn::RegisterArchive
-            ? "by entering its root above, ticking Resume an interrupted registration of this folder or volume and "
-              "pressing Register"
-            : "in Register Archive by entering its root, ticking Resume an interrupted registration of this folder or "
-              "volume and pressing Register";
-    const auto ways = std::string(on_its_row) + "; or finish it " + resume + ")";
+    const auto ways = std::string(on_its_row) + "; or finish it by choosing its root in Register Archive, " +
+                      std::string(in_register_archive) + ")";
     return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                              "finish it " +
                       ways
@@ -121,7 +121,7 @@ std::string refusal_in_window(const RefusingOperation& refusing, RefusedIn view,
 {
     switch (refusing.kind) {
     case Kind::Registration:
-        return registration_refusal(refusing, view, runs);
+        return registration_refusal(refusing, runs);
     case Kind::Relocation:
         return relocation_refusal(refusing, runs);
     case Kind::AddingVerification:

@@ -509,49 +509,33 @@ void translation_tests()
               "在該頁此封存的詳細資料中按「繼續」完成它）");
     // The window's words while a registration of the archive is unfinished
     // (decisions 0033, 0046): Resume and Abandon... on its row under
-    // Unfinished operations first, then Register Archive's checkbox; of the
-    // root entered, of another root, in Register Archive and for a
-    // verification in Archives, made for an older revision; once it has
-    // stopped and while it runs.
-    const std::string tick = "勾選「繼續此資料夾或磁碟區中斷的註冊」";
+    // Unfinished operations first, then Register Archive, the root chosen
+    // there, whose options then resume it; of the root chosen and of another
+    // root, the same in Register Archive and for a verification in Archives,
+    // made for an older revision; once it has stopped and while it runs.
+    const std::string choose_again = "在「註冊封存」再選一次這個資料夾或磁碟區，在選項中繼續它";
+    const std::string choose_root = "在「註冊封存」選擇它的根目錄，在選項中繼續它";
     const std::string in_list = "或在「封存」頁的「未完成的作業」中按「放棄…」放棄它";
     CHECK(chinese.format("Not registered: {}",
               chinese("an interrupted registration of this root exists (archive " + sample + "); finish it " +
-                      on_its_row +
-                      "; or finish it by ticking Resume an interrupted registration of this folder or volume and "
-                      "pressing Register again")) ==
-          "未能註冊：此根目錄有一個中斷的註冊（封存 " + sample + "）；請" + on_its_row_chinese + tick +
-              "，再按一次「註冊」完成它");
+                      on_its_row + "; or choose this folder or volume again in Register Archive, whose options then "
+                                   "resume it")) ==
+          "未能註冊：此根目錄有一個中斷的註冊（封存 " + sample + "）；請" + on_its_row_chinese + choose_again);
     CHECK(chinese("a registration of this root (archive " + sample +
                   ") is still running; wait for it to finish; if it stops, finish it " + on_its_row +
-                  "; or finish it by ticking Resume an interrupted registration of this folder or volume and pressing "
-                  "Register again") ==
-          "此根目錄的註冊（封存 " + sample + "）仍在執行；請等它完成；若它停止了，請" + on_its_row_chinese + tick +
-              "，再按一次「註冊」完成它");
+                  "; or choose this folder or volume again in Register Archive, whose options then resume it") ==
+          "此根目錄的註冊（封存 " + sample + "）仍在執行；請等它完成；若它停止了，請" + on_its_row_chinese +
+              choose_again);
     const std::string creating = "an unfinished registration of archive " + sample + " (root \"Z:\\範例\") is creating revision 2";
     const std::string creating_chinese = "封存 " + sample + " 有一個未完成的註冊（根目錄「Z:\\範例」）正在建立版次 2";
     CHECK(chinese(creating + "; nothing was changed (finish it first " + on_its_row +
-                  "; or finish it by entering its root above, ticking Resume an interrupted registration of this "
-                  "folder or volume and pressing Register)") ==
-          creating_chinese + "；未做任何變更（請先" + on_its_row_chinese + "在上方輸入它的根目錄，" + tick +
-              "，再按「註冊」完成它）");
+                  "; or finish it by choosing its root in Register Archive, whose options then resume it)") ==
+          creating_chinese + "；未做任何變更（請先" + on_its_row_chinese + choose_root + "）");
     CHECK(chinese(creating + " and is still running; nothing was changed (wait for it to finish; if it stops, finish it " +
-                  on_its_row +
-                  "; or finish it by entering its root above, ticking Resume an interrupted registration of this "
-                  "folder or volume and pressing Register)") ==
+                  on_its_row + "; or finish it by choosing its root in Register Archive, whose options then resume "
+                               "it)") ==
           creating_chinese + "，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
-              "在上方輸入它的根目錄，" + tick + "，再按「註冊」完成它）");
-    CHECK(chinese(creating + "; nothing was changed (finish it first " + on_its_row +
-                  "; or finish it in Register Archive by entering its root, ticking Resume an interrupted registration "
-                  "of this folder or volume and pressing Register)") ==
-          creating_chinese + "；未做任何變更（請先" + on_its_row_chinese + "在「註冊封存」輸入它的根目錄，" + tick +
-              "，再按「註冊」完成它）");
-    CHECK(chinese(creating + " and is still running; nothing was changed (wait for it to finish; if it stops, finish it " +
-                  on_its_row +
-                  "; or finish it in Register Archive by entering its root, ticking Resume an interrupted registration "
-                  "of this folder or volume and pressing Register)") ==
-          creating_chinese + "，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
-              "在「註冊封存」輸入它的根目錄，" + tick + "，再按「註冊」完成它）");
+              choose_root + "）");
     const std::string older = "the unfinished registration of archive " + sample +
                               " (root \"Z:\\範例\") would create revision 2, but the archive now has a later revision "
                               "(3); the registration can no longer finish";
@@ -1241,9 +1225,13 @@ void translation_tests()
     CHECK(chinese.format("Waiting: {} reads the same device", "註冊 H:\\") == "等候中：註冊 H:\\ 正在讀取同一個裝置");
     CHECK(chinese.format("{} jobs are still running.", 2) == "還有 2 個工作在執行。");
     CHECK(chinese("Stopped before it started, while it waited for the device.") == "在等候裝置時就停止了，尚未開始。");
-    // Register and Verify name their target a folder or volume: a volume root
-    // registers the whole volume.
-    CHECK(chinese("Choose the folder or volume to register.") == "請選擇要註冊的資料夾或磁碟區。");
+    // Register Archive and Verify name their target a folder or volume: a
+    // volume root registers the whole volume (decision 0046).
+    CHECK(chinese("Choose a volume to register it as a whole, or a folder in one.") ==
+          "選一個磁碟區（整個註冊），或選其中的一個資料夾。");
+    CHECK(chinese.format("Choose a folder in {}...", "/media/SAMPLE-A") == "選擇 /media/SAMPLE-A 裡的資料夾…");
+    CHECK(chinese("Resume the interrupted registration") == "繼續中斷的註冊");
+    CHECK(chinese("Copy of which archive (optional)") == "這是哪個封存的副本（選填）");
     CHECK(chinese("Register as a separate archive even though this folder or volume is registered") ==
           "即使此資料夾或磁碟區已註冊，仍註冊為另一個封存");
     // Archives (decision 0046): the page, the menu of FULL verify of an
@@ -1287,7 +1275,8 @@ void format_fallback_tests()
 // Decision 0010: a verification whose content matched and that has
 // Unbaselined entries says how to take a baseline for them: a new revision,
 // named on the command line with the root the run read, in the window as the
-// Register Archive view's box, in either language. Nothing for a run that
+// details' menu and Register Archive's options name it (decision 0046), in
+// either language. Nothing for a run that
 // FAILED, whose entries that differ a new revision would take for good ones,
 // nor for one without such entries, nor for a retired archive, which takes
 // no new revision. (A sample run.)
@@ -1318,13 +1307,13 @@ void unbaselined_advice_tests()
             : "veriarchive-cli register '/vol/SAMPLE 範例' --new-revision"));
     CHECK(va::app::unbaselined_advice(english, outcome, ReportedIn::Window) ==
           "The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. "
-          "To take one for them, register a new revision of the archive: in Register Archive, choose its folder or "
-          "volume (/vol/SAMPLE-範例), tick \"New revision of the archive registered at this folder or volume\" and "
-          "press \"Register\".");
+          "To take one for them, register a new revision of the archive: choose \"Create a new revision...\" in the "
+          "menu of its details in Archives (or choose its folder or volume (/vol/SAMPLE-範例) in Register Archive "
+          "and turn on \"Create a new revision\"), then press \"Next\" and \"Start registration\".");
     CHECK(va::app::unbaselined_advice(chinese, outcome, ReportedIn::Window) ==
           "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：在"
-          "「註冊封存」頁選擇它的資料夾或磁碟區（/vol/SAMPLE-範例），勾選「為此資料夾或磁碟區已註冊的封存建立新版次」，"
-          "再按「註冊」。");
+          "「封存」頁此封存詳細資料的選單中選擇「建立新版次…」（或在「註冊封存」選擇它的資料夾或磁碟區"
+          "（/vol/SAMPLE-範例），開啟「建立新版次」），再按「下一步」和「開始註冊」。");
 
     auto failed = outcome;
     failed.result = "FAILED";

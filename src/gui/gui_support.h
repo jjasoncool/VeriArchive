@@ -80,8 +80,16 @@ std::optional<Uuid> chosen_archive(GtkWidget* drop_down, const std::vector<Uuid>
 void choose_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset,
     const std::optional<Uuid>& archive);
 
-// Opens a folder chooser titled `title`; the chosen folder is written into `entry`.
-void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title);
+// Makes an AdwComboRow of a GtkStringList show its items, and the one chosen,
+// up to about 40 characters ("ARCH-0001 · SAMPLE-VOLUME"), where its own
+// factory cuts the one chosen at about 20; its list marks the one chosen, as
+// its own does.
+void show_whole_items(GtkWidget* combo_row);
+
+// Opens a folder chooser titled `title`, in the folder `initial` where one is
+// given; the chosen folder is written into `entry`.
+void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title,
+    const std::filesystem::path& initial = {});
 
 // GTK calls signal handlers from C code, which a C++ exception cannot pass
 // through: the program would end at once (std::terminate). Every handler

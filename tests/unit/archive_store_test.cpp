@@ -861,7 +861,11 @@ void automatic_labels_skip_the_labels_in_use()
              {"c0ffee00-0000-4000-8000-000000000012", "ARCH-12X"}}) {
         CHECK(store->insert_archive({uuid, label, "2026-10-27T00:00:00Z", 1, "REGISTERED", "", ""}));
     }
+    // Looking at the next label (Register Archive, decision 0046) takes none.
+    CHECK(store->peek_next_label() == "ARCH-0002");
+    CHECK(store->peek_next_label() == "ARCH-0002");
     CHECK(store->next_label() == "ARCH-0002");
+    CHECK(store->peek_next_label() == "ARCH-0005");
     CHECK(store->next_label() == "ARCH-0005");
     CHECK(store->next_label() == "ARCH-0007");
     CHECK(store->next_label() == "ARCH-0008");

@@ -59,16 +59,17 @@ void open_repository_session(GuiState& state, bool initialise)
     refresh_shell(state);
     refresh_settings(state);
     refresh_archives(state);
-    refresh_archive_choices(state);
     refresh_history(state);
 }
 
 namespace {
 
-// What the user typed and chose in the window, carried over when a language
-// change replaces it. (What the views show is kept in GuiState as Reports;
-// the Jobs page and the header's popover show the jobs as they are.) The
-// window's position cannot be kept: GTK 4 has no way to set it.
+// What the user chose in the window, carried over when a language change
+// replaces it. (What the views show is kept in GuiState as Reports; the Jobs
+// page and the header's popover show the jobs as they are. Register Archive
+// and the comparison dialog cover the window, Settings' language row too, so
+// none is open when the language changes.) The window's position cannot be
+// kept: GTK 4 has no way to set it.
 struct Kept {
     int width = 0;
     int height = 0;
@@ -76,41 +77,11 @@ struct Kept {
     std::string page;                    // the page shown (a child of state.stack)
     bool page_shown = false;             // a narrow window shows the page, not the sidebar
     bool details_shown = false;          // ... and of Archives the details of an archive, not the list
-    std::string register_folder;
-    std::string register_label;
-    bool new_revision = false;
-    bool force_new_archive = false;
-    bool media_copy = false;
-    bool resume = false;
-    double register_fraction = 0.0;
-    bool register_finished = false;
-    std::optional<Uuid> compare_reference;
-    std::optional<Uuid> compare_copy;
-    double compare_fraction = 0.0;
-    bool compare_finished = false;
     // The runs whose result pages are open over Archives and over History.
     // (History's filter and its check of the chain are kept in GuiState.)
     std::vector<std::string> archives_results;
     std::vector<std::string> history_results;
 };
-
-std::string entry_text(GtkWidget* entry)
-{
-    return gtk_editable_get_text(GTK_EDITABLE(entry));
-}
-
-bool checked(GtkWidget* check_button)
-{
-    return gtk_check_button_get_active(GTK_CHECK_BUTTON(check_button)) != FALSE;
-}
-
-// A finished operation leaves "Done" on its progress bar; before the first
-// one the bar has no text.
-bool finished(GtkWidget* progress_bar)
-{
-    const char* text = gtk_progress_bar_get_text(GTK_PROGRESS_BAR(progress_bar));
-    return text && *text;
-}
 
 Kept keep(const GuiState& state)
 {
@@ -127,22 +98,6 @@ Kept keep(const GuiState& state)
     kept.details_shown =
         adw_navigation_split_view_get_show_content(ADW_NAVIGATION_SPLIT_VIEW(state.archives_page.split)) != FALSE;
 
-    const auto& registering = state.register_view;
-    kept.register_folder = entry_text(registering.folder);
-    kept.register_label = entry_text(registering.label);
-    kept.new_revision = checked(registering.new_revision);
-    kept.force_new_archive = checked(registering.force_new_archive);
-    kept.media_copy = checked(registering.media_copy);
-    kept.resume = checked(registering.resume);
-    kept.register_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(registering.progress));
-    kept.register_finished = finished(registering.progress);
-
-    const auto& comparing = state.compare_view;
-    kept.compare_reference = chosen_archive(comparing.reference, comparing.archive_uuids, 0);
-    kept.compare_copy = chosen_archive(comparing.copy, comparing.archive_uuids, 0);
-    kept.compare_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(comparing.progress));
-    kept.compare_finished = finished(comparing.progress);
-
     kept.archives_results = results_open(state, ResultsOver::Archives);
     kept.history_results = results_open(state, ResultsOver::History);
     return kept;
@@ -151,38 +106,11 @@ Kept keep(const GuiState& state)
 // Puts what `keep` read into the new window, after the views were refreshed.
 void restore(GuiState& state, const Kept& kept)
 {
-    const auto& text = state.text;
     if (kept.width > 0 && kept.height > 0) {
         gtk_window_set_default_size(state.window, kept.width, kept.height);
     }
     if (kept.maximized) {
         gtk_window_maximize(state.window);
-    }
-
-    auto& registering = state.register_view;
-    gtk_editable_set_text(GTK_EDITABLE(registering.folder), kept.register_folder.c_str());
-    gtk_editable_set_text(GTK_EDITABLE(registering.label), kept.register_label.c_str());
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.new_revision), kept.new_revision);
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.force_new_archive), kept.force_new_archive);
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.media_copy), kept.media_copy);
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(registering.resume), kept.resume);
-    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(registering.progress), kept.register_fraction);
-    if (kept.register_finished) {
-        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(registering.progress), text("Done").c_str());
-    }
-    if (registering.shown_report) {
-        set_text(registering.report, registering.shown_report(text));
-    }
-
-    auto& comparing = state.compare_view;
-    choose_archive(comparing.reference, comparing.archive_uuids, 0, kept.compare_reference);
-    choose_archive(comparing.copy, comparing.archive_uuids, 0, kept.compare_copy);
-    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(comparing.progress), kept.compare_fraction);
-    if (kept.compare_finished) {
-        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(comparing.progress), text("Done").c_str());
-    }
-    if (comparing.shown_report) {
-        set_text(comparing.report, comparing.shown_report(text));
     }
 
     open_results_again(state, ResultsOver::Archives, kept.archives_results);
@@ -302,7 +230,6 @@ bool open_with_upgrade_notice(GuiState& state, bool initialise)
                     refresh_shell(state);
                     refresh_settings(state);
                     refresh_archives(state);
-                    refresh_archive_choices(state);
                     refresh_history(state);
                     // Settings says once where the copy of the database is.
                     if (!state.session->notes.empty()) {
@@ -433,8 +360,10 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
 
     // The new window is built before the old one closes, so the application
     // always has a window and keeps running. A job's dialog of details
-    // belongs to the old one; the new window shows it again.
+    // belongs to the old one; the new window shows it again. Register
+    // Archive and the comparison dialog go with it.
     const auto details = close_job_details(state);
+    close_dialogs(state);
     GtkWindow* old_window = state.window;
     build_window(state);
     const auto replace_old_window = [&] {
@@ -453,16 +382,9 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
         refresh_shell(state);
         refresh_settings(state);
         refresh_archives(state);
-        refresh_archive_choices(state);
         refresh_history(state);
+        // The details of an archive, made anew, show its job as it is.
         restore(state, kept);
-        // The views show the jobs they show, as they are now; the details of
-        // an archive, made anew, show its job as it is.
-        for (const auto job : {state.register_view.job, state.compare_view.job}) {
-            if (job != 0) {
-                job_changed(state, job);
-            }
-        }
         lock_language(state);
     } catch (...) {
         // `state` already points at the new window, so it replaces the old

@@ -2,7 +2,8 @@
 // AdwNavigationSplitView puts a sidebar of the pages beside the page shown,
 // each under a header bar of its own: above the sidebar VeriArchive, the
 // folder of the open repository and Register Archive (an icon, so that the
-// title beside it is never cut); above the page its title and the jobs
+// title beside it is never cut), which opens its dialog (register_wizard.cpp);
+// above the page its title and the jobs
 // button. A narrow window (AdwBreakpoint) shows one of the two at a time, and
 // Archives its list or the details of an archive. Toasts come over the whole
 // window. Closing it while jobs run asks first.
@@ -17,26 +18,21 @@
 namespace va::gui {
 namespace {
 
-// A page of the window: the name of its child in state.stack, its icon, its
-// title (English, worded where shown), and whether the sidebar lists it, and
-// below a line. Register Archive has no row: the button above the sidebar
-// opens it.
+// A page of the window, a row of the sidebar: the name of its child in
+// state.stack, its icon, its title (English, worded where shown). Register
+// Archive and the comparison are dialogs: the button above the sidebar opens
+// the one, an archive's details the other.
 struct Page {
     const char* name;
     const char* icon;
     const char* title;
-    bool listed;
-    bool separated;
 };
 
 constexpr Page pages[] = {
-    {"archives", "package-x-generic-symbolic", "Archives", true, false},
-    {"jobs", jobs_icon, "Jobs", true, false},
-    {"history", "document-open-recent-symbolic", "History", true, false},
-    {"settings", "emblem-system-symbolic", "Settings", true, false},
-    // Until a later step of decision 0046 takes it into Archives.
-    {"compare", "view-dual-symbolic", "Compare Archives", true, true},
-    {"register", "list-add-symbolic", "Register Archive", false, false},
+    {"archives", "package-x-generic-symbolic", "Archives"},
+    {"jobs", jobs_icon, "Jobs"},
+    {"history", "document-open-recent-symbolic", "History"},
+    {"settings", "emblem-system-symbolic", "Settings"},
 };
 
 const Page* page_named(std::string_view name)
@@ -212,8 +208,7 @@ const char* page_of(GtkListBoxRow* row)
     return row ? static_cast<const char*>(g_object_get_data(G_OBJECT(row), "va-page")) : nullptr;
 }
 
-// The sidebar selects the row of the page shown; none for a page it does not
-// list (Register Archive).
+// The sidebar selects the row of the page shown.
 void select_row(GuiState& state, const char* page)
 {
     auto* sidebar = GTK_LIST_BOX(state.shell.sidebar);
@@ -237,7 +232,6 @@ GtkWidget* sidebar_row(GuiState& state, const Page& page)
 {
     GtkWidget* row = gtk_list_box_row_new();
     g_object_set_data(G_OBJECT(row), "va-page", const_cast<char*>(page.name));
-    g_object_set_data(G_OBJECT(row), "va-separated", GINT_TO_POINTER(page.separated ? 1 : 0));
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_box_append(GTK_BOX(box), gtk_image_new_from_icon_name(page.icon));
     GtkWidget* label = gtk_label_new(state.text(page.title).c_str());
@@ -266,26 +260,8 @@ GtkWidget* build_sidebar(GuiState& state)
     gtk_widget_add_css_class(sidebar, "navigation-sidebar");
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar), GTK_SELECTION_SINGLE);
     for (const auto& page : pages) {
-        if (page.listed) {
-            gtk_list_box_append(GTK_LIST_BOX(sidebar), sidebar_row(state, page));
-        }
+        gtk_list_box_append(GTK_LIST_BOX(sidebar), sidebar_row(state, page));
     }
-    // A line above the first row of the pages that later steps take into
-    // others.
-    gtk_list_box_set_header_func(GTK_LIST_BOX(sidebar),
-        +[](GtkListBoxRow* row, GtkListBoxRow* before, gpointer) {
-            const auto separated = [](GtkListBoxRow* listed) {
-                return g_object_get_data(G_OBJECT(listed), "va-separated") != nullptr;
-            };
-            if (before && separated(row) && !separated(before)) {
-                if (!gtk_list_box_row_get_header(row)) {
-                    gtk_list_box_row_set_header(row, gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-                }
-            } else if (gtk_list_box_row_get_header(row)) {
-                gtk_list_box_row_set_header(row, nullptr);
-            }
-        },
-        nullptr, nullptr);
     // A click or Enter on a row shows its page, also its own page again in
     // a narrow window, where the page takes the sidebar's place.
     g_signal_connect(sidebar, "row-activated",
@@ -323,13 +299,14 @@ GtkWidget* build_sidebar(GuiState& state)
     // An icon, named to a tooltip and a screen reader: the sidebar's title
     // beside it is never cut; Archives has Register Archive in words.
     GtkWidget* add = gtk_button_new_from_icon_name("list-add-symbolic");
+    state.shell.add = add;
     gtk_widget_add_css_class(add, "flat");
     gtk_widget_set_tooltip_text(add, text("Register Archive").c_str());
     gtk_accessible_update_property(
         GTK_ACCESSIBLE(add), GTK_ACCESSIBLE_PROPERTY_LABEL, text("Register Archive").c_str(), -1);
     g_signal_connect(add, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
-        guarded([&] { show_page(state, "register"); }, [](const Report&) {});
+        guarded([&] { open_register_wizard(state); }, [&](const Report& report) { show_message(state, report); });
     }), &state);
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), add);
 
@@ -414,21 +391,8 @@ void build_window(GuiState& state)
     const auto add_page = [&](GtkWidget* child, const char* name) {
         gtk_stack_add_titled(GTK_STACK(stack), child, name, text(page_named(name)->title).c_str());
     };
-    // The views from before decision 0046 do not scroll as a whole, only
-    // their table or report does. A window with breakpoints is as small as its
-    // size request, whatever its content asks for, so in a smaller one they
-    // scroll rather than lose their buttons. A view taller than its least
-    // still fills the page: its table or report takes the rest.
-    const auto scrolling = [](GtkWidget* view) {
-        GtkWidget* scroller = gtk_scrolled_window_new();
-        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), view);
-        return scroller;
-    };
     add_page(build_archives_page(state), "archives");
     add_page(build_jobs_page(state), "jobs");
-    add_page(scrolling(build_register_view(state)), "register");
-    add_page(scrolling(build_compare_view(state)), "compare");
     add_page(build_history_page(state), "history");
     add_page(build_settings_page(state), "settings");
 
@@ -562,7 +526,29 @@ void refresh_shell(GuiState& state)
     adw_window_title_set_subtitle(ADW_WINDOW_TITLE(state.shell.title), folder.c_str());
 }
 
-void show_toast(GuiState& state, const std::string& text, std::optional<ToastAction> action)
+namespace {
+
+// Forgets the toast that `kept` points at, as a weak pointer, and dismisses
+// it if it is still there.
+void forget_toast(AdwToast*& kept, bool dismiss)
+{
+    if (AdwToast* toast = std::exchange(kept, nullptr)) {
+        g_object_remove_weak_pointer(G_OBJECT(toast), reinterpret_cast<gpointer*>(&kept));
+        if (dismiss) {
+            adw_toast_dismiss(toast);
+        }
+    }
+}
+
+void keep_toast(AdwToast*& kept, AdwToast* toast)
+{
+    kept = toast;
+    g_object_add_weak_pointer(G_OBJECT(toast), reinterpret_cast<gpointer*>(&kept));
+}
+
+} // namespace
+
+void show_toast(GuiState& state, const std::string& text, std::optional<ToastAction> action, ToastKind kind)
 {
     if (!state.shell.toasts) {
         return;
@@ -589,17 +575,23 @@ void show_toast(GuiState& state, const std::string& text, std::optional<ToastAct
             new Pressed{&state, std::move(action->run)},
             +[](gpointer data, GClosure*) { delete static_cast<Pressed*>(data); }, GConnectFlags{});
     }
+    // That a job started gives way to whatever comes next: the end of a job
+    // says more than that it started. Any other toast waits behind the new
+    // one, which shows at once, and shows again after it.
+    forget_toast(state.shell.started, true);
+    adw_toast_set_priority(toast, ADW_TOAST_PRIORITY_HIGH);
     // Kept until it goes, for dismiss_toast; the overlay holds it.
-    if (state.shell.toast) {
-        g_object_remove_weak_pointer(G_OBJECT(state.shell.toast), reinterpret_cast<gpointer*>(&state.shell.toast));
+    forget_toast(state.shell.toast, false);
+    keep_toast(state.shell.toast, toast);
+    if (kind == ToastKind::Started) {
+        keep_toast(state.shell.started, toast);
     }
-    state.shell.toast = toast;
-    g_object_add_weak_pointer(G_OBJECT(toast), reinterpret_cast<gpointer*>(&state.shell.toast));
     adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(state.shell.toasts), toast);
 }
 
 void dismiss_toast(GuiState& state)
 {
+    forget_toast(state.shell.started, true);
     if (state.shell.toast) {
         adw_toast_dismiss(state.shell.toast);
     }

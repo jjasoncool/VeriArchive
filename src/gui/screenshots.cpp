@@ -1,8 +1,9 @@
 // Documentation screenshots (tools/screenshots/README.md). With
 // VERIARCHIVE_GUI_SCREENSHOTS=<folder> set, the GUI tours its views once the
 // window is shown, as a reader of the user guide would: it fills in forms,
-// starts a verification and a comparison through the buttons' own handlers,
-// saves each view as a PNG in the folder, and quits.
+// opens Register Archive and the comparison dialog, starts a verification and
+// a comparison through the buttons' own handlers, saves each view as a PNG in
+// the folder, and quits.
 //
 // The archives and the folder come from the environment:
 //   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: selected in Archives, verified by its
@@ -13,7 +14,7 @@
 //                                     earlier version registered archives: its details shown in
 //                                     Archives with the menu of FULL verify open, which offers
 //                                     "FULL verify, and add chunk hashes"
-//   VERIARCHIVE_SCREENSHOT_FOLDER     archive A's folder: typed into Register, verified
+//   VERIARCHIVE_SCREENSHOT_FOLDER     archive A's folder: typed into Register Archive, verified
 //
 // GTK renders the pictures itself from what the window drew, so they show only
 // the window, never other windows on the desktop, and need no screen access.
@@ -21,7 +22,9 @@
 // The pictures are published, and the sample archives are folders on a real
 // volume, whose label, device model and capacity Archives would show. So
 // while this mode runs, the views show a fixed sample identity instead
-// (displayed_identity; main turns it on together with the mode).
+// (displayed_identity; main turns it on together with the mode), and Register
+// Archive lists a fixed list of sample volumes (sample_volumes), never this
+// computer's.
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -32,6 +35,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -72,31 +76,17 @@ std::string environment(const char* name)
     return value;
 }
 
-std::string text_of(GtkWidget* text_view)
-{
-    GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
-    GtkTextIter start;
-    GtkTextIter end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    gchar* text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-    std::string result = text;
-    g_free(text);
-    return result;
-}
-
 // Clicks a button as the user would: its "clicked" handler runs now.
 void click(GtkWidget* button)
 {
     g_signal_emit_by_name(button, "clicked");
 }
 
-// Chooses `archive` in a drop-down whose item `offset + i` is uuids[i].
-void choose(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset, const Uuid& archive)
+// The archive chosen in a combo row (AdwComboRow) whose item i is uuids[i].
+std::optional<Uuid> chosen(GtkWidget* row, const std::vector<Uuid>& uuids)
 {
-    choose_archive(drop_down, uuids, offset, archive);
-    if (chosen_archive(drop_down, uuids, offset) != archive) {
-        throw std::runtime_error("archive " + archive + " is not in the repository's archive list");
-    }
+    const auto selected = adw_combo_row_get_selected(ADW_COMBO_ROW(row));
+    return selected < uuids.size() ? std::optional(uuids[selected]) : std::nullopt;
 }
 
 // The first popover inside `widget`, at any depth.
@@ -222,19 +212,60 @@ public:
                 {}},
             {"03-register.png",
                 [this] {
-                    // How archive A was registered: its folder and label, not started.
-                    gtk_editable_set_text(GTK_EDITABLE(state_.register_view.folder), folder_.c_str());
-                    gtk_editable_set_text(GTK_EDITABLE(state_.register_view.label), label_of(reference_).c_str());
-                    show("register");
+                    // Register Archive as the sidebar's + opens it, archive
+                    // A's folder typed in on its first page, then Next,
+                    // which reads it off the window's thread.
+                    show("archives");
+                    select(reference_);
+                    click(state_.shell.add);
+                    auto& wizard = state_.register_wizard;
+                    if (!wizard.dialog || !wizard.folder || !wizard.source_next) {
+                        throw std::runtime_error("Register Archive did not open");
+                    }
+                    gtk_editable_set_text(GTK_EDITABLE(wizard.folder), folder_.c_str());
+                    click(wizard.source_next);
                 },
-                {}},
+                {},
+                // Its Options page for A's folder with Create a new revision
+                // of A on, as its details' Create a new revision... opens it
+                // (not started): ready for Next. (A typed label needs a
+                // folder that no sample archive holds.)
+                [this] {
+                    const auto& wizard = state_.register_wizard;
+                    if (!wizard.dialog) {
+                        throw std::runtime_error("Register Archive closed");
+                    }
+                    if (wizard.reading_source) {
+                        return false;
+                    }
+                    if (!wizard.options_page) {
+                        const char* problem =
+                            wizard.problem_words ? gtk_label_get_text(GTK_LABEL(wizard.problem_words)) : "";
+                        throw std::runtime_error(std::string("Register Archive did not offer its options: ") + problem);
+                    }
+                    return true;
+                },
+                [this] {
+                    auto& wizard = state_.register_wizard;
+                    // A's folder is A's root: a new revision of A applies.
+                    if (!gtk_widget_get_visible(wizard.new_revision)) {
+                        throw std::runtime_error("Register Archive does not offer a new revision of archive " +
+                                                 reference_);
+                    }
+                    adw_switch_row_set_active(ADW_SWITCH_ROW(wizard.new_revision), TRUE);
+                    if (!wizard.options_next || !gtk_widget_get_sensitive(wizard.options_next)) {
+                        throw std::runtime_error("Register Archive does not offer Next with a new revision of " +
+                                                 label_of(reference_));
+                    }
+                }},
             {"04-verify.png",
                 [this] {
                     // A FULL verification of archive A by its folder, as
                     // "Verify a folder or volume..." in its details starts
                     // one, rather than by its uuid: by uuid the verification
                     // looks through every attached volume, the folder needs
-                    // only its own.
+                    // only its own. Register Archive goes first.
+                    close_dialogs(state_);
                     show("archives");
                     select(reference_);
                     verify_root(state_, reference_, path_from_utf8(folder_));
@@ -261,18 +292,39 @@ public:
                     open_popover(page.verify_menu);
                     gtk_popover_popup(GTK_POPOVER(popover_));
                 }},
+            // The comparison dialog with A and its copy B chosen, as Compare...
+            // on B's row under Copies in A's details opens it; not started.
             {"06-compare.png",
                 [this] {
-                    show("compare");
-                    choose(state_.compare_view.reference, state_.compare_view.archive_uuids, 0, reference_);
-                    choose(state_.compare_view.copy, state_.compare_view.archive_uuids, 0, copy_);
-                    start(state_.compare_view.start, state_.compare_view.report, "comparison");
+                    show("archives");
+                    select(reference_);
+                    compare_with(state_, reference_, copy_);
+                    const auto& dialog = state_.compare_dialog;
+                    if (!dialog.dialog) {
+                        throw std::runtime_error("the comparison dialog did not open");
+                    }
+                    if (chosen(dialog.reference, dialog.references) != reference_ ||
+                        chosen(dialog.copy, dialog.copies) != copy_) {
+                        throw std::runtime_error("the comparison dialog does not have A and B chosen");
+                    }
+                },
+                {}},
+            // Then Compare (no picture): the report in the job's details.
+            {"",
+                [this] {
+                    click(state_.compare_dialog.start);
+                    if (!state_.jobs.active() || state_.compare_dialog.dialog) {
+                        throw std::runtime_error("the comparison did not start");
+                    }
+                    comparison_ = state_.jobs.shown().back().id;
                 },
                 [this] {
-                    expect(state_.compare_view.shown_report, "ARCHIVES ", "comparison");
+                    const auto* job = state_.jobs.find(comparison_);
+                    const auto report = job ? job->report : Report{};
+                    expect(report, "ARCHIVES ", "comparison");
                     // Each archive's line says when its compared revision was
                     // recorded (decision 0041).
-                    const auto english = state_.compare_view.shown_report(app::Text());
+                    const auto english = report(app::Text());
                     for (const std::string archive : {"\nA (reference): ", "\nB (copy): "}) {
                         const auto start = english.find(archive);
                         const auto line = start == std::string::npos
@@ -351,7 +403,9 @@ public:
         try {
             return advance();
         } catch (const std::exception& error) {
-            g_printerr("VeriArchive screenshots: %s: %s\n", stops_[next_].file.c_str(), error.what());
+            const auto& file = stops_[next_].file;
+            g_printerr("VeriArchive screenshots: %s: %s\n", file.empty() ? "(between pictures)" : file.c_str(),
+                error.what());
             state_.exit_status = 1;
             g_application_quit(G_APPLICATION(state_.application));
             return false;
@@ -359,16 +413,21 @@ public:
     }
 
 private:
-    enum class Phase { Act, Job, Settle };
+    enum class Phase { Act, Ready, Job, Settle };
 
     // One picture: `act` brings the view into shape, then the picture is
     // taken. When `act` starts an operation, `after_job` is set: the tour
     // waits for the operation, and after_job checks that it ended as the
-    // picture needs.
+    // picture needs. When `act` starts a read of a dialog, `ready` is set:
+    // the tour waits until it says the dialog shows what the picture needs,
+    // then `after_ready` finishes the view. A stop without a file takes no
+    // picture.
     struct Stop {
         std::string file;
         std::function<void()> act;
         std::function<void()> after_job;
+        std::function<bool()> ready = {};
+        std::function<void()> after_ready = {};
     };
 
     bool advance()
@@ -378,6 +437,25 @@ private:
         switch (phase_) {
         case Phase::Act:
             stop.act();
+            since_ = now;
+            if (stop.ready) {
+                phase_ = Phase::Ready;
+            } else if (stop.after_job) {
+                phase_ = Phase::Job;
+            } else {
+                begin_settling(now);
+            }
+            return true;
+        case Phase::Ready:
+            if (!stop.ready()) {
+                if (now - since_ > draw_timeout) {
+                    throw std::runtime_error("the dialog did not read what it shows in time");
+                }
+                return true;
+            }
+            if (stop.after_ready) {
+                stop.after_ready();
+            }
             since_ = now;
             if (stop.after_job) {
                 phase_ = Phase::Job;
@@ -403,7 +481,9 @@ private:
                 }
                 return true;
             }
-            take(stop.file);
+            if (!stop.file.empty()) {
+                take(stop.file);
+            }
             // The next picture shows neither the popover of this one nor
             // its toast.
             close_popover();
@@ -464,15 +544,6 @@ private:
         }
     }
 
-    // Starts an operation with its button; it must then be running.
-    void start(GtkWidget* button, GtkWidget* report, const char* what)
-    {
-        click(button);
-        if (!state_.jobs.active()) {
-            throw std::runtime_error(std::string("the ") + what + " did not start: " + text_of(report));
-        }
-    }
-
     // The report shown after the operation, worded in English, must begin
     // with `beginning`; anything else (an error) would make a wrong picture.
     static void expect(const Report& report, const std::string& beginning, const char* what)
@@ -522,6 +593,7 @@ private:
     Clock::time_point since_{};
     gint64 frame_before_ = 0;
     std::uint64_t job_ = 0;          // the verification of 04-verify
+    std::uint64_t comparison_ = 0;   // the comparison after 06-compare
     GtkWidget* popover_ = nullptr;   // the popover drawn over the picture (a reference of its own)
 };
 

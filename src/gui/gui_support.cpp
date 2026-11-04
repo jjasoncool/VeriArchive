@@ -4,6 +4,7 @@
 #include "app/plain_words.h"
 #include "app/progress_estimate.h"
 #include "app/typed_path.h"
+#include "common/utf8.h"
 #include "gui/ended_notification.h"
 #include "gui/window_words.h"
 #include "platform/platform_services.h"
@@ -161,10 +162,92 @@ void choose_archive(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint 
     }
 }
 
-void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title)
+namespace {
+
+GtkWidget* item_label()
+{
+    GtkWidget* label = gtk_label_new(nullptr);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 40);
+    return label;
+}
+
+const char* item_words(GtkListItem* item)
+{
+    auto* words = GTK_STRING_OBJECT(gtk_list_item_get_item(item));
+    return words ? gtk_string_object_get_string(words) : "";
+}
+
+// The check mark of an item of the list, as the row's own list shows it: on
+// the item chosen; kept in its place, unseen, on the others.
+void show_check(GtkListItem* item, GtkWidget* combo_row)
+{
+    GtkWidget* check = gtk_widget_get_last_child(gtk_list_item_get_child(item));
+    const bool chosen = gtk_list_item_get_position(item) == adw_combo_row_get_selected(ADW_COMBO_ROW(combo_row));
+    gtk_widget_set_opacity(check, chosen ? 1.0 : 0.0);
+}
+
+} // namespace
+
+void show_whole_items(GtkWidget* combo_row)
+{
+    // The item chosen, on the row.
+    GtkListItemFactory* chosen = gtk_signal_list_item_factory_new();
+    g_signal_connect(chosen, "setup", G_CALLBACK(+[](GtkSignalListItemFactory*, GObject* item, gpointer) {
+        gtk_list_item_set_child(GTK_LIST_ITEM(item), item_label());
+    }), nullptr);
+    g_signal_connect(chosen, "bind", G_CALLBACK(+[](GtkSignalListItemFactory*, GObject* item, gpointer) {
+        auto* listed = GTK_LIST_ITEM(item);
+        gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(listed)), item_words(listed));
+    }), nullptr);
+    adw_combo_row_set_factory(ADW_COMBO_ROW(combo_row), chosen);
+    g_object_unref(chosen);
+
+    // The items of its list, each with the check mark of the one chosen,
+    // which follows the choice while the item shows. The row owns the
+    // factory, and its list unbinds the items before the row goes.
+    GtkListItemFactory* list = gtk_signal_list_item_factory_new();
+    g_signal_connect(list, "setup", G_CALLBACK(+[](GtkSignalListItemFactory*, GObject* item, gpointer) {
+        GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        GtkWidget* label = item_label();
+        gtk_widget_set_hexpand(label, TRUE);
+        gtk_box_append(GTK_BOX(box), label);
+        gtk_box_append(GTK_BOX(box), gtk_image_new_from_icon_name("object-select-symbolic"));
+        gtk_list_item_set_child(GTK_LIST_ITEM(item), box);
+    }), nullptr);
+    g_signal_connect(list, "bind", G_CALLBACK(+[](GtkSignalListItemFactory*, GObject* item, gpointer row) {
+        auto* listed = GTK_LIST_ITEM(item);
+        gtk_label_set_text(GTK_LABEL(gtk_widget_get_first_child(gtk_list_item_get_child(listed))), item_words(listed));
+        show_check(listed, GTK_WIDGET(row));
+        const auto handler = g_signal_connect(row, "notify::selected",
+            G_CALLBACK(+[](GObject* changed, GParamSpec*, gpointer data) {
+                show_check(GTK_LIST_ITEM(data), GTK_WIDGET(changed));
+            }),
+            item);
+        g_object_set_data(item, "va-selected-handler", GSIZE_TO_POINTER(handler));
+    }), combo_row);
+    g_signal_connect(list, "unbind", G_CALLBACK(+[](GtkSignalListItemFactory*, GObject* item, gpointer row) {
+        const auto handler = GPOINTER_TO_SIZE(g_object_steal_data(item, "va-selected-handler"));
+        if (handler != 0 && g_signal_handler_is_connected(row, handler)) {
+            g_signal_handler_disconnect(row, handler);
+        }
+    }), combo_row);
+    adw_combo_row_set_list_factory(ADW_COMBO_ROW(combo_row), list);
+    g_object_unref(list);
+}
+
+void choose_folder(GtkWindow* parent, GtkWidget* entry, const std::string& title,
+    const std::filesystem::path& initial)
 {
     GtkFileDialog* dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, title.c_str());
+    if (!initial.empty()) {
+        // GLib's file names are UTF-8 on Windows; on Linux the path's bytes.
+        GFile* folder = g_file_new_for_path(path_to_utf8(initial).c_str());
+        gtk_file_dialog_set_initial_folder(dialog, folder);
+        g_object_unref(folder);
+    }
     // The dialog holds its own reference to the entry, so the answer can be
     // written even if the window closed meanwhile (the entry is then unused).
     gtk_file_dialog_select_folder(dialog, parent, nullptr,

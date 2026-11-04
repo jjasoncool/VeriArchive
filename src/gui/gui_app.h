@@ -2,10 +2,10 @@
 // The GUI's state, its window (decision 0046: a sidebar of pages beside the
 // page shown, the header's jobs button) and its pages: Archives (the list of
 // archives beside the details of the one selected, where verifications start,
-// and the unfinished operations above them), Register Archive, History (the
-// runs of every archive) and Settings of HANDOFF §B17, Compare Archives
-// (decision 0020) and Jobs (decision 0045); and the result page of a run,
-// which Archives and History open over themselves.
+// and the unfinished operations above them), History (the runs of every
+// archive) and Settings of HANDOFF §B17, and Jobs (decision 0045); the result
+// page of a run, which Archives and History open over themselves; and the
+// dialogs of Register Archive and of a comparison (decision 0020).
 #include "app/adding_chunk_hashes.h"
 #include "app/refusal_in_window.h"
 #include "app/unfinished_operations.h"
@@ -17,12 +17,16 @@
 #include "gui/history_rows.h"
 #include "gui/job_words.h"
 #include "gui/jobs.h"
+#include "gui/register_choices.h"
 
+#include <atomic>
 #include <chrono>
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <list>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <thread>
@@ -62,12 +66,50 @@ struct OperationsPoll {
     }
 };
 
+// The reads that the window's dialogs make off its thread (register_wizard.cpp):
+// the attached volumes, which a slow or sleeping device may hold up, and the
+// folder or volume chosen. Each runs on a thread of its own and hands its
+// result to the main thread; a dialog closed meanwhile drops it. Kept across
+// windows; the program waits for the reads still in flight before it ends.
+struct OffThreadReads {
+    struct Read {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> finished;
+    };
+    std::list<Read> reads;
+
+    // Joins the reads that have finished; the others go on (main thread only).
+    void prune()
+    {
+        for (auto read = reads.begin(); read != reads.end();) {
+            if (read->finished->load()) {
+                read->thread.join();
+                read = reads.erase(read);
+            } else {
+                ++read;
+            }
+        }
+    }
+
+    OffThreadReads() = default;
+    OffThreadReads(const OffThreadReads&) = delete;
+    OffThreadReads& operator=(const OffThreadReads&) = delete;
+    ~OffThreadReads()
+    {
+        for (auto& read : reads) {
+            if (read.thread.joinable()) {
+                read.thread.join();
+            }
+        }
+    }
+};
+
 struct GuiState {
     GtkApplication* application = nullptr;
     GtkWindow* window = nullptr;           // an AdwApplicationWindow
     // The pages, each a child named as the sidebar names it (archives, jobs,
-    // history, settings, register, verify, compare): the one shown is the
-    // window's content, whichever way it was chosen.
+    // history, settings): the one shown is the window's content, whichever
+    // way it was chosen.
     GtkWidget* stack = nullptr;
     app::Text text;                        // interface language (decision 0017)
     HostInfo host;
@@ -81,6 +123,7 @@ struct GuiState {
     // unfinished operation (decisions 0025, 0026, 0033).
     Job job;
     OperationsPoll operations;             // every unfinished operation, for Archives
+    OffThreadReads reads;                  // what Register Archive reads off the window's thread
     int exit_status = 0;                   // 1 when an unexpected error cut the smoke test, the start or the screenshots short
     // Set from VERIARCHIVE_GUI_SCREENSHOTS: take the documentation screenshots
     // into this folder, then quit (screenshots.cpp).
@@ -123,13 +166,15 @@ struct GuiState {
     // The window around the pages (decision 0046).
     struct {
         GtkWidget* split = nullptr;        // AdwNavigationSplitView: the sidebar beside the page shown
-        GtkWidget* sidebar = nullptr;      // GtkListBox, a row for each page but Register Archive
+        GtkWidget* sidebar = nullptr;      // GtkListBox, a row for each page
+        GtkWidget* add = nullptr;          // Register Archive, the button above the sidebar
         GtkWidget* title = nullptr;        // AdwWindowTitle above the sidebar: VeriArchive, the repository's folder
         GtkWidget* content = nullptr;      // AdwNavigationPage of the page shown, titled as it
         GtkWidget* toasts = nullptr;       // AdwToastOverlay over the whole window
         GtkWidget* jobs_badge = nullptr;   // the Jobs row's count of jobs that run or wait
         AdwBreakpoint* narrow = nullptr;   // the window's breakpoint, below which it shows one pane at a time
-        AdwToast* toast = nullptr;         // the last toast while it is shown (a weak pointer: nothing once gone)
+        AdwToast* toast = nullptr;         // the last toast while it is shown or waits (a weak pointer: nothing once gone)
+        AdwToast* started = nullptr;       // the last toast that a job started, which the next toast replaces (weak too)
         bool asking_to_close = false;      // the question before the window closes is shown
     } shell;
 
@@ -215,33 +260,74 @@ struct GuiState {
         bool filling = false;                  // the list is being filled: a row selected is not the operator's
     } archives_page;
 
-    struct {
-        GtkWidget* folder = nullptr;
-        GtkWidget* label = nullptr;
-        GtkWidget* new_revision = nullptr;
-        GtkWidget* force_new_archive = nullptr;
-        GtkWidget* media_copy = nullptr;
-        GtkWidget* resume = nullptr;
-        GtkWidget* start = nullptr;
-        GtkWidget* cancel = nullptr;
-        GtkWidget* alert = nullptr;        // a device alert, above the progress (decision 0044)
-        GtkWidget* progress = nullptr;
-        GtkWidget* report = nullptr;
-        Report shown_report;
-        std::uint64_t job = 0;             // the job the view shows: the last it started (0: none)
-    } register_view;
+    // Register Archive (decision 0046): an AdwDialog of three pages in an
+    // AdwNavigationView: Choose the source (the attached volumes, read off
+    // the window's thread, and a folder chosen or typed), Options (those that
+    // apply to the source, as the read of it found them) and Confirm (what
+    // the registration will do), whose Start registration starts its job
+    // (decision 0045). Its widgets while it is open; nothing otherwise.
+    struct RegisterWizard {
+        GtkWidget* dialog = nullptr;            // AdwDialog
+        GtkWidget* navigation = nullptr;        // AdwNavigationView of its pages
+        GtkWidget* source_page = nullptr;       // AdwNavigationPage: Choose the source
+        GtkWidget* options_page = nullptr;      // ... Options, once the source was read
+        GtkWidget* confirm_page = nullptr;      // ... Confirm
+        // Choose the source.
+        GtkWidget* volumes = nullptr;           // AdwPreferencesGroup of the attached volumes
+        std::vector<GtkWidget*> volume_rows;    // its rows, as it shows them now
+        std::vector<GtkWidget*> radios;         // the radio of each volume that can be chosen whole
+        std::vector<std::string> radio_roots;   // the root that each of them chooses
+        GtkWidget* folder = nullptr;            // AdwEntryRow: the folder or volume chosen, or typed
+        GtkWidget* problem = nullptr;           // why the source cannot be registered, hidden while none
+        GtkWidget* problem_words = nullptr;
+        GtkWidget* source_next = nullptr;       // Next
+        GtkWidget* reading = nullptr;           // GtkSpinner beside it while the source is read
+        // Options.
+        GtkWidget* label = nullptr;             // AdwEntryRow
+        GtkWidget* label_group = nullptr;       // its group, with the line about the next label
+        GtkWidget* new_revision = nullptr;      // AdwSwitchRow
+        GtkWidget* another_archive = nullptr;   // AdwSwitchRow: --force-new-archive
+        GtkWidget* resume = nullptr;            // AdwActionRow, no switch: the resume is the only way on there
+        GtkWidget* media_copy = nullptr;        // AdwSwitchRow
+        GtkWidget* copy_of = nullptr;           // AdwComboRow: not a copy, then the archives (copy_of_uuids)
+        GtkWidget* blocked = nullptr;           // why Next is not offered yet, hidden while none
+        GtkWidget* blocked_words = nullptr;
+        GtkWidget* options_next = nullptr;      // Next
+        std::vector<Uuid> copy_of_uuids;        // item i + 1 of copy_of
+        // What the reads found: the archives' names, as Archives names them;
+        // the source chosen, which options apply to it, and what was chosen.
+        std::vector<ArchiveName> names;
+        std::optional<ChosenSource> source;
+        SourceOptions options;
+        OptionsChosen chosen;
+        // Opened by Create a new revision... of this archive: Create a new
+        // revision on, once a source where it is registered was read; until
+        // then, any other source is refused, saying so.
+        std::optional<Uuid> preset_archive;
+        // ... and the root its latest revision recorded, read once the
+        // attached volumes were (where they hold the archive, if they do).
+        std::optional<std::string> preset_root;
+        bool reading_source = false;            // a read of the source is in flight
+        bool filling = false;                   // a change of the code's, not the operator's
+        std::uint64_t opened = 0;               // which opening of the dialog this is, whose reads it takes
+    } register_wizard;
+    std::uint64_t wizards_opened = 0;           // the openings of Register Archive so far
 
-    struct {
-        GtkWidget* reference = nullptr;    // drop-down: archive A, the reference
-        GtkWidget* copy = nullptr;         // drop-down: archive B, the copy to check
-        GtkWidget* start = nullptr;
-        GtkWidget* cancel = nullptr;
-        GtkWidget* progress = nullptr;
-        GtkWidget* report = nullptr;
-        Report shown_report;
-        std::uint64_t job = 0;             // the job the view shows: the last it started (0: none)
-        std::vector<Uuid> archive_uuids;   // index i of both drop-downs
-    } compare_view;
+    // The comparison dialog (decisions 0020, 0046): the reference archive
+    // (A) and the copy to check (B), the copies of A first in B's list, and
+    // why the two cannot be compared as chosen; Compare starts its job. Its
+    // widgets while it is open; nothing otherwise.
+    struct CompareDialog {
+        GtkWidget* dialog = nullptr;            // AdwDialog
+        GtkWidget* reference = nullptr;         // AdwComboRow: A
+        GtkWidget* copy = nullptr;              // AdwComboRow: B
+        GtkWidget* refusal = nullptr;           // why A and B cannot be compared, hidden while they can
+        GtkWidget* refusal_words = nullptr;
+        GtkWidget* start = nullptr;             // Compare
+        std::vector<Uuid> references;           // item i of A
+        std::vector<Uuid> copies;               // item i of B
+        bool filling = false;                   // a change of the code's, not the operator's
+    } compare_dialog;
 
     // The Jobs page and the header's jobs button (decisions 0045, 0046): a
     // row for each job in the group it is in, the button's popover with the
@@ -305,8 +391,6 @@ struct GuiState {
 // Archives and History are each an AdwNavigationView (their `navigation`)
 // whose first page is the page itself, over which a result page opens.
 GtkWidget* build_archives_page(GuiState& state);
-GtkWidget* build_register_view(GuiState& state);
-GtkWidget* build_compare_view(GuiState& state);
 GtkWidget* build_history_page(GuiState& state);
 GtkWidget* build_settings_page(GuiState& state);
 GtkWidget* build_jobs_page(GuiState& state);
@@ -349,15 +433,21 @@ void set_while_narrow(GuiState& state, GtkWidget* object, const char* property, 
 void refresh_shell(GuiState& state);
 
 // A short confirmation at the bottom of the window (AdwToast), with a button
-// that runs `action` when there is one; it goes by itself.
+// that runs `action` when there is one; it goes by itself. It shows at once:
+// a toast shown before waits behind it, and shows again after it, so the
+// result of a verification (FAILED, say) is never lost to a later toast.
+// Only a toast that says a job started (ToastKind::Started) gives way: the
+// next toast takes its place, as the end of the job says more.
 struct ToastAction {
     std::string label;
     std::function<void(GuiState&)> run;
 };
-void show_toast(GuiState& state, const std::string& text, std::optional<ToastAction> action = std::nullopt);
+enum class ToastKind { Lasting, Started };
+void show_toast(GuiState& state, const std::string& text, std::optional<ToastAction> action = std::nullopt,
+    ToastKind kind = ToastKind::Lasting);
 
-// Takes the last toast away at once (the screenshot tour, before its next
-// picture).
+// Takes the last toast, and that of a job started, away at once (the
+// screenshot tour, before its next picture).
 void dismiss_toast(GuiState& state);
 
 // What the window does once a job changed (Jobs::on_change; 0: jobs were
@@ -395,9 +485,9 @@ bool refused_while_a_job_reads(GuiState& state, const std::string& root, const U
 // Reload data shown by the views (after the repository changes).
 // refresh_archives reads the archives again and shows them, the details of
 // the one selected, and the unfinished operations of the latest read; the
-// reads of those run while Archives is shown (watch_operations).
+// reads of those run while Archives is shown (watch_operations). An open
+// comparison dialog lists the archives read, keeping A and B where it can.
 void refresh_archives(GuiState& state);
-void refresh_archive_choices(GuiState& state);
 void refresh_settings(GuiState& state);
 
 // ---- Archives (archives_page.cpp, archive_detail.cpp) -----------------------
@@ -546,26 +636,26 @@ void show_history_error(GuiState& state, Report report);
 // operations (decision 0022, point 7): continues it exactly as its
 // command-line resume does, with the request that app::verification_resume
 // and app::registration_resume make, as they make it: no choice of the views
-// takes part. It runs as a job (decision 0045), shown where an operation of
-// its kind started in the window shows it: a verification in its archive's
-// details in Archives, a registration in Register Archive, which it brings
-// into view. The caller has made sure that a repository is open and that no
-// job of the window reads the operation (refused_while_a_job_reads).
-// `confirmed`: the operator chose Resume in the question that a resume of a
-// registration an older version left asks first (ask_before_resuming), as
-// `register <root> --resume --confirm`; a resume of such a registration that
-// is not confirmed asks it in Register Archive.
+// takes part. It runs as a job (decision 0045): a verification shown in its
+// archive's details in Archives, which it brings into view; a registration in
+// Jobs, a toast saying that it started and, once it ended, its result. The
+// caller has made sure that a repository is open and that no job of the
+// window reads the operation (refused_while_a_job_reads). `confirmed`: the
+// operator chose Resume in the question that a resume of a registration an
+// older version left asks first (ask_before_resuming), as `register <root>
+// --resume --confirm`; a resume of such a registration that is not confirmed
+// asks it once its job ended.
 void resume_verification(GuiState& state, const app::UnfinishedOperation& verification);
 void resume_registration(GuiState& state, const app::UnfinishedOperation& registration, bool confirmed = false);
 
 // Asks, with Cancel as the default, before a registration that an older
 // version of VeriArchive left is resumed, as that version may still run it
 // (decision 0022, point 7; app::older_version_resume_warning): Resume under
-// Unfinished operations on such a registration asks it, and so does a resume
-// of one in Register Archive, which its own resume box or a stopped row's
-// Resume starts, when the resume says it waits for the operator's word
-// (RegisterFailure::older_version). `resume` runs only once the operator
-// chose Resume; Cancel changes nothing.
+// Unfinished operations on such a registration asks it, and so does the job
+// of a resume of one, which Register Archive's Resume the interrupted
+// registration or a stopped row's Resume starts, when the resume says it
+// waits for the operator's word (RegisterFailure::older_version). `resume`
+// runs only once the operator chose Resume; Cancel changes nothing.
 void ask_before_resuming(GuiState& state, const std::string& label, const std::string& root,
     std::function<void(GuiState&)> resume);
 
@@ -607,15 +697,38 @@ void resume_in_details(GuiState& state, const Uuid& archive, const std::string& 
 // verification that Archives starts asks it first.
 bool refused_while_the_archive_has_a_job(GuiState& state, const Uuid& archive, const std::string& root);
 
-// ---- Other pages, preset from an archive's details --------------------------
+// ---- Register Archive (register_wizard.cpp) and the comparison (compare_dialog.cpp)
 
-// Compare Archives with `reference` as A and `copy` as B, where it lists
-// them; without `copy`, B is another archive than A.
+// Opens Register Archive on its first page, Choose the source: the sidebar's
+// + button, Register Archive in Archives, and Register the first archive. It
+// reads the attached volumes off the window's thread: in the screenshot
+// mode, a fixed sample list instead (sample_volumes). Says in a message why
+// it does not open: no repository is open.
+void open_register_wizard(GuiState& state);
+
+// Create a new revision... of an archive's details: Register Archive for
+// `archive`, once the attached volumes were read, with the folder or volume
+// where they hold it now (drive letters follow the order in which devices
+// are attached), or else `root`, the one its latest revision recorded, read
+// as Next reads it; then on its Options page with Create a new revision on,
+// not started. On its first page, saying why, where that root cannot be
+// registered now or another archive is there.
+void register_new_revision(GuiState& state, const Uuid& archive, const std::string& root);
+
+// The comparison dialog with `reference` as A and `copy` as B, where the
+// repository lists them; without `copy`, B is a copy of A, or another
+// archive. Not started: Compare starts its job. Says in a message why it does
+// not open: no repository is open.
 void compare_with(GuiState& state, const Uuid& reference, const std::optional<Uuid>& copy);
 
-// Register Archive with the folder or volume `root` and "New revision of the
-// archive registered at this folder or volume" ticked, not started.
-void register_new_revision(GuiState& state, const std::string& root);
+// An open comparison dialog lists the archives that Archives read last,
+// keeping A and B where they are listed.
+void refresh_compare_dialog(GuiState& state);
+
+// Closes Register Archive and the comparison dialog at once, whatever they
+// show (a language change replaces the window they belong to; the screenshot
+// tour, before its next picture).
+void close_dialogs(GuiState& state);
 
 // History with its filter set to `archive`, its runs listed.
 void show_history_of(GuiState& state, const Uuid& archive);

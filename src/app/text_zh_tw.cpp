@@ -514,7 +514,8 @@ constexpr CatalogEntry entries[] = {
 
     // Graphical interface
     // src/gui/window.cpp: the sidebar's pages and the header above it
-    // (decision 0046); Register Archive is the button above the sidebar.
+    // (decision 0046); Register Archive is the button above the sidebar, and
+    // the title of its dialog; Compare Archives the comparison dialog's.
     {"Archives", "封存"},
     {"History", "歷程"},
     {"Register Archive", "註冊封存"},
@@ -898,7 +899,9 @@ constexpr CatalogEntry entries[] = {
     {"Stop them and close", "停止並關閉"},
     {"A job of this window is working on this operation. Stop it in Jobs first, or wait for it to end.",
         "這個視窗有一個工作正在處理這個作業。請先到「工作」停止它，或等它結束。"},
-    // src/gui/register_view.cpp
+    // src/gui/register_wizard.cpp, src/gui/register_choices.cpp: Register
+    // Archive (decision 0046), a dialog of three pages, and the report of its
+    // job.
     {"{}, {}, {}, {} hashed", "{}、{}、{}，已計算雜湊 {}", Match::FormatOnly},
     {"Manifest: {}", "清單檔：{}"},
     {"Unreadable at registration (recorded without hashes, never reported as verified):",
@@ -912,8 +915,6 @@ constexpr CatalogEntry entries[] = {
         "清單檔已無法取回的版次 {} 已從索引移除；它的驗證紀錄仍保留在歷程中。", Match::FormatOnly},
     {"Another step of abandoning is running.", "已有另一個放棄步驟正在執行。"},
     {"Open a repository first (Settings).", "請先開啟儲存庫（見「設定」）。"},
-    {"Choose the folder or volume to register.", "請選擇要註冊的資料夾或磁碟區。"},
-    {"Registering {} ...", "正在註冊 {}……"},
     {"Cannot open the repository: {}", "無法開啟儲存庫：{}"},
     {"Not registered: {}", "未能註冊：{}"},
     {"Done", "完成"},
@@ -922,19 +923,147 @@ constexpr CatalogEntry entries[] = {
         "Nothing is written to the archive unless you ask for a media copy.",
         "註冊會讀取資料夾或磁碟區中的每個檔案，並記錄其指紋（BLAKE3 與 SHA-256）作為基準，"
         "供日後驗證比對。除非您要求寫入媒體副本，否則不會對封存寫入任何內容。"},
-    {"Archive folder or volume root", "封存資料夾或磁碟區根目錄"},
     {"Choose...", "選擇…"},
     {"Choose the archive folder or volume", "選擇封存資料夾或磁碟區"},
-    {"Label (optional, e.g. ARCH-0012)", "標籤（選填，例如 ARCH-0012）"},
-    {"New revision of the archive registered at this folder or volume",
-        "為此資料夾或磁碟區已註冊的封存建立新版次"},
     {"Register as a separate archive even though this folder or volume is registered",
         "即使此資料夾或磁碟區已註冊，仍註冊為另一個封存"},
     {"Also write a manifest copy to the media (.veriarchive)",
         "同時將清單檔寫入媒體作為媒體副本（.veriarchive）"},
-    {"Resume an interrupted registration of this folder or volume", "繼續此資料夾或磁碟區中斷的註冊"},
-    {"Register", "註冊"},
     {"Cancel", "取消"},
+    // Its pages and their steps.
+    {"{}. {}", "{}. {}", Match::FormatOnly},
+    {"Choose the source", "選擇來源"},
+    {"Options", "選項"},
+    {"Confirm", "確認"},
+    {"Back", "上一步"},
+    {"Next", "下一步"},
+    // Choose the source: the attached volumes (read off the window's
+    // thread), a folder chosen, typed or pasted.
+    {"Choose a volume to register it as a whole, or a folder in one.", "選一個磁碟區（整個註冊），或選其中的一個資料夾。"},
+    {"Attached volumes", "已連接的磁碟區"},
+    {"Read the attached volumes again", "重新讀取已連接的磁碟區"},
+    {"Reading the attached volumes...", "正在讀取已連接的磁碟區……"},
+    {"Cannot list the attached volumes: {}", "無法列出已連接的磁碟區：{}", Match::FormatOnly},
+    {"No volume is attached.", "沒有已連接的磁碟區。"},
+    {"Volume without a label", "沒有標籤的磁碟區"},
+    {"{} used", "已使用 {}", Match::FormatOnly},
+    {"{}, {}", "{}、{}", Match::FormatOnly},
+    {"{} ({})", "{}（{}）", Match::FormatOnly},
+    {"the filesystem of {}, behind another enclosure or on another device than recorded ({})",
+        "{} 的檔案系統，但外接盒或裝置與記錄中的不同（{}）", Match::FormatOnly},
+    {"an unfinished registration of {} ({})", "{} 未完成的註冊（{}）", Match::FormatOnly},
+    {"Holds {}", "已有 {}", Match::FormatOnly},
+    {"{}; the whole volume cannot be registered: choose a folder in it that does not overlap them",
+        "{}；整個磁碟區不能註冊，可以選其中不重疊的資料夾", Match::FormatOnly},
+    {"Choose a folder in {}...", "選擇 {} 裡的資料夾…", Match::FormatOnly},
+    // The button of a volume known by its GUID path alone, too long for it.
+    {"Choose a folder in it...", "選擇其中的資料夾…"},
+    {"Folder", "資料夾"},
+    {"You can also type or paste a folder or volume, including a volume's GUID path.",
+        "也可以直接輸入或貼上資料夾或磁碟區，包括磁碟區的 GUID 路徑。"},
+    {"Choose a folder...", "選擇資料夾…"},
+    {"This folder or volume cannot be registered: {}", "無法註冊此資料夾或磁碟區：{}", Match::FormatOnly},
+    {"Cannot identify the volume of this folder or volume: {}", "無法辨識此資料夾或磁碟區所在的磁碟區：{}",
+        Match::FormatOnly},
+    {"This folder or volume overlaps the root of {}: archive roots on one volume may not contain each other. "
+        "Choose a folder that does not overlap it.",
+        "此資料夾或磁碟區與 {} 的根目錄重疊：同一磁碟區上的封存根目錄不得互相包含。請選擇不與它重疊的資料夾。",
+        Match::FormatOnly},
+    // Options: those that apply to the source chosen.
+    {"Label", "標籤"},
+    {"Leave it empty to take the repository's next label (ARCH-NNNN).", "留空時使用儲存庫的下一個標籤（ARCH-NNNN）。"},
+    {"Leave it empty to take {}, the repository's next label.", "留空時使用儲存庫的下一個標籤 {}。",
+        Match::FormatOnly},
+    {"A label has the form ARCH-NNNN, such as ARCH-0012.", "標籤的格式是 ARCH-NNNN，例如 ARCH-0012。"},
+    {"Create a new revision", "建立新版次"},
+    {"Reads all of {} again and makes its current content the new baseline. Use it after you changed the content on "
+        "purpose.",
+        "重新讀取整個 {}，以它現在的內容作為新的基準；用於內容有意更改之後。", Match::FormatOnly},
+    {"This folder or volume is registered as {}. Another archive gets revisions and a history of its own.",
+        "此資料夾或磁碟區已註冊為 {}。另一個封存會有自己的版次與驗證歷程。", Match::FormatOnly},
+    {"The filesystem of this folder or volume is that of {}, on another device than the one recorded. Register it as "
+        "another archive only if it is another device, such as a sector-by-sector clone.",
+        "此資料夾或磁碟區的檔案系統屬於 {}，但所在的裝置與記錄中的不同。只有在它是另一個裝置（例如逐磁區複製出來的"
+        "複本）時，才註冊為另一個封存。",
+        Match::FormatOnly},
+    {"Choose whether to create a new revision of the archive registered here or to register another archive.",
+        "請選擇要為已在此註冊的封存建立新版次，或註冊為另一個封存。"},
+    {"This folder or volume is registered already: choose to register another archive, or choose another folder or "
+        "volume.",
+        "此資料夾或磁碟區已經註冊過：請選擇註冊為另一個封存，或選擇其他資料夾或磁碟區。"},
+    // Why no new revision is offered at an archive's root (decision 0003;
+    // AMBIGUOUS).
+    {"Several archives are registered here ({}), so none takes a new revision: register another archive, or choose "
+        "another folder or volume.",
+        "此處註冊了多個封存（{}），所以都不能建立新版次：請註冊為另一個封存，或選擇其他資料夾或磁碟區。",
+        Match::FormatOnly},
+    {"{} is retired and takes no new revision: register another archive, or choose another folder or volume.",
+        "{} 已停用，不能建立新版次：請註冊為另一個封存，或選擇其他資料夾或磁碟區。", Match::FormatOnly},
+    // MIGRATED: the filesystem of an archive behind another enclosure or on
+    // another device than recorded.
+    {"The filesystem of this folder or volume is a registered archive's, but the enclosure or device differs from the "
+        "one recorded: choose to register another archive, or choose another folder or volume.",
+        "此資料夾或磁碟區的檔案系統屬於一個已註冊的封存，但外接盒或裝置與記錄中的不同：請選擇註冊為另一個封存，"
+        "或選擇其他資料夾或磁碟區。"},
+    // PREVIOUS_CARRIER (decision 0004), such as the disk a relocation left.
+    {"This folder or volume is an earlier carrier of {}: an earlier revision of it was registered here, and its latest "
+        "revision is on another volume. Register it as another archive only if it is to be kept and verified apart "
+        "from {}.",
+        "此資料夾或磁碟區是 {} 先前的載體：它較早的版次在這裡註冊，最新的版次在另一個磁碟區上。只有在要把它和 {} "
+        "分開保存與驗證時，才註冊為另一個封存。",
+        Match::FormatOnly},
+    {"This folder or volume is an earlier carrier of a registered archive: choose to register another archive, or "
+        "choose another folder or volume.",
+        "此資料夾或磁碟區是一個已註冊封存先前的載體：請選擇註冊為另一個封存，或選擇其他資料夾或磁碟區。"},
+    // Create a new revision... of an archive that is not at the root its
+    // latest revision recorded.
+    {"{} is not at {} now: its volume may be attached at another drive letter or mount point, or not attached. "
+        "Choose the folder or volume where it is now.",
+        "{} 目前不在 {}：它的磁碟區可能換了磁碟機代號或掛載點，或沒有連接。請選擇它現在所在的資料夾或磁碟區。",
+        Match::FormatOnly},
+    {"Resume the interrupted registration", "繼續中斷的註冊"},
+    {"An interrupted registration of {} exists at this folder or volume: it continues without reading again the "
+        "files it hashed.",
+        "此資料夾或磁碟區有 {} 中斷的註冊：繼續時，已計算雜湊的檔案不必重讀。", Match::FormatOnly},
+    {"Writes the manifest into the .veriarchive folder in the archive's root. Otherwise VeriArchive writes nothing to "
+        "the archive.",
+        "會把清單檔寫入封存根目錄的 .veriarchive 資料夾。不開啟的話，VeriArchive 不會對封存寫入任何內容。"},
+    {"Copy of which archive (optional)", "這是哪個封存的副本（選填）"},
+    {"Not a copy", "不是副本"},
+    // Confirm: what the registration will do.
+    {"Source", "來源"},
+    {"To read", "要讀取"},
+    {"Media copy", "媒體副本"},
+    {"Copy of", "副本來源"},
+    {"{}, as the interrupted registration planned it", "{}（中斷的註冊所定的標籤）", Match::FormatOnly},
+    {"the rest of the interrupted registration of {}", "繼續 {} 中斷的註冊", Match::FormatOnly},
+    {"{}, the archive's own", "{}（封存原有的標籤）", Match::FormatOnly},
+    {"a new revision of {}", "{} 的新版次", Match::FormatOnly},
+    {"the next label of the repository", "儲存庫的下一個標籤"},
+    {"{}, the repository's next label", "{}（儲存庫的下一個標籤）", Match::FormatOnly},
+    {"the files that the interrupted registration has not hashed yet; those it hashed are not read again",
+        "中斷的註冊尚未計算雜湊的檔案；已計算雜湊的不必重讀"},
+    {"another archive, besides {}", "{} 以外的另一個封存", Match::FormatOnly},
+    {"a new archive", "新的封存"},
+    {"every file of the volume, about {} in use; their number is known after the scan",
+        "磁碟區中的每個檔案，約 {}；檔案數掃描後才知道", Match::FormatOnly},
+    {"every file of the volume; their number is known after the scan", "磁碟區中的每個檔案；檔案數掃描後才知道"},
+    {"every file in this folder; their number and size are known after the scan",
+        "此資料夾中的每個檔案；檔案數與大小掃描後才知道"},
+    {"written to the .veriarchive folder in the root", "寫入根目錄的 .veriarchive 資料夾"},
+    {"not written: nothing is written to the archive", "不寫入：不會對封存寫入任何內容"},
+    {"not a copy", "不是副本"},
+    {"Once it starts, the time left is estimated from the actual read speed. While it registers, the computer does "
+        "not go to sleep by itself; you may leave, and a notification says when it ends while the window is not in "
+        "front. Stopping it halfway is fine: it can be resumed later without reading again what it read.",
+        "開始後會依實際讀取速度估計剩餘時間。註冊期間電腦不會自己進入睡眠；您可以離開，結束時若視窗不在前景會發出通知。"
+        "中途停止也沒關係，之後可以繼續，已讀過的不必重讀。"},
+    {"Start registration", "開始註冊"},
+    // The toasts of its job, and of a comparison's.
+    {"{}: started", "{}：已開始", Match::FormatOnly},
+    {"Registered as {}", "已註冊為 {}", Match::FormatOnly},
+    {"Registered revision {} of {}", "已註冊 {1} 的版次 {0}", Match::FormatOnly},
+    {"View archive", "查看封存"},
     // src/gui/verification.cpp: a FULL verification and its report.
     {"FULL VERIFY {}", "完整驗證 {}"},
     {"{} ({}) revision {}", "{}（{}）版次 {}", Match::FormatOnly},
@@ -971,10 +1100,12 @@ constexpr CatalogEntry entries[] = {
         "veriarchive-cli register {} --new-revision",
         Match::FormatOnly},
     {"The Unbaselined entries could not be read when the archive was registered, so they have no baseline yet. To "
-        "take one for them, register a new revision of the archive: in Register Archive, choose its folder or volume "
-        "({}), tick \"{}\" and press \"{}\".",
+        "take one for them, register a new revision of the archive: choose \"{}\" in the menu of its details in "
+        "Archives (or choose its folder or volume ({}) in Register Archive and turn on \"{}\"), then press \"{}\" and "
+        "\"{}\".",
         "這些「無基準」項目在註冊此封存時無法讀取，所以還沒有基準。若要為它們建立基準，請註冊此封存的新版次：在"
-        "「註冊封存」頁選擇它的資料夾或磁碟區（{}），勾選「{}」，再按「{}」。",
+        "「封存」頁此封存詳細資料的選單中選擇「{}」（或在「註冊封存」選擇它的資料夾或磁碟區（{}），開啟「{}」），"
+        "再按「{}」和「{}」。",
         Match::FormatOnly},
     // Adding chunk hashes (decision 0033): the item of the menu of FULL
     // verify, offered for an archive without them, and the report's line.
@@ -982,7 +1113,8 @@ constexpr CatalogEntry entries[] = {
     {"Chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
         "已加入區塊雜湊：由版次 {} 記錄（區塊大小 {}，{} 個區塊，總碼 {}）"},
     {"Chunk hashes not added: {}", "未加入區塊雜湊：{}", Match::Cause},
-    // src/gui/compare_view.cpp
+    // src/gui/compare_dialog.cpp, src/gui/compare_choices.cpp: the comparison
+    // dialog (decisions 0020, 0046) and the report of its job.
     {"ARCHIVES {}", "比較結果：{}"},
     {"Every entry of A is in B with the same type and content, and B has no other entries.",
         "A 的每個項目都以相同的類型與內容存在於 B，且 B 沒有其他項目。"},
@@ -1001,15 +1133,17 @@ constexpr CatalogEntry entries[] = {
     {"Choose the two archives to compare.", "請選擇要比較的兩個封存。"},
     {"A and B are the same archive; choose the copy to check as B.",
         "A 與 B 是同一個封存；請將要檢查的副本選為 B。"},
-    {"Comparing the manifests of A and B ...", "正在比較 A 與 B 的清單檔……"},
     {"Comparison checks that two registered archives hold the same entries with the same "
         "content, using their manifests in the repository; no media is read. Choose the reference "
         "archive as A and the copy to check as B.",
         "比較會使用儲存庫中的清單檔，檢查兩個已註冊的封存是否有相同的項目與內容；不會讀取媒體。"
         "請將參考封存選為 A，要檢查的副本選為 B。"},
-    {"Reference archive (A):", "參考封存（A）："},
-    {"Copy to check (B):", "要檢查的副本（B）："},
+    {"Reference archive (A)", "參考封存（A）"},
+    {"Copy to check (B)", "要檢查的副本（B）"},
+    {"The copies of A come first.", "A 的副本排在最前面。"},
     {"Compare", "比較"},
+    {"stopped", "已停止"},
+    {"not compared", "未能比較"},
 
     // Engine and repository messages
     // src/core/engine/register_engine.cpp
@@ -1290,49 +1424,33 @@ constexpr CatalogEntry entries[] = {
     // The refusal of Register Archive and of a verification in Archives while
     // a registration of the archive is unfinished, in the windows' own words
     // (decisions 0025, 0030, 0033, 0046): Resume and Abandon... on its row
-    // under Unfinished operations first, then Register Archive's checkbox; of
-    // the root entered, of another root of the archive, or one made for an
-    // older revision, which can only be abandoned; once it has stopped, and
-    // while it runs.
+    // under Unfinished operations first, then Register Archive, the root
+    // chosen there, whose options then resume it; of the root chosen, of
+    // another root of the archive, or one made for an older revision, which
+    // can only be abandoned; once it has stopped, and while it runs.
     {"an interrupted registration of this root exists (archive {}); finish it with Resume, or abandon it with "
-        "Abandon..., on its row under Unfinished operations in Archives; or finish it by ticking Resume an "
-        "interrupted registration of this folder or volume and pressing Register again",
+        "Abandon..., on its row under Unfinished operations in Archives; or choose this folder or volume again in "
+        "Register Archive, whose options then resume it",
         "此根目錄有一個中斷的註冊（封存 {}）；請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，"
-        "或按該列的「放棄…」放棄它；也可以勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」完成它"},
+        "或按該列的「放棄…」放棄它；也可以在「註冊封存」再選一次這個資料夾或磁碟區，在選項中繼續它"},
     {"a registration of this root (archive {}) is still running; wait for it to finish; if it stops, finish it with "
-        "Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or finish it by "
-        "ticking Resume an interrupted registration of this folder or volume and pressing Register again",
+        "Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or choose this "
+        "folder or volume again in Register Archive, whose options then resume it",
         "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的"
-        "「繼續」完成它，或按該列的「放棄…」放棄它；也可以勾選「繼續此資料夾或磁碟區中斷的註冊」，再按一次「註冊」"
-        "完成它"},
+        "「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」再選一次這個資料夾或磁碟區，在選項中繼續它"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
         "it first with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or "
-        "finish it by entering its root above, ticking Resume an interrupted registration of this folder or volume "
-        "and pressing Register)",
+        "finish it by choosing its root in Register Archive, whose options then resume it)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存」頁的「未完成的作業」"
-        "中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在上方輸入它的根目錄，勾選「繼續此資料夾或"
-        "磁碟區中斷的註冊」，再按「註冊」完成它）"},
+        "中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」選擇它的根目錄，在選項中"
+        "繼續它）"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
         "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
-        "its row under Unfinished operations in Archives; or finish it by entering its root above, ticking Resume an "
-        "interrupted registration of this folder or volume and pressing Register)",
+        "its row under Unfinished operations in Archives; or finish it by choosing its root in Register Archive, "
+        "whose options then resume it)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
         "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
-        "也可以在上方輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
-    {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
-        "it first with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or "
-        "finish it in Register Archive by entering its root, ticking Resume an interrupted registration of this "
-        "folder or volume and pressing Register)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存」頁的「未完成的作業」"
-        "中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」輸入它的根目錄，勾選「繼續此"
-        "資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
-    {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
-        "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
-        "its row under Unfinished operations in Archives; or finish it in Register Archive by entering its root, "
-        "ticking Resume an interrupted registration of this folder or volume and pressing Register)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
-        "也可以在「註冊封存」輸入它的根目錄，勾選「繼續此資料夾或磁碟區中斷的註冊」，再按「註冊」完成它）"},
+        "也可以在「註冊封存」選擇它的根目錄，在選項中繼續它）"},
     {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
         "later revision ({}); the registration can no longer finish: abandon it with Abandon... under Unfinished "
         "operations in Archives",

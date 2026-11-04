@@ -127,9 +127,13 @@ GtkWidget* more_menu(GuiState& state, const ArchiveStatus& status)
     add_to_menu(popover, menu_item(state, popover, text("Compare with another archive..."),
                              compare_choice(text, state.archives_page.statuses.size()), uuid,
                              [](GuiState& state, const Uuid& archive) { compare_with(state, archive, std::nullopt); }));
+    // The root its latest revision recorded, read where the attached volumes
+    // do not hold the archive elsewhere now.
     const std::string root = status.header ? status.header->root_hint : std::string{};
     add_to_menu(popover, menu_item(state, popover, text("Create a new revision..."), new_revision_choice(text, status),
-                             uuid, [root](GuiState& state, const Uuid&) { register_new_revision(state, root); }));
+                             uuid, [root](GuiState& state, const Uuid& archive) {
+                                 register_new_revision(state, archive, root);
+                             }));
     add_to_menu(popover, menu_item(state, popover, text("Copy archive UUID"), Choice{true, uuid}, uuid,
                              [](GuiState& state, const Uuid& archive) {
                                  if (!state.window) {

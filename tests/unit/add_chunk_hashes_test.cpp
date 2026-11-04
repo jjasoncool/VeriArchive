@@ -1196,8 +1196,8 @@ void a_verification_that_adds_chunk_hashes_waits_for_a_registration()
     const auto registration_in_window = [](const RegisteredWithout& fixture, bool runs) {
         const auto creating = "an unfinished registration of archive " + fixture.archive_uuid + " (root \"" +
                               va::path_to_utf8(fixture.archive.root()) + "\") is creating revision 2";
-        const auto ways = on_its_row + "; or finish it in Register Archive by entering its root, ticking Resume an "
-                                       "interrupted registration of this folder or volume and pressing Register)";
+        const auto ways = on_its_row + "; or finish it by choosing its root in Register Archive, whose options then "
+                                       "resume it)";
         return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                                  "finish it " +
                           ways
@@ -1912,12 +1912,11 @@ void the_window_judges_the_operation_that_refuses_it()
     const auto creating = "an unfinished registration of archive " + uuid +
                           " (root \"K:/SAMPLE\") is creating revision 2; nothing was changed (finish it first " +
                           on_its_row + "; or finish it ";
+    // Both name Register Archive, whose options resume it once its root is
+    // chosen there (decision 0046).
     const auto ways_on_for_registration_in_verify_archive =
-        creating + "in Register Archive by entering its root, ticking Resume an interrupted registration of this "
-                   "folder or volume and pressing Register)";
-    const auto ways_on_for_registration_in_register_archive =
-        creating + "by entering its root above, ticking Resume an interrupted registration of this folder or "
-                   "volume and pressing Register)";
+        creating + "by choosing its root in Register Archive, whose options then resume it)";
+    const auto ways_on_for_registration_in_register_archive = ways_on_for_registration_in_verify_archive;
     CHECK(verify_archive_says(stopped_by_registration) == ways_on_for_registration_in_verify_archive);
     CHECK(register_archive_says(refused_by_registration) == ways_on_for_registration_in_register_archive);
     test::FakeProcessTable outside;

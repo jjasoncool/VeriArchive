@@ -6,8 +6,9 @@
 // its commands; the window names its own ways on in their place (decisions
 // 0033, 0046): first "Resume" and "Abandon..." on the operation's row under
 // Unfinished operations in Archives (decision 0022, point 7), then Register
-// Archive's "Resume an interrupted registration of this folder or volume" or
-// "Resume" in the archive's details, where its stopped verification shows; a
+// Archive, the registration's root chosen there, whose options then resume it
+// ("Resume the interrupted registration"), or "Resume" in the archive's
+// details, where its stopped verification shows; a
 // relocation, which has no window and no Resume in the list, keeps its
 // command line for continuing, and a registration made for an older revision
 // can only be abandoned. While the operation that refuses still runs or is

@@ -76,6 +76,7 @@ add_library(veriarchive_core
     src/core/engine/abandon_verification.cpp
     src/core/engine/add_chunk_hashes.cpp
     src/core/engine/archive_status.cpp
+    src/core/engine/attached.cpp
     src/core/engine/compare_archives.cpp
     src/core/engine/candidates.cpp
     src/core/engine/comparison.cpp
@@ -213,7 +214,8 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/archive_detail.cpp
         src/gui/archive_rows.cpp
         src/gui/archives_page.cpp
-        src/gui/compare_view.cpp
+        src/gui/compare_choices.cpp
+        src/gui/compare_dialog.cpp
         src/gui/displayed_identity.cpp
         src/gui/ended_notification.cpp
         src/gui/gui_app.cpp
@@ -229,8 +231,9 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/report.cpp
         src/gui/result_page.cpp
         src/gui/run_result.cpp
+        src/gui/register_choices.cpp
+        src/gui/register_wizard.cpp
         src/gui/screenshots.cpp
-        src/gui/register_view.cpp
         src/gui/settings_page.cpp
         src/gui/unfinished_actions.cpp
         src/gui/verification.cpp
@@ -319,9 +322,11 @@ if(BUILD_TESTING)
         tests/unit/abandon_registration_test.cpp
         tests/unit/add_chunk_hashes_test.cpp
         tests/unit/archive_rows_test.cpp
+        tests/unit/attached_test.cpp
         tests/unit/archive_path_test.cpp
         tests/unit/archive_status_test.cpp
         tests/unit/compare_archives_test.cpp
+        tests/unit/compare_choices_test.cpp
         tests/unit/archive_store_test.cpp
         tests/unit/canonical_json_test.cpp
         tests/unit/config_test.cpp
@@ -344,6 +349,7 @@ if(BUILD_TESTING)
         tests/unit/merkle_test.cpp
         tests/unit/plain_words_test.cpp
         tests/unit/read_speed_test.cpp
+        tests/unit/register_choices_test.cpp
         tests/unit/run_result_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
@@ -394,12 +400,14 @@ if(BUILD_TESTING)
     # The GUI's choice of the media identity it shows, the body of its
     # notification that an operation ended, the queue of its jobs and what it
     # says of them, what the window says around its pages, what Archives says
-    # of each archive, what History lists and what the result page of a run
-    # says, are plain C++ without GTK, so they are tested also where the GUI is
-    # not built.
-    target_sources(veriarchive_tests PRIVATE src/gui/archive_rows.cpp src/gui/displayed_identity.cpp
-        src/gui/ended_notification.cpp src/gui/history_rows.cpp src/gui/job_queue.cpp src/gui/job_words.cpp
-        src/gui/report.cpp src/gui/run_result.cpp src/gui/window_words.cpp)
+    # of each archive, what History lists, what the result page of a run says,
+    # and what Register Archive and the comparison dialog offer and say, are
+    # plain C++ without GTK, so they are tested also where the GUI is not
+    # built.
+    target_sources(veriarchive_tests PRIVATE src/gui/archive_rows.cpp src/gui/compare_choices.cpp
+        src/gui/displayed_identity.cpp src/gui/ended_notification.cpp src/gui/history_rows.cpp src/gui/job_queue.cpp
+        src/gui/job_words.cpp src/gui/register_choices.cpp src/gui/report.cpp src/gui/run_result.cpp
+        src/gui/window_words.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
         # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.

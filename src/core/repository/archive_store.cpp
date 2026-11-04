@@ -508,6 +508,27 @@ std::expected<std::vector<std::pair<std::string, std::string>>, IoError> Archive
 
 std::expected<std::string, IoError> ArchiveStore::next_label()
 {
+    const auto sequence = free_label_number();
+    if (!sequence) {
+        return std::unexpected(sequence.error());
+    }
+    if (auto saved = set_setting("next_label_seq", std::to_string(*sequence + 1)); !saved) {
+        return std::unexpected(saved.error());
+    }
+    return std::format("ARCH-{:04}", *sequence);
+}
+
+std::expected<std::string, IoError> ArchiveStore::peek_next_label()
+{
+    const auto sequence = free_label_number();
+    if (!sequence) {
+        return std::unexpected(sequence.error());
+    }
+    return std::format("ARCH-{:04}", *sequence);
+}
+
+std::expected<std::uint64_t, IoError> ArchiveStore::free_label_number()
+{
     const auto current = setting("next_label_seq");
     if (!current) {
         return std::unexpected(current.error());
@@ -548,10 +569,7 @@ std::expected<std::string, IoError> ArchiveStore::next_label()
     while (used.contains(sequence)) {
         ++sequence;
     }
-    if (auto saved = set_setting("next_label_seq", std::to_string(sequence + 1)); !saved) {
-        return std::unexpected(saved.error());
-    }
-    return std::format("ARCH-{:04}", sequence);
+    return sequence;
 }
 
 std::expected<void, IoError> ArchiveStore::insert_archive(const ArchiveRecord& archive)

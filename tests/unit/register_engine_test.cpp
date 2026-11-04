@@ -2032,11 +2032,12 @@ void an_abandoned_attempt_leaves_the_next_registration_alone()
 const std::string on_its_row =
     "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives";
 
-// Register Archive's ways on for the registration of the very root entered:
-// the list's, then its checkbox, ticked, and Register again.
+// Register Archive's ways on for the registration of the very root chosen:
+// the list's, then Register Archive, whose options resume it once the root is
+// chosen there again (decision 0046).
 const std::string finish_by_ticking = "finish it " + on_its_row +
-                                      "; or finish it by ticking Resume an interrupted registration of this folder or "
-                                      "volume and pressing Register again";
+                                      "; or choose this folder or volume again in Register Archive, whose options "
+                                      "then resume it";
 
 // Decision 0025: an archive has one unfinished registration at a time. Its
 // volume is also reached through a second path, a second mount point (sample
@@ -2087,8 +2088,8 @@ void a_registration_never_replaces_another_unfinished_one_of_its_archive()
     const auto another_in_window = [&](std::uint32_t revision, bool runs) {
         const auto creating = "an unfinished registration of archive " + archive_uuid + " (root \"" +
                               va::path_to_utf8(data) + "\") is creating revision " + std::to_string(revision);
-        const auto ways = on_its_row + "; or finish it by entering its root above, ticking Resume an interrupted "
-                                       "registration of this folder or volume and pressing Register)";
+        const auto ways = on_its_row + "; or finish it by choosing its root in Register Archive, whose options then "
+                                       "resume it)";
         return runs ? creating + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                                  "finish it " +
                           ways
@@ -2307,8 +2308,7 @@ void the_window_names_its_ways_on_for_a_plan_that_says_nothing_of_its_state()
         CHECK(in_window(other_root.error()) ==
               "an unfinished registration of archive " + archive_uuid + " (root \"" + va::path_to_utf8(data) +
                   "\") is creating revision 2; nothing was changed (finish it first " + on_its_row +
-                  "; or finish it by entering its root above, ticking Resume an interrupted registration of this "
-                  "folder or volume and pressing Register)");
+                  "; or finish it by choosing its root in Register Archive, whose options then resume it)");
     }
     auto resume = at(data);
     resume.resume = true;

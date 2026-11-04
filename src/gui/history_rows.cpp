@@ -27,6 +27,11 @@ std::string filter_words(const app::Text& text, const ArchiveName& name)
     return name.volume_label.empty() ? name.label : text.format("{} · {}", name.label, name.volume_label);
 }
 
+std::string choice_words(const app::Text& text, const ArchiveName& name)
+{
+    return text.format("{} · {}", filter_words(text, name), name.archive_uuid.substr(0, 8));
+}
+
 std::size_t history_count(const std::vector<VerifyRunRecord>& runs, const std::optional<Uuid>& only)
 {
     if (!only) {

@@ -1,15 +1,15 @@
 # Screenshots for the user guides
 
-`make_screenshots.cmake` makes the pictures of the GUI that the user guides show: `docs/images/en/` for the English guide (`docs/user-guide.md`) and `docs/images/zh-TW/` for the Chinese one (`docs/user-guide.zh-TW.md`), with the same file names in both. It builds sample data, registers it as two archives with `veriarchive-cli`, adds a third archive registered without chunk hashes, as an earlier version of VeriArchive registered archives, then starts `veriarchive-gui` in its screenshot mode. The GUI tours its views as a reader of the guide would: it fills in forms and starts a verification and a comparison with the buttons' own handlers. It saves one PNG per view and quits.
+`make_screenshots.cmake` makes the pictures of the GUI that the user guides show: `docs/images/en/` for the English guide (`docs/user-guide.md`) and `docs/images/zh-TW/` for the Chinese one (`docs/user-guide.zh-TW.md`), with the same file names in both. It builds sample data, registers it as two archives with `veriarchive-cli`, adds a third archive registered without chunk hashes, as an earlier version of VeriArchive registered archives, then starts `veriarchive-gui` in its screenshot mode. The GUI tours its views as a reader of the guide would: it fills in forms, opens Register Archive and the comparison dialog, and starts a verification and a comparison with the buttons' own handlers. It saves one PNG per view and quits.
 
 | File | What it shows |
 |---|---|
 | `01-settings.png` | Settings: the repository, the config file, the policy |
 | `02-archive-list.png` | Archives with the three sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB), archive A selected and its details beside the list |
-| `03-register.png` | Register Archive with archive A's folder and label typed in (not started) |
+| `03-register.png` | Register Archive on its Options page: archive A's folder typed in on its first page, read with Next, which offers a new revision of A or another archive there; Create a new revision of A turned on, as Create a new revision... in A's details opens it (not started) |
 | `04-verify.png` | Archives after a FULL verification of archive A by its folder (its toast at the bottom), then the details of archive C with the menu of FULL verify open, which offers "FULL verify, and add chunk hashes" (not started), as an archive registered by an earlier version shows it |
 | `05-history.png` | History: the runs of every archive, newest first, after the verification of archive A and the comparison, with the history chain checked |
-| `06-compare.png` | Compare Archives: A (`原始資料`) against its copy B (`備份資料`) |
+| `06-compare.png` | The comparison dialog with A (`原始資料`) and its copy B (`備份資料`) chosen, as Compare... of B's row under Copies in A's details opens it (not started); the tour then compares them, and the report is in the job's details |
 | `07-language.png` | Settings with the language list open |
 | `08-jobs.png` | Jobs: the verification and the comparison that the tour started, ended |
 | `09-result.png` | The result page of archive A's FULL verification, the tour's, opened with View result in its details |
@@ -46,7 +46,7 @@ The repository is public, and so are these pictures. The script makes its own sa
 
 - The GUI finds its config file in `WORK`: the script points `APPDATA` (Windows) or `XDG_CONFIG_HOME` (Linux) there and clears `VERIARCHIVE_REPOSITORY`.
 - A portable install (a `config.json` next to `veriarchive-gui`) would use its own repository instead, so the script refuses such a GUI.
-- The sample folders lie on a real volume, the one `WORK` is on, so what the registrations record about their carrier is that volume's own identity: its label, its device's model and serial, its capacity. The screenshot mode never shows it: every view shows a fixed sample identity instead (see below).
+- The sample folders lie on a real volume, the one `WORK` is on, so what the registrations record about their carrier is that volume's own identity: its label, its device's model and serial, its capacity. The screenshot mode never shows it: every view shows a fixed sample identity instead (see below). Nor does it show this computer's volumes: Register Archive lists a fixed list of sample volumes (`/media/SAMPLE-VOLUME-1`, ...) and never asks the system for its own.
 - The pictures still show the paths under `WORK`, its drive letter included, and the computer's time zone. Check them before publishing.
 - The identity in the pictures is sample data, but what the tour's own runs measured is not: the health that the device under `WORK` reported, the read speed and the duration of the verification (in the details of archive A, under Device and Recent verifications, in History and on its result page), and every time shown come from the machine that took the pictures, as do the roots, which are the sample folders' real paths under `WORK`. Check them before publishing too. The name of the computer that recorded a run, which a result page shows under Technical details, is shown as `SAMPLE-HOST`.
 
@@ -60,9 +60,9 @@ The script sets these variables for the GUI. Setting them by hand works too, aga
 | `VERIARCHIVE_SCREENSHOT_REFERENCE` | uuid of archive A: verified, compared, its runs in History, the result page of its FULL verification shown |
 | `VERIARCHIVE_SCREENSHOT_COPY` | uuid of archive B: compared with A |
 | `VERIARCHIVE_SCREENSHOT_EARLIER` | uuid of archive C, registered without chunk hashes: its details shown in Archives with the menu of FULL verify open, which offers "FULL verify, and add chunk hashes" |
-| `VERIARCHIVE_SCREENSHOT_FOLDER` | archive A's folder: typed into Register Archive, and verified as "Verify a folder or volume..." verifies one |
+| `VERIARCHIVE_SCREENSHOT_FOLDER` | archive A's folder: typed into Register Archive's first page, and verified as "Verify a folder or volume..." verifies one |
 | `VERIARCHIVE_LANG` | The interface language of the pictures |
 
-While the mode runs, every view shows the same sample media identity in place of the recorded one, in every language: volume label `SAMPLE-VOLUME`, device model `SAMPLE-DEVICE`, serial `SAMPLE0001`, capacity 1.0 TiB, and sample values in every other identity field (filesystem type and id, volume GUID, WWN, bus); whether the device rotates (HDD or SSD) is unknown. One function decides which identity the views show: `displayed_identity` in `src/gui/displayed_identity.cpp`. Normal use always shows what was recorded, and the smoke test (`VERIARCHIVE_GUI_SMOKE_TEST`), which takes precedence, shows nothing.
+While the mode runs, every view shows the same sample media identity in place of the recorded one, in every language: volume label `SAMPLE-VOLUME`, device model `SAMPLE-DEVICE`, serial `SAMPLE0001`, capacity 1.0 TiB, and sample values in every other identity field (filesystem type and id, volume GUID, WWN, bus); whether the device rotates (HDD or SSD) is unknown. One function decides which identity the views show: `displayed_identity` in `src/gui/displayed_identity.cpp`; beside it, `sample_volumes` gives the attached volumes that Register Archive lists in this mode, each plainly sample (`SAMPLE-VOLUME-1`, `SAMPLE-DEVICE-01`, mounted under `/media/SAMPLE-*`, never at a drive letter). Normal use always shows what was recorded, and the smoke test (`VERIARCHIVE_GUI_SMOKE_TEST`), which takes precedence, shows nothing.
 
-The GUI exits with status 1 and writes the reason to stderr when a step fails, for example when an archive is not in the repository, the verification does not reach a result, or "FULL verify, and add chunk hashes" is not offered for archive C. The tour is in `src/gui/screenshots.cpp`.
+The GUI exits with status 1 and writes the reason to stderr when a step fails, for example when an archive is not in the repository, Register Archive does not offer its options for archive A's folder, the verification or the comparison does not reach a result, or "FULL verify, and add chunk hashes" is not offered for archive C. The tour is in `src/gui/screenshots.cpp`.
