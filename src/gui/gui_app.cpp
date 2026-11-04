@@ -1,5 +1,6 @@
-// Window layout: a sidebar to switch between the seven views, and the session
-// (repository) shared by all of them.
+// The session (repository) shared by every page, the notice while its open
+// upgrades the database, the start, and the language change that rebuilds the
+// window (window.cpp builds it).
 #include "gui/gui_app.h"
 
 #include <exception>
@@ -51,6 +52,7 @@ void open_repository_session(GuiState& state, bool initialise)
         state.session.reset();
         state.session_error = unexpected_error(error.what());
     }
+    refresh_shell(state);
     refresh_settings(state);
     refresh_archive_list(state);
     refresh_archive_choices(state);
@@ -58,122 +60,16 @@ void open_repository_session(GuiState& state, bool initialise)
 
 namespace {
 
-// Closing the window while jobs wait or work asks first (decision 0045):
-// closing stops them, each resumable. Confirmed, the window closes and the
-// application's shutdown stops them and waits for each to record where it
-// stopped. Without jobs, the window closes.
-gboolean ask_before_closing(GtkWindow* closing, gpointer data)
-{
-    auto& state = *static_cast<GuiState*>(data);
-    const auto active = state.jobs.active_count();
-    if (active == 0) {
-        return FALSE;
-    }
-    const auto& text = state.text;
-    const auto question =
-        active == 1 ? text("1 job is still running.") : text.format("{} jobs are still running.", active);
-    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s", question.c_str());
-    gtk_alert_dialog_set_detail(dialog,
-        text("Closing the window stops them. Each can be resumed later, without reading again what it read.").c_str());
-    const auto keep = text("Keep the window open");
-    const auto stop = text("Stop them and close");
-    const char* buttons[] = {keep.c_str(), stop.c_str(), nullptr};
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_cancel_button(dialog, 0);
-    gtk_alert_dialog_set_default_button(dialog, 0);
-    gtk_alert_dialog_choose(dialog, closing, nullptr,
-        +[](GObject* source, GAsyncResult* result, gpointer window) {
-            const int chosen = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, nullptr);
-            if (chosen == 1) {
-                gtk_window_destroy(GTK_WINDOW(window));
-            }
-            g_object_unref(window);
-        },
-        g_object_ref(closing));
-    g_object_unref(dialog);
-    return TRUE;
-}
-
-// Creates the window with the sidebar and the seven views, in state.text's language.
-void build_window(GuiState& state)
-{
-    const auto& text = state.text;
-    GtkWidget* window = gtk_application_window_new(state.application);
-    state.window = GTK_WINDOW(window);
-    gtk_window_set_title(state.window, "VeriArchive");
-    gtk_window_set_default_size(state.window, 1100, 720);
-
-    GtkWidget* stack = gtk_stack_new();
-    state.stack = stack;
-    gtk_widget_set_hexpand(stack, TRUE);
-    gtk_widget_set_vexpand(stack, TRUE);
-    gtk_stack_add_titled(GTK_STACK(stack), build_archive_list_view(state), "archives",
-        text("Archive List").c_str());
-    gtk_stack_add_titled(GTK_STACK(stack), build_jobs_view(state), "jobs", text("Jobs").c_str());
-    gtk_stack_add_titled(GTK_STACK(stack), build_register_view(state), "register",
-        text("Register Archive").c_str());
-    gtk_stack_add_titled(GTK_STACK(stack), build_verify_view(state), "verify",
-        text("Verify Archive").c_str());
-    gtk_stack_add_titled(GTK_STACK(stack), build_compare_view(state), "compare",
-        text("Compare Archives").c_str());
-    gtk_stack_add_titled(GTK_STACK(stack), build_history_view(state), "history",
-        text("Verification History").c_str());
-    gtk_stack_add_titled(GTK_STACK(stack), build_settings_view(state), "settings",
-        text("Settings").c_str());
-
-    // Switching back to the list shows the latest results.
-    g_signal_connect(stack, "notify::visible-child",
-        G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
-            auto& state = *static_cast<GuiState*>(data);
-            guarded(
-                [&] {
-                    const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
-                    if (name && std::string_view(name) == "archives") {
-                        refresh_archive_list(state);
-                    }
-                },
-                [&](const Report& report) {
-                    gtk_label_set_text(GTK_LABEL(state.archive_list.status), report(state.text).c_str());
-                });
-        }),
-        &state);
-    // Switching to Settings reads again which copies of the database kept
-    // before an upgrade are in RepositoryRoot (decision 0032): one removed
-    // since is no longer named.
-    g_signal_connect(stack, "notify::visible-child",
-        G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
-            auto& state = *static_cast<GuiState*>(data);
-            guarded(
-                [&] {
-                    const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
-                    if (name && std::string_view(name) == "settings") {
-                        refresh_settings(state);
-                    }
-                },
-                [&](const Report& report) {
-                    gtk_label_set_text(GTK_LABEL(state.settings_view.info), report(state.text).c_str());
-                });
-        }),
-        &state);
-
-    GtkWidget* sidebar = gtk_stack_sidebar_new();
-    gtk_stack_sidebar_set_stack(GTK_STACK_SIDEBAR(sidebar), GTK_STACK(stack));
-    GtkWidget* layout = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_box_append(GTK_BOX(layout), sidebar);
-    gtk_box_append(GTK_BOX(layout), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
-    gtk_box_append(GTK_BOX(layout), stack);
-    gtk_window_set_child(state.window, layout);
-
-    g_signal_connect(window, "close-request", G_CALLBACK(ask_before_closing), &state);
-}
-
 // What the user typed and chose in the window, carried over when a language
-// change replaces it. (What the views show is kept in GuiState as Reports.)
-// The window's position cannot be kept: GTK 4 has no way to set it.
+// change replaces it. (What the views show is kept in GuiState as Reports;
+// the Jobs page and the header's popover show the jobs as they are.) The
+// window's position cannot be kept: GTK 4 has no way to set it.
 struct Kept {
     int width = 0;
     int height = 0;
     bool maximized = false;
+    std::string page;                    // the page shown (a child of state.stack)
+    bool page_shown = false;             // a narrow window shows the page, not the sidebar
     std::string register_folder;
     std::string register_label;
     bool new_revision = false;
@@ -221,6 +117,11 @@ Kept keep(const GuiState& state)
     // size a maximized window returns to.
     gtk_window_get_default_size(state.window, &kept.width, &kept.height);
     kept.maximized = gtk_window_is_maximized(state.window) != FALSE;
+    if (const char* page = gtk_stack_get_visible_child_name(GTK_STACK(state.stack))) {
+        kept.page = page;
+    }
+    kept.page_shown =
+        adw_navigation_split_view_get_show_content(ADW_NAVIGATION_SPLIT_VIEW(state.shell.split)) != FALSE;
 
     const auto& registering = state.register_view;
     kept.register_folder = entry_text(registering.folder);
@@ -334,10 +235,10 @@ bool upgrade_ahead(bool initialise) noexcept
     }
 }
 
-// The notice that the window shows in place of its views while the open
+// The notice that the window shows in place of its pages while the open
 // upgrades the repository's database (decision 0032).
 struct UpgradeNotice {
-    GtkWidget* heading = nullptr;
+    GtkWidget* heading = nullptr;  // AdwStatusPage, its title the heading
     GtkWidget* body = nullptr;
     GtkWidget* bar = nullptr;
 };
@@ -359,27 +260,41 @@ bool open_with_upgrade_notice(GuiState& state, bool initialise)
         return false;
     }
     const auto& text = state.text;
-    GtkWidget* views = gtk_window_get_child(state.window);
+    auto* window = ADW_APPLICATION_WINDOW(state.window);
+    GtkWidget* views = adw_application_window_get_content(window);
     g_object_ref(views);  // kept while the notice takes their place
-    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    set_margins(box, 24);
+    // A status page under a header bar of its own, which keeps the window's
+    // title and its buttons.
     UpgradeNotice notice;
-    notice.heading = make_heading(text("Upgrading the repository database..."));
+    notice.heading = adw_status_page_new();
+    adw_status_page_set_title(ADW_STATUS_PAGE(notice.heading), text("Upgrading the repository database...").c_str());
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
     notice.body = make_label(text("VeriArchive first keeps a copy of the database from before the upgrade, beside it. "
                                   "For a large repository this takes a while; the views open when it is done."));
+    gtk_label_set_justify(GTK_LABEL(notice.body), GTK_JUSTIFY_CENTER);
+    gtk_label_set_xalign(GTK_LABEL(notice.body), 0.5f);
     notice.bar = gtk_progress_bar_new();
-    gtk_box_append(GTK_BOX(box), notice.heading);
     gtk_box_append(GTK_BOX(box), notice.body);
     gtk_box_append(GTK_BOX(box), notice.bar);
-    gtk_window_set_child(state.window, box);
+    GtkWidget* clamp = adw_clamp_new();
+    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 560);
+    adw_clamp_set_child(ADW_CLAMP(clamp), box);
+    adw_status_page_set_child(ADW_STATUS_PAGE(notice.heading), clamp);
+    GtkWidget* page = adw_toolbar_view_new();
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(page), adw_header_bar_new());
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(page), notice.heading);
+    adw_application_window_set_content(window, page);
     gtk_window_present(state.window);
 
     // Why no repository is open, in place of the notice; it can be selected
     // and copied, as in Settings.
     const auto show_failure = [&state, notice](const Report& why) {
-        set_heading(notice.heading, state.text("No repository is open."));
+        adw_status_page_set_title(ADW_STATUS_PAGE(notice.heading), state.text("No repository is open.").c_str());
+        adw_status_page_set_icon_name(ADW_STATUS_PAGE(notice.heading), "dialog-warning-symbolic");
         gtk_label_set_text(GTK_LABEL(notice.body), why ? why(state.text).c_str() : "");
         gtk_label_set_selectable(GTK_LABEL(notice.body), TRUE);
+        gtk_label_set_justify(GTK_LABEL(notice.body), GTK_JUSTIFY_LEFT);
+        gtk_label_set_xalign(GTK_LABEL(notice.body), 0.0f);
         gtk_widget_set_visible(notice.bar, FALSE);
     };
     auto opened = std::make_shared<std::optional<std::expected<app::Session, app::SessionFailure>>>();
@@ -408,15 +323,16 @@ bool open_with_upgrade_notice(GuiState& state, bool initialise)
                     }
                     state.session = std::move(**session);
                     state.session_error = nullptr;
-                    gtk_window_set_child(state.window, views);
+                    adw_application_window_set_content(ADW_APPLICATION_WINDOW(state.window), views);
                     g_object_unref(views);
                     shown = true;
+                    refresh_shell(state);
                     refresh_settings(state);
                     refresh_archive_list(state);
                     refresh_archive_choices(state);
                     // Settings says once where the copy of the database is.
                     if (!state.session->notes.empty()) {
-                        gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "settings");
+                        show_page(state, "settings");
                     }
                 },
                 [&](const Report& error) {
@@ -461,7 +377,7 @@ void activate(GuiState& state, bool smoke_test)
     // was upgraded and where the copy from before the upgrade is (decision
     // 0032).
     if (!state.session || !state.session->notes.empty()) {
-        gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "settings");
+        show_page(state, "settings");
     }
 
     if (smoke_test) {
@@ -524,9 +440,9 @@ void change_language(GuiState& state, app::Language language)
         show_language_in_use(state);
         return;
     }
-    state.settings_view.notice = nullptr;
+    state.settings_page.notice = nullptr;
     if (auto saved = app::save_language(language, std::nullopt); !saved) {
-        state.settings_view.notice = fixed_message(saved.error());
+        state.settings_page.notice = fixed_message(saved.error());
     }
     rebuild_window(state, language, true);
 }
@@ -539,19 +455,23 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
     use_gtk_language(language);
 
     // The new window is built before the old one closes, so the application
-    // always has a window and keeps running. A job's window of details
-    // belongs to the old one.
-    close_job_details(state);
+    // always has a window and keeps running. A job's dialog of details
+    // belongs to the old one; the new window shows it again.
+    const auto details = close_job_details(state);
     GtkWindow* old_window = state.window;
     build_window(state);
     const auto replace_old_window = [&] {
-        gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "settings");
+        // The page shown before; Settings, where the language was changed,
+        // when none was.
+        gtk_stack_set_visible_child_name(GTK_STACK(state.stack), kept.page.empty() ? "settings" : kept.page.c_str());
+        adw_navigation_split_view_set_show_content(ADW_NAVIGATION_SPLIT_VIEW(state.shell.split), kept.page_shown);
         if (show) {
             gtk_window_present(state.window);
         }
         gtk_window_destroy(old_window);
     };
     try {
+        refresh_shell(state);
         refresh_settings(state);
         refresh_archive_list(state);
         refresh_archive_choices(state);
@@ -570,6 +490,11 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
         throw;
     }
     replace_old_window();
+    if (show) {
+        for (const auto job : details) {
+            open_job_details(state, job);
+        }
+    }
 }
 
 } // namespace va::gui

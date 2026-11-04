@@ -1,0 +1,659 @@
+// Jobs (decisions 0045 and 0046): every registration, verification and
+// comparison started in the window, in the groups Running, Waiting and Ended,
+// each with its title, how far it is, its device alert, its bar while it
+// runs, Stop until it ended, and Details, a dialog of its own with its
+// progress and, once it ended, its report; an ended job's result shows in its
+// tone. The header's jobs button shows how far the jobs that run are on a
+// ring, counts the jobs that run or wait and lists them, with the last ended
+// ones, in its popover. The view that started a job shows it too, as it did
+// when the window ran one operation.
+#include "gui/gui_app.h"
+
+#include "common/utf8.h"
+#include "platform/media_enumerator.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <limits>
+#include <string>
+#include <string_view>
+#include <utility>
+
+namespace va::gui {
+namespace {
+
+// The ended jobs the header's popover lists, the last ones.
+constexpr std::size_t popover_ended = 3;
+
+// A job's progress on a bar that says it in words (its details, the view
+// that started it): while it waits, its state; once it ended, as far as it
+// came, and Done.
+void show_bar(const app::Text& text, const JobShown& job, GtkWidget* bar)
+{
+    auto* progress = GTK_PROGRESS_BAR(bar);
+    if (job.state == JobState::Ended) {
+        gtk_progress_bar_set_fraction(progress, job.bar.pulse ? 0 : job.bar.fraction);
+        gtk_progress_bar_set_text(progress, text("Done").c_str());
+        return;
+    }
+    if (job.state == JobState::Waiting) {
+        gtk_progress_bar_set_fraction(progress, 0);
+        gtk_progress_bar_set_text(progress, state_words(text, job).c_str());
+        return;
+    }
+    if (job.bar.pulse) {
+        gtk_progress_bar_pulse(progress);
+    } else {
+        gtk_progress_bar_set_fraction(progress, job.bar.fraction);
+    }
+    gtk_progress_bar_set_text(progress, job.bar.text.c_str());
+}
+
+// A row's bar, whose line above says the words: shown while the job runs.
+void show_row_bar(const JobShown& job, GtkWidget* bar)
+{
+    const bool running = group_of(job) == JobGroup::Running;
+    gtk_widget_set_visible(bar, running);
+    if (!running) {
+        return;
+    }
+    if (job.bar.pulse) {
+        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(bar));
+    } else {
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(bar), job.bar.fraction);
+    }
+}
+
+void show_job_alert(const JobShown& job, GtkWidget* label)
+{
+    if (job.alert.empty()) {
+        hide_alert(label);
+    } else {
+        show_alert(label, job.alert);
+    }
+}
+
+std::string title_of(const app::Text& text, const JobShown& job)
+{
+    return job.title ? job.title(text) : std::string{};
+}
+
+// The line under a job's title in the tone of its result once it ended, after
+// the tone's icon, so the result is not told by colour alone (decision 0046);
+// dim before.
+void show_tone(const GuiState::JobRow& row, const JobShown& job)
+{
+    const auto tone = job.state == JobState::Ended ? job.tone : JobTone::None;
+    const std::string_view wanted = tone_style(tone);
+    // Only what changes: a running job's row is updated with each progress.
+    for (GtkWidget* widget : {row.meta, row.tone}) {
+        for (const auto any : {JobTone::Success, JobTone::Warning, JobTone::Error, JobTone::None}) {
+            if (tone_style(any) != wanted) {
+                gtk_widget_remove_css_class(widget, tone_style(any));
+            }
+        }
+        gtk_widget_add_css_class(widget, wanted.data());
+    }
+    const char* icon = tone_icon(tone);
+    if (icon) {
+        gtk_image_set_from_icon_name(GTK_IMAGE(row.tone), icon);
+    }
+    gtk_widget_set_visible(row.tone, icon != nullptr);
+}
+
+void update_row(GuiState& state, const GuiState::JobRow& row, const JobShown& job)
+{
+    const auto& text = state.text;
+    const auto title = title_of(text, job);
+    gtk_label_set_text(GTK_LABEL(row.title), title.c_str());
+    gtk_widget_set_tooltip_text(row.title, title.c_str());
+    gtk_label_set_text(GTK_LABEL(row.meta), job_meta(text, job).c_str());
+    show_tone(row, job);
+    show_row_bar(job, row.bar);
+    show_job_alert(job, row.alert);
+    // Stop does not ask first (decision 0045): a job stopped can be resumed.
+    gtk_widget_set_visible(row.stop, job.state != JobState::Ended);
+    gtk_widget_set_sensitive(row.stop, !job.stopping);
+}
+
+void update_details(GuiState& state, const JobShown& job)
+{
+    const auto found = state.jobs_page.details.find(job.id);
+    if (found == state.jobs_page.details.end()) {
+        return;
+    }
+    const auto& details = found->second;
+    const auto& text = state.text;
+    gtk_label_set_text(GTK_LABEL(details.state), state_words(text, job).c_str());
+    show_bar(text, job, details.bar);
+    show_job_alert(job, details.alert);
+    // Until it ended, as on its row.
+    gtk_widget_set_visible(details.stop, job.state != JobState::Ended);
+    gtk_widget_set_sensitive(details.stop, !job.stopping);
+    set_text(details.report, job.state == JobState::Ended && job.report
+                                 ? job.report(text)
+                                 : text("The report shows here once the job has ended."));
+}
+
+// The view that started `job`, as it showed its one operation before.
+void update_view(GuiState& state, const JobShown& job)
+{
+    const auto show = [&](std::uint64_t shown, GtkWidget* bar, GtkWidget* alert, GtkWidget* cancel) {
+        if (shown != job.id || !bar) {
+            return;
+        }
+        show_bar(state.text, job, bar);
+        if (alert) {
+            show_job_alert(job, alert);
+        }
+        gtk_widget_set_sensitive(cancel, job.state != JobState::Ended && !job.stopping);
+    };
+    show(state.register_view.job, state.register_view.progress, state.register_view.alert,
+        state.register_view.cancel);
+    show(state.verify_view.job, state.verify_view.progress, state.verify_view.alert, state.verify_view.cancel);
+    show(state.compare_view.job, state.compare_view.progress, nullptr, state.compare_view.cancel);
+}
+
+struct JobButton {
+    GuiState* state;
+    std::uint64_t job;
+};
+
+// Connects `signal` of `widget` to `handler`, which gets the state and the job.
+void connect_job(GtkWidget* widget, const char* signal, GCallback handler, GuiState& state, std::uint64_t job)
+{
+    g_signal_connect_data(widget, signal, handler, new JobButton{&state, job},
+        +[](gpointer data, GClosure*) { delete static_cast<JobButton*>(data); }, GConnectFlags{});
+}
+
+void connect_stop(GtkWidget* button, GuiState& state, std::uint64_t job)
+{
+    connect_job(button, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto* pressed = static_cast<JobButton*>(data);
+        pressed->state->jobs.stop(pressed->job);
+    }),
+        state, job);
+}
+
+// A job's row: its title, under it how far it is (job_meta) or, once it
+// ended, its result in its tone, Stop and Details beside them, its device
+// alert, its bar. `compact`: the popover's, whose title stays on one line.
+GtkWidget* make_row(GuiState& state, GuiState::JobList& list, const JobShown& job, bool compact)
+{
+    const auto& text = state.text;
+    GuiState::JobRow row;
+    row.group = group_of(job);
+    GtkWidget* list_row = gtk_list_box_row_new();
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(list_row), FALSE);
+    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(list_row), FALSE);
+    GtkWidget* grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
+    gtk_widget_set_margin_start(grid, compact ? 12 : 14);
+    gtk_widget_set_margin_end(grid, compact ? 12 : 14);
+    gtk_widget_set_margin_top(grid, compact ? 8 : 12);
+    gtk_widget_set_margin_bottom(grid, compact ? 8 : 12);
+
+    GtkWidget* words = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_hexpand(words, TRUE);
+    gtk_widget_set_valign(words, GTK_ALIGN_CENTER);
+    row.title = gtk_label_new(nullptr);
+    gtk_label_set_xalign(GTK_LABEL(row.title), 0.0f);
+    gtk_widget_add_css_class(row.title, "heading");
+    if (compact) {
+        gtk_label_set_ellipsize(GTK_LABEL(row.title), PANGO_ELLIPSIZE_MIDDLE);
+    } else {
+        gtk_label_set_wrap(GTK_LABEL(row.title), TRUE);
+        gtk_label_set_wrap_mode(GTK_LABEL(row.title), PANGO_WRAP_WORD_CHAR);
+    }
+    row.meta = gtk_label_new(nullptr);
+    gtk_label_set_xalign(GTK_LABEL(row.meta), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(row.meta), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(row.meta), PANGO_WRAP_WORD_CHAR);
+    gtk_widget_set_hexpand(row.meta, TRUE);
+    gtk_widget_add_css_class(row.meta, "numeric");
+    if (compact) {
+        gtk_widget_add_css_class(row.meta, "caption");
+    }
+    row.tone = gtk_image_new();
+    gtk_widget_set_valign(row.tone, GTK_ALIGN_START);
+    GtkWidget* meta_line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_append(GTK_BOX(meta_line), row.tone);
+    gtk_box_append(GTK_BOX(meta_line), row.meta);
+    gtk_box_append(GTK_BOX(words), row.title);
+    gtk_box_append(GTK_BOX(words), meta_line);
+
+    GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_valign(buttons, GTK_ALIGN_CENTER);
+    row.stop = gtk_button_new_with_label(text("Stop").c_str());
+    connect_stop(row.stop, state, job.id);
+    row.details = gtk_button_new_with_label(text("Details").c_str());
+    gtk_widget_add_css_class(row.details, "flat");
+    connect_job(row.details, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto* pressed = static_cast<JobButton*>(data);
+        auto& state = *pressed->state;
+        guarded(
+            [&] {
+                // From the popover: the dialog takes its place.
+                if (state.jobs_page.popover) {
+                    gtk_popover_popdown(GTK_POPOVER(state.jobs_page.popover));
+                }
+                open_job_details(state, pressed->job);
+            },
+            [](const Report&) {});
+    }),
+        state, job.id);
+    gtk_box_append(GTK_BOX(buttons), row.stop);
+    gtk_box_append(GTK_BOX(buttons), row.details);
+
+    row.alert = make_alert_label();
+    row.bar = gtk_progress_bar_new();
+    gtk_widget_set_valign(row.bar, GTK_ALIGN_CENTER);
+
+    gtk_grid_attach(GTK_GRID(grid), words, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), buttons, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), row.alert, 0, 1, 2, 1);
+    gtk_grid_attach(GTK_GRID(grid), row.bar, 0, 2, 2, 1);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(list_row), grid);
+    // A screen reader names the job each button is for, as several are
+    // listed. A job's title stays; a language change makes the rows again.
+    const auto title = title_of(text, job);
+    gtk_accessible_update_property(
+        GTK_ACCESSIBLE(row.stop), GTK_ACCESSIBLE_PROPERTY_LABEL, text.format("Stop {}", title).c_str(), -1);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(row.details), GTK_ACCESSIBLE_PROPERTY_LABEL,
+        text.format("Details of {}", title).c_str(), -1);
+    update_row(state, row, job);
+    list.rows[job.id] = row;
+    return list_row;
+}
+
+// The jobs of `list` again, in their groups: the Jobs page every job, the
+// popover (`compact`) those that run or wait and the last ended ones.
+void show_list(GuiState& state, GuiState::JobList& list, bool compact)
+{
+    if (!list.box) {
+        return;
+    }
+    while (GtkWidget* child = gtk_widget_get_first_child(list.box)) {
+        gtk_box_remove(GTK_BOX(list.box), child);
+    }
+    list.rows.clear();
+    const auto& text = state.text;
+    const auto grouped =
+        group_jobs(state.jobs.shown(), compact ? popover_ended : std::numeric_limits<std::size_t>::max());
+    if (grouped.empty()) {
+        GtkWidget* empty = gtk_label_new(text("No jobs yet.").c_str());
+        gtk_widget_add_css_class(empty, "dim-label");
+        set_margins(empty, compact ? 24 : 48);
+        gtk_box_append(GTK_BOX(list.box), empty);
+        return;
+    }
+    const std::pair<const char*, const std::vector<const JobShown*>*> groups[] = {
+        {"Running", &grouped.running}, {"Waiting", &grouped.waiting}, {"Ended", &grouped.ended}};
+    for (const auto& [name, jobs] : groups) {
+        if (jobs->empty()) {
+            continue;
+        }
+        if (compact) {
+            GtkWidget* heading = gtk_label_new(text(name).c_str());
+            gtk_label_set_xalign(GTK_LABEL(heading), 0.0f);
+            gtk_widget_add_css_class(heading, "caption-heading");
+            gtk_widget_add_css_class(heading, "dim-label");
+            gtk_widget_set_margin_start(heading, 6);
+            gtk_widget_set_margin_top(heading, 6);
+            GtkWidget* rows = gtk_list_box_new();
+            gtk_list_box_set_selection_mode(GTK_LIST_BOX(rows), GTK_SELECTION_NONE);
+            gtk_widget_add_css_class(rows, "boxed-list");
+            for (const auto* job : *jobs) {
+                gtk_list_box_append(GTK_LIST_BOX(rows), make_row(state, list, *job, true));
+            }
+            gtk_box_append(GTK_BOX(list.box), heading);
+            gtk_box_append(GTK_BOX(list.box), rows);
+        } else {
+            GtkWidget* group = adw_preferences_group_new();
+            adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group), text(name).c_str());
+            for (const auto* job : *jobs) {
+                adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), make_row(state, list, *job, false));
+            }
+            gtk_box_append(GTK_BOX(list.box), group);
+        }
+    }
+}
+
+// Whether a list's row of `job` shows it as it is now, in its group; if so,
+// the row shows the change. Otherwise the list is shown again: the job moved
+// to another group, or into the list.
+bool update_list(GuiState& state, GuiState::JobList& list, const JobShown& job)
+{
+    const auto found = list.rows.find(job.id);
+    if (found == list.rows.end() || found->second.group != group_of(job)) {
+        return false;
+    }
+    update_row(state, found->second, job);
+    return true;
+}
+
+// "Clear ended jobs" while a job has ended.
+void show_clear(GuiState& state)
+{
+    if (state.jobs_page.clear) {
+        gtk_widget_set_sensitive(state.jobs_page.clear, state.jobs.shown().size() > state.jobs.active_count());
+    }
+}
+
+// The count of jobs that run or wait, on the header's button and the Jobs
+// row, hidden at 0; the button says them in words to a tooltip and a screen
+// reader.
+void show_counts(GuiState& state)
+{
+    const auto counts = count_jobs(state.jobs.shown());
+    const auto number = std::to_string(counts.active());
+    for (GtkWidget* badge : {state.jobs_page.count, state.shell.jobs_badge}) {
+        if (badge) {
+            gtk_label_set_text(GTK_LABEL(badge), number.c_str());
+            gtk_widget_set_visible(badge, counts.active() > 0);
+        }
+    }
+    if (GtkWidget* button = state.jobs_page.button) {
+        const auto summary = jobs_summary(state.text, counts);
+        gtk_widget_set_tooltip_text(button, summary.c_str());
+        gtk_accessible_update_property(GTK_ACCESSIBLE(button), GTK_ACCESSIBLE_PROPERTY_LABEL, summary.c_str(), -1);
+    }
+    if (state.jobs_page.ring) {
+        gtk_widget_queue_draw(state.jobs_page.ring);
+    }
+}
+
+// The ring of the header's jobs button (decision 0046): a faint track in the
+// colour of the button's words, and, over it from the top clockwise, how far
+// the jobs that run are (running_fraction) in the theme's accent colour, which
+// the style gives the ring itself (.va-ring), in the light and the dark style.
+void draw_ring(GtkDrawingArea* area, cairo_t* cairo, int width, int height, gpointer data)
+{
+    const auto& state = *static_cast<const GuiState*>(data);
+    const double fraction = running_fraction(state.jobs.shown());
+    GdkRGBA words{};
+    GdkRGBA accent{};
+    gtk_widget_get_color(gtk_widget_get_parent(GTK_WIDGET(area)), &words);
+    gtk_widget_get_color(GTK_WIDGET(area), &accent);
+    constexpr double line = 2.5;
+    const double radius = (std::min(width, height) - line) / 2.0;
+    const double x = width / 2.0;
+    const double y = height / 2.0;
+    cairo_set_line_width(cairo, line);
+    cairo_set_source_rgba(cairo, words.red, words.green, words.blue, words.alpha * 0.2);
+    cairo_arc(cairo, x, y, radius, 0, 2 * G_PI);
+    cairo_stroke(cairo);
+    if (fraction > 0) {
+        gdk_cairo_set_source_rgba(cairo, &accent);
+        cairo_arc(cairo, x, y, radius, -G_PI / 2, -G_PI / 2 + 2 * G_PI * fraction);
+        cairo_stroke(cairo);
+    }
+}
+
+} // namespace
+
+void open_job_details(GuiState& state, std::uint64_t id)
+{
+    const auto* job = state.jobs.find(id);
+    if (!job || !state.window) {
+        return;
+    }
+    auto& open = state.jobs_page.details;
+    if (open.contains(id)) {
+        return;  // shown already
+    }
+    const auto& text = state.text;
+    GuiState::JobDetails details;
+    AdwDialog* dialog = adw_dialog_new();
+    details.dialog = GTK_WIDGET(dialog);
+    adw_dialog_set_title(dialog, text("Job details").c_str());
+    adw_dialog_set_content_width(dialog, 760);
+    adw_dialog_set_content_height(dialog, 560);
+
+    GtkWidget* view = adw_toolbar_view_new();
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(view), adw_header_bar_new());
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_start(box, 18);
+    gtk_widget_set_margin_end(box, 18);
+    gtk_widget_set_margin_top(box, 6);
+    gtk_widget_set_margin_bottom(box, 6);
+    GtkWidget* title = make_label(title_of(text, *job), true);
+    gtk_label_set_wrap_mode(GTK_LABEL(title), PANGO_WRAP_WORD_CHAR);
+    gtk_widget_add_css_class(title, "title-4");
+    gtk_box_append(GTK_BOX(box), title);
+    details.state = make_label("", true);
+    gtk_widget_add_css_class(details.state, "dim-label");
+    gtk_box_append(GTK_BOX(box), details.state);
+    details.alert = make_alert_label();
+    gtk_box_append(GTK_BOX(box), details.alert);
+    details.bar = gtk_progress_bar_new();
+    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(details.bar), TRUE);
+    gtk_box_append(GTK_BOX(box), details.bar);
+    details.report = make_text_view();
+    set_margins(details.report, 8);
+    GtkWidget* scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), details.report);
+    gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(scroller), TRUE);
+    gtk_widget_set_vexpand(scroller, TRUE);
+    gtk_box_append(GTK_BOX(box), scroller);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(view), box);
+
+    GtkWidget* buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    set_margins(buttons, 12);
+    gtk_widget_set_margin_start(buttons, 18);
+    gtk_widget_set_margin_end(buttons, 18);
+    // Stop at the start, while the job waits or runs; Close at the end.
+    details.stop = gtk_button_new_with_label(text("Stop").c_str());
+    connect_stop(details.stop, state, id);
+    GtkWidget* close = gtk_button_new_with_label(text("Close").c_str());
+    gtk_widget_set_hexpand(close, TRUE);
+    gtk_widget_set_halign(close, GTK_ALIGN_END);
+    gtk_widget_add_css_class(close, "suggested-action");
+    g_signal_connect_swapped(close, "clicked", G_CALLBACK(adw_dialog_close), dialog);
+    gtk_box_append(GTK_BOX(buttons), details.stop);
+    gtk_box_append(GTK_BOX(buttons), close);
+    adw_toolbar_view_add_bottom_bar(ADW_TOOLBAR_VIEW(view), buttons);
+    adw_dialog_set_child(dialog, view);
+    adw_dialog_set_default_widget(dialog, close);
+    // Close has the focus, not the title, whose text would show selected.
+    adw_dialog_set_focus(dialog, close);
+
+    // Closed, by its button, by Escape, or with the main window: the window
+    // no longer shows the job; a dialog shown for the job since keeps its
+    // entry.
+    connect_job(details.dialog, "closed", G_CALLBACK(+[](AdwDialog* closed, gpointer data) {
+        auto* shown = static_cast<JobButton*>(data);
+        auto& open = shown->state->jobs_page.details;
+        if (const auto found = open.find(shown->job); found != open.end() && found->second.dialog == GTK_WIDGET(closed)) {
+            open.erase(found);
+        }
+    }),
+        state, id);
+    open[id] = details;
+    update_details(state, *job);
+    adw_dialog_present(dialog, GTK_WIDGET(state.window));
+}
+
+GtkWidget* build_jobs_page(GuiState& state)
+{
+    auto& page = state.jobs_page;
+    const auto& text = state.text;
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 24);
+    set_margins(box, 24);
+    GtkWidget* intro = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 18);
+    GtkWidget* explanation =
+        make_label(text("Each registration, verification and comparison started in this window runs as a job. Jobs "
+                        "that read the same device wait for one another; the others run at once. A job stopped "
+                        "keeps what it did: it can be resumed without reading again what it read."));
+    gtk_widget_set_hexpand(explanation, TRUE);
+    gtk_widget_add_css_class(explanation, "dim-label");
+    page.clear = gtk_button_new_with_label(text("Clear ended jobs").c_str());
+    gtk_widget_set_valign(page.clear, GTK_ALIGN_START);
+    g_signal_connect(page.clear, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        static_cast<GuiState*>(data)->jobs.clear_ended();
+    }), &state);
+    gtk_box_append(GTK_BOX(intro), explanation);
+    gtk_box_append(GTK_BOX(intro), page.clear);
+    gtk_box_append(GTK_BOX(box), intro);
+    page.page.box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 24);
+    gtk_box_append(GTK_BOX(box), page.page.box);
+
+    GtkWidget* clamp = adw_clamp_new();
+    adw_clamp_set_maximum_size(ADW_CLAMP(clamp), 900);
+    adw_clamp_set_tightening_threshold(ADW_CLAMP(clamp), 700);
+    adw_clamp_set_child(ADW_CLAMP(clamp), box);
+    GtkWidget* scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), clamp);
+    gtk_widget_set_vexpand(scroller, TRUE);
+    show_list(state, page.page, false);
+    show_clear(state);
+    return scroller;
+}
+
+GtkWidget* build_jobs_button(GuiState& state)
+{
+    auto& page = state.jobs_page;
+    const auto& text = state.text;
+    page.button = gtk_menu_button_new();
+    // Flat, as the header bar's icon buttons are: a header bar gives a button
+    // with more than an icon a background of its own.
+    gtk_widget_add_css_class(page.button, "flat");
+    // A ring, the count and the word Jobs, as the approved design draws it:
+    // no icon alone, which the header's Reload would be taken for. The ring
+    // says nothing a screen reader needs; the button's label says it all.
+    GtkWidget* face = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    page.ring = GTK_WIDGET(g_object_new(GTK_TYPE_DRAWING_AREA, "accessible-role", GTK_ACCESSIBLE_ROLE_PRESENTATION,
+        nullptr));
+    gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(page.ring), 16);
+    gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(page.ring), 16);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(page.ring), draw_ring, &state, nullptr);
+    gtk_widget_set_valign(page.ring, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class(page.ring, "va-ring");
+    gtk_box_append(GTK_BOX(face), page.ring);
+    page.count = gtk_label_new("0");
+    gtk_widget_add_css_class(page.count, "va-count");
+    gtk_widget_add_css_class(page.count, "numeric");
+    gtk_widget_set_valign(page.count, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(page.count, FALSE);
+    gtk_box_append(GTK_BOX(face), page.count);
+    page.word = gtk_label_new(text("Jobs").c_str());
+    gtk_box_append(GTK_BOX(face), page.word);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(page.button), face);
+
+    page.popover = gtk_popover_new();
+    // Its right edge under the button's, near the window's: it opens into the
+    // window, not past it; a narrow window makes it narrower (build_window).
+    gtk_widget_set_halign(page.popover, GTK_ALIGN_END);
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    page.popover_box = box;
+    gtk_widget_set_size_request(box, jobs_popover_width, -1);
+    page.popover_list.box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget* scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroller), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroller), 460);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), page.popover_list.box);
+    gtk_box_append(GTK_BOX(box), scroller);
+    GtkWidget* all = gtk_button_new_with_label(text("See all jobs").c_str());
+    gtk_widget_set_halign(all, GTK_ALIGN_END);
+    g_signal_connect(all, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded(
+            [&] {
+                gtk_popover_popdown(GTK_POPOVER(state.jobs_page.popover));
+                show_page(state, "jobs");
+            },
+            [](const Report&) {});
+    }), &state);
+    gtk_box_append(GTK_BOX(box), all);
+    gtk_popover_set_child(GTK_POPOVER(page.popover), box);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(page.button), page.popover);
+    show_list(state, page.popover_list, true);
+    show_counts(state);
+    return page.button;
+}
+
+void job_changed(GuiState& state, std::uint64_t job)
+{
+    if (!state.window) {
+        return;  // shutting down
+    }
+    auto& page = state.jobs_page;
+    if (job == 0) {
+        show_list(state, page.page, false);
+        show_list(state, page.popover_list, true);
+        for (const auto& shown : state.jobs.shown()) {
+            update_details(state, shown);
+        }
+    } else if (const auto* shown = state.jobs.find(job)) {
+        if (!update_list(state, page.page, *shown)) {
+            show_list(state, page.page, false);
+        }
+        if (!update_list(state, page.popover_list, *shown)) {
+            show_list(state, page.popover_list, true);
+        }
+        update_details(state, *shown);
+        update_view(state, *shown);
+    }
+    show_clear(state);
+    show_counts(state);
+    lock_language(state);
+}
+
+std::vector<std::uint64_t> close_job_details(GuiState& state)
+{
+    // The entries go first, as the window they belong to goes: a dialog
+    // closes once its animation has ended, but at once where there is none
+    // (animations off, a dialog not shown), and its "closed" handler then
+    // looks for its entry while this goes through them.
+    const auto details = std::exchange(state.jobs_page.details, {});
+    std::vector<std::uint64_t> open;
+    for (const auto& [job, shown] : details) {
+        open.push_back(job);
+        adw_dialog_force_close(ADW_DIALOG(shown.dialog));
+    }
+    return open;
+}
+
+std::vector<std::string> devices_of_root(const std::filesystem::path& root)
+{
+    const auto media = platform::make_media_enumerator();
+    const auto volume = media->volume_for_path(root);
+    return volume ? device_keys(*volume) : std::vector<std::string>{};
+}
+
+std::vector<std::string> devices_of_archive(const RepositoryLayout& layout, const Uuid& archive_uuid)
+{
+    // The carrier as the index's copy of the latest revision's header records
+    // it: what the queue needs is only which device it is.
+    auto store = ArchiveStore::open_read_only(layout);
+    if (!store) {
+        return {"archive:" + archive_uuid};
+    }
+    const auto archive = store->find_archive(archive_uuid);
+    if (!archive || !*archive) {
+        return {"archive:" + archive_uuid};
+    }
+    const auto revision = store->revision(archive_uuid, (*archive)->current_revision);
+    if (!revision || !*revision) {
+        return {"archive:" + archive_uuid};
+    }
+    return recorded_device_keys(archive_uuid, nlohmann::json::parse((*revision)->header_json, nullptr, false));
+}
+
+bool refused_while_a_job_reads(GuiState& state, const std::string& root, const Uuid& archive)
+{
+    const auto read = state.jobs.reads(root.empty() ? std::nullopt : std::optional(path_from_utf8(root)),
+        archive.empty() ? std::nullopt : std::optional(archive));
+    if (read) {
+        tell(state.window, state.text,
+            state.text("A job of this window is working on this operation. Stop it in Jobs first, or wait for it to "
+                       "end."));
+    }
+    return read;
+}
+
+} // namespace va::gui

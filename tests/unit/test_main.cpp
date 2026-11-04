@@ -15,6 +15,8 @@ int main()
     displayed_identity_tests();
     ended_notification_tests();
     job_queue_tests();
+    job_words_tests();
+    window_words_tests();
     hash_tests();
     merkle_tests();
     fs_access_tests();

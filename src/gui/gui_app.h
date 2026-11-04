@@ -1,13 +1,16 @@
 #pragma once
-// The GUI's state and its seven views: the five of HANDOFF §B17 (Archive List,
-// Register Archive, Verify Archive, Verification History, Settings), Compare
-// Archives (decision 0020) and Jobs (decision 0045).
+// The GUI's state, its window (decision 0046: a sidebar of pages beside the
+// page shown, the header's jobs button) and its pages: the five views of
+// HANDOFF §B17 (Archive List, Register Archive, Verify Archive, Verification
+// History, Settings), Compare Archives (decision 0020) and Jobs (decision
+// 0045).
 #include "app/adding_chunk_hashes.h"
 #include "app/refusal_in_window.h"
 #include "app/unfinished_operations.h"
 #include "app/session.h"
 #include "gui/displayed_identity.h"
 #include "gui/gui_support.h"
+#include "gui/job_words.h"
 #include "gui/jobs.h"
 
 #include <chrono>
@@ -55,8 +58,11 @@ struct OperationsPoll {
 
 struct GuiState {
     GtkApplication* application = nullptr;
-    GtkWindow* window = nullptr;
-    GtkWidget* stack = nullptr;            // the seven views
+    GtkWindow* window = nullptr;           // an AdwApplicationWindow
+    // The pages, each a child named as the sidebar names it (archives, jobs,
+    // history, settings, register, verify, compare): the one shown is the
+    // window's content, whichever way it was chosen.
+    GtkWidget* stack = nullptr;
     app::Text text;                        // interface language (decision 0017)
     HostInfo host;
     std::optional<app::Session> session;   // empty until a repository is open
@@ -81,6 +87,18 @@ struct GuiState {
     // The widgets below belong to the current window; a language change
     // replaces them. The Reports are what a view shows, kept so the new window
     // can word them in the new language.
+
+    // The window around the pages (decision 0046).
+    struct {
+        GtkWidget* split = nullptr;        // AdwNavigationSplitView: the sidebar beside the page shown
+        GtkWidget* sidebar = nullptr;      // GtkListBox, a row for each page but Register Archive
+        GtkWidget* title = nullptr;        // AdwWindowTitle above the sidebar: VeriArchive, the repository's folder
+        GtkWidget* content = nullptr;      // AdwNavigationPage of the page shown, titled as it
+        GtkWidget* toasts = nullptr;       // AdwToastOverlay over the whole window
+        GtkWidget* jobs_badge = nullptr;   // the Jobs row's count of jobs that run or wait
+        bool asking_to_close = false;      // the question before the window closes is shown
+    } shell;
+
     struct {
         GtkWidget* grid = nullptr;
         GtkWidget* status = nullptr;
@@ -143,17 +161,26 @@ struct GuiState {
         std::vector<Uuid> archive_uuids;   // index i of both drop-downs
     } compare_view;
 
-    // The Jobs page (decision 0045): a row for each job, and the window of
+    // The Jobs page and the header's jobs button (decisions 0045, 0046): a
+    // row for each job in the group it is in, the button's popover with the
+    // jobs that run and wait and the last ended ones, and the dialog of
     // details of each job whose Details was opened.
     struct JobRow {
         GtkWidget* title = nullptr;
-        GtkWidget* state = nullptr;
-        GtkWidget* bar = nullptr;
+        GtkWidget* meta = nullptr;         // job_meta: how far it is, whom it waits for, its result
+        GtkWidget* tone = nullptr;         // once it ended: the icon of its result's tone, before `meta`
+        GtkWidget* bar = nullptr;          // while it runs
         GtkWidget* alert = nullptr;
-        GtkWidget* stop = nullptr;
+        GtkWidget* stop = nullptr;         // until it ended
+        GtkWidget* details = nullptr;
+        JobGroup group = JobGroup::Waiting;  // the group the row is listed in
+    };
+    struct JobList {
+        GtkWidget* box = nullptr;          // its groups, or that there are no jobs
+        std::map<std::uint64_t, JobRow> rows;
     };
     struct JobDetails {
-        GtkWidget* window = nullptr;
+        GtkWidget* dialog = nullptr;       // AdwDialog
         GtkWidget* state = nullptr;
         GtkWidget* bar = nullptr;
         GtkWidget* alert = nullptr;
@@ -161,12 +188,17 @@ struct GuiState {
         GtkWidget* stop = nullptr;
     };
     struct {
-        GtkWidget* list = nullptr;
-        GtkWidget* empty = nullptr;        // "No jobs yet."
+        JobList page;                      // the Jobs page
         GtkWidget* clear = nullptr;        // "Clear ended jobs"
-        std::map<std::uint64_t, JobRow> rows;
+        GtkWidget* button = nullptr;       // the header's jobs button (GtkMenuButton)
+        GtkWidget* ring = nullptr;         // its ring: how far the jobs that run are (running_fraction)
+        GtkWidget* count = nullptr;        // its count of jobs that run or wait, hidden at 0
+        GtkWidget* word = nullptr;         // its word "Jobs", hidden in a narrow window
+        GtkWidget* popover = nullptr;
+        GtkWidget* popover_box = nullptr;  // what the popover holds, narrower in a narrow window
+        JobList popover_list;              // the popover's jobs
         std::map<std::uint64_t, JobDetails> details;
-    } jobs_view;
+    } jobs_page;
 
     struct {
         GtkWidget* archive = nullptr;
@@ -178,12 +210,16 @@ struct GuiState {
         std::vector<Uuid> archive_uuids;
     } history_view;
 
+    // Settings, an AdwPreferencesPage (decision 0046): its groups, and the
+    // rows that refresh_settings put into them.
     struct {
-        GtkWidget* info = nullptr;
-        GtkWidget* initialise = nullptr;
-        GtkWidget* language = nullptr;     // drop-down: English, 繁體中文
+        GtkWidget* repository = nullptr;   // RepositoryRoot and how it was chosen, or why none is open
+        GtkWidget* language = nullptr;     // AdwComboRow: English, 繁體中文
+        GtkWidget* policy = nullptr;       // overdue limits, strict metadata, trusted keys
+        GtkWidget* about = nullptr;        // the program's version, what it detects, the notice
+        std::vector<std::pair<GtkWidget*, GtkWidget*>> rows;  // (group, row) that refresh_settings added
         Report notice;                     // e.g. the language could not be saved
-    } settings_view;
+    } settings_page;
 };
 
 GtkWidget* build_archive_list_view(GuiState& state);
@@ -191,18 +227,61 @@ GtkWidget* build_register_view(GuiState& state);
 GtkWidget* build_verify_view(GuiState& state);
 GtkWidget* build_compare_view(GuiState& state);
 GtkWidget* build_history_view(GuiState& state);
-GtkWidget* build_settings_view(GuiState& state);
-GtkWidget* build_jobs_view(GuiState& state);
+GtkWidget* build_settings_page(GuiState& state);
+GtkWidget* build_jobs_page(GuiState& state);
+
+// The icon of the Jobs page on its sidebar row, beside its name, as the
+// approved design of decision 0046 draws it. The header's jobs button has a
+// ring of its own instead, beside its word, so that it never looks like the
+// header's Reload.
+inline constexpr const char* jobs_icon = "view-refresh-symbolic";
+
+// The width of what the jobs popover holds, and its width in a narrow window
+// (whose least width is 360), where it would reach past the window.
+inline constexpr int jobs_popover_width = 420;
+inline constexpr int jobs_popover_narrow_width = 300;
+
+// The header's jobs button (decision 0046): a ring of how far the jobs that
+// run are, the count of the jobs that run or wait and the word Jobs, and its
+// popover, which lists them and the last 3 ended and leads to the Jobs page.
+GtkWidget* build_jobs_button(GuiState& state);
+
+// Creates the window, in state.text's language (window.cpp): the sidebar of
+// pages beside the page shown, the header's jobs button, and the question
+// before the window closes while jobs run. It shows Archives.
+void build_window(GuiState& state);
+
+// Shows the page named `page` (a child of state.stack); the sidebar selects
+// its row, the header names it, and a narrow window shows it in place of the
+// sidebar.
+void show_page(GuiState& state, const char* page);
+
+// The window's own part of what a repository changes: the repository's
+// folder under the sidebar's title.
+void refresh_shell(GuiState& state);
+
+// A short confirmation at the bottom of the window (AdwToast), with a button
+// that runs `action` when there is one; it goes by itself.
+struct ToastAction {
+    std::string label;
+    std::function<void(GuiState&)> run;
+};
+void show_toast(GuiState& state, const std::string& text, std::optional<ToastAction> action = std::nullopt);
 
 // What the window does once a job changed (Jobs::on_change; 0: jobs were
-// added or removed): the Jobs page, the job's window of details, and the
-// view that started it show it as it is now, and the language drop-down is
-// locked while a job waits or works.
+// added or removed): the Jobs page, the header's jobs button and its
+// popover, the job's details, and the view that started it show it as it is
+// now, and the language drop-down is locked while a job waits or works.
 void job_changed(GuiState& state, std::uint64_t job);
 
-// Closes every window of a job's details (before a language change replaces
-// the main window).
-void close_job_details(GuiState& state);
+// Shows the details of `job` in a dialog of their own, or nothing for a job
+// removed.
+void open_job_details(GuiState& state, std::uint64_t job);
+
+// Closes every dialog of a job's details (before a language change replaces
+// the main window); returns the jobs whose details were open, so the new
+// window can show them again.
+std::vector<std::uint64_t> close_job_details(GuiState& state);
 
 // The devices that a job of `root`, or of the archive `archive_uuid`, reads
 // (device_keys, recorded_device_keys), as the device queue compares them;
@@ -253,10 +332,11 @@ void resume_registration(GuiState& state, const app::UnfinishedOperation& regist
 void ask_before_resuming(GuiState& state, const std::string& label, const std::string& root,
     std::function<void(GuiState&)> resume);
 
-// The Settings language drop-down. show_language_in_use selects the language
-// in use. lock_language makes the drop-down unavailable while a job waits or
-// works, or a step of the window runs, and available again once none does,
-// because a language change rebuilds the window they report into.
+// The Settings language row. show_language_in_use selects the language in
+// use. lock_language makes the row unavailable while a job waits or works, or
+// a step of the window runs, saying so under its title, and available again
+// once none does, because a language change rebuilds the window they report
+// into.
 void show_language_in_use(GuiState& state);
 void lock_language(GuiState& state);
 
@@ -294,8 +374,9 @@ void use_gtk_language(app::Language language);
 void change_language(GuiState& state, app::Language language);
 
 // Replaces the window with one in `language`, keeping what the user typed,
-// chose and was shown; nothing is saved. `show` presents the new window (the
-// smoke test rebuilds without showing anything).
+// chose and was shown: the page shown, the details of jobs open; nothing is
+// saved. `show` presents the new window (the smoke test rebuilds without
+// showing anything).
 void rebuild_window(GuiState& state, app::Language language, bool show);
 
 } // namespace va::gui

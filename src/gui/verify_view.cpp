@@ -23,10 +23,6 @@
 namespace va::gui {
 namespace {
 
-constexpr const char* guarantee =
-    "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) "
-    "is not part of this version.";
-
 std::string report(const app::Text& text, const VerifyOutcome& outcome)
 {
     std::string body = text.format("FULL VERIFY {}", text(outcome.result)) + "\n\n" +
@@ -278,6 +274,8 @@ void run_verification(GuiState& state, VerifyRequest request)
         };
     }
     job.work = [&state, request, interrupted](JobContext& context) -> Report {
+            // Not verified, until a result says otherwise.
+            context.tone = JobTone::Error;
             // Decision 0029: a root on a network share, or one written in the
             // \\?\ form, is refused before anything of it is read. Asked here,
             // off the window's thread: on Linux it reads the root's filesystem.
@@ -344,6 +342,7 @@ void run_verification(GuiState& state, VerifyRequest request)
             // The devices as the view names them: the sample identity in the
             // screenshot mode, whose pictures are published.
             outcome->devices = displayed_devices(outcome->devices, state.identity_shown);
+            context.tone = verification_tone(outcome->result);
             if (outcome->result == "INCOMPLETE") {
                 *interrupted = Interrupted{outcome->run_id, outcome->archive_uuid};
             } else if (request.resume_run && !outcome->media_read) {
@@ -387,7 +386,7 @@ void resume_verification(GuiState& state, const app::UnfinishedOperation& verifi
     // Exactly `verify --full <archive_uuid> --resume <run_id>`: strict
     // metadata as the policy sets it, whatever this view's box says, which is
     // not where Resume is clicked (decision 0022, point 7).
-    gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "verify");
+    show_page(state, "verify");
     run_verification(state, app::verification_resume(verification, state.session->context.config));
 }
 
@@ -457,7 +456,6 @@ GtkWidget* build_verify_view(GuiState& state)
     auto& view = state.verify_view;
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     set_margins(box, 16);
-    gtk_box_append(GTK_BOX(box), make_heading(state.text("Verify Archive")));
     gtk_box_append(GTK_BOX(box), make_label(state.text(
         "FULL verification re-reads every registered file from the medium and compares it with "
         "the baseline. Only FULL VERIFY PASSED means 100% of the registered content was read and matched.")));

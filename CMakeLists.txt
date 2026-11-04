@@ -218,13 +218,17 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/gui_support.cpp
         src/gui/history_view.cpp
         src/gui/job_queue.cpp
+        src/gui/job_words.cpp
         src/gui/jobs.cpp
-        src/gui/jobs_view.cpp
+        src/gui/jobs_page.cpp
         src/gui/main.cpp
+        src/gui/report.cpp
         src/gui/screenshots.cpp
         src/gui/register_view.cpp
-        src/gui/settings_view.cpp
-        src/gui/verify_view.cpp)
+        src/gui/settings_page.cpp
+        src/gui/verify_view.cpp
+        src/gui/window.cpp
+        src/gui/window_words.cpp)
     set_target_properties(veriarchive_gui PROPERTIES OUTPUT_NAME veriarchive-gui WIN32_EXECUTABLE TRUE)
     target_compile_features(veriarchive_gui PRIVATE cxx_std_23)
     # The GUI uses no API newer than the oldest CI image has (Ubuntu 24.04:
@@ -323,6 +327,7 @@ if(BUILD_TESTING)
         tests/unit/identity_test.cpp
         tests/unit/interrupt_test.cpp
         tests/unit/job_queue_test.cpp
+        tests/unit/job_words_test.cpp
         tests/unit/keep_awake_test.cpp
         tests/unit/local_time_test.cpp
         tests/unit/progress_estimate_test.cpp
@@ -346,7 +351,8 @@ if(BUILD_TESTING)
         tests/unit/subst_drive_test.cpp
         tests/unit/text_test.cpp
         tests/unit/transfer_test.cpp
-        tests/unit/typed_path_test.cpp)
+        tests/unit/typed_path_test.cpp
+        tests/unit/window_words_test.cpp)
     # The platform layer's own names for failed calls (Win32 errors, errno),
     # and a sparse sample file made as each system makes one (R-48).
     if(WIN32)
@@ -376,10 +382,11 @@ if(BUILD_TESTING)
             src/platform/windows/subst_drive.cpp)
     endif()
     # The GUI's choice of the media identity it shows, the body of its
-    # notification that an operation ended, and the queue of its jobs, are
-    # plain C++ without GTK, so they are tested also where the GUI is not built.
+    # notification that an operation ended, the queue of its jobs and what it
+    # says of them, and what the window says around its pages, are plain C++
+    # without GTK, so they are tested also where the GUI is not built.
     target_sources(veriarchive_tests PRIVATE src/gui/displayed_identity.cpp src/gui/ended_notification.cpp
-        src/gui/job_queue.cpp)
+        src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/report.cpp src/gui/window_words.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
         # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.

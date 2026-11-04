@@ -66,11 +66,13 @@ GtkWidget* cell(const std::string& text, bool bold = false, bool warning = false
     gchar* escaped = g_markup_escape_text(text.c_str(), -1);
     std::string markup = escaped;
     g_free(escaped);
-    if (bold) {
+    if (bold || warning) {
         markup = "<b>" + markup + "</b>";
     }
+    // The theme's red for errors, which libadwaita gives the light and the
+    // dark style each its own of, so it stays readable in either.
     if (warning) {
-        markup = "<span foreground=\"#c01c28\"><b>" + markup + "</b></span>";
+        gtk_widget_add_css_class(label, "error");
     }
     gtk_label_set_markup(GTK_LABEL(label), markup.c_str());
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
@@ -86,12 +88,10 @@ GtkWidget* cell(const std::string& text, bool bold = false, bool warning = false
 // can be copied.
 GtkWidget* problem_cell(const std::string& text, bool warning)
 {
-    GtkWidget* label = gtk_label_new(nullptr);
-    gchar* escaped = g_markup_escape_text(text.c_str(), -1);
-    const std::string markup =
-        warning ? std::string("<span foreground=\"#c01c28\">") + escaped + "</span>" : std::string(escaped);
-    g_free(escaped);
-    gtk_label_set_markup(GTK_LABEL(label), markup.c_str());
+    GtkWidget* label = gtk_label_new(text.c_str());
+    if (warning) {
+        gtk_widget_add_css_class(label, "error");  // as `cell` does
+    }
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
     gtk_label_set_selectable(GTK_LABEL(label), TRUE);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
@@ -506,9 +506,7 @@ void show_message(GuiState& state, const Report& report)
     if (!state.window) {
         return;
     }
-    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s", report(state.text).c_str());
-    gtk_alert_dialog_show(dialog, state.window);
-    g_object_unref(dialog);
+    tell(state.window, state.text, report(state.text));
 }
 
 // Whether the window can run a step of abandoning now, one at a time besides
@@ -593,36 +591,19 @@ void confirm_abandon(GuiState& state, const AbandonableRegistration& registratio
         detail += "\n\n" + text("The archive has no revision yet: it is removed with its registration.");
     }
 
-    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s",
-        text.format("Abandon the unfinished registration of {}?", label).c_str());
-    gtk_alert_dialog_set_detail(dialog, detail.c_str());
-    const auto cancel = text("Cancel");
-    const auto abandon = text("Abandon");
-    const char* buttons[] = {cancel.c_str(), abandon.c_str(), nullptr};
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_cancel_button(dialog, 0);
-    gtk_alert_dialog_set_default_button(dialog, 0);
     // The request names the registration shown: one that changed meanwhile
     // (resumed and finished, say) is not abandoned in its place.
-    auto* choice = new AbandonChoice{
-        &state, {registration.archive_uuid, registration.revision, registration.created}, label};
-    gtk_alert_dialog_choose(dialog, state.window, nullptr,
-        +[](GObject* source, GAsyncResult* result, gpointer data) {
-            std::unique_ptr<AbandonChoice> choice(static_cast<AbandonChoice*>(data));
-            GError* error = nullptr;
-            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
-            if (error) {
-                g_error_free(error); // dismissed, as when the window closed
-            }
-            g_object_unref(source);
-            auto& state = *choice->state;
-            if (button != 1 || !state.window) {
+    ask(state.window, text.format("Abandon the unfinished registration of {}?", label), detail,
+        {{"cancel", text("Cancel")}, {"abandon", text("Abandon"), true}},
+        [choice = AbandonChoice{&state, {registration.archive_uuid, registration.revision, registration.created},
+             label}](const std::string& answer) {
+            auto& state = *choice.state;
+            if (answer != "abandon" || !state.window) {
                 return;
             }
-            guarded([&] { start_abandon(state, choice->request, choice->label); },
+            guarded([&] { start_abandon(state, choice.request, choice.label); },
                 [&](const Report& report) { show_message(state, report); });
-        },
-        choice);
+        });
 }
 
 // ---- Abandoning a relocation (decision 0026) --------------------------------
@@ -679,35 +660,19 @@ void confirm_relocation_abandon(GuiState& state, const AbandonableRelocation& re
                                " " +
                                text("It cannot be resumed afterwards. The archive, its revisions, manifests and the "
                                     "verification history are not changed.");
-    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s",
-        text.format("Abandon the unfinished relocation of {}?", label).c_str());
-    gtk_alert_dialog_set_detail(dialog, detail.c_str());
-    const auto cancel = text("Cancel");
-    const auto abandon = text("Abandon");
-    const char* buttons[] = {cancel.c_str(), abandon.c_str(), nullptr};
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_cancel_button(dialog, 0);
-    gtk_alert_dialog_set_default_button(dialog, 0);
     // The request names the relocation shown: one that changed meanwhile
     // (resumed and finished, say) is not abandoned in its place.
-    auto* choice = new RelocationAbandonChoice{&state, {relocation.archive_uuid, relocation.run_id}, label};
-    gtk_alert_dialog_choose(dialog, state.window, nullptr,
-        +[](GObject* source, GAsyncResult* result, gpointer data) {
-            std::unique_ptr<RelocationAbandonChoice> choice(static_cast<RelocationAbandonChoice*>(data));
-            GError* error = nullptr;
-            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
-            if (error) {
-                g_error_free(error); // dismissed, as when the window closed
-            }
-            g_object_unref(source);
-            auto& state = *choice->state;
-            if (button != 1 || !state.window) {
+    ask(state.window, text.format("Abandon the unfinished relocation of {}?", label), detail,
+        {{"cancel", text("Cancel")}, {"abandon", text("Abandon"), true}},
+        [choice = RelocationAbandonChoice{&state, {relocation.archive_uuid, relocation.run_id}, label}](
+            const std::string& answer) {
+            auto& state = *choice.state;
+            if (answer != "abandon" || !state.window) {
                 return;
             }
-            guarded([&] { start_relocation_abandon(state, choice->request, choice->label); },
+            guarded([&] { start_relocation_abandon(state, choice.request, choice.label); },
                 [&](const Report& report) { show_message(state, report); });
-        },
-        choice);
+        });
 }
 
 // The operator chose to abandon the relocation of a row: what abandoning it
@@ -801,35 +766,19 @@ void confirm_verification_abandon(GuiState& state, const AbandonableVerification
                                " " +
                                text("It cannot be resumed afterwards. The archive, its revisions, manifests and the "
                                     "verification history are not changed.");
-    GtkAlertDialog* dialog = gtk_alert_dialog_new("%s",
-        text.format("Abandon the unfinished verification of {} that adds chunk hashes?", label).c_str());
-    gtk_alert_dialog_set_detail(dialog, detail.c_str());
-    const auto cancel = text("Cancel");
-    const auto abandon = text("Abandon");
-    const char* buttons[] = {cancel.c_str(), abandon.c_str(), nullptr};
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_cancel_button(dialog, 0);
-    gtk_alert_dialog_set_default_button(dialog, 0);
     // The request names the run shown: one resumed meanwhile, under a run of
     // its own, is not abandoned in its place.
-    auto* choice = new VerificationAbandonChoice{&state, {verification.archive_uuid, verification.run_id}, label};
-    gtk_alert_dialog_choose(dialog, state.window, nullptr,
-        +[](GObject* source, GAsyncResult* result, gpointer data) {
-            std::unique_ptr<VerificationAbandonChoice> choice(static_cast<VerificationAbandonChoice*>(data));
-            GError* error = nullptr;
-            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
-            if (error) {
-                g_error_free(error); // dismissed, as when the window closed
-            }
-            g_object_unref(source);
-            auto& state = *choice->state;
-            if (button != 1 || !state.window) {
+    ask(state.window, text.format("Abandon the unfinished verification of {} that adds chunk hashes?", label),
+        detail, {{"cancel", text("Cancel")}, {"abandon", text("Abandon"), true}},
+        [choice = VerificationAbandonChoice{&state, {verification.archive_uuid, verification.run_id}, label}](
+            const std::string& answer) {
+            auto& state = *choice.state;
+            if (answer != "abandon" || !state.window) {
                 return;
             }
-            guarded([&] { start_verification_abandon(state, choice->request, choice->label); },
+            guarded([&] { start_verification_abandon(state, choice.request, choice.label); },
                 [&](const Report& report) { show_message(state, report); });
-        },
-        choice);
+        });
 }
 
 // The operator chose to abandon the verification that adds chunk hashes of a
@@ -1068,32 +1017,15 @@ void ask_before_resuming(GuiState& state, const std::string& label, const std::s
     // which window or command to look for.
     const auto& text = state.text;
     const auto detail = text.format("Root: {}", root) + "\n\n" + text(app::older_version_resume_warning);
-    GtkAlertDialog* dialog =
-        gtk_alert_dialog_new("%s", text.format("Resume the unfinished registration of {}?", label).c_str());
-    gtk_alert_dialog_set_detail(dialog, detail.c_str());
-    const auto cancel = text("Cancel");
-    const auto go_on = text("Resume");
-    const char* buttons[] = {cancel.c_str(), go_on.c_str(), nullptr};
-    gtk_alert_dialog_set_buttons(dialog, buttons);
-    gtk_alert_dialog_set_cancel_button(dialog, 0);
-    gtk_alert_dialog_set_default_button(dialog, 0);
-    auto* choice = new ResumeChoice{&state, std::move(resume)};
-    gtk_alert_dialog_choose(dialog, state.window, nullptr,
-        +[](GObject* source, GAsyncResult* result, gpointer data) {
-            std::unique_ptr<ResumeChoice> choice(static_cast<ResumeChoice*>(data));
-            GError* error = nullptr;
-            const int button = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
-            if (error) {
-                g_error_free(error); // dismissed, as when the window closed
-            }
-            g_object_unref(source);
-            auto& state = *choice->state;
-            if (button != 1 || !state.window) {
+    ask(state.window, text.format("Resume the unfinished registration of {}?", label), detail,
+        {{"cancel", text("Cancel")}, {"resume", text("Resume")}},
+        [choice = ResumeChoice{&state, std::move(resume)}](const std::string& answer) {
+            auto& state = *choice.state;
+            if (answer != "resume" || !state.window) {
                 return;
             }
-            guarded([&] { choice->resume(state); }, [&](const Report& report) { show_message(state, report); });
-        },
-        choice);
+            guarded([&] { choice.resume(state); }, [&](const Report& report) { show_message(state, report); });
+        });
 }
 
 void refresh_archive_list(GuiState& state)
@@ -1199,7 +1131,6 @@ GtkWidget* build_archive_list_view(GuiState& state)
     const auto& text = state.text;
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     set_margins(box, 16);
-    gtk_box_append(GTK_BOX(box), make_heading(text("Archives")));
     gtk_box_append(GTK_BOX(box), make_label(text(
         "Each archive shows when it was last read in full (FULL verify) and when it was last "
         "verified at all. A result is only as current as its date.")));

@@ -6,6 +6,8 @@
 #include "app/progress_estimate.h"
 #include "app/text.h"
 #include "core/interfaces.h"
+#include "gui/job_shown.h"
+#include "gui/report.h"
 
 #include <adwaita.h>
 
@@ -21,16 +23,11 @@
 
 namespace va::gui {
 
-// A message or report that can be worded in any interface language. A view
-// keeps the one it shows, so a language change can show it again in the new
-// language (decision 0017).
-using Report = std::function<std::string(const app::Text&)>;
-
-// A fixed English message (or engine sentence) as a Report.
-Report fixed_message(std::string english);
-
-// "Unexpected error: ..." for an exception's message.
-Report unexpected_error(std::string what);
+// What VeriArchive detects and what this version does not (R-02): every
+// verify report carries it (decision 0017), and Settings says it.
+inline constexpr const char* guarantee =
+    "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) "
+    "is not part of this version.";
 
 std::string format_bytes(std::uint64_t bytes);
 
@@ -39,20 +36,39 @@ GtkWidget* make_label(const std::string& text, bool selectable = false);
 // line: a wrapping label there is given its narrowest width and would show as
 // a column of single words or characters.
 GtkWidget* make_row_label(const std::string& text);
-GtkWidget* make_heading(const std::string& text);
-// Gives a heading made by make_heading another text.
-void set_heading(GtkWidget* heading, const std::string& text);
 GtkWidget* make_text_view();
 void set_text(GtkWidget* text_view, const std::string& text);
 void set_margins(GtkWidget* widget, int margin);
 void clear_grid(GtkWidget* grid);
 
-// A device alert above a job's progress (decision 0044): a label in bold
-// red, hidden until an alert is shown in it, and hidden again when the job it
-// shows has none. On the main thread.
+// A device alert above a job's progress (decision 0044): a label in bold, in
+// the theme's colour for errors, hidden until an alert is shown in it, and
+// hidden again when the job it shows has none. On the main thread.
 GtkWidget* make_alert_label();
 void show_alert(GtkWidget* label, const std::string& text);
 void hide_alert(GtkWidget* label);
+
+// One answer to a question of the window (ask).
+struct Answer {
+    std::string id;
+    std::string label;
+    bool destructive = false;  // shown in the theme's colour for what cannot be undone
+};
+
+// Asks `heading`, with `body` under it, in an AdwAlertDialog over `parent`
+// (decision 0046). answers[0] is the answer that changes nothing (Cancel,
+// Keep the window open): it is the default, and the answer when the dialog
+// is closed otherwise (Escape). `answered` gets the id of the answer, on the
+// main thread; it is never called when the window closes first. An empty
+// heading or body is left out.
+void ask(GtkWindow* parent, const std::string& heading, const std::string& body, std::vector<Answer> answers,
+    std::function<void(const std::string& id)> answered);
+
+// Says `message` in an AdwAlertDialog over `parent` whose one answer is
+// Close: a short first line as the heading and the lines after it under it,
+// or, where the first line is long, the whole message under no heading
+// (alert_words).
+void tell(GtkWindow* parent, const app::Text& text, const std::string& message);
 
 // The folder or volume root to register or verify, typed in (or chosen into)
 // an entry, made into a root exactly as the command line makes one
@@ -89,16 +105,7 @@ void log_failure(std::string_view what) noexcept;
 // verify), or manifest entries compared, with no bytes read.
 enum class Counting { Files, Entries };
 
-// A progress bar as an operation's progress shows it: moving to and fro while
-// it scans, otherwise how far it is, with what it did and, hashing, the speed
-// and the time left (app::ProgressEstimate), worded as on the command line.
-struct BarState {
-    bool pulse = false;
-    double fraction = 0;
-    std::string text;
-};
-
-// Words an operation's progress for a bar, at most five times a second, and
+// Words an operation's progress for a bar (BarState), at most five times a second, and
 // always for the report that completes the count, so a finished operation's
 // bar ends full rather than where the update before left it. Every report
 // feeds the estimate, also those not shown.

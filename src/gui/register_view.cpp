@@ -135,6 +135,8 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     job.target.root = request.root;
     job.devices = [root = request.root] { return devices_of_root(root); };
     job.work = [&state, request, typed, unconfirmed](JobContext& context) -> Report {
+            // Not registered, until it is.
+            context.tone = JobTone::Error;
             // Decision 0029: a root on a network share, or one written in the
             // \\?\ form, is refused before anything of it is read, and a
             // resumed one that is no folder too, as on the command line. Asked
@@ -168,6 +170,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                 // command line asks for --confirm, and says why meanwhile.
                 if (outcome.error().kind == RegisterFailure::Kind::Unconfirmed && outcome.error().older_version) {
                     *unconfirmed = outcome.error().older_version;
+                    context.tone = JobTone::Warning;  // nothing went wrong: the question follows
                     return [](const app::Text& text) {
                         return text.format("Not registered: {}", text(app::older_version_resume_warning));
                     };
@@ -176,6 +179,11 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
                 // next revision is unfinished, it names the window's own ways
                 // on, or says that that operation still runs, judged now as
                 // the Archive List judges its row (decisions 0025, 0033).
+                // Stopped, or cut short by a device that went away: it can be
+                // resumed.
+                if (outcome.error().kind == RegisterFailure::Kind::Incomplete) {
+                    context.tone = JobTone::Stopped;
+                }
                 const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
                 return [message = app::register_message_in_window(
                             outcome.error(), *store, *processes, state.host.host, now)](const app::Text& text) {
@@ -185,6 +193,9 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
             // The devices as the view names them: the sample identity in the
             // screenshot mode, whose pictures are published.
             outcome->devices = displayed_devices(outcome->devices, state.identity_shown);
+            // Entries recorded without hashes, and warnings, ask to be read.
+            context.tone = outcome->unreadable.empty() && outcome->warnings.empty() ? JobTone::Success
+                                                                                    : JobTone::Warning;
             return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
         };
     job.done = [&state, request, typed, unconfirmed](std::uint64_t ended, const Report& result) {
@@ -235,7 +246,7 @@ void resume_registration(GuiState& state, const app::UnfinishedOperation& regist
     // here, with the resume box and the media copy box. With --confirm where
     // the operator confirmed it in the question about an older version's
     // registration.
-    gtk_stack_set_visible_child_name(GTK_STACK(state.stack), "register");
+    show_page(state, "register");
     run_registration(state, app::registration_resume(registration, state.session->context.config, confirmed),
         registration.root);
 }
@@ -245,7 +256,6 @@ GtkWidget* build_register_view(GuiState& state)
     auto& view = state.register_view;
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     set_margins(box, 16);
-    gtk_box_append(GTK_BOX(box), make_heading(state.text("Register Archive")));
     gtk_box_append(GTK_BOX(box), make_label(state.text(
         "Registration reads every file of the folder or volume and records its fingerprints "
         "(BLAKE3 and SHA-256) as the baseline that later verifications compare against. Nothing is "

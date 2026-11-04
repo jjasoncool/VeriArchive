@@ -5,6 +5,7 @@
 #include "app/progress_estimate.h"
 #include "app/typed_path.h"
 #include "gui/ended_notification.h"
+#include "gui/window_words.h"
 #include "platform/platform_services.h"
 
 #include <algorithm>
@@ -18,20 +19,6 @@
 #include <system_error>
 
 namespace va::gui {
-
-Report fixed_message(std::string english)
-{
-    return [english = std::move(english)](const app::Text& text) { return text(english); };
-}
-
-Report unexpected_error(std::string what)
-{
-    // The message goes through text() too: some exceptions carry a sentence the
-    // catalog knows, such as "cannot initialise SHA-256".
-    return [what = std::move(what)](const app::Text& text) {
-        return text.format("Unexpected error: {}", text(what));
-    };
-}
 
 std::string format_bytes(std::uint64_t bytes)
 {
@@ -59,22 +46,6 @@ GtkWidget* make_row_label(const std::string& text)
     GtkWidget* label = gtk_label_new(text.c_str());
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
     return label;
-}
-
-GtkWidget* make_heading(const std::string& text)
-{
-    GtkWidget* label = gtk_label_new(nullptr);
-    set_heading(label, text);
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
-    return label;
-}
-
-void set_heading(GtkWidget* heading, const std::string& text)
-{
-    gchar* escaped = g_markup_escape_text(text.c_str(), -1);
-    const std::string markup = std::string("<b><big>") + escaped + "</big></b>";
-    g_free(escaped);
-    gtk_label_set_markup(GTK_LABEL(heading), markup.c_str());
 }
 
 GtkWidget* make_text_view()
@@ -109,6 +80,10 @@ void clear_grid(GtkWidget* grid)
 GtkWidget* make_alert_label()
 {
     GtkWidget* label = make_label("", true);
+    // The theme's red for errors, which libadwaita gives the light and the
+    // dark style each its own of: it must stand out from the progress in
+    // either.
+    gtk_widget_add_css_class(label, "error");
     gtk_widget_set_visible(label, FALSE);
     return label;
 }
@@ -116,9 +91,7 @@ GtkWidget* make_alert_label()
 void show_alert(GtkWidget* label, const std::string& text)
 {
     gchar* escaped = g_markup_escape_text(text.c_str(), -1);
-    // Red, as GNOME's palette has it for errors, and bold: it must stand out
-    // from the progress in either theme.
-    const std::string markup = std::string("<span foreground=\"#e01b24\" weight=\"bold\">") + escaped + "</span>";
+    const std::string markup = std::string("<b>") + escaped + "</b>";
     g_free(escaped);
     gtk_label_set_markup(GTK_LABEL(label), markup.c_str());
     gtk_widget_set_visible(label, TRUE);
@@ -128,6 +101,44 @@ void hide_alert(GtkWidget* label)
 {
     gtk_label_set_text(GTK_LABEL(label), "");
     gtk_widget_set_visible(label, FALSE);
+}
+
+void ask(GtkWindow* parent, const std::string& heading, const std::string& body, std::vector<Answer> answers,
+    std::function<void(const std::string& id)> answered)
+{
+    if (!parent || answers.empty()) {
+        return;
+    }
+    AdwDialog* dialog =
+        adw_alert_dialog_new(heading.empty() ? nullptr : heading.c_str(), body.empty() ? nullptr : body.c_str());
+    auto* alert = ADW_ALERT_DIALOG(dialog);
+    for (const auto& answer : answers) {
+        adw_alert_dialog_add_response(alert, answer.id.c_str(), answer.label.c_str());
+        if (answer.destructive) {
+            adw_alert_dialog_set_response_appearance(alert, answer.id.c_str(), ADW_RESPONSE_DESTRUCTIVE);
+        }
+    }
+    // The answer that changes nothing is chosen by Enter, Escape and by
+    // closing the dialog.
+    adw_alert_dialog_set_default_response(alert, answers.front().id.c_str());
+    adw_alert_dialog_set_close_response(alert, answers.front().id.c_str());
+    using Answered = std::function<void(const std::string&)>;
+    g_signal_connect_data(dialog, "response",
+        G_CALLBACK(+[](AdwAlertDialog*, const char* response, gpointer data) {
+            const auto& answered = *static_cast<Answered*>(data);
+            if (answered) {
+                answered(response ? response : "");
+            }
+        }),
+        new Answered(std::move(answered)), +[](gpointer data, GClosure*) { delete static_cast<Answered*>(data); },
+        GConnectFlags{});
+    adw_dialog_present(dialog, GTK_WIDGET(parent));
+}
+
+void tell(GtkWindow* parent, const app::Text& text, const std::string& message)
+{
+    const auto words = alert_words(message);
+    ask(parent, words.heading, words.body, {{"close", text("Close")}}, nullptr);
 }
 
 std::filesystem::path entry_root(GtkWidget* entry)

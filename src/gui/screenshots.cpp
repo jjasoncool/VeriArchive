@@ -95,17 +95,29 @@ void choose(GtkWidget* drop_down, const std::vector<Uuid>& uuids, guint offset, 
     }
 }
 
-// Opens a drop-down's list, as a click on it does, and returns the popover
-// that shows the list.
+// The first popover inside `widget`, at any depth.
+GtkWidget* popover_in(GtkWidget* widget)
+{
+    for (GtkWidget* child = gtk_widget_get_first_child(widget); child; child = gtk_widget_get_next_sibling(child)) {
+        if (GTK_IS_POPOVER(child)) {
+            return child;
+        }
+        if (GtkWidget* inner = popover_in(child)) {
+            return inner;
+        }
+    }
+    return nullptr;
+}
+
+// Opens the list of a drop-down or a combo row (AdwComboRow), as a click on
+// it does, and returns the popover that shows the list.
 GtkWidget* open_list(GtkWidget* drop_down)
 {
     if (!gtk_widget_activate(drop_down)) {
         throw std::runtime_error("the drop-down did not open");
     }
-    for (GtkWidget* child = gtk_widget_get_first_child(drop_down); child; child = gtk_widget_get_next_sibling(child)) {
-        if (GTK_IS_POPOVER(child)) {
-            return child;
-        }
+    if (GtkWidget* popover = popover_in(drop_down)) {
+        return popover;
     }
     throw std::runtime_error("the drop-down has no list to show");
 }
@@ -262,7 +274,7 @@ public:
             {"07-language.png",
                 [this] {
                     show("settings");
-                    popover_ = open_list(state_.settings_view.language);
+                    popover_ = open_list(state_.settings_page.language);
                 },
                 {}},
         };
@@ -366,7 +378,7 @@ private:
 
     void show(const char* view)
     {
-        gtk_stack_set_visible_child_name(GTK_STACK(state_.stack), view);
+        show_page(state_, view);
     }
 
     // Starts an operation with its button; it must then be running.

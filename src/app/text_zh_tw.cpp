@@ -513,13 +513,15 @@ constexpr CatalogEntry entries[] = {
     {"A long operation is running", "長時間作業執行中"},
 
     // Graphical interface
-    // src/gui/gui_app.cpp
-    {"Archive List", "封存列表"},
+    // src/gui/window.cpp: the sidebar's pages and the header above it
+    // (decision 0046); Register Archive is the button above the sidebar.
+    {"Archives", "封存"},
+    {"History", "歷程"},
     {"Register Archive", "註冊封存"},
     {"Verify Archive", "驗證封存"},
     {"Compare Archives", "比較封存"},
-    {"Verification History", "驗證歷程"},
     {"Settings", "設定"},
+    // src/gui/gui_app.cpp
     // The window's notice while the open upgrades the repository database,
     // in place of the views (decision 0032).
     {"Upgrading the repository database...", "正在升級儲存庫資料庫……"},
@@ -551,7 +553,6 @@ constexpr CatalogEntry entries[] = {
     {"Overdue", "逾期"},
     {"Rev", "版次"},
     {"Status", "狀態"},
-    {"Archives", "封存列表"},
     {"Each archive shows when it was last read in full (FULL verify) and when it was last "
         "verified at all. A result is only as current as its date.",
         "每個封存都會顯示上次完整讀取（完整驗證）的時間，以及上次進行任何驗證的時間。"
@@ -667,19 +668,27 @@ constexpr CatalogEntry entries[] = {
     {"Archive:", "封存："},
     {"Show runs", "顯示執行紀錄"},
     {"Check history chain", "檢查歷程鏈"},
-    // src/gui/settings_view.cpp
+    // src/gui/settings_page.cpp: its groups (decision 0046) and their rows.
+    {"Repository", "儲存庫"},
+    {"Interface", "介面"},
+    {"Verification policy", "驗證政策"},
+    {"About", "關於"},
     {"No repository is open.", "目前沒有開啟的儲存庫。"},
     {"On first use, initialise a repository: it is created next to the program (or in your "
         "home folder when that is not writable) and remembered in the config file.",
         "第一次使用時，請初始化儲存庫：它會建立在程式所在資料夾（若該處無法寫入，"
         "則建立在您的個人資料夾），並記錄在設定檔中。"},
-    {"Selected by: {}", "選定方式：{}"},
-    {"Config file: {}", "設定檔：{}"},
-    {"Overdue after: FULL verify {}, any verify {}", "逾期期限：完整驗證 {}，任何驗證 {}", Match::FormatOnly},
-    {"Strict metadata: on", "嚴格中繼資料：開啟"},
-    {"Strict metadata: off", "嚴格中繼資料：關閉"},
-    {"Trusted signing keys: signed manifests are not part of this version.",
-        "受信任的金鑰：這個版本尚未提供簽章清單檔。"},
+    {"RepositoryRoot", "儲存庫根目錄"},
+    {"Selected by", "選定方式"},
+    {"repository_uuid", "repository_uuid"},
+    {"Config file", "設定檔"},
+    {"Overdue after", "逾期期限"},
+    {"FULL verify {}, any verify {}", "完整驗證 {}，任何驗證 {}", Match::FormatOnly},
+    {"Strict metadata", "嚴格中繼資料"},
+    {"On", "開啟"},
+    {"Off", "關閉"},
+    {"Trusted signing keys", "受信任的金鑰"},
+    {"Signed manifests are not part of this version.", "這個版本尚未提供簽章清單檔。"},
     {"Back up RepositoryRoot. Losing it loses all verification history; "
         "manifests can be recovered only from media copies, if they were written.",
         "請備份儲存庫根目錄。遺失它會失去所有驗證歷程；"
@@ -693,8 +702,16 @@ constexpr CatalogEntry entries[] = {
     {"cannot locate the config file", "找不到設定檔的位置"},
     {"Wait for the jobs to end, or stop them, before changing the language.",
         "請等工作結束或先停止它們，再切換語言。"},
-    // src/gui/jobs_view.cpp, src/gui/jobs.cpp: the window's jobs (decision 0045).
+    // src/gui/jobs_page.cpp, src/gui/job_words.cpp, src/gui/jobs.cpp: the
+    // window's jobs (decision 0045), the groups of the Jobs page and the
+    // header's jobs button with its popover (decision 0046).
     {"Jobs", "工作"},
+    {"Running", "執行中"},
+    {"Waiting", "等候中"},
+    {"See all jobs", "查看全部工作"},
+    {"Jobs: {} running, {} waiting", "工作：{} 個執行中、{} 個等候中", Match::FormatOnly},
+    {"Jobs: {} running", "工作：{} 個執行中", Match::FormatOnly},
+    {"Jobs: none running", "工作：沒有執行中的工作"},
     {"Each registration, verification and comparison started in this window runs as a job. Jobs that read the "
      "same device wait for one another; the others run at once. A job stopped keeps what it did: it can be resumed "
      "without reading again what it read.",
@@ -704,6 +721,9 @@ constexpr CatalogEntry entries[] = {
     {"No jobs yet.", "還沒有工作。"},
     {"Stop", "停止"},
     {"Details", "詳細"},
+    // What a screen reader calls a row's Stop and Details: with the job's title.
+    {"Stop {}", "停止 {}", Match::FormatOnly},
+    {"Details of {}", "{} 的詳細資料", Match::FormatOnly},
     {"Close", "關閉"},
     {"Job details", "工作詳細資料"},
     {"Ended", "已結束"},

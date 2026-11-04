@@ -64,6 +64,7 @@ std::uint64_t Jobs::start(const app::Text& text, JobSpec spec)
         thread.thread = std::thread([this, id, cancel = &thread.cancel, text, spec = std::move(spec),
                                         shown_as = identity_shown_]() mutable {
             Report report;
+            JobTone tone = JobTone::None;
             try {
                 const auto devices = spec.devices ? spec.devices() : std::vector<std::string>{};
                 const bool turn = queue_.take(id, devices, *cancel, [this, id](std::uint64_t ahead) {
@@ -75,6 +76,7 @@ std::uint64_t Jobs::start(const app::Text& text, JobSpec spec)
                 });
                 if (!turn) {
                     report = fixed_message("Stopped before it started, while it waited for the device.");
+                    tone = JobTone::Stopped;
                 } else {
                     post(id, [](JobShown& job) {
                         job.state = JobState::Running;
@@ -94,19 +96,21 @@ std::uint64_t Jobs::start(const app::Text& text, JobSpec spec)
                             post(id, [alert](JobShown& job) { job.alert = alert; });
                         }
                     };
-                    JobContext context{*cancel, progress, alerts};
+                    JobContext context{*cancel, progress, alerts, JobTone::None};
                     report = spec.work(context);
+                    tone = context.tone;
                 }
             } catch (const std::exception& error) {
                 log_failure(std::string("exception in a job: ") + error.what());
                 report = unexpected_error(error.what());
+                tone = JobTone::Error;
             }
             queue_.give_back(id);
             {
                 const std::lock_guard lock(targets_mutex_);
                 std::erase_if(targets_, [id](const auto& target) { return target.first == id; });
             }
-            finish(id, std::move(report), std::move(spec.done), text);
+            finish(id, std::move(report), tone, std::move(spec.done), text);
         });
     } catch (...) {
         // No thread could be started (std::system_error): nothing runs.
@@ -231,13 +235,14 @@ void Jobs::post(std::uint64_t job, std::function<void(JobShown&)> change)
         new Change{this, job, std::move(change)});
 }
 
-void Jobs::finish(std::uint64_t job, Report report, std::function<void(std::uint64_t, const Report&)> done,
-    app::Text text)
+void Jobs::finish(std::uint64_t job, Report report, JobTone tone,
+    std::function<void(std::uint64_t, const Report&)> done, app::Text text)
 {
     struct Finished {
         Jobs* jobs;
         std::uint64_t job;
         Report report;
+        JobTone tone;
         std::function<void(std::uint64_t, const Report&)> done;
         app::Text text;
     };
@@ -263,6 +268,7 @@ void Jobs::finish(std::uint64_t job, Report report, std::function<void(std::uint
                     shown->state = JobState::Ended;
                     shown->waiting_for = nullptr;
                     shown->report = finished->report;
+                    shown->tone = finished->tone;
                 }
                 if (finished->done) {
                     finished->done(finished->job, finished->report);
@@ -276,7 +282,7 @@ void Jobs::finish(std::uint64_t job, Report report, std::function<void(std::uint
             jobs.changed(finished->job);
             return G_SOURCE_REMOVE;
         },
-        new Finished{this, job, std::move(report), std::move(done), std::move(text)});
+        new Finished{this, job, std::move(report), tone, std::move(done), std::move(text)});
 }
 
 } // namespace va::gui

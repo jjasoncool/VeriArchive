@@ -107,7 +107,6 @@ GtkWidget* build_history_view(GuiState& state)
     const auto& text = state.text;
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     set_margins(box, 16);
-    gtk_box_append(GTK_BOX(box), make_heading(text("Verification History")));
 
     GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(row), make_row_label(text("Archive:")));

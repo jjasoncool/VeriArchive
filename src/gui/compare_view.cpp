@@ -142,6 +142,8 @@ void start_comparison(GuiState& state)
     };
     job.counting = Counting::Entries;
     job.work = [&state, a = *reference, b = *copy](JobContext& context) -> Report {
+            // Not compared, until a result says otherwise.
+            context.tone = JobTone::Error;
             auto& session = *state.session;
             auto store = ArchiveStore::open(session.context.repo);
             if (!store) {
@@ -153,8 +155,12 @@ void start_comparison(GuiState& state)
             auto comparison = compare_archives(
                 *store, *repository_files, session.context.repo, a, b, context.cancel, context.progress);
             if (!comparison) {
+                if (comparison.error().failure_class == "Cancelled") {
+                    context.tone = JobTone::Stopped;
+                }
                 return [failure = comparison.error()](const app::Text& text) { return failure_report(text, failure); };
             }
+            context.tone = comparison_tone(comparison->result);
             Shown shown{std::move(*comparison), 0};
             auto& differences = shown.comparison.differences;
             shown.differences = differences.size();
@@ -185,7 +191,6 @@ GtkWidget* build_compare_view(GuiState& state)
     const auto& text = state.text;
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     set_margins(box, 16);
-    gtk_box_append(GTK_BOX(box), make_heading(text("Compare Archives")));
     gtk_box_append(GTK_BOX(box), make_label(text(
         "Comparison checks that two registered archives hold the same entries with the same content, "
         "using their manifests in the repository; no media is read. Choose the reference archive as A "

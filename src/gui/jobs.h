@@ -14,6 +14,7 @@
 #include "gui/displayed_identity.h"
 #include "gui/gui_support.h"
 #include "gui/job_queue.h"
+#include "gui/job_shown.h"
 
 #include <nlohmann/json.hpp>
 
@@ -28,8 +29,6 @@
 
 namespace va::gui {
 
-enum class JobState { Waiting, Running, Ended };
-
 // What a job's work is given, on its thread.
 struct JobContext {
     CancelToken& cancel;
@@ -37,6 +36,9 @@ struct JobContext {
     // Shows the device alert of each device that the operation reads, in the
     // job, as soon as the operation tells them (decision 0044).
     DevicesObserved devices_observed;
+    // Set by the work as it returns its report: the tone that the window
+    // shows its result in once the job ended (decision 0046).
+    JobTone tone = JobTone::None;
 };
 
 struct JobSpec {
@@ -48,18 +50,6 @@ struct JobSpec {
     Counting counting = Counting::Files;
     std::function<Report(JobContext&)> work;            // on the job's thread; its report, unworded
     std::function<void(std::uint64_t job, const Report& report)> done;  // on the main thread, once it ended
-};
-
-// What the window shows of a job.
-struct JobShown {
-    std::uint64_t id = 0;
-    Report title;
-    JobState state = JobState::Waiting;
-    bool stopping = false;          // Stop was pressed; it ends soon
-    Report waiting_for;             // while it waits: the title of the job ahead of it
-    BarState bar;                   // its progress, as a bar shows it
-    std::string alert;              // its device alerts, worded, one per line
-    Report report;                  // once it ended
 };
 
 class Jobs {
@@ -115,8 +105,8 @@ private:
     void changed(std::uint64_t job) const;
     // Posts `change` to the main thread, where it is made to the job's JobShown.
     void post(std::uint64_t job, std::function<void(JobShown&)> change);
-    void finish(std::uint64_t job, Report report, std::function<void(std::uint64_t, const Report&)> done,
-        app::Text text);
+    void finish(std::uint64_t job, Report report, JobTone tone,
+        std::function<void(std::uint64_t, const Report&)> done, app::Text text);
 
     std::uint64_t next_ = 1;
     std::vector<JobShown> shown_;
