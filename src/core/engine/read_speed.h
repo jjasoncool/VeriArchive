@@ -43,6 +43,12 @@ struct ReadSpeed {
 
     std::uint64_t bytes() const;
     std::uint64_t milliseconds() const;
+    // How fast it read, in bytes per second, over the hundredths it read in
+    // a measurable time (bytes and milliseconds both above 0), as
+    // compare_read_speed takes them; nothing where it read none so. A
+    // hundredth of a few bytes read in no measurable time would otherwise
+    // count its bytes without its time.
+    std::optional<std::uint64_t> bytes_per_second() const;
     // Whether `other` read the same device and the same content.
     bool comparable(const ReadSpeed& other) const;
 };

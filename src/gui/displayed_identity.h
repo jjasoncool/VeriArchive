@@ -10,6 +10,7 @@
 // Plain C++ without GTK, so the unit tests can check it.
 #include "common/types.h"
 
+#include <string>
 #include <vector>
 
 namespace va::gui {
@@ -38,5 +39,11 @@ VolumeInfo displayed_identity(const VolumeInfo& recorded, IdentityShown shown);
 // (decision 0044), as a report or a device alert of a view names them:
 // Sample, each as the sample identity's device, keeping only its health.
 std::vector<PhysicalDeviceInfo> displayed_devices(const std::vector<PhysicalDeviceInfo>& read, IdentityShown shown);
+
+// The computer that recorded a run (VerifyRunRecord::host), as a view shows
+// it: Sample, SAMPLE-HOST, since the name of the computer that takes the
+// published pictures is no more sample data than its volumes are; nothing
+// where none was recorded.
+std::string displayed_host(const std::string& recorded, IdentityShown shown);
 
 } // namespace va::gui

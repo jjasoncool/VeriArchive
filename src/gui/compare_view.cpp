@@ -221,9 +221,6 @@ void refresh_archive_choices(GuiState& state)
         g_object_unref(model);
     };
 
-    set_choices(state.history_view.archive, labels);
-    state.history_view.archive_uuids = uuids;
-
     // The comparison keeps the two archives chosen when the list is reloaded
     // (after a registration, say). Otherwise B suggests the second archive, so
     // A and B start out different.

@@ -2,9 +2,10 @@
 // The GUI's state, its window (decision 0046: a sidebar of pages beside the
 // page shown, the header's jobs button) and its pages: Archives (the list of
 // archives beside the details of the one selected, where verifications start,
-// and the unfinished operations above them), Register Archive, Verification
-// History and Settings of HANDOFF §B17, Compare Archives (decision 0020) and
-// Jobs (decision 0045).
+// and the unfinished operations above them), Register Archive, History (the
+// runs of every archive) and Settings of HANDOFF §B17, Compare Archives
+// (decision 0020) and Jobs (decision 0045); and the result page of a run,
+// which Archives and History open over themselves.
 #include "app/adding_chunk_hashes.h"
 #include "app/refusal_in_window.h"
 #include "app/unfinished_operations.h"
@@ -13,6 +14,7 @@
 #include "gui/archive_rows.h"
 #include "gui/displayed_identity.h"
 #include "gui/gui_support.h"
+#include "gui/history_rows.h"
 #include "gui/job_words.h"
 #include "gui/jobs.h"
 
@@ -98,6 +100,22 @@ struct GuiState {
     std::map<Uuid, std::uint64_t> verification_jobs;
     std::optional<InterruptedRun> interrupted_run;
 
+    // The run that each ended verification job of the window recorded, by
+    // the job: View result on its rows in Jobs and in its details opens the
+    // run's result page. Kept across windows; Clear ended jobs drops the
+    // runs of the jobs it clears.
+    struct JobRun {
+        std::string run_id;
+        Uuid archive_uuid;
+    };
+    std::map<std::uint64_t, JobRun> job_runs;
+
+    // What History shows, kept across windows: the archive its filter names
+    // (none: every archive), and what the last check of the chain found
+    // (nothing until it is checked), worded as it is shown.
+    std::optional<Uuid> history_filter;
+    std::optional<std::expected<HistoryCheck, IoError>> history_check;
+
     // The widgets below belong to the current window; a language change
     // replaces them. The Reports are what a view shows, kept so the new window
     // can word them in the new language.
@@ -124,6 +142,7 @@ struct GuiState {
         GtkWidget* bar = nullptr;          // while it runs
         GtkWidget* alert = nullptr;
         GtkWidget* stop = nullptr;         // until it ended
+        GtkWidget* result = nullptr;       // View result, once it ended having recorded a run (job_runs)
         GtkWidget* details = nullptr;
         JobGroup group = JobGroup::Waiting;  // the group the row is listed in
     };
@@ -159,6 +178,8 @@ struct GuiState {
     // archives, a page that leads to the first registration. A narrow window
     // shows the list or the details.
     struct {
+        GtkWidget* navigation = nullptr;       // AdwNavigationView: the page, the result pages opened over it
+        GtkWidget* root = nullptr;             // its first page (AdwNavigationPage), which holds `page`
         GtkWidget* page = nullptr;             // the page: the operations are read while it is shown
         GtkWidget* status = nullptr;           // how many archives, or why none can be listed
         GtkWidget* refresh = nullptr;          // Refresh, which holds the focus while what had it is made anew
@@ -182,6 +203,7 @@ struct GuiState {
         std::optional<std::string> notice_key; // the operation `notice` shows, once it shows one
         GtkWidget* notice_words = nullptr;     // its words, which a later read of it changes in place
         GtkWidget* verify = nullptr;           // FULL verify (AdwSplitButton)
+        GtkWidget* view_result = nullptr;      // View result of the last FULL verification, where there is one
         GtkWidget* verify_menu = nullptr;      // the popover of the menu of FULL verify
         GtkWidget* adding = nullptr;           // its "FULL verify, and add chunk hashes", where it lists it
         GtkWidget* adding_note = nullptr;      // the line under it: what it does, or why it is not offered
@@ -232,6 +254,7 @@ struct GuiState {
         GtkWidget* alert = nullptr;
         GtkWidget* report = nullptr;
         GtkWidget* stop = nullptr;
+        GtkWidget* result = nullptr;       // View result, as on its row
     };
     struct {
         JobList page;                      // the Jobs page
@@ -246,15 +269,26 @@ struct GuiState {
         std::map<std::uint64_t, JobDetails> details;
     } jobs_page;
 
+    // History (decision 0046): the runs of every archive, or of the archive
+    // the filter names, newest first, a page of them at a time; each row
+    // opens the run's result page over it. Above them the result of the
+    // last check of the chain.
     struct {
-        GtkWidget* archive = nullptr;
-        GtkWidget* show = nullptr;         // "Show runs"
+        GtkWidget* navigation = nullptr;   // AdwNavigationView: the page, the result pages opened over it
+        GtkWidget* root = nullptr;         // its first page (AdwNavigationPage)
+        GtkWidget* filter = nullptr;       // AdwComboRow: every archive, then each archive
         GtkWidget* check = nullptr;        // "Check history chain"
-        GtkWidget* grid = nullptr;
-        GtkWidget* chain = nullptr;
-        Report chain_result;               // shown in `chain`
-        std::vector<Uuid> archive_uuids;
-    } history_view;
+        GtkWidget* chain = nullptr;        // the check's result, hidden until checked
+        GtkWidget* chain_result = nullptr;
+        GtkWidget* chain_limits = nullptr;
+        GtkWidget* list = nullptr;         // GtkListBox, a row for each run listed
+        std::vector<Uuid> filter_uuids;    // item i + 1 of the filter
+        std::vector<ArchiveName> names;    // the archives, as the last read named them
+        std::vector<VerifyRunRecord> runs; // every run, as the last read found them, oldest first
+        Report unread;                     // why the last read failed
+        std::size_t listed = 0;            // the rows listed of the filter's runs
+        bool filling = false;              // the filter is being filled: a choice is not the operator's
+    } history_page;
 
     // Settings, an AdwPreferencesPage (decision 0046): its groups, and the
     // rows that refresh_settings put into them.
@@ -268,10 +302,12 @@ struct GuiState {
     } settings_page;
 };
 
+// Archives and History are each an AdwNavigationView (their `navigation`)
+// whose first page is the page itself, over which a result page opens.
 GtkWidget* build_archives_page(GuiState& state);
 GtkWidget* build_register_view(GuiState& state);
 GtkWidget* build_compare_view(GuiState& state);
-GtkWidget* build_history_view(GuiState& state);
+GtkWidget* build_history_page(GuiState& state);
 GtkWidget* build_settings_page(GuiState& state);
 GtkWidget* build_jobs_page(GuiState& state);
 
@@ -297,9 +333,9 @@ GtkWidget* build_jobs_button(GuiState& state);
 // before the window closes while jobs run. It shows Archives.
 void build_window(GuiState& state);
 
-// Shows the page named `page` (a child of state.stack); the sidebar selects
-// its row, the header names it, and a narrow window shows it in place of the
-// sidebar.
+// Shows the page named `page` (a child of state.stack), itself rather than a
+// result page opened over it; the sidebar selects its row, the header names
+// it, and a narrow window shows it in place of the sidebar.
 void show_page(GuiState& state, const char* page);
 
 // The window's narrow layout (window.cpp): sets `property` of `object` to
@@ -400,6 +436,17 @@ bool keep_focus_from(GuiState& state, GtkWidget* part);
 GtkWidget* make_pill(const Pill& pill);
 GtkWidget* make_dot(Tone tone);
 
+// What the details and the result pages are made of (archive_detail.cpp):
+// words that wrap anywhere in a long name, in `style`, selectable where they
+// may be copied; the icon of a banner's tone; a line of a device alert or a
+// notice, in the colour of its kind (va-error, va-neutral), its icon first,
+// the rest appended; and a row of a boxed list with each field's name beside
+// its value, which can be selected and copied.
+GtkWidget* make_words(const std::string& text, const char* style = nullptr, bool selectable = false);
+const char* tone_icon(Tone tone);
+GtkWidget* make_line_box(const char* kind, const char* icon_name, const char* icon_style);
+GtkWidget* make_fields_row(const std::vector<Field>& fields);
+
 // ---- The unfinished operations (operations_poll.cpp) ------------------------
 
 // The watches belong to one repository; another one opened in Settings
@@ -443,8 +490,57 @@ bool can_resume(GuiState& state);
 // Says `report` in a message of its own (AdwAlertDialog).
 void show_message(GuiState& state, const Report& report);
 
-// Shows the recorded runs of the archive chosen in Verification History.
-void show_runs(GuiState& state);
+// ---- Result pages (result_page.cpp) -----------------------------------------
+
+// The pages over which a result page opens: Archives (from the details' View
+// result and Recent verifications, and from the toast of a verification) and
+// History (from its rows).
+enum class ResultsOver { Archives, History };
+
+// Opens the result page of the run `run_id` (decision 0046) over the page
+// `over`, which it shows: an AdwNavigationPage pushed on its navigation view,
+// whose back button returns to it and names it. Read from the repository's
+// records of the run; a page that says so where they cannot be read.
+void open_result(GuiState& state, ResultsOver over, const std::string& run_id);
+
+// The result page of the run `run_id` of `archive` over Archives, with the
+// details of that archive behind it, also in a narrow window: View result of
+// a verification's toast, and of an ended verification's row in Jobs and its
+// details.
+void open_result_of(GuiState& state, const Uuid& archive, const std::string& run_id);
+
+// The runs whose result pages are open over `over`, first opened first; and
+// the same opened again over a new window's page (a language change), at once.
+std::vector<std::string> results_open(const GuiState& state, ResultsOver over);
+void open_results_again(GuiState& state, ResultsOver over, const std::vector<std::string>& runs);
+
+// The part of the result pages that the reads of the unfinished operations
+// and the jobs change: Resume on the page of an INCOMPLETE run, shown while
+// the latest read lists its stopped verification with Resume (stopped_run)
+// and its archive has no job of the window that waits or works.
+void show_results_operations(GuiState& state);
+
+// The smoke test's check of the read speed chart (decision 0044), which no
+// run of the smoke test's empty repository has: draws a fixed chart of sample
+// data, made up for the check, with an earlier read and a markedly slower
+// stretch, as a result page draws it, in the light and in the dark style,
+// into images of its own, never on a run's page. Throws where it drew almost
+// nothing; GTK says on the error output what else went wrong, which fails the
+// smoke test. Where VERIARCHIVE_GUI_SMOKE_CHART names a folder, writes each
+// image into it (sample-chart-light.png, sample-chart-dark.png).
+void check_sample_chart(GuiState& state);
+
+// ---- History (history_page.cpp) ---------------------------------------------
+
+// Reads every run again, with the archives' names, and lists those of the
+// archive the filter names (state.history_filter), or every archive's. A
+// check of the chain that found it intact goes once a run was recorded since
+// (chain_check_holds).
+void refresh_history(GuiState& state);
+
+// Says in History that its runs could not be read (`report`: an unexpected
+// error of a read), in place of the runs of the last read.
+void show_history_error(GuiState& state, Report report);
 
 // Resume on a stopped verification or registration of the unfinished
 // operations (decision 0022, point 7): continues it exactly as its
@@ -521,7 +617,7 @@ void compare_with(GuiState& state, const Uuid& reference, const std::optional<Uu
 // archive registered at this folder or volume" ticked, not started.
 void register_new_revision(GuiState& state, const std::string& root);
 
-// Verification History with the runs of `archive` shown.
+// History with its filter set to `archive`, its runs listed.
 void show_history_of(GuiState& state, const Uuid& archive);
 
 // The Settings language row. show_language_in_use selects the language in

@@ -85,6 +85,13 @@ void show_alert(GtkWidget* label, const std::string& text)
     gtk_widget_set_visible(label, TRUE);
 }
 
+void set_status_description(GtkWidget* status_page, const std::string& words)
+{
+    gchar* escaped = g_markup_escape_text(words.c_str(), -1);
+    adw_status_page_set_description(ADW_STATUS_PAGE(status_page), escaped);
+    g_free(escaped);
+}
+
 void hide_alert(GtkWidget* label)
 {
     gtk_label_set_text(GTK_LABEL(label), "");

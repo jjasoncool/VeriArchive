@@ -23,12 +23,6 @@
 
 namespace va::gui {
 
-// What VeriArchive detects and what this version does not (R-02): every
-// verify report carries it (decision 0017), and Settings says it.
-inline constexpr const char* guarantee =
-    "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) "
-    "is not part of this version.";
-
 GtkWidget* make_label(const std::string& text, bool selectable = false);
 // A short caption beside other widgets in a row ("Archive:"). It stays on one
 // line: a wrapping label there is given its narrowest width and would show as
@@ -45,6 +39,10 @@ void clear_grid(GtkWidget* grid);
 GtkWidget* make_alert_label();
 void show_alert(GtkWidget* label, const std::string& text);
 void hide_alert(GtkWidget* label);
+
+// The description of an AdwStatusPage, which takes Pango markup, as plain
+// words: a path such as D:\R&D in them would otherwise blank it.
+void set_status_description(GtkWidget* status_page, const std::string& words);
 
 // One answer to a question of the window (ask).
 struct Answer {

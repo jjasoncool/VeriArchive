@@ -46,9 +46,11 @@ std::vector<std::string> health_alert_lines(const Text& text, const std::vector<
 std::string speed_words(const Text& text, std::uint64_t bytes_per_second);
 
 // How fast a FULL verification read the content, said after "Read speed: ":
-// "182 MiB/s", and where it was compared, "182 MiB/s; the last FULL
-// verification of this archive on this device read 180 MiB/s (2026-11-01
-// 14:03)". Nothing where it read nothing.
+// "182 MiB/s" (over the hundredths it read in a measurable time,
+// ReadSpeed::bytes_per_second), and where it was compared, "182 MiB/s; the
+// last FULL verification of this archive on this device, which finished
+// 2026-11-01 14:03:00 (UTC+8), read 180 MiB/s". Nothing where it read
+// nothing in a measurable time.
 std::optional<std::string> read_speed_words(
     const Text& text, const std::optional<ReadSpeed>& speed, const std::optional<SpeedComparison>& compared);
 

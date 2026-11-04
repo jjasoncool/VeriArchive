@@ -1,7 +1,8 @@
 #pragma once
 // The verification history as people read it (`history <uuid>`, the GUI's
-// Verification History). Every run is a verification of its archive; some are
-// also a relocation's (decision 0026), and the history says so beside them.
+// History and a run's result page). Every run is a verification of its
+// archive; some are also a relocation's (decision 0026), and the history says
+// so beside them.
 #include "app/text.h"
 #include "core/repository/archive_store.h"
 

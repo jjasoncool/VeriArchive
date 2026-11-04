@@ -124,6 +124,43 @@ void history_chain_limits_in_v1()
     CHECK(runs && runs->size() == 2 && runs->back().result == "PASSED");
 }
 
+// The window's History (decision 0046): every archive's runs in the order
+// they were recorded, and the media evidence recorded with a run, which its
+// result page shows. Reading them leaves the chain as it was. Sample runs
+// and archives (28ff645e-..., c0ffee00-...).
+void history_across_archives()
+{
+    TestRepository repository;
+    auto store = repository.store();
+    const auto& repository_uuid = repository.context.repository_uuid;
+    auto other = run("run-2", "FAILED");
+    other.archive_uuid = "c0ffee00-0000-4000-8000-000000000002";
+    CHECK(store.append_verify_run(run("run-1", "PASSED"), repository_uuid));
+    CHECK(store.append_verify_run(other, repository_uuid));
+    CHECK(store.append_verify_run(run("run-3", "INCOMPLETE"), repository_uuid));
+    const auto all = store.all_verify_runs();
+    CHECK(all && all->size() == 3);
+    CHECK(all && all->size() == 3 && (*all)[0].run_id == "run-1" && (*all)[1].run_id == "run-2" &&
+          (*all)[1].archive_uuid == other.archive_uuid && (*all)[2].result == "INCOMPLETE");
+    const auto one = store.verify_runs("28ff645e-a220-4aac-ae0b-6c328bf1a2b3");
+    CHECK(one && one->size() == 2);
+    const auto check = store.check_history(repository_uuid);
+    CHECK(check && check->runs == 3 && !check->first_broken_run);
+
+    // The evidence of a run: the last that names it; none for another run.
+    CHECK(store.insert_evidence({other.archive_uuid, "run-2", "2026-10-08T00:00:00Z", "{\"label\":\"SAMPLE-A\"}",
+        "MATCH_WEAK", ""}));
+    CHECK(store.insert_evidence({other.archive_uuid, "run-2", "2026-10-08T00:30:00Z", "{\"label\":\"SAMPLE-B\"}",
+        "MATCH", "sample note"}));
+    CHECK(store.insert_evidence({other.archive_uuid, "", "2026-10-08T00:40:00Z", "{}", "UNKNOWN", ""}));
+    const auto evidence = store.run_evidence("run-2");
+    CHECK(evidence && *evidence && (*evidence)->match_result == "MATCH" &&
+          (*evidence)->volume_json == "{\"label\":\"SAMPLE-B\"}" && (*evidence)->operator_note == "sample note" &&
+          (*evidence)->run_id == "run-2" && (*evidence)->archive_uuid == other.archive_uuid);
+    const auto none = store.run_evidence("run-1");
+    CHECK(none && !*none);
+}
+
 void items_and_progress()
 {
     TestRepository repository;
@@ -999,6 +1036,7 @@ void archive_store_tests()
     automatic_labels_skip_the_labels_in_use();
     history_chain_detects_tampering();
     history_chain_limits_in_v1();
+    history_across_archives();
     items_and_progress();
     pending_registrations_with_checkpoints();
     unfinished_verifications_with_checkpoints();

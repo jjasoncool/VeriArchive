@@ -52,10 +52,15 @@ void open_repository_session(GuiState& state, bool initialise)
         state.session.reset();
         state.session_error = unexpected_error(error.what());
     }
+    // The check of the chain was of the repository open before, and the
+    // filter may name an archive of it.
+    state.history_check.reset();
+    state.history_filter.reset();
     refresh_shell(state);
     refresh_settings(state);
     refresh_archives(state);
     refresh_archive_choices(state);
+    refresh_history(state);
 }
 
 namespace {
@@ -83,8 +88,10 @@ struct Kept {
     std::optional<Uuid> compare_copy;
     double compare_fraction = 0.0;
     bool compare_finished = false;
-    std::optional<Uuid> history_archive;
-    bool runs_shown = false;
+    // The runs whose result pages are open over Archives and over History.
+    // (History's filter and its check of the chain are kept in GuiState.)
+    std::vector<std::string> archives_results;
+    std::vector<std::string> history_results;
 };
 
 std::string entry_text(GtkWidget* entry)
@@ -136,9 +143,8 @@ Kept keep(const GuiState& state)
     kept.compare_fraction = gtk_progress_bar_get_fraction(GTK_PROGRESS_BAR(comparing.progress));
     kept.compare_finished = finished(comparing.progress);
 
-    const auto& history = state.history_view;
-    kept.history_archive = chosen_archive(history.archive, history.archive_uuids, 0);
-    kept.runs_shown = gtk_widget_get_first_child(history.grid) != nullptr;
+    kept.archives_results = results_open(state, ResultsOver::Archives);
+    kept.history_results = results_open(state, ResultsOver::History);
     return kept;
 }
 
@@ -179,14 +185,8 @@ void restore(GuiState& state, const Kept& kept)
         set_text(comparing.report, comparing.shown_report(text));
     }
 
-    auto& history = state.history_view;
-    choose_archive(history.archive, history.archive_uuids, 0, kept.history_archive);
-    if (history.chain_result) {
-        gtk_label_set_text(GTK_LABEL(history.chain), history.chain_result(text).c_str());
-    }
-    if (kept.runs_shown) {
-        show_runs(state);
-    }
+    open_results_again(state, ResultsOver::Archives, kept.archives_results);
+    open_results_again(state, ResultsOver::History, kept.history_results);
 }
 
 } // namespace
@@ -303,6 +303,7 @@ bool open_with_upgrade_notice(GuiState& state, bool initialise)
                     refresh_settings(state);
                     refresh_archives(state);
                     refresh_archive_choices(state);
+                    refresh_history(state);
                     // Settings says once where the copy of the database is.
                     if (!state.session->notes.empty()) {
                         show_page(state, "settings");
@@ -365,6 +366,9 @@ void activate(GuiState& state, bool smoke_test)
                         if (!state.window) {
                             return;  // shutting down
                         }
+                        // The result pages' read speed chart, which the
+                        // empty repository gives no run to draw.
+                        check_sample_chart(state);
                         const auto start = state.text.language();
                         const auto other = start == app::Language::English ? app::Language::TraditionalChinese
                                                                            : app::Language::English;
@@ -450,6 +454,7 @@ void rebuild_window(GuiState& state, app::Language language, bool show)
         refresh_settings(state);
         refresh_archives(state);
         refresh_archive_choices(state);
+        refresh_history(state);
         restore(state, kept);
         // The views show the jobs they show, as they are now; the details of
         // an archive, made anew, show its job as it is.

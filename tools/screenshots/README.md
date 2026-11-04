@@ -8,10 +8,11 @@
 | `02-archive-list.png` | Archives with the three sample archives and the sample identity (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, 1.0 TiB), archive A selected and its details beside the list |
 | `03-register.png` | Register Archive with archive A's folder and label typed in (not started) |
 | `04-verify.png` | Archives after a FULL verification of archive A by its folder (its toast at the bottom), then the details of archive C with the menu of FULL verify open, which offers "FULL verify, and add chunk hashes" (not started), as an archive registered by an earlier version shows it |
-| `05-history.png` | Verification History of archive A, with the history chain checked |
+| `05-history.png` | History: the runs of every archive, newest first, after the verification of archive A and the comparison, with the history chain checked |
 | `06-compare.png` | Compare Archives: A (`原始資料`) against its copy B (`備份資料`) |
 | `07-language.png` | Settings with the language list open |
 | `08-jobs.png` | Jobs: the verification and the comparison that the tour started, ended |
+| `09-result.png` | The result page of archive A's FULL verification, the tour's, opened with View result in its details |
 
 The pictures are 1100 × 720 and show the window only, title bar included. GTK draws them itself from what the window drew, so other windows on the desktop never appear in them.
 
@@ -47,7 +48,7 @@ The repository is public, and so are these pictures. The script makes its own sa
 - A portable install (a `config.json` next to `veriarchive-gui`) would use its own repository instead, so the script refuses such a GUI.
 - The sample folders lie on a real volume, the one `WORK` is on, so what the registrations record about their carrier is that volume's own identity: its label, its device's model and serial, its capacity. The screenshot mode never shows it: every view shows a fixed sample identity instead (see below).
 - The pictures still show the paths under `WORK`, its drive letter included, and the computer's time zone. Check them before publishing.
-- The identity in the pictures is sample data, but what the tour's own runs measured is not: the health that the device under `WORK` reported, the read speed and the duration of the verification (in the details of archive A, under Device and Recent verifications), and every time shown come from the machine that took the pictures, as do the roots, which are the sample folders' real paths under `WORK`. Check them before publishing too.
+- The identity in the pictures is sample data, but what the tour's own runs measured is not: the health that the device under `WORK` reported, the read speed and the duration of the verification (in the details of archive A, under Device and Recent verifications, in History and on its result page), and every time shown come from the machine that took the pictures, as do the roots, which are the sample folders' real paths under `WORK`. Check them before publishing too. The name of the computer that recorded a run, which a result page shows under Technical details, is shown as `SAMPLE-HOST`.
 
 ## The screenshot mode
 
@@ -56,7 +57,7 @@ The script sets these variables for the GUI. Setting them by hand works too, aga
 | Variable | Meaning |
 |---|---|
 | `VERIARCHIVE_GUI_SCREENSHOTS` | Folder for the PNG files; turns the mode on |
-| `VERIARCHIVE_SCREENSHOT_REFERENCE` | uuid of archive A: verified, its history shown, compared |
+| `VERIARCHIVE_SCREENSHOT_REFERENCE` | uuid of archive A: verified, compared, its runs in History, the result page of its FULL verification shown |
 | `VERIARCHIVE_SCREENSHOT_COPY` | uuid of archive B: compared with A |
 | `VERIARCHIVE_SCREENSHOT_EARLIER` | uuid of archive C, registered without chunk hashes: its details shown in Archives with the menu of FULL verify open, which offers "FULL verify, and add chunk hashes" |
 | `VERIARCHIVE_SCREENSHOT_FOLDER` | archive A's folder: typed into Register Archive, and verified as "Verify a folder or volume..." verifies one |

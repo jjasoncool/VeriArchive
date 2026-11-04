@@ -117,4 +117,11 @@ inline constexpr const char* name_collision_warning =
     "an accent or a mark is encoded (Unicode normalisation); a volume or system that does not tell such names apart "
     "cannot keep them all";
 
+// R-30, §A6: the detail of the SkippedMountPoint item of a mount point where
+// the revision records nothing at or below it. It holds no part of the
+// archive, so its item changes no result; a mount point that covers recorded
+// entries has another detail, and fails the run.
+inline constexpr const char* mount_point_outside_archive =
+    "another volume is mounted here; it is not part of the archive";
+
 } // namespace va

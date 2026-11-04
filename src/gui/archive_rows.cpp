@@ -259,18 +259,20 @@ ResultBanner result_banner(const app::Text& text, const ArchiveStatus& status, c
     return banner;
 }
 
-std::vector<std::string> device_alert_lines(const app::Text& text, const ArchiveStatus& status, IdentityShown shown)
+std::vector<AlertLine> device_alert_lines(const app::Text& text, const ArchiveStatus& status, IdentityShown shown)
 {
-    std::vector<std::string> lines;
+    std::vector<AlertLine> lines;
     if (status.last_run) {
-        lines = app::health_alert_lines(
-            text, displayed_devices(recorded_device_health(status.last_run->counts_json), shown));
+        for (auto& line : app::health_alert_lines(
+                 text, displayed_devices(recorded_device_health(status.last_run->counts_json), shown))) {
+            lines.push_back({std::move(line), {}});
+        }
     }
     if (status.last_full) {
         if (const auto compared = recorded_speed_comparison(status.last_full->counts_json);
             compared && compared->alerts()) {
-            if (const auto line = app::slower_alert_line(text, *compared)) {
-                lines.push_back(*line);
+            if (auto line = app::slower_alert_line(text, *compared)) {
+                lines.push_back({std::move(*line), status.last_full->run_id});
             }
         }
     }

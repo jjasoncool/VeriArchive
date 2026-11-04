@@ -74,6 +74,22 @@ std::uint64_t ReadSpeed::milliseconds() const
     return total;
 }
 
+std::optional<std::uint64_t> ReadSpeed::bytes_per_second() const
+{
+    std::uint64_t bytes = 0;
+    std::uint64_t milliseconds = 0;
+    for (const auto& part : parts) {
+        if (part.bytes > 0 && part.milliseconds > 0) {
+            bytes += part.bytes;
+            milliseconds += part.milliseconds;
+        }
+    }
+    if (milliseconds == 0) {
+        return std::nullopt;
+    }
+    return bytes * 1000 / milliseconds;
+}
+
 bool ReadSpeed::comparable(const ReadSpeed& other) const
 {
     return content_bytes == other.content_bytes && devices == other.devices &&

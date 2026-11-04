@@ -61,4 +61,12 @@ std::vector<PhysicalDeviceInfo> displayed_devices(const std::vector<PhysicalDevi
     return devices;
 }
 
+std::string displayed_host(const std::string& recorded, IdentityShown shown)
+{
+    if (shown == IdentityShown::Recorded || recorded.empty()) {
+        return recorded;
+    }
+    return "SAMPLE-HOST";
+}
+
 } // namespace va::gui

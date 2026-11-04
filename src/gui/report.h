@@ -14,6 +14,13 @@ namespace va::gui {
 
 using Report = std::function<std::string(const app::Text&)>;
 
+// What VeriArchive detects and what this version does not (R-02): every
+// verify report and the result page of every run carry it (decision 0017),
+// and Settings says it.
+inline constexpr const char* guarantee =
+    "VeriArchive detects accidental corruption and unintended change; tamper evidence (signed manifests) "
+    "is not part of this version.";
+
 // A fixed English message (or engine sentence) as a Report.
 Report fixed_message(std::string english);
 

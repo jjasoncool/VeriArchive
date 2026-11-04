@@ -1,10 +1,12 @@
 // Jobs (decisions 0045 and 0046): every registration, verification and
 // comparison started in the window, in the groups Running, Waiting and Ended,
 // each with its title, how far it is, its device alert, its bar while it
-// runs, Stop until it ended, and Details, a dialog of its own with its
-// progress and, once it ended, its report; an ended job's result shows in its
-// tone. The header's jobs button shows how far the jobs that run are on a
-// ring, counts the jobs that run or wait and lists them, with the last ended
+// runs, Stop until it ended, View result once a verification ended having
+// recorded a run (its result page), and Details, a dialog of its own with its
+// progress and, once it ended, its report and View result too; an ended
+// job's result shows in its tone. The header's jobs button shows how far the
+// jobs that run are on a ring, counts the jobs that run or wait and lists
+// them, with the last ended
 // ones, in its popover. The view that started a job shows it too: Register
 // Archive and Compare Archives its bar, an archive's details in Archives a
 // card of its row.
@@ -103,6 +105,12 @@ void show_tone(const GuiState::JobRow& row, const JobShown& job)
     gtk_widget_set_visible(row.tone, icon != nullptr);
 }
 
+// Whether `job` ended having recorded a run, whose result page View result opens.
+bool recorded_a_run(const GuiState& state, const JobShown& job)
+{
+    return job.state == JobState::Ended && state.job_runs.contains(job.id);
+}
+
 void update_row(GuiState& state, const GuiState::JobRow& row, const JobShown& job)
 {
     const auto& text = state.text;
@@ -116,6 +124,7 @@ void update_row(GuiState& state, const GuiState::JobRow& row, const JobShown& jo
     // Stop does not ask first (decision 0045): a job stopped can be resumed.
     gtk_widget_set_visible(row.stop, job.state != JobState::Ended);
     gtk_widget_set_sensitive(row.stop, !job.stopping);
+    gtk_widget_set_visible(row.result, recorded_a_run(state, job));
 }
 
 void update_details(GuiState& state, const JobShown& job)
@@ -129,9 +138,10 @@ void update_details(GuiState& state, const JobShown& job)
     gtk_label_set_text(GTK_LABEL(details.state), state_words(text, job).c_str());
     show_bar(text, job, details.bar);
     show_job_alert(job, details.alert);
-    // Until it ended, as on its row.
+    // Until it ended, as on its row; then View result, where it recorded a run.
     gtk_widget_set_visible(details.stop, job.state != JobState::Ended);
     gtk_widget_set_sensitive(details.stop, !job.stopping);
+    gtk_widget_set_visible(details.result, recorded_a_run(state, job));
     set_text(details.report, job.state == JobState::Ended && job.report
                                  ? job.report(text)
                                  : text("The report shows here once the job has ended."));
@@ -178,6 +188,35 @@ void connect_stop(GtkWidget* button, GuiState& state, std::uint64_t job)
     connect_job(button, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto* pressed = static_cast<JobButton*>(data);
         pressed->state->jobs.stop(pressed->job);
+    }),
+        state, job);
+}
+
+// View result of an ended verification: the result page of the run it
+// recorded, over Archives, in place of the popover or of the job's details.
+void connect_view_result(GtkWidget* button, GuiState& state, std::uint64_t job)
+{
+    connect_job(button, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto* pressed = static_cast<JobButton*>(data);
+        auto& state = *pressed->state;
+        // Copies: closing the details takes this button away.
+        const auto ended = pressed->job;
+        guarded(
+            [&] {
+                const auto found = state.job_runs.find(ended);
+                if (found == state.job_runs.end()) {
+                    return;
+                }
+                const auto run = found->second;
+                if (state.jobs_page.popover) {
+                    gtk_popover_popdown(GTK_POPOVER(state.jobs_page.popover));
+                }
+                if (const auto open = state.jobs_page.details.find(ended); open != state.jobs_page.details.end()) {
+                    adw_dialog_close(ADW_DIALOG(open->second.dialog));
+                }
+                open_result_of(state, run.archive_uuid, run.run_id);
+            },
+            [&](const Report& report) { show_message(state, report); });
     }),
         state, job);
 }
@@ -234,6 +273,8 @@ GtkWidget* make_row(GuiState& state, GuiState::JobList& list, const JobShown& jo
     gtk_widget_set_valign(buttons, GTK_ALIGN_CENTER);
     row.stop = gtk_button_new_with_label(text("Stop").c_str());
     connect_stop(row.stop, state, job.id);
+    row.result = gtk_button_new_with_label(text("View result").c_str());
+    connect_view_result(row.result, state, job.id);
     row.details = gtk_button_new_with_label(text("Details").c_str());
     gtk_widget_add_css_class(row.details, "flat");
     connect_job(row.details, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
@@ -251,6 +292,7 @@ GtkWidget* make_row(GuiState& state, GuiState::JobList& list, const JobShown& jo
     }),
         state, job.id);
     gtk_box_append(GTK_BOX(buttons), row.stop);
+    gtk_box_append(GTK_BOX(buttons), row.result);
     gtk_box_append(GTK_BOX(buttons), row.details);
 
     row.alert = make_alert_label();
@@ -269,6 +311,8 @@ GtkWidget* make_row(GuiState& state, GuiState::JobList& list, const JobShown& jo
         GTK_ACCESSIBLE(row.stop), GTK_ACCESSIBLE_PROPERTY_LABEL, text.format("Stop {}", title).c_str(), -1);
     gtk_accessible_update_property(GTK_ACCESSIBLE(row.details), GTK_ACCESSIBLE_PROPERTY_LABEL,
         text.format("Details of {}", title).c_str(), -1);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(row.result), GTK_ACCESSIBLE_PROPERTY_LABEL,
+        text.format("Result of {}", title).c_str(), -1);
     update_row(state, row, job);
     list.rows[job.id] = row;
     return list_row;
@@ -458,12 +502,15 @@ void open_job_details(GuiState& state, std::uint64_t id)
     // Stop at the start, while the job waits or runs; Close at the end.
     details.stop = gtk_button_new_with_label(text("Stop").c_str());
     connect_stop(details.stop, state, id);
+    details.result = gtk_button_new_with_label(text("View result").c_str());
+    connect_view_result(details.result, state, id);
     GtkWidget* close = gtk_button_new_with_label(text("Close").c_str());
     gtk_widget_set_hexpand(close, TRUE);
     gtk_widget_set_halign(close, GTK_ALIGN_END);
     gtk_widget_add_css_class(close, "suggested-action");
     g_signal_connect_swapped(close, "clicked", G_CALLBACK(adw_dialog_close), dialog);
     gtk_box_append(GTK_BOX(buttons), details.stop);
+    gtk_box_append(GTK_BOX(buttons), details.result);
     gtk_box_append(GTK_BOX(buttons), close);
     adw_toolbar_view_add_bottom_bar(ADW_TOOLBAR_VIEW(view), buttons);
     adw_dialog_set_child(dialog, view);
@@ -503,7 +550,10 @@ GtkWidget* build_jobs_page(GuiState& state)
     page.clear = gtk_button_new_with_label(text("Clear ended jobs").c_str());
     gtk_widget_set_valign(page.clear, GTK_ALIGN_START);
     g_signal_connect(page.clear, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
-        static_cast<GuiState*>(data)->jobs.clear_ended();
+        auto& state = *static_cast<GuiState*>(data);
+        state.jobs.clear_ended();
+        // The runs of the jobs cleared: no row leads to them any more.
+        std::erase_if(state.job_runs, [&](const auto& run) { return !state.jobs.find(run.first); });
     }), &state);
     gtk_box_append(GTK_BOX(intro), explanation);
     gtk_box_append(GTK_BOX(intro), page.clear);
@@ -608,6 +658,12 @@ void job_changed(GuiState& state, std::uint64_t job)
         }
         update_details(state, *shown);
         update_view(state, *shown);
+    }
+    // A result page offers Resume while no job of the window works on its
+    // archive: a job added or ended changes that.
+    const auto* changed = job == 0 ? nullptr : state.jobs.find(job);
+    if (job == 0 || (changed && changed->state == JobState::Ended)) {
+        show_results_operations(state);
     }
     show_clear(state);
     show_counts(state);

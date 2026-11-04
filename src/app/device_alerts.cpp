@@ -102,14 +102,17 @@ std::optional<std::string> read_speed_words(
     const Text& text, const std::optional<ReadSpeed>& speed, const std::optional<SpeedComparison>& compared)
 {
     if (compared) {
-        return text.format("{}; the last FULL verification of this archive on this device read {} ({})",
-            speed_words(text, compared->bytes_per_second), speed_words(text, compared->baseline_bytes_per_second),
-            local_time(compared->baseline_finished, text));
+        // The time is not put in brackets: it holds its offset in brackets.
+        return text.format("{}; the last FULL verification of this archive on this device, which finished {}, read {}",
+            speed_words(text, compared->bytes_per_second), local_time(compared->baseline_finished, text),
+            speed_words(text, compared->baseline_bytes_per_second));
     }
-    if (!speed || speed->milliseconds() == 0) {
+    // Over the hundredths read in a measurable time, as the comparison takes them.
+    const auto per_second = speed ? speed->bytes_per_second() : std::nullopt;
+    if (!per_second) {
         return std::nullopt;
     }
-    return speed_words(text, speed->bytes() * 1000 / speed->milliseconds());
+    return speed_words(text, *per_second);
 }
 
 std::optional<std::string> slower_alert_line(const Text& text, const SpeedComparison& compared)

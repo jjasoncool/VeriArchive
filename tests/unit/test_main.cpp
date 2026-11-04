@@ -18,6 +18,8 @@ int main()
     job_words_tests();
     window_words_tests();
     archive_rows_tests();
+    run_result_tests();
+    history_rows_tests();
     hash_tests();
     merkle_tests();
     fs_access_tests();

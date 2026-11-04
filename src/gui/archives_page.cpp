@@ -9,7 +9,8 @@
 // (operations_poll.cpp), with Resume and Abandon... where they have stopped
 // (unfinished_actions.cpp). Without archives, a page that leads to the first
 // registration. A narrow window shows the list, and the details of an archive
-// in its place.
+// in its place. The result page of a run opens over the page
+// (result_page.cpp).
 #include "gui/gui_app.h"
 
 #include "app/plain_words.h"
@@ -375,10 +376,9 @@ void show_empty(GuiState& state, bool repository_open)
     if (repository_open) {
         adw_status_page_set_icon_name(empty, "package-x-generic-symbolic");
         adw_status_page_set_title(empty, text("No archives yet").c_str());
-        adw_status_page_set_description(empty,
+        set_status_description(page.empty,
             text("Register a folder or volume: VeriArchive records the fingerprints of each of its files. A FULL "
-                 "verification later tells whether any of them was modified, corrupted, deleted or added.")
-                .c_str());
+                 "verification later tells whether any of them was modified, corrupted, deleted or added."));
         gtk_button_set_label(GTK_BUTTON(page.empty_button), text("Register the first archive").c_str());
         g_object_set_data(G_OBJECT(page.empty_button), "va-page", const_cast<char*>("register"));
     } else {
@@ -386,8 +386,8 @@ void show_empty(GuiState& state, bool repository_open)
         // attached, say: rule 5), as Settings says it.
         adw_status_page_set_icon_name(empty, "dialog-information-symbolic");
         adw_status_page_set_title(empty, text("No repository is open.").c_str());
-        adw_status_page_set_description(empty, state.session_error ? state.session_error(text).c_str()
-                                                                   : text("No repository is open; see Settings.").c_str());
+        set_status_description(page.empty, state.session_error ? state.session_error(text)
+                                                               : text("No repository is open; see Settings."));
         gtk_button_set_label(GTK_BUTTON(page.empty_button), text("Settings").c_str());
         g_object_set_data(G_OBJECT(page.empty_button), "va-page", const_cast<char*>("settings"));
     }
@@ -555,6 +555,7 @@ void show_operations(GuiState& state)
     use_session_repository(state);
     const auto& poll = state.operations;
     show_details_operations(state);
+    show_results_operations(state);
     const auto clear = [&] {
         keep_focus_from(state, page.operations_list);
         gtk_list_box_remove_all(GTK_LIST_BOX(page.operations_list));
@@ -650,15 +651,15 @@ void refresh_archives(GuiState& state)
         state.operations.archives_shown = *mark;
     }
     page.statuses = std::move(*statuses);
-    // Compare Archives and Verification History list the archives listed
-    // here, so that the details open either of them on any of them, also on
-    // an archive registered meanwhile from the command line or another
-    // window. Both lists read archive_statuses, in the same order.
+    // Compare Archives lists the archives listed here, so that the details
+    // open it on any of them, also on an archive registered meanwhile from
+    // the command line or another window. Both lists read archive_statuses,
+    // in the same order. (History reads them as it is shown.)
     std::vector<Uuid> uuids;
     for (const auto& status : page.statuses) {
         uuids.push_back(status.archive.archive_uuid);
     }
-    if (uuids != state.history_view.archive_uuids) {
+    if (uuids != state.compare_view.archive_uuids) {
         refresh_archive_choices(state);
     }
     gtk_label_set_text(
@@ -794,7 +795,14 @@ GtkWidget* build_archives_page(GuiState& state)
         auto& state = *static_cast<GuiState*>(data);
         guarded([&] { stop_watching(state, hidden); }, [](const Report&) {});
     }), &state);
-    return box;
+
+    // The page is the first of a navigation view, over which the result page
+    // of a run opens (decision 0046); its back button returns here and names
+    // the page. Added, not pushed: it stays the first page for good.
+    page.root = GTK_WIDGET(adw_navigation_page_new(box, text("Archives").c_str()));
+    page.navigation = adw_navigation_view_new();
+    adw_navigation_view_add(ADW_NAVIGATION_VIEW(page.navigation), ADW_NAVIGATION_PAGE(page.root));
+    return page.navigation;
 }
 
 } // namespace va::gui

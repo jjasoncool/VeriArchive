@@ -5,7 +5,8 @@
 // identity, with strict metadata or not. Each runs as a job (decision 0045),
 // shown as a card in the details that started it, whose Stop stops it, and
 // none starts while the archive has one that waits or works; once it ended, a
-// toast says its result, with Details, its report. The result always carries
+// toast says its result, with View result, the result page of the run it
+// recorded, or, where it recorded none, Details, its report. The result always carries
 // its mode (R-21) and the V1 guarantee (R-02). A stopped verification is
 // resumed from the unfinished operations or the archive's details.
 #include "gui/gui_app.h"
@@ -146,6 +147,7 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
         std::string result;
         Uuid archive_uuid;
         std::string label;  // as the verification read it
+        std::string run_id; // the run it recorded, whose result page the toast opens
     };
     auto reached = std::make_shared<std::optional<Reached>>();
     // The worker returns its report unworded; it is worded when shown, in the
@@ -235,7 +237,9 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
         // screenshot mode, whose pictures are published.
         outcome->devices = displayed_devices(outcome->devices, state.identity_shown);
         context.tone = verification_tone(outcome->result);
-        *reached = Reached{outcome->result, outcome->archive_uuid, outcome->label};
+        // A verification that returns an outcome has recorded its run, an
+        // INCOMPLETE one and one that failed on its manifest included.
+        *reached = Reached{outcome->result, outcome->archive_uuid, outcome->label, outcome->run_id};
         if (outcome->result == "INCOMPLETE") {
             *interrupted = Interrupted{outcome->run_id, outcome->archive_uuid};
         } else if (request.resume_run && !outcome->media_read) {
@@ -256,23 +260,37 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
                            *request.resume_run == state.interrupted_run->run_id) {
                     state.interrupted_run.reset();
                 }
+                // The run it recorded, which View result on its rows in Jobs
+                // and in its details opens; the rows are made again once
+                // `done` returns, as the job ended.
+                if (*reached && !(*reached)->run_id.empty()) {
+                    state.job_runs[ended] = {(*reached)->run_id, (*reached)->archive_uuid};
+                }
                 // Its new result, its revision with chunk hashes, or the
-                // verification that stopped, at once.
+                // verification that stopped, at once; in History too.
                 refresh_archives(state);
+                refresh_history(state);
                 start_poll(state);
                 // The archive as the list names it: by its uuid as the job's
                 // title does, by the root's archive once the verification
                 // found it; or, without a result, what the job verified.
-                std::string toast = not_verified_toast(state.text, name);
-                if (*reached) {
+                // View result opens the result page of the run it recorded;
+                // a job that recorded none has its report in Details.
+                if (*reached && !(*reached)->run_id.empty()) {
                     const auto& found = **reached;
                     const auto archive = !request.root          ? name
                                          : found.archive_uuid.empty() ? found.label
                                                                       : archive_name(state, found.archive_uuid);
-                    toast = verified_toast(state.text, archive.empty() ? name : archive, found.result);
+                    show_toast(state, verified_toast(state.text, archive.empty() ? name : archive, found.result),
+                        ToastAction{state.text("View result"),
+                            [run = found.run_id, uuid = found.archive_uuid](GuiState& state) {
+                                // Over Archives, the details of its archive behind it.
+                                open_result_of(state, uuid, run);
+                            }});
+                } else {
+                    show_toast(state, not_verified_toast(state.text, name),
+                        ToastAction{state.text("Details"), [ended](GuiState& state) { open_job_details(state, ended); }});
                 }
-                show_toast(state, toast,
-                    ToastAction{state.text("Details"), [ended](GuiState& state) { open_job_details(state, ended); }});
             },
             [&](const Report& error) { show_archives_status(state, error); });
     };

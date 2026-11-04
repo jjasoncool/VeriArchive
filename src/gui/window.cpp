@@ -55,7 +55,9 @@ const Page* page_named(std::string_view name)
 // the status dot of an archive, the pills of results and marks, the banner of
 // an archive's result and the lines of its device alerts and notices, each in
 // the colour of its tone (tone_class); the list's pane on the page's own
-// background, and the items of the details' menus.
+// background, and the items of the details' menus; on a result page the
+// colours of its read speed chart and of the swatches of its legend, which
+// the chart takes its colours from, and its metrics.
 constexpr const char* style = R"css(
 .va-ring {
     color: @accent_color;
@@ -137,6 +139,39 @@ constexpr const char* style = R"css(
 }
 .va-line.va-neutral {
     background-color: alpha(@window_fg_color, 0.06);
+}
+.va-line.va-success {
+    background-color: alpha(@success_color, 0.12);
+}
+.va-chart {
+    color: alpha(@window_fg_color, 0.7);
+}
+.va-chart-now {
+    color: @accent_color;
+}
+.va-chart-before {
+    color: alpha(@window_fg_color, 0.6);
+}
+.va-chart-slower {
+    color: @error_color;
+}
+.va-swatch {
+    min-width: 16px;
+    min-height: 3px;
+    border-radius: 2px;
+    background-color: currentColor;
+}
+.va-swatch.va-chart-before {
+    min-height: 0;
+    border-top: 2px dashed currentColor;
+    background-color: transparent;
+}
+.va-swatch.va-chart-slower {
+    min-height: 10px;
+    background-color: alpha(@error_color, 0.25);
+}
+.va-metric {
+    padding: 12px 16px;
 }
 navigation-split-view.va-archives > .sidebar-pane {
     background-color: transparent;
@@ -394,7 +429,7 @@ void build_window(GuiState& state)
     add_page(build_jobs_page(state), "jobs");
     add_page(scrolling(build_register_view(state)), "register");
     add_page(scrolling(build_compare_view(state)), "compare");
-    add_page(scrolling(build_history_view(state)), "history");
+    add_page(build_history_page(state), "history");
     add_page(build_settings_page(state), "settings");
 
     GtkWidget* sidebar = build_sidebar(state);
@@ -437,7 +472,8 @@ void build_window(GuiState& state)
             guarded([&] { page_changed(state); }, [](const Report&) {});
         }),
         &state);
-    // Switching back to Archives shows the latest results.
+    // Switching back to Archives shows the latest results, and History the
+    // latest runs.
     g_signal_connect(stack, "notify::visible-child",
         G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
             auto& state = *static_cast<GuiState*>(data);
@@ -449,6 +485,15 @@ void build_window(GuiState& state)
                     }
                 },
                 [&](const Report& report) { show_archives_status(state, report); });
+            guarded(
+                [&] {
+                    const char* name = gtk_stack_get_visible_child_name(GTK_STACK(source));
+                    if (name && std::string_view(name) == "history") {
+                        refresh_history(state);
+                    }
+                },
+                // Said in the page, never the last read shown as if it were this one.
+                [&](const Report& report) { guarded([&] { show_history_error(state, report); }, [](const Report&) {}); });
         }),
         &state);
     // Switching to Settings reads again which copies of the database kept
@@ -478,6 +523,16 @@ void show_page(GuiState& state, const char* page)
 {
     if (!state.stack) {
         return;
+    }
+    // The page itself, not a result page opened over it.
+    const std::string_view name = page ? page : "";
+    GtkWidget* navigation = name == "archives"  ? state.archives_page.navigation
+                            : name == "history" ? state.history_page.navigation
+                                                : nullptr;
+    GtkWidget* root = name == "archives" ? state.archives_page.root : state.history_page.root;
+    if (navigation && root &&
+        adw_navigation_view_get_visible_page(ADW_NAVIGATION_VIEW(navigation)) != ADW_NAVIGATION_PAGE(root)) {
+        adw_navigation_view_pop_to_page(ADW_NAVIGATION_VIEW(navigation), ADW_NAVIGATION_PAGE(root));
     }
     gtk_stack_set_visible_child_name(GTK_STACK(state.stack), page);
     // The page shown already: a narrow window shows it all the same.

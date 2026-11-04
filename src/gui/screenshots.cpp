@@ -6,7 +6,8 @@
 //
 // The archives and the folder come from the environment:
 //   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: selected in Archives, verified by its
-//                                     folder, its history shown, compared
+//                                     folder, compared, its runs in History, the result page of
+//                                     its FULL verification shown
 //   VERIARCHIVE_SCREENSHOT_COPY       uuid of archive B: compared with A
 //   VERIARCHIVE_SCREENSHOT_EARLIER    uuid of archive C, registered without chunk hashes as an
 //                                     earlier version registered archives: its details shown in
@@ -25,6 +26,7 @@
 
 #include "common/utf8.h"
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <fstream>
@@ -259,14 +261,6 @@ public:
                     open_popover(page.verify_menu);
                     gtk_popover_popup(GTK_POPOVER(popover_));
                 }},
-            {"05-history.png",
-                [this] {
-                    show("history");
-                    choose(state_.history_view.archive, state_.history_view.archive_uuids, 0, reference_);
-                    click(state_.history_view.show);
-                    click(state_.history_view.check);
-                },
-                {}},
             {"06-compare.png",
                 [this] {
                     show("compare");
@@ -290,6 +284,46 @@ public:
                         }
                     }
                 }},
+            // History of every archive after the verification of A and the
+            // comparison, with the chain checked.
+            {"05-history.png",
+                [this] {
+                    state_.history_filter.reset();
+                    show("history");
+                    refresh_history(state_);
+                    click(state_.history_page.check);
+                    const auto& check = state_.history_check;
+                    if (!check || !*check || (*check)->first_broken_run) {
+                        throw std::runtime_error("the check of the history chain did not find it intact");
+                    }
+                    // The run that the tour's verification of A recorded: a
+                    // new sample repository holds no other.
+                    const auto recorded = state_.job_runs.find(job_);
+                    if (recorded == state_.job_runs.end() ||
+                        std::ranges::none_of(state_.history_page.runs, [&](const VerifyRunRecord& run) {
+                            return run.run_id == recorded->second.run_id && run.archive_uuid == reference_;
+                        })) {
+                        throw std::runtime_error("History does not list the verification of archive " + reference_);
+                    }
+                },
+                {}},
+            // The result page of A's last FULL verification, the tour's,
+            // opened with View result in its details.
+            {"09-result.png",
+                [this] {
+                    show("archives");
+                    select(reference_);
+                    if (!state_.archives_page.view_result) {
+                        throw std::runtime_error("the details of archive " + reference_ + " offer no View result");
+                    }
+                    click(state_.archives_page.view_result);
+                    auto* navigation = ADW_NAVIGATION_VIEW(state_.archives_page.navigation);
+                    if (adw_navigation_view_get_visible_page(navigation) ==
+                        ADW_NAVIGATION_PAGE(state_.archives_page.root)) {
+                        throw std::runtime_error("View result opened no result page");
+                    }
+                },
+                {}},
             // The jobs the tour started, the verification and the comparison,
             // ended (decision 0045); taken before the language list opens.
             {"08-jobs.png", [this] { show("jobs"); }, {}},

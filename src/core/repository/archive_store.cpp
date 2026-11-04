@@ -793,6 +793,26 @@ std::expected<void, IoError> ArchiveStore::insert_evidence(const EvidenceRecord&
     return statement->run();
 }
 
+std::expected<std::optional<EvidenceRecord>, IoError> ArchiveStore::run_evidence(const std::string& run_id)
+{
+    auto statement = database_.prepare(
+        "SELECT archive_uuid, run_id, seen_at, volume_json, match_result, operator_note FROM media_evidence "
+        "WHERE run_id = ? ORDER BY id DESC LIMIT 1");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, run_id);
+    const auto row = statement->step();
+    if (!row) {
+        return std::unexpected(row.error());
+    }
+    if (!*row) {
+        return std::optional<EvidenceRecord>{};
+    }
+    return std::optional<EvidenceRecord>(EvidenceRecord{statement->text(0), statement->text(1), statement->text(2),
+        statement->text(3), statement->text(4), statement->text(5)});
+}
+
 std::expected<void, IoError> ArchiveStore::insert_file_rows(const Uuid& archive_uuid, std::uint32_t revision,
     const std::vector<Entry>& entries, std::uint64_t chunk_size)
 {
@@ -1145,6 +1165,25 @@ std::expected<std::vector<VerifyRunRecord>, IoError> ArchiveStore::verify_runs(c
         return std::unexpected(statement.error());
     }
     statement->bind(1, archive_uuid);
+    std::vector<VerifyRunRecord> result;
+    for (;;) {
+        const auto row = statement->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            return result;
+        }
+        result.push_back(read_run(*statement));
+    }
+}
+
+std::expected<std::vector<VerifyRunRecord>, IoError> ArchiveStore::all_verify_runs()
+{
+    auto statement = database_.prepare(std::string("SELECT ") + run_columns + " FROM verify_runs ORDER BY rowid");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
     std::vector<VerifyRunRecord> result;
     for (;;) {
         const auto row = statement->step();

@@ -326,6 +326,9 @@ public:
     std::expected<void, IoError> remove_revision(const Uuid& archive_uuid, std::uint32_t revision);
 
     std::expected<void, IoError> insert_evidence(const EvidenceRecord& evidence);
+    // The media evidence recorded with the run `run_id` (the last, where more
+    // than one names it), or nothing: a run that read no media has none.
+    std::expected<std::optional<EvidenceRecord>, IoError> run_evidence(const std::string& run_id);
 
     // Rebuildable index of manifest entries (files table, R-80). A file's
     // chunk hashes (Entry::chunks) go with its row, as rows of the chunks
@@ -367,6 +370,11 @@ public:
     std::expected<VerifyRunRecord, IoError> append_verify_run(
         VerifyRunRecord run, const std::string& repository_uuid);
     std::expected<std::vector<VerifyRunRecord>, IoError> verify_runs(const Uuid& archive_uuid);
+    // Every recorded run of every archive, oldest first (in the order they
+    // were recorded, as the chain links them): the history across archives
+    // that the window's History shows. Reads only; the chain is checked by
+    // check_history.
+    std::expected<std::vector<VerifyRunRecord>, IoError> all_verify_runs();
     // The run recorded under `run_id`, or nothing when there is none.
     std::expected<std::optional<VerifyRunRecord>, IoError> verify_run(const std::string& run_id);
     std::expected<HistoryCheck, IoError> check_history(const std::string& repository_uuid);

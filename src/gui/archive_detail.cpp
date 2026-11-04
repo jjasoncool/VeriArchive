@@ -5,10 +5,11 @@
 // verification of another mode, and OVERDUE with the limit that fired (R-21,
 // R-105); FULL verify, whose menu holds adding chunk hashes (decision 0033),
 // strict metadata and the verification of a folder or volume the operator
-// chooses; the device alerts of its last verification (decision 0044); its
-// job as a card, with Stop and Details (decision 0045); a stopped
-// verification that Resume continues; and its device, its content, its
-// copies and its recent verifications.
+// chooses, and View result, the result page of that last FULL verification;
+// the device alerts of its last verification (decision 0044); its job as a
+// card, with Stop and Details (decision 0045); a stopped verification that
+// Resume continues; and its device, its content, its copies and its recent
+// verifications, each of which opens its result page.
 #include "gui/gui_app.h"
 
 #include "core/engine/add_chunk_hashes.h"
@@ -27,30 +28,9 @@ namespace {
 // The recent verifications the details list; History has every one.
 constexpr std::size_t recent_limit = 10;
 
-// The icon of a tone in the banner.
-const char* banner_icon(Tone tone)
-{
-    switch (tone) {
-    case Tone::Success:
-        return "object-select-symbolic";
-    case Tone::Warning:
-        return "dialog-warning-symbolic";
-    case Tone::Error:
-        return "dialog-error-symbolic";
-    case Tone::Neutral:
-        break;
-    }
-    return "package-x-generic-symbolic";
-}
-
 GtkWidget* words_label(const std::string& text, const char* style = nullptr, bool selectable = false)
 {
-    GtkWidget* label = make_label(text, selectable);
-    gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
-    if (style) {
-        gtk_widget_add_css_class(label, style);
-    }
-    return label;
+    return make_words(text, style, selectable);
 }
 
 GtkWidget* group(const std::string& title)
@@ -219,7 +199,8 @@ GtkWidget* verify_button(GuiState& state, const ArchiveStatus& status, bool busy
 }
 
 // The result of the last FULL verification (result_banner), with FULL verify,
-// not offered while the archive's job waits or works (`busy`).
+// not offered while the archive's job waits or works (`busy`), and View
+// result, which opens the result page of that verification.
 GtkWidget* banner(GuiState& state, const ArchiveStatus& status, bool busy)
 {
     const auto& text = state.text;
@@ -230,7 +211,7 @@ GtkWidget* banner(GuiState& state, const ArchiveStatus& status, bool busy)
     gtk_widget_add_css_class(box, tone_class(shown.tone));
     // The icon on a circle of the tone's colour, which the style draws
     // around it (.va-banner-icon), as large as it is wide.
-    GtkWidget* icon = gtk_image_new_from_icon_name(banner_icon(shown.tone));
+    GtkWidget* icon = gtk_image_new_from_icon_name(tone_icon(shown.tone));
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 22);
     gtk_widget_add_css_class(icon, "va-banner-icon");
     gtk_widget_add_css_class(icon, tone_class(shown.tone));
@@ -257,56 +238,37 @@ GtkWidget* banner(GuiState& state, const ArchiveStatus& status, bool busy)
         gtk_box_append(GTK_BOX(words), label);
     }
     gtk_box_append(GTK_BOX(box), words);
-    gtk_box_append(GTK_BOX(box), verify_button(state, status, busy));
+    // One above the other, as wide as each other: side by side they would
+    // leave the words beside them a narrow column in the details' pane.
+    GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_valign(actions, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(actions), verify_button(state, status, busy));
+    if (status.last_full) {
+        GtkWidget* view = gtk_button_new_with_label(text("View result").c_str());
+        state.archives_page.view_result = view;
+        g_object_set_data_full(G_OBJECT(view), "va-run", g_strdup(status.last_full->run_id.c_str()), g_free);
+        g_signal_connect(view, "clicked", G_CALLBACK(+[](GtkButton* clicked, gpointer data) {
+            auto& state = *static_cast<GuiState*>(data);
+            const std::string run = static_cast<const char*>(g_object_get_data(G_OBJECT(clicked), "va-run"));
+            guarded([&] { open_result(state, ResultsOver::Archives, run); },
+                [&](const Report& report) { show_archives_status(state, report); });
+        }), &state);
+        gtk_box_append(GTK_BOX(actions), view);
+    }
+    gtk_box_append(GTK_BOX(box), actions);
     return box;
 }
 
-// A line of a device alert, or a notice, in the colour of its kind.
 GtkWidget* line_box(const char* kind, const char* icon_name, const char* icon_style)
 {
-    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_add_css_class(box, "va-line");
-    gtk_widget_add_css_class(box, kind);
-    GtkWidget* icon = gtk_image_new_from_icon_name(icon_name);
-    gtk_widget_set_valign(icon, GTK_ALIGN_START);
-    gtk_widget_set_margin_top(icon, 2);
-    if (icon_style) {
-        gtk_widget_add_css_class(icon, icon_style);
-    }
-    gtk_box_append(GTK_BOX(box), icon);
-    return box;
+    return make_line_box(kind, icon_name, icon_style);
 }
 
-// A group of fields: each name beside its value, which can be selected and
-// copied, in one row of a boxed list.
+// A group of fields: each name beside its value, in one row of a boxed list.
 GtkWidget* fields_group(const std::string& title, const std::vector<Field>& fields)
 {
     GtkWidget* shown = group(title);
-    GtkWidget* grid = gtk_grid_new();
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
-    gtk_widget_set_margin_start(grid, 16);
-    gtk_widget_set_margin_end(grid, 16);
-    gtk_widget_set_margin_top(grid, 12);
-    gtk_widget_set_margin_bottom(grid, 12);
-    int line = 0;
-    for (const auto& field : fields) {
-        // Up to about 12 characters of Chinese on a line ("上次完整驗證的讀取速度").
-        GtkWidget* name = words_label(field.name, "dim-label");
-        gtk_label_set_max_width_chars(GTK_LABEL(name), 24);
-        gtk_widget_set_valign(name, GTK_ALIGN_START);
-        GtkWidget* value = words_label(field.value, nullptr, true);
-        gtk_widget_set_hexpand(value, TRUE);
-        gtk_widget_set_valign(value, GTK_ALIGN_START);
-        gtk_grid_attach(GTK_GRID(grid), name, 0, line, 1, 1);
-        gtk_grid_attach(GTK_GRID(grid), value, 1, line, 1, 1);
-        ++line;
-    }
-    GtkWidget* row = gtk_list_box_row_new();
-    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
-    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(row), FALSE);
-    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), grid);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(shown), row);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(shown), make_fields_row(fields));
     return shown;
 }
 
@@ -351,8 +313,10 @@ GtkWidget* copies_group(GuiState& state, const std::vector<CopyLink>& links)
     return shown;
 }
 
-// The archive's runs, newest first; a row leads to its archive's history.
-// Runs that cannot be read are said to be so, never taken for none.
+// The archive's runs, newest first; a row opens the run's result page over
+// Archives, and a last row History with the archive's runs, where it has more
+// than the group lists. Runs that cannot be read are said to be so, never
+// taken for none.
 GtkWidget* runs_group(GuiState& state, const Uuid& archive)
 {
     const auto& text = state.text;
@@ -367,18 +331,20 @@ GtkWidget* runs_group(GuiState& state, const Uuid& archive)
         runs = std::move(*read);
     }
     const auto rows = recent_runs(text, runs, recent_limit);
-    const auto connect_history = [&](GtkWidget* row) {
+    // A row opens `act` for the archive, or for the run its "va-run" names.
+    const auto connect = [&](GtkWidget* row, std::function<void(GuiState&, const Uuid&)> act) {
         gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
         g_signal_connect_data(row, "activated",
             G_CALLBACK(+[](AdwActionRow*, gpointer data) {
                 auto* action = static_cast<MenuAction*>(data);
                 auto& state = *action->state;
+                // Copies: what it runs may make the details again, this row with them.
                 const auto archive = action->archive;
-                guarded([&] { show_history_of(state, archive); },
-                    [&](const Report& report) { show_archives_status(state, report); });
+                const auto act = action->act;
+                guarded([&] { act(state, archive); }, [&](const Report& report) { show_archives_status(state, report); });
             }),
-            new MenuAction{&state, archive, {}}, +[](gpointer data, GClosure*) { delete static_cast<MenuAction*>(data); },
-            GConnectFlags{});
+            new MenuAction{&state, archive, std::move(act)},
+            +[](gpointer data, GClosure*) { delete static_cast<MenuAction*>(data); }, GConnectFlags{});
         adw_action_row_add_suffix(ADW_ACTION_ROW(row), gtk_image_new_from_icon_name("go-next-symbolic"));
     };
     for (const auto& run : rows) {
@@ -395,7 +361,9 @@ GtkWidget* runs_group(GuiState& state, const Uuid& archive)
             adw_action_row_add_suffix(ADW_ACTION_ROW(row), pill);
         }
         gtk_widget_add_css_class(row, "numeric");
-        connect_history(row);
+        connect(row, [run = run.run_id](GuiState& state, const Uuid&) {
+            open_result(state, ResultsOver::Archives, run);
+        });
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(shown), row);
     }
     if (runs.size() > rows.size()) {
@@ -403,7 +371,7 @@ GtkWidget* runs_group(GuiState& state, const Uuid& archive)
         adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
         adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row),
             text.format("Every verification of this archive in History ({})", runs.size()).c_str());
-        connect_history(row);
+        connect(row, [](GuiState& state, const Uuid& archive) { show_history_of(state, archive); });
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(shown), row);
     }
     if (unread) {
@@ -437,6 +405,75 @@ const JobShown* active_job_of(const GuiState& state, const Uuid& archive)
 
 } // namespace
 
+GtkWidget* make_words(const std::string& text, const char* style, bool selectable)
+{
+    GtkWidget* label = make_label(text, selectable);
+    gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+    if (style) {
+        gtk_widget_add_css_class(label, style);
+    }
+    return label;
+}
+
+const char* tone_icon(Tone tone)
+{
+    switch (tone) {
+    case Tone::Success:
+        return "object-select-symbolic";
+    case Tone::Warning:
+        return "dialog-warning-symbolic";
+    case Tone::Error:
+        return "dialog-error-symbolic";
+    case Tone::Neutral:
+        break;
+    }
+    return "package-x-generic-symbolic";
+}
+
+GtkWidget* make_line_box(const char* kind, const char* icon_name, const char* icon_style)
+{
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(box, "va-line");
+    gtk_widget_add_css_class(box, kind);
+    GtkWidget* icon = gtk_image_new_from_icon_name(icon_name);
+    gtk_widget_set_valign(icon, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(icon, 2);
+    if (icon_style) {
+        gtk_widget_add_css_class(icon, icon_style);
+    }
+    gtk_box_append(GTK_BOX(box), icon);
+    return box;
+}
+
+GtkWidget* make_fields_row(const std::vector<Field>& fields)
+{
+    GtkWidget* grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_widget_set_margin_start(grid, 16);
+    gtk_widget_set_margin_end(grid, 16);
+    gtk_widget_set_margin_top(grid, 12);
+    gtk_widget_set_margin_bottom(grid, 12);
+    int line = 0;
+    for (const auto& field : fields) {
+        // Up to about 12 characters of Chinese on a line ("上次完整驗證的讀取速度").
+        GtkWidget* name = make_words(field.name, "dim-label");
+        gtk_label_set_max_width_chars(GTK_LABEL(name), 24);
+        gtk_widget_set_valign(name, GTK_ALIGN_START);
+        GtkWidget* value = make_words(field.value, nullptr, true);
+        gtk_widget_set_hexpand(value, TRUE);
+        gtk_widget_set_valign(value, GTK_ALIGN_START);
+        gtk_grid_attach(GTK_GRID(grid), name, 0, line, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), value, 1, line, 1, 1);
+        ++line;
+    }
+    GtkWidget* row = gtk_list_box_row_new();
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), grid);
+    return row;
+}
+
 void show_details(GuiState& state)
 {
     auto& page = state.archives_page;
@@ -455,6 +492,7 @@ void show_details(GuiState& state)
     page.notice_key.reset();
     page.notice_words = nullptr;
     page.verify = nullptr;
+    page.view_result = nullptr;
     page.verify_menu = nullptr;
     page.adding = nullptr;
     page.adding_note = nullptr;
@@ -511,12 +549,19 @@ void show_details(GuiState& state)
     const auto* job = active_job_of(state, uuid);
     gtk_box_append(GTK_BOX(page.detail), banner(state, status, job != nullptr));
 
-    // Decision 0044: the device alerts of its last verification.
+    // Decision 0044: the device alerts of its last verification; a slower
+    // read leads to the result page of its run, whose chart shows where.
     for (const auto& line : device_alert_lines(text, status, state.identity_shown)) {
         GtkWidget* alert = line_box("va-error", "dialog-warning-symbolic", "error");
-        GtkWidget* words = words_label(line, nullptr, true);
+        GtkWidget* words = words_label(line.words, nullptr, true);
         gtk_widget_set_hexpand(words, TRUE);
         gtk_box_append(GTK_BOX(alert), words);
+        if (!line.slower_run.empty()) {
+            GtkWidget* where = row_button(state, text("See where it slowed"), uuid,
+                [run = line.slower_run](GuiState& state, const Uuid&) { open_result(state, ResultsOver::Archives, run); });
+            gtk_widget_add_css_class(where, "flat");
+            gtk_box_append(GTK_BOX(alert), where);
+        }
         gtk_box_append(GTK_BOX(page.detail), alert);
     }
 

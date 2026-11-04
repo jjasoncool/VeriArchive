@@ -8,6 +8,7 @@
 #include "app/device_alerts.h"
 #include "app/local_time.h"
 #include "core/engine/device_alerts.h"
+#include "core/engine/read_speed.h"
 #include "gui/archive_rows.h"
 
 #include <nlohmann/json.hpp>
@@ -325,10 +326,25 @@ void details()
                          {"Health in the last verification", "warning"}}));
     CHECK(names_recorded(va::gui::device_fields(english, status, IdentityShown::Recorded)));
     const auto alerts = va::gui::device_alert_lines(english, status, IdentityShown::Sample);
-    CHECK(alerts.size() == 1 && alerts.front().starts_with(std::string(va::app::alert_mark)) &&
-          alerts.front().find("SAMPLE-DEVICE") != std::string::npos &&
-          alerts.front().find("RECORDED") == std::string::npos);
+    CHECK(alerts.size() == 1 && alerts.front().words.starts_with(std::string(va::app::alert_mark)) &&
+          alerts.front().words.find("SAMPLE-DEVICE") != std::string::npos &&
+          alerts.front().words.find("RECORDED") == std::string::npos && alerts.front().slower_run.empty());
     CHECK(va::gui::device_alert_lines(english, sample_status(), IdentityShown::Sample).empty());
+    // A slower read of the last FULL verification names that run, whose
+    // result page charts where it read slower.
+    va::SpeedComparison slower;
+    slower.baseline_run = "c0ffee00-0000-4000-9000-000000000000";
+    slower.baseline_finished = ago(24h * 60);
+    slower.bytes_per_second = 50'000'000;
+    slower.baseline_bytes_per_second = 100'000'000;
+    slower.whole_compared = true;
+    slower.slower_percent = 50;
+    auto slowed = sample_status();
+    slowed.last_full->counts_json =
+        nlohmann::json{{"items", nlohmann::json::object()}, {"read_compared", va::speed_comparison_json(slower)}}.dump();
+    const auto slower_lines = va::gui::device_alert_lines(english, slowed, IdentityShown::Sample);
+    CHECK(slower_lines.size() == 1 && slower_lines.front().slower_run == slowed.last_full->run_id &&
+          slower_lines.front().words.find("50% slower") != std::string::npos);
 
     // The content, with and without chunk hashes.
     auto content = va::gui::content_fields(english, status);

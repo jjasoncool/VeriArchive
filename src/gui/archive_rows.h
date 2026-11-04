@@ -126,8 +126,16 @@ ResultBanner result_banner(const app::Text& text, const ArchiveStatus& status, c
 // run started (an INCOMPLETE one included), and a read of the last FULL
 // verification markedly slower than the one it was compared with; the
 // devices named as the views name them (displayed_devices). The same two
-// sources as app::archive_alerts, which marks the archive's row.
-std::vector<std::string> device_alert_lines(const app::Text& text, const ArchiveStatus& status, IdentityShown shown);
+// sources as app::archive_alerts, which marks the archive's row. The slower
+// read names its run (`slower_run`), whose result page charts where it read
+// slower; a health alert names none.
+struct AlertLine {
+    std::string words;
+    std::string slower_run;
+    bool operator==(const AlertLine&) const = default;
+};
+
+std::vector<AlertLine> device_alert_lines(const app::Text& text, const ArchiveStatus& status, IdentityShown shown);
 
 // A name and its value, a line of a group of the details.
 struct Field {

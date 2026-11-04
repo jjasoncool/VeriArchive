@@ -466,13 +466,25 @@ void words()
     usual.slower_parts.clear();
     CHECK(!va::app::slower_alert_line(english, usual));
 
+    // The time of the one compared with is not put in brackets: it holds its
+    // offset in brackets.
     CHECK(va::app::read_speed_words(english, std::nullopt, usual) ==
-          "100 MiB/s; the last FULL verification of this archive on this device read 200 MiB/s (" + when + ")");
+          "100 MiB/s; the last FULL verification of this archive on this device, which finished " + when +
+              ", read 200 MiB/s");
     CHECK(va::app::read_speed_words(chinese, std::nullopt, usual) ==
-          "每秒 100 MiB；此封存上次在此裝置上的完整驗證為每秒 200 MiB（" + chinese_when + "）");
+          "每秒 100 MiB；此封存上次在此裝置上、於 " + chinese_when + " 完成的完整驗證為每秒 200 MiB");
     CHECK(va::app::read_speed_words(english, sample_speed(20'000), std::nullopt) == "47.7 MiB/s");
     CHECK(!va::app::read_speed_words(english, std::nullopt, std::nullopt));
     CHECK(!va::app::read_speed_words(english, ReadSpeed{}, std::nullopt));
+    // Over the hundredths read in a measurable time, as the comparison takes
+    // them: a hundredth read in no measurable time adds no bytes.
+    auto untimed = sample_speed(20'000);
+    untimed.parts.back().milliseconds = 0;
+    CHECK(untimed.bytes_per_second() == 50'000'000u && sample_speed(20'000).bytes_per_second() == 50'000'000u);
+    CHECK(va::app::read_speed_words(english, untimed, std::nullopt) == "47.7 MiB/s");
+    ReadSpeed none_timed;
+    none_timed.parts = {{0, 173, 0}};
+    CHECK(!none_timed.bytes_per_second() && !va::app::read_speed_words(english, none_timed, std::nullopt));
 }
 
 } // namespace

@@ -218,7 +218,8 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/ended_notification.cpp
         src/gui/gui_app.cpp
         src/gui/gui_support.cpp
-        src/gui/history_view.cpp
+        src/gui/history_page.cpp
+        src/gui/history_rows.cpp
         src/gui/job_queue.cpp
         src/gui/job_words.cpp
         src/gui/jobs.cpp
@@ -226,6 +227,8 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/main.cpp
         src/gui/operations_poll.cpp
         src/gui/report.cpp
+        src/gui/result_page.cpp
+        src/gui/run_result.cpp
         src/gui/screenshots.cpp
         src/gui/register_view.cpp
         src/gui/settings_page.cpp
@@ -329,6 +332,7 @@ if(BUILD_TESTING)
         tests/unit/fs_access_test.cpp
         tests/unit/hash_pipeline_test.cpp
         tests/unit/hash_test.cpp
+        tests/unit/history_rows_test.cpp
         tests/unit/identity_test.cpp
         tests/unit/interrupt_test.cpp
         tests/unit/job_queue_test.cpp
@@ -340,6 +344,7 @@ if(BUILD_TESTING)
         tests/unit/merkle_test.cpp
         tests/unit/plain_words_test.cpp
         tests/unit/read_speed_test.cpp
+        tests/unit/run_result_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp
         tests/unit/vpd_test.cpp
@@ -388,12 +393,13 @@ if(BUILD_TESTING)
     endif()
     # The GUI's choice of the media identity it shows, the body of its
     # notification that an operation ended, the queue of its jobs and what it
-    # says of them, what the window says around its pages, and what Archives
-    # says of each archive, are plain C++ without GTK, so they are tested also
-    # where the GUI is not built.
+    # says of them, what the window says around its pages, what Archives says
+    # of each archive, what History lists and what the result page of a run
+    # says, are plain C++ without GTK, so they are tested also where the GUI is
+    # not built.
     target_sources(veriarchive_tests PRIVATE src/gui/archive_rows.cpp src/gui/displayed_identity.cpp
-        src/gui/ended_notification.cpp src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/report.cpp
-        src/gui/window_words.cpp)
+        src/gui/ended_notification.cpp src/gui/history_rows.cpp src/gui/job_queue.cpp src/gui/job_words.cpp
+        src/gui/report.cpp src/gui/run_result.cpp src/gui/window_words.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")
         # GTK4 needs OpenGL, which Windows Server Core (CI containers) lacks.
@@ -402,10 +408,12 @@ if(BUILD_TESTING)
         # Builds every GUI view without showing the window (decision 0016), then
         # rebuilds it in the other language and back (decision 0017). APPDATA
         # keeps the config and the failure log out of the developer's profile.
+        # It also draws a result page's read speed chart of sample data in the
+        # light and the dark style, into PNGs in gui-smoke-chart-<language>.
         foreach(language en zh-TW)
             add_test(NAME veriarchive_gui_smoke_${language} COMMAND veriarchive_gui)
             set_tests_properties(veriarchive_gui_smoke_${language} PROPERTIES
-                ENVIRONMENT "VERIARCHIVE_GUI_SMOKE_TEST=1;VERIARCHIVE_LANG=${language};VERIARCHIVE_REPOSITORY=${CMAKE_CURRENT_BINARY_DIR}/no-repository;APPDATA=${CMAKE_CURRENT_BINARY_DIR}/gui-smoke-appdata"
+                ENVIRONMENT "VERIARCHIVE_GUI_SMOKE_TEST=1;VERIARCHIVE_LANG=${language};VERIARCHIVE_REPOSITORY=${CMAKE_CURRENT_BINARY_DIR}/no-repository;APPDATA=${CMAKE_CURRENT_BINARY_DIR}/gui-smoke-appdata;VERIARCHIVE_GUI_SMOKE_CHART=${CMAKE_CURRENT_BINARY_DIR}/gui-smoke-chart-${language}"
                 FAIL_REGULAR_EXPRESSION "CRITICAL|WARNING")
         endforeach()
     endif()

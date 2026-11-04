@@ -381,8 +381,7 @@ ComparisonResult compare_with_manifest(
             Entry skipped;
             skipped.type = 'd';
             skipped.path = mount_point;
-            classify.add(skipped, "SkippedMountPoint", "another volume is mounted here; it is not part of the archive",
-                Severity::None);
+            classify.add(skipped, "SkippedMountPoint", mount_point_outside_archive, Severity::None);
         }
     }
 
