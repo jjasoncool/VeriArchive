@@ -36,6 +36,7 @@ int main()
     archive_store_tests();
     register_engine_tests();
     verify_engine_tests();
+    carrier_confirmation_tests();
     add_chunk_hashes_tests();
     archive_status_tests();
     sha256sums_tests();

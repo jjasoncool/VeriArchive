@@ -733,6 +733,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     nlohmann::json plan_record;            // the plan as this attempt writes it
     std::optional<ArchiveRecord> existing; // archive receiving a new revision
     std::map<std::string, Entry> cached;   // R-104: hashes from the interrupted attempt
+    // Decision 0047: the read of the device's own identity behind its
+    // enclosure that this registration records: the request's, or the one
+    // that the attempt it resumes began with, which its plan keeps (a resume
+    // does not ask for administrator permission again).
+    std::optional<DeviceIdentityRead> device_read = request.device_read;
     if (request.resume) {
         if (!*pending) {
             return no_resumable();
@@ -857,6 +862,13 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             }
             if (request.write_media_copy) {
                 record["media_copy"] = true; // decision 0025: an attempt writes identity.json on the media
+            }
+            // Decision 0047: the device read the registration began with goes
+            // on with its resume; one given to the resume replaces it.
+            if (device_read) {
+                record[device_identity_member] = device_identity_read_json(*device_read);
+            } else if (const auto kept = record.find(device_identity_member); kept != record.end()) {
+                device_read = device_identity_read_from_json(*kept);
             }
             record["updated"] = current_timestamp();
             if (auto saved = store.update_setting(pending_key(plan.archive_uuid), record.dump()); !saved) {
@@ -1049,6 +1061,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         if (request.write_media_copy) {
             plan_record["media_copy"] = true;
+        }
+        // Decision 0047: kept for a resume of this registration; a version
+        // that knows no such member ignores it.
+        if (device_read) {
+            plan_record[device_identity_member] = device_identity_read_json(*device_read);
         }
         std::optional<RegisterFailure> refused;
         const auto recorded = [&]() -> std::expected<void, IoError> {
@@ -1541,12 +1558,23 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         // A registration over a lost manifest matched nothing: the archive's
         // carrier was the lost manifest's to record (decision 0028, point 8).
-        EvidenceRecord evidence_record{plan.archive_uuid, "", evidence.seen_at, volume_to_json_text(observed),
+        // Decision 0047: with the device's own identity behind its enclosure,
+        // where it was read for this registration, which is the archive's
+        // confirmed device from now on, cached.
+        EvidenceRecord evidence_record{plan.archive_uuid, "", evidence.seen_at,
+            device_read ? volume_json_with_device_read(observed, *device_read) : volume_to_json_text(observed),
             plan.new_archive || plan.lost_revision ? "UNKNOWN" : "MATCH",
             plan.lost_revision ? "registered over the lost manifest of revision " + std::to_string(*plan.lost_revision)
                                : std::string("registered")};
         if (auto inserted = store.insert_evidence(evidence_record); !inserted) {
             return inserted;
+        }
+        if (device_read) {
+            const ConfirmedDevice device{device_read->device, evidence.seen_at, {}};
+            if (auto cached = store.set_setting(device_identity_key(plan.archive_uuid), confirmed_device_json(device).dump());
+                !cached) {
+                return cached;
+            }
         }
         if (auto removed = store.remove_setting(pending_key(plan.archive_uuid)); !removed) {
             return removed;

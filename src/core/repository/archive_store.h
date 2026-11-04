@@ -338,6 +338,10 @@ public:
     // The media evidence recorded with the run `run_id` (the last, where more
     // than one names it), or nothing: a run that read no media has none.
     std::expected<std::optional<EvidenceRecord>, IoError> run_evidence(const std::string& run_id);
+    // Every media evidence recorded for the archive, in the order it was
+    // recorded: for the device its registrations read behind its enclosure
+    // (decision 0047, confirmed_device).
+    std::expected<std::vector<EvidenceRecord>, IoError> archive_evidence(const Uuid& archive_uuid);
 
     // Rebuildable index of manifest entries (files table, R-80). A file's
     // chunk hashes (Entry::chunks) go with its row, as rows of the chunks

@@ -332,6 +332,11 @@ constexpr CatalogEntry entries[] = {
     {"chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
         "已加入區塊雜湊：由版次 {} 記錄（區塊大小 {}，{} 個區塊，總碼 {}）"},
     {"chunk hashes not added: {}", "未加入區塊雜湊：{}", Match::Cause},
+    // A run that went on past a changed enclosure (decision 0047): the
+    // revision that records the new enclosure, or why there is none (an
+    // engine sentence).
+    {"new enclosure recorded: revision {} records it ({})", "已記下新的外接盒：由版次 {} 記錄（{}）"},
+    {"new enclosure not recorded: {}", "未記下新的外接盒：{}", Match::Cause},
     // src/cli/archive_commands.cpp
     {"Last verify: never", "上次驗證：從未執行"},
     {"Last FULL verify: never", "上次完整驗證：從未執行"},
@@ -418,6 +423,11 @@ constexpr CatalogEntry entries[] = {
     // src/app/history.cpp.
     {"interrupted relocation attempt", "中斷的搬移嘗試"},
     {"relocation from r{}", "從 r{} 搬移", Match::FormatOnly},
+    // A run that went on past a changed enclosure (decision 0047): how it was
+    // confirmed, beside it in history and the window's History.
+    {"enclosure changed, same device by its serial", "外接盒已更換，裝置本身的序號相符"},
+    {"enclosure changed, confirmed by the operator after reading the device's serial", "外接盒已更換，讀取序號後由您確認"},
+    {"enclosure changed, confirmed by the operator without the serial", "外接盒已更換，由您確認、未讀序號"},
     {"several archives start with {}", "有多個封存以 {} 開頭"},
     {"no archive {}", "找不到封存 {}"},
     {"usage: archive list | show <uuid> | retire <uuid> [--confirm] | relocate <uuid> <root_path> "
@@ -1252,6 +1262,74 @@ constexpr CatalogEntry entries[] = {
     {"Chunk hashes added: revision {} records them (chunk size {}, {} chunks, Merkle root {})",
         "已加入區塊雜湊：由版次 {} 記錄（區塊大小 {}，{} 個區塊，總碼 {}）"},
     {"Chunk hashes not added: {}", "未加入區塊雜湊：{}", Match::Cause},
+    // src/app/enclosure_words.cpp: a carrier seen behind another enclosure
+    // (decision 0047): the question the FULL verify asks first, a read of the
+    // device's own serial, and the operator confirmation (由您確認).
+    {"The enclosure of {} differs from the one recorded", "{} 的外接盒與記錄中的不同", Match::FormatOnly},
+    {"The filesystem ID of this volume is the one {} records, but the serial its enclosure reports has changed: "
+     "recorded {}, now {}.",
+        "這個磁碟區的檔案系統 ID 和 {} 記錄中的相同，但外接盒回報的序號換了：記錄中是 {}，這次是 {}。",
+        Match::FormatOnly},
+    {"{} records the device's own serial {}. Reading the serial now tells whether this is the same device.",
+        "{} 記錄了裝置本身的序號 {}。讀取這次的序號，就能判斷是不是同一個裝置。", Match::FormatOnly},
+    {"It may be the same device in another enclosure, or a sector-by-sector clone of it. A clone holds exactly the "
+     "same content and passes a FULL verify too, so the verification itself cannot tell them apart.",
+        "可能是同一個裝置換了外接盒，也可能是逐磁區複製出來的複本。複本的內容完全相同，完整驗證也會通過，所以驗證本身"
+        "無法分辨。"},
+    {"{} records no serial of the device itself, so a serial read now has nothing to be compared with: you compare "
+     "it with the serial on the device's label. Only once you confirm that it is the same device and the FULL verify "
+     "passes is it recorded; when the enclosure changes again, the serial tells.",
+        "{} 沒有記錄裝置本身的序號，所以這次讀到的序號沒有紀錄可以比對，要由您對照裝置外殼標籤上的序號判斷。您確認是"
+        "同一個裝置、完整驗證也通過之後，才會記下它；之後再換外接盒，就能用序號判斷。",
+        Match::FormatOnly},
+    {"Needs administrator permission: Windows asks whether to allow the VeriArchive device identity reader of an "
+     "unknown publisher. It reads only the model, serial and WWN that the device reports, and reads or writes none "
+     "of the data on the device.",
+        "需要系統管理員權限：Windows 會詢問是否允許「不明發行者」的 VeriArchive 裝置身分讀取程式。它只讀取裝置回報的"
+        "型號、序號與 WWN，不讀取或寫入裝置上的任何資料。"},
+    {"Administrator permission was not given, so the device's own serial was not read. Choose \"Confirm without "
+     "reading the serial\" only if you are sure that you moved this device into the new enclosure yourself.",
+        "沒有取得系統管理員權限，未讀取裝置本身的序號。只有在您確定是自己把這個裝置換到新的外接盒時，才選「不讀序號，"
+        "自行確認」。"},
+    {"The device's own serial cannot be read: this enclosure does not pass ATA commands on. Try another enclosure; "
+     "when you are sure that it is the same device, you can also confirm it yourself.",
+        "讀不到裝置本身的序號：這個外接盒不轉送 ATA 指令。可以換一個外接盒後再試；確定是同一個裝置時，也可以自行確認。"},
+    {"Confirm without reading the serial", "不讀序號，自行確認"},
+    {"Do this only if you are sure that you moved the device of {} into the new enclosure yourself.",
+        "只有在您確定是自己把 {} 的裝置換到新的外接盒時，才這麼做。", Match::FormatOnly},
+    {"VeriArchive verifies it in full once. Whatever the result, the history records that you confirmed it without "
+     "reading its serial; only when the verification passes is the new enclosure recorded. A sector-by-sector clone "
+     "passes the verification too, so VeriArchive cannot find such a mistake for you.",
+        "VeriArchive 會完整驗證一次。無論結果如何，歷程都會記錄這次是由您確認、沒有讀取序號；驗證通過之後，才會記下新的"
+        "外接盒。逐磁區複製出來的複本也會通過驗證，所以 VeriArchive 無法替您發現弄錯的情況。"},
+    {"What the device reports", "讀到的裝置"},
+    {"{} records no serial of the device itself, so VeriArchive cannot tell by itself. Compare it with the serial on "
+     "the device's label: is this the device of {}, only in another enclosure?",
+        "{} 沒有記錄裝置本身的序號，所以 VeriArchive 無法自己判斷。請對照裝置外殼標籤上的序號：這是 {} 的裝置、只是"
+        "換了外接盒嗎？",
+        Match::FormatOnly},
+    {"Once you answer yes, it is verified in full once. Whatever the result, the history records that you confirmed "
+     "it after reading its serial; only when the verification passes are the new enclosure and the device's own "
+     "serial recorded.",
+        "回答「是」之後會完整驗證一次。無論結果如何，歷程都會記錄這次是讀取序號後由您確認；驗證通過之後，才會記下新的"
+        "外接盒與裝置本身的序號。"},
+    {"This is not the device of {}", "這不是 {} 的裝置", Match::FormatOnly},
+    {"Its filesystem is that of {} (the same filesystem ID), but the device differs: most likely a sector-by-sector "
+     "clone. You can register it as another archive (a copy of {}), then compare the two with Compare.",
+        "它的檔案系統和 {} 的相同（檔案系統 ID 一樣），但裝置不同，很可能是逐磁區複製出來的複本。可以把它註冊為另一個"
+        "封存（{} 的副本），再用「比較」查看兩者的內容是否相同。",
+        Match::FormatOnly},
+    {"Nothing was recorded.", "沒有記錄任何內容。"},
+    {"The device's own serial matches ({}). Once the FULL verify passes, the new enclosure is recorded.",
+        "裝置本身的序號相符（{}）。完整驗證通過後會記下新的外接盒。", Match::FormatOnly},
+    {"the device's serial matches", "裝置本身的序號相符"},
+    {"confirmed by you after reading the serial", "讀取序號後由您確認"},
+    {"confirmed by you, serial not read", "由您確認、未讀序號"},
+    {"MIGRATED: the enclosure differs from the one recorded ({})", "已遷移：外接盒與記錄中的不同（{}）",
+        Match::FormatOnly},
+    // ... and what the run recorded of the new carrier, in the window's report.
+    {"New enclosure recorded: revision {} records it ({})", "已記下新的外接盒：由版次 {} 記錄（{}）"},
+    {"New enclosure not recorded: {}", "未記下新的外接盒：{}", Match::Cause},
     // src/gui/compare_dialog.cpp, src/gui/compare_choices.cpp: the comparison
     // dialog (decisions 0020, 0046) and the report of its job.
     {"ARCHIVES {}", "比較結果：{}"},
@@ -1606,6 +1684,28 @@ constexpr CatalogEntry entries[] = {
         "版次 {0} 的項目行無法原樣寫出；版次 {1} 仍不含區塊雜湊（`register --new-revision` 會記錄它們）"},
     {"chunk hashes of {}: {} read, {} expected", "{} 的區塊雜湊：讀到 {} 個，應為 {} 個"},
     {"the verification was abandoned while it ran", "這次驗證在執行期間被放棄"},
+    // A verification that goes on past a changed enclosure (decision 0047):
+    // refused before anything is read; and why it records no new carrier.
+    {"chunk hashes are not added by the verification that accepts another enclosure; verify the archive first, then "
+        "add chunk hashes",
+        "接受新外接盒的驗證不會加入區塊雜湊；請先驗證封存，再加入區塊雜湊"},
+    {"the confirmation names the enclosure {} (recorded: {}), but archive {} is seen through the enclosure {} "
+        "(recorded: {}); confirm it again",
+        "確認的外接盒是 {}（記錄中：{}），但封存 {} 現在是透過外接盒 {}（記錄中：{}）看到的；請重新確認"},
+    {"a confirmation by the device's serial names no device", "依裝置序號確認時，沒有提供讀到的裝置"},
+    {"archive {} has no confirmed device to compare the serial {} with; only the operator can confirm it",
+        "封存 {} 沒有已確認的裝置可與序號 {} 比對；只能由您確認"},
+    {"the device's own serial {} is not the serial {} of the device of archive {}: it is another device",
+        "裝置本身的序號 {0} 與封存 {2} 的裝置序號 {1} 不同：這是另一個裝置"},
+    {"this volume is the carrier of archive {} as recorded, so it is not taken for the device of archive {}; verify "
+        "archive {}, or attach the device of archive {} through another enclosure",
+        "這個磁碟區是封存 {0} 記錄中的載體，所以不會當成封存 {1} 的裝置；請驗證封存 {2}，或把封存 {3} 的裝置接在另一個"
+        "外接盒上"},
+    // Why such a run records no new carrier (VerifyOutcome::carrier_not_recorded).
+    {"the verification did not pass", "驗證未通過"},
+    {"some names cannot exist on this system and would drop out of a new revision (verify the archive on a system "
+        "where they can exist)",
+        "有些名稱無法存在於這個系統上，新版次會遺漏它們（請在能保存這些名稱的系統上驗證封存）"},
     // One operation that creates an archive's next revision at a time: a
     // verification that adds chunk hashes refuses, and is refused by, a
     // registration and a relocation (decision 0033), and by another of its
@@ -1787,6 +1887,17 @@ constexpr CatalogEntry entries[] = {
     {"verification finished as PASSED_WITH_WARNINGS but its revision with chunk hashes could not be written: {}; "
         "resume the run with `verify --full {} --resume {}` to record it",
         "驗證結果為通過（有警告），但無法寫入含區塊雜湊的版次：{}；請以 `verify --full {} --resume {}` "
+        "繼續該執行，以記錄該版次",
+        Match::Cause},
+    // ... and the revision with the new carrier behind another enclosure
+    // (decision 0047).
+    {"verification finished as PASSED but its revision with the new enclosure could not be written: {}; resume the "
+        "run with `verify --full {} --resume {}` to record it",
+        "驗證結果為通過，但無法寫入記錄新外接盒的版次：{}；請以 `verify --full {} --resume {}` 繼續該執行，以記錄該版次",
+        Match::Cause},
+    {"verification finished as PASSED_WITH_WARNINGS but its revision with the new enclosure could not be written: "
+        "{}; resume the run with `verify --full {} --resume {}` to record it",
+        "驗證結果為通過（有警告），但無法寫入記錄新外接盒的版次：{}；請以 `verify --full {} --resume {}` "
         "繼續該執行，以記錄該版次",
         Match::Cause},
     {"verification finished as PASSED but could not be recorded: {}; resume the run with `verify --full {} "

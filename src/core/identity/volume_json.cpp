@@ -21,6 +21,10 @@ nlohmann::json volume_to_json(const VolumeInfo& volume)
         if (device.health) {
             entry["health"] = health_to_json(*device.health);
         }
+        // Decision 0047: said only where an enclosure hides the device's identity.
+        if (device.enclosure_hides_identity) {
+            entry["enclosure_hides_identity"] = true;
+        }
         devices.push_back(std::move(entry));
     }
     return {
@@ -63,6 +67,10 @@ VolumeInfo volume_from_json(const nlohmann::json& json)
             }
             if (entry.contains("health") && entry["health"].is_object()) {
                 device.health = health_from_json(entry["health"]);
+            }
+            if (const auto hides = entry.find("enclosure_hides_identity");
+                hides != entry.end() && hides->is_boolean()) {
+                device.enclosure_hides_identity = hides->get<bool>();
             }
             volume.devices.push_back(std::move(device));
         }

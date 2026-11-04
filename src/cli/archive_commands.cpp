@@ -1147,20 +1147,11 @@ int history_command(const Arguments& arguments)
     }
     if (arguments.json) {
         auto list = nlohmann::json::array();
+        // Each with the relocation it belongs to (decision 0026), its device
+        // alerts (decision 0044) and the confirmation of a changed enclosure
+        // it went on with (decision 0047).
         for (const auto& run : *runs) {
-            nlohmann::json entry{{"run_id", run.run_id}, {"revision", run.revision}, {"mode", run.mode},
-                {"started", run.started}, {"finished", run.finished}, {"result", run.result},
-                {"failure_classes", run.failure_classes}, {"host", run.host}};
-            entry["coverage_bytes"] = run.coverage_bytes ? nlohmann::json(*run.coverage_bytes) : nullptr;
-            // The relocation a run belongs to (decision 0026): an interrupted
-            // attempt, or the run that recorded the relocation's revision.
-            const auto part = relocation_part(run);
-            entry["relocation"] = part ? nlohmann::json{{"run_id", part->relocation},
-                                             {"from_revision", part->from_revision},
-                                             {"interrupted_attempt", part->interrupted_attempt}}
-                                       : nlohmann::json(nullptr);
-            entry["device_alerts"] = run_alerts_json(run_alerts(run.counts_json));
-            list.push_back(std::move(entry));
+            list.push_back(app::history_run_json(run));
         }
         print_json({{"archive_uuid", status->archive.archive_uuid}, {"runs", std::move(list)}});
         return exit_code::passed;

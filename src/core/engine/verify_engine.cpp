@@ -50,6 +50,7 @@ struct ResumePoint {
     std::uint32_t revision = 0;
     std::string root;  // where the run read (decision 0022); empty in a record of an older version
     std::uint64_t adding = 0;  // the chunk size at which the run adds chunk hashes (decision 0033)
+    std::optional<RecordedConfirmation> confirmation;  // the run went on past a changed enclosure (decision 0047)
 };
 
 std::optional<std::filesystem::path> native_subpath(const std::string& root_subpath)
@@ -127,13 +128,21 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
     }
     const auto& candidate = pool.front();
     std::vector<Located> holding;
+    // Decision 0047: the archive's folder on a volume whose filesystem is the
+    // archive's, on another device (MIGRATED), as behind another enclosure.
+    // Looked at only where no volume matches the archive as recorded:
+    // identity matching then gives MIGRATED there, and the verification goes
+    // on only with a carrier confirmation, and otherwise stops as every
+    // MIGRATED does (exit 12), naming relocation.
+    std::vector<Located> migrated;
     // The archive's folder on a volume that matches it, where that folder is
     // not there: the volume is attached, the folder was moved or renamed.
     std::optional<std::filesystem::path> folder_gone;
     for (const auto& volume : *volumes) {
         const MediaEvidence evidence{current_timestamp(), volume, std::nullopt};
         const auto match = match_identity(evidence, candidate.root_subpath, std::span(&candidate, 1));
-        if (match.result != MatchResult::Match && match.result != MatchResult::MatchWeak) {
+        const bool other_device = match.result == MatchResult::Migrated;
+        if (match.result != MatchResult::Match && match.result != MatchResult::MatchWeak && !other_device) {
             continue;
         }
         const auto relative = native_subpath(candidate.root_subpath);
@@ -146,11 +155,18 @@ std::expected<Located, VerifyStop> locate(VerifyServices& services, const Verify
         // while "X:\" and "/" keep theirs.
         const auto root = without_trailing_separators(
             relative->empty() ? volume.mount_point : volume.mount_point / *relative);
-        if (services.archive_files.list(root)) {
+        if (other_device) {
+            if (services.archive_files.list(root)) {
+                migrated.push_back(Located{root, volume, candidate.root_subpath});
+            }
+        } else if (services.archive_files.list(root)) {
             holding.push_back(Located{root, volume, candidate.root_subpath});
         } else if (!folder_gone) {
             folder_gone = root;
         }
+    }
+    if (holding.empty() && !folder_gone) {
+        holding = std::move(migrated);
     }
     if (holding.empty() && folder_gone) {
         return stop(VerifyStop::Kind::NotFound, "the folder " + path_to_utf8(*folder_gone) + " of archive " +
@@ -329,7 +345,8 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
     }
     const auto root = json.find("root");
     return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>(),
-        root != json.end() && root->is_string() ? root->get<std::string>() : std::string{}, adding_chunk_size(json)};
+        root != json.end() && root->is_string() ? root->get<std::string>() : std::string{}, adding_chunk_size(json),
+        carrier_confirmed_in_record(json)};
 }
 
 // Why a run that adds chunk hashes records no revision with them, though it
@@ -353,6 +370,161 @@ std::optional<std::string> why_no_revision(const VerifyOutcome& outcome, std::ui
         }
     }
     return std::nullopt;
+}
+
+// Why a run that went on past a changed enclosure, and passed, records no
+// revision with the new carrier (decision 0047): a relocation requires every
+// entry to match (decision 0004), and a name that cannot exist on this system
+// would drop out of the new revision; nothing when one can be recorded. A
+// MetadataMismatch is recorded with the new metadata, and an entry unreadable
+// since registration is carried as it is (decision 0010), as a relocation
+// records them. The cause alone, as VerifyOutcome::carrier_not_recorded holds
+// it.
+std::optional<std::string> why_no_carrier_revision(const VerifyOutcome& outcome)
+{
+    for (const auto& item : outcome.items) {
+        if (item.status == "Unrepresentable") {
+            return "some names cannot exist on this system and would drop out of a new revision (verify the archive "
+                   "on a system where they can exist)";
+        }
+    }
+    return std::nullopt;
+}
+
+// The media evidence note of a run that went on past a changed enclosure
+// (decision 0047), naming how it was confirmed.
+std::string confirmation_note(const CarrierConfirmation& confirmation)
+{
+    if (confirmation.how == CarrierConfirmation::How::DeviceSerial) {
+        return "enclosure changed, same device by its serial";
+    }
+    return confirmation.device ? "enclosure changed, confirmed by the operator after reading the device's serial"
+                               : "enclosure changed, confirmed by the operator without the serial";
+}
+
+// Decision 0047: whether a verification whose carrier identity matching found
+// MIGRATED goes on, with the confirmation it is offered (a resumed run's, as
+// its record carries it, or the request's): only where the match is a changed
+// enclosure (enclosure_changed) of an archive that takes new revisions, while
+// no other operation that creates its next revision is unfinished (decision
+// 0033), for the enclosures the confirmation names, as recorded and as seen
+// now, on a volume that is no other archive's carrier as recorded at an
+// overlapping root (decision 0001, as a relocation's new root), in a
+// verification that adds no chunk hashes; a device_serial confirmation only
+// with the device's serial of the archive's confirmed device. Nothing: it
+// stops as every MIGRATED does (exit 12); a refusal: it stops so, saying why.
+std::expected<std::optional<RecordedConfirmation>, VerifyStop> going_on_past_the_enclosure(VerifyServices& services,
+    const std::optional<CarrierConfirmation>& offered, const std::optional<ResumePoint>& resume,
+    const std::optional<std::string>& resume_run, std::uint64_t adding, const ArchiveCandidate& recorded,
+    const VolumeInfo& now, const MatchOutcome& identity)
+{
+    if (!offered || !enclosure_changed(recorded.identity, now)) {
+        return std::optional<RecordedConfirmation>{};
+    }
+    auto& store = services.store;
+    const auto& uuid = recorded.archive_uuid;
+    const auto refused = [&](std::string message) {
+        return std::unexpected(VerifyStop{VerifyStop::Kind::Refused, std::move(message), identity, {}, std::nullopt});
+    };
+    const auto archive = store.find_archive(uuid);
+    if (!archive) {
+        return std::unexpected(VerifyStop{VerifyStop::Kind::Repository, archive.error().message, identity, {},
+            std::nullopt});
+    }
+    if (!*archive) {
+        return std::unexpected(VerifyStop{VerifyStop::Kind::Repository,
+            "the matched archive is missing from the database", identity, {}, std::nullopt});
+    }
+    if ((*archive)->status == "RETIRED") {
+        return refused("a retired archive takes no new revisions");
+    }
+    if (adding > 0) {
+        return refused("chunk hashes are not added by the verification that accepts another enclosure; verify the "
+                       "archive first, then add chunk hashes");
+    }
+    // One operation that creates the archive's next revision at a time
+    // (decision 0033), as a relocation begins: not while a registration, a
+    // relocation or a verification that adds chunk hashes is unfinished,
+    // whose plan, record or checkpoints the record of revision N+1 would
+    // otherwise end. Without the identity: the window then names its own ways
+    // on (app::stop_message_in_window), not its MIGRATED advice.
+    auto another = another_operation_creates_the_revision(store, **archive);
+    if (!another) {
+        return std::unexpected(VerifyStop{VerifyStop::Kind::Repository, another.error().message, identity, {},
+            std::nullopt});
+    }
+    if (*another) {
+        return std::unexpected(VerifyStop{VerifyStop::Kind::Refused, std::move((*another)->message), {}, {},
+            std::move((*another)->refusing)});
+    }
+    const auto enclosure_recorded = enclosure_serial(recorded.identity);
+    const auto enclosure_now = enclosure_serial(now);
+    if (!serials_equal(offered->enclosure_recorded, enclosure_recorded) ||
+        !serials_equal(offered->enclosure_now, enclosure_now)) {
+        if (resume && resume_run) {
+            return std::unexpected(VerifyStop{VerifyStop::Kind::Decision,
+                "run " + *resume_run + " cannot be resumed: the media identity or the archive revision changed "
+                "since it started; run a new verification",
+                identity, {}, std::nullopt});
+        }
+        return refused("the confirmation names the enclosure " + offered->enclosure_now + " (recorded: " +
+                       offered->enclosure_recorded + "), but archive " + uuid + " is seen through the enclosure " +
+                       enclosure_now + " (recorded: " + enclosure_recorded + "); confirm it again");
+    }
+    // Decision 0001, as a relocation's new root may not overlap another
+    // archive on its volume: a verification by uuid reads no other archive's
+    // manifest, so it never saw that this volume is, exactly as recorded
+    // (MATCH, MATCH_WEAK), another archive's carrier at an overlapping root,
+    // such as a sector-by-sector clone registered as another archive (a copy
+    // of this one) behind the enclosure seen now. Recording it as this
+    // archive's carrier would make two archives record one volume, and the
+    // other's verification find two. One seen through a third enclosure is
+    // MIGRATED for both twins: that is the question the operator answers.
+    const auto others = load_candidates(store, services.repository_files, services.layout);
+    if (!others) {
+        return std::unexpected(VerifyStop{VerifyStop::Kind::Repository, others.error().message, identity, {},
+            std::nullopt});
+    }
+    const MediaEvidence seen{current_timestamp(), now, std::nullopt};
+    for (const auto& other : *others) {
+        if (other.archive_uuid == uuid) {
+            continue;
+        }
+        const auto match = match_identity(seen, other.root_subpath, std::span(&other, 1));
+        if ((match.result == MatchResult::Match || match.result == MatchResult::MatchWeak) &&
+            roots_overlap(other.root_subpath, recorded.root_subpath)) {
+            return refused("this volume is the carrier of archive " + other.archive_uuid +
+                           " as recorded, so it is not taken for the device of archive " + uuid + "; verify archive " +
+                           other.archive_uuid + ", or attach the device of archive " + uuid +
+                           " through another enclosure");
+        }
+    }
+    if (offered->how == CarrierConfirmation::How::DeviceSerial && !resume) {
+        if (!offered->device) {
+            return refused("a confirmation by the device's serial names no device");
+        }
+        const auto confirmed = read_confirmed_device(store, uuid);
+        if (!confirmed) {
+            return std::unexpected(VerifyStop{VerifyStop::Kind::Repository, confirmed.error().message, identity,
+                {}, std::nullopt});
+        }
+        if (!*confirmed) {
+            return refused("archive " + uuid + " has no confirmed device to compare the serial " +
+                           offered->device->serial + " with; only the operator can confirm it");
+        }
+        if (!same_device_identity(*offered->device, (*confirmed)->device)) {
+            return refused("the device's own serial " + offered->device->serial + " is not the serial " +
+                           (*confirmed)->device.serial + " of the device of archive " + uuid +
+                           ": it is another device");
+        }
+    }
+    RecordedConfirmation going_on;
+    going_on.confirmation = *offered;
+    going_on.confirmation.enclosure_recorded = enclosure_recorded;
+    going_on.confirmation.enclosure_now = enclosure_now;
+    going_on.from_revision = resume && resume->confirmation ? resume->confirmation->from_revision
+                                                            : (*archive)->current_revision;
+    return std::optional<RecordedConfirmation>(std::move(going_on));
 }
 
 // Decision 0028: the archive is known, and the manifest of its current
@@ -559,13 +731,29 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     const auto& identity = *matched;
 
-    const auto record_evidence = [&](const Uuid& archive_uuid, const std::string& run_id) {
+    const auto record_evidence = [&](const Uuid& archive_uuid, const std::string& run_id, const std::string& note) {
         return store.insert_evidence({archive_uuid, run_id, evidence.seen_at,
-            volume_to_json_text(evidence.volume), std::string(to_string(identity.result)), ""});
+            volume_to_json_text(evidence.volume), std::string(to_string(identity.result)), note});
     };
+    // Decision 0047: the confirmation offered past a changed enclosure: a
+    // resumed run's, as its record carries it, and no other; otherwise the
+    // request's. And the one this run goes on with, where its carrier is
+    // MIGRATED behind another enclosure.
+    // A confirmation names enclosures, not an archive: it is taken only for
+    // the archive named by its uuid, never for whichever archive a root
+    // alone matches.
+    std::optional<CarrierConfirmation> offered;
+    if (resume) {
+        if (resume->confirmation) {
+            offered = resume->confirmation->confirmation;
+        }
+    } else if (request.archive_uuid) {
+        offered = request.carrier_confirmation;
+    }
+    std::optional<RecordedConfirmation> confirmed;
     switch (identity.result) {
     case MatchResult::Unknown: {
-        (void)record_evidence("", "");
+        (void)record_evidence("", "", "");
         // An empty folder is most often a place where a volume is mounted
         // while its device is not attached, as a mount point on Linux that
         // the system mounts when the device is there (decision 0029, point
@@ -582,7 +770,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     case MatchResult::Ambiguous:
         for (const auto& archive_uuid : identity.archives) {
-            (void)record_evidence(archive_uuid, "");
+            (void)record_evidence(archive_uuid, "", "");
         }
         // Selected by its uuid, an archive whose volume and a clone of it are
         // attached together stops as well, finding it on both (decision 0022,
@@ -592,15 +780,32 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             "`verify --full <archive_uuid>`; where the volumes of those archives are attached together, detach all "
             "but the volume of the one to verify, then verify it",
             identity);
-    case MatchResult::Migrated:
-        (void)record_evidence(identity.archives.front(), "");
+    case MatchResult::Migrated: {
+        // Decision 0047: behind another enclosure, with a confirmation that
+        // it holds the archive's device, the verification goes on; every
+        // other MIGRATED stops, naming relocation.
+        const auto recorded = std::ranges::find(candidates, identity.archives.front(), &ArchiveCandidate::archive_uuid);
+        if (recorded != candidates.end()) {
+            auto going_on = going_on_past_the_enclosure(
+                services, offered, resume, request.resume_run, adding, *recorded, located->volume, identity);
+            if (!going_on) {
+                (void)record_evidence(identity.archives.front(), "", "");
+                return std::unexpected(std::move(going_on.error()));
+            }
+            confirmed = std::move(*going_on);
+        }
+        if (confirmed) {
+            break;
+        }
+        (void)record_evidence(identity.archives.front(), "", "");
         return stop(VerifyStop::Kind::Decision,
             "MIGRATED: the filesystem matches archive " + identity.archives.front() +
                 " but the device differs; confirm with `archive relocate " +
                 identity.archives.front() + " <root_path>`",
             identity);
+    }
     case MatchResult::PreviousCarrier:
-        (void)record_evidence(identity.archives.front(), "");
+        (void)record_evidence(identity.archives.front(), "", "");
         return stop(VerifyStop::Kind::Decision,
             "PREVIOUS_CARRIER: this media held an earlier revision of archive " +
                 identity.archives.front() + " before it was relocated; it is not verified",
@@ -613,8 +818,11 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     if (!archive || !*archive) {
         return stop(VerifyStop::Kind::Repository, "the matched archive is missing from the database");
     }
-    // R-104: resume only while the identity matches and the revision is unchanged.
-    if (resume && (identity.result == MatchResult::Mismatch || (*archive)->current_revision != resume->revision)) {
+    // R-104: resume only while the identity matches and the revision is
+    // unchanged; a run that went on past a changed enclosure only behind that
+    // enclosure (decision 0047).
+    if (resume && (identity.result == MatchResult::Mismatch || (*archive)->current_revision != resume->revision ||
+                      (resume->confirmation && !confirmed))) {
         return stop(VerifyStop::Kind::Decision,
             "run " + *request.resume_run + " cannot be resumed: the media identity or the archive "
             "revision changed since it started; run a new verification");
@@ -648,6 +856,7 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         outcome.notes.push_back("driver: " + located->volume.driver);
     }
     outcome.adding_chunk_size = adding;
+    outcome.carrier_confirmed = confirmed;
     const auto started = current_timestamp();
 
     // Make this run resumable from now on, carrying over a resumed run's
@@ -658,6 +867,12 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     std::set<std::string> content_verified;
     nlohmann::json run_record{{"archive_uuid", outcome.archive_uuid}, {"revision", outcome.revision},
         {"started", started}, {"root", path_to_utf8(located->root)}, {"updated", started}};
+    // Decision 0047: the confirmation it goes on with past a changed
+    // enclosure, which its resume goes on with.
+    if (confirmed) {
+        run_record[carrier_confirmed_member] =
+            carrier_confirmation_json(confirmed->confirmation, confirmed->from_revision);
+    }
     // The chunk hashes read, by entry key, of every file larger than the
     // chunk size whose content matched; with those that the checkpoints of a
     // resumed run kept (decision 0033).
@@ -1054,6 +1269,40 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             }
         }
     }
+    // The chunk size of the revision recorded with the run: the one chunk
+    // hashes are added at, or rN's for a new carrier.
+    auto added_chunk_size = adding;
+    // Decision 0047: the new carrier behind another enclosure, recorded as
+    // revision N+1 when the run passed and every entry matched as a
+    // relocation requires (decision 0004): written as a relocation writes it
+    // (write_new_carrier_revision), from the comparison's entries (rN's hashes
+    // with the carrier's names and metadata), with the carrier read as its
+    // identity, so that later verifications match it. A FAILED run records
+    // nothing of the carrier, and says so; an INCOMPLETE one waits for its
+    // resume.
+    if (confirmed && outcome.result == "FAILED") {
+        outcome.carrier_not_recorded = "the verification did not pass";
+    }
+    if (confirmed && manifest && (outcome.result == "PASSED" || outcome.result == "PASSED_WITH_WARNINGS")) {
+        if (auto why = why_no_carrier_revision(outcome)) {
+            outcome.carrier_not_recorded = std::move(*why);
+        } else {
+            heartbeat.beat();
+            auto written = write_new_carrier_revision(services.writer, services.repository_files,
+                manifest_path(services.layout.manifests(), outcome.archive_uuid, creates), manifest->header,
+                comparison.current_entries, services.host, located->volume, located->root_subpath,
+                path_to_utf8(located->root));
+            if (!written) {
+                return stop(VerifyStop::Kind::Repository,
+                    "verification finished as " + outcome.result +
+                        " but its revision with the new enclosure could not be written: " + written.error().message +
+                        resume_hint);
+            }
+            added = std::move(*written);
+            added_entries = std::move(comparison.current_entries);
+            added_chunk_size = manifest->header.chunk_size;
+        }
+    }
 
     // Record evidence, the chained run row and its items in one transaction.
     // With a revision with chunk hashes added, the transaction records it too
@@ -1070,6 +1319,12 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     }
     if (const auto health = device_health_json(outcome.devices); !health.empty()) {
         counts["device_health"] = health;
+    }
+    // Decision 0047: the confirmation it went on with past a changed
+    // enclosure, hash-chained with the run whatever its result, so that a
+    // wrong "same device" is audited too.
+    if (confirmed) {
+        counts[carrier_confirmed_member] = carrier_confirmation_json(confirmed->confirmation, confirmed->from_revision);
     }
     // Decision 0044: how fast this run read each hundredth of the content it
     // read; and, once the verification reached a result, how its read (with
@@ -1167,12 +1422,14 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             row_counts[adding_member] = adding;
         }
         row.revision = records_revision ? creates : previous_revision;
-        if (records_revision) {
+        if (records_revision && adding > 0) {
             row_counts["chunk_hashes_added_from_revision"] = previous_revision;
         }
         row.counts_json = row_counts.dump();
         row.finished = current_timestamp();
-        if (auto inserted = record_evidence(outcome.archive_uuid, outcome.run_id); !inserted) {
+        if (auto inserted = record_evidence(outcome.archive_uuid, outcome.run_id,
+                confirmed ? confirmation_note(confirmed->confirmation) : std::string{});
+            !inserted) {
             return inserted;
         }
         if (auto appended = store.append_verify_run(row, services.repository_uuid); !appended) {
@@ -1206,9 +1463,21 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
             if (auto inserted = store.insert_revision(revision); !inserted) {
                 return inserted;
             }
-            if (auto indexed = store.insert_file_rows(outcome.archive_uuid, creates, added_entries, adding);
+            if (auto indexed =
+                    store.insert_file_rows(outcome.archive_uuid, creates, added_entries, added_chunk_size);
                 !indexed) {
                 return indexed;
+            }
+            // Decision 0047: the device whose serial confirmed the new
+            // carrier, or that the operator confirmed after reading its
+            // serial, is the archive's confirmed device from now on, cached.
+            if (confirmed && confirmed->confirmation.device) {
+                const ConfirmedDevice device{*confirmed->confirmation.device, row.finished, outcome.run_id};
+                if (auto cached = store.set_setting(
+                        device_identity_key(outcome.archive_uuid), confirmed_device_json(device).dump());
+                    !cached) {
+                    return cached;
+                }
             }
         }
         // A finished run needs no checkpoints; an INCOMPLETE one keeps them for --resume.
@@ -1234,7 +1503,14 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
                 recorded_run.error().message + (added ? resume_hint : std::string{}));
     }
     stop_mark.on = false;
-    if (added && not_recorded.empty()) {
+    if (added && confirmed) {
+        if (not_recorded.empty()) {
+            outcome.revision = creates;
+            outcome.carrier_revision = creates;
+        } else {
+            outcome.carrier_not_recorded = not_recorded;
+        }
+    } else if (added && not_recorded.empty()) {
         outcome.revision = creates;
         outcome.added_revision = creates;
         outcome.added_chunks = added->header.counts.chunks;

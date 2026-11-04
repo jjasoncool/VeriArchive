@@ -20,6 +20,7 @@
 #include "core/engine/candidates.h"
 #include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
+#include "core/manifest/manifest_writer.h"
 #include "core/repository/archive_store.h"
 
 #include <map>
@@ -125,5 +126,22 @@ struct RelocationPart {
 
 // Nothing for a run that is no relocation's, such as every verification.
 std::optional<RelocationPart> relocation_part(const VerifyRunRecord& run);
+
+// Revision N+1 of an archive on a new carrier (decision 0004), as a
+// relocation writes it, and as a FULL verification that accepts a changed
+// enclosure writes it (decision 0047): the header of rN `previous` (its
+// label, copy_of, exclusions and chunk size) with revision N+1 superseding N,
+// made now by this program on `host`, from the carrier `carrier` at the
+// archive root `root_subpath` on it, found at `root_hint`; its entries
+// `entries`, as the comparison of the new carrier gives them
+// (ComparisonResult::current_entries: rN's hashes, chunk hashes included, with
+// the new carrier's names and metadata). Written and flushed at `path`
+// without a lock, not at its name yet: the transaction that records the
+// revision names it (WrittenManifest::file), so that a recorded manifest is
+// never replaced (decision 0023).
+std::expected<WrittenManifest, IoError> write_new_carrier_revision(IFileWriter& writer,
+    IFileSystemAccess& repository_files, const std::filesystem::path& path, const ManifestHeader& previous,
+    const std::vector<Entry>& entries, const HostInfo& host, const VolumeInfo& carrier,
+    const std::string& root_subpath, const std::string& root_hint);
 
 } // namespace va

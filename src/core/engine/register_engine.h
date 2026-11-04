@@ -3,6 +3,7 @@
 // new) revision's manifest, and index it in the repository.
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/candidates.h"
+#include "core/engine/carrier_confirmation.h"
 #include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
@@ -50,6 +51,12 @@ struct RegisterRequest {
     std::uint64_t chunk_size = default_chunk_size;
     // Decision 0044: told of the devices' health before the root is read.
     DevicesObserved devices_observed = {};
+    // Decision 0047: the device's own identity behind its enclosure, as the
+    // device identity reader read it for this registration (Register
+    // Archive's "Record the device's own serial"). Evidence, not history:
+    // recorded in the registration's media evidence (device_identity_member),
+    // and cached as the archive's confirmed device (device_identity_key).
+    std::optional<DeviceIdentityRead> device_read = std::nullopt;
 };
 
 struct RegisterServices {

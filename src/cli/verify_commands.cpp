@@ -7,6 +7,7 @@
 
 #include "app/adding_chunk_hashes.h"
 #include "app/device_alerts.h"
+#include "app/enclosure_words.h"
 #include "app/plain_words.h"
 #include "app/verify_report.h"
 
@@ -103,6 +104,12 @@ void print_outcome(const app::Text& text, const VerifyOutcome& outcome)
     if (const auto line = app::chunk_hashes_line(text, outcome); !line.empty()) {
         std::cout << "  " << line << '\n';
     }
+    // Decision 0047: a run that went on past a changed enclosure, as a
+    // confirmed run started in the window and resumed here: the revision that
+    // records the new enclosure, or why none does.
+    if (const auto line = app::carrier_line(text, outcome); !line.empty()) {
+        std::cout << "  " << line << '\n';
+    }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::CommandLine)) {
         std::cout << "  " << *advice << '\n';
     }
@@ -168,6 +175,9 @@ nlohmann::json outcome_json(const VerifyOutcome& outcome)
     // Decision 0033: a run that adds chunk hashes says at which chunk size,
     // and once it has finished, which revision records them, or why none does.
     document.update(app::chunk_hashes_member(outcome));
+    // Decision 0047: the confirmation a run went on with past a changed
+    // enclosure, and what it recorded of the new carrier; null for any other.
+    document.update(app::carrier_member(outcome));
     return document;
 }
 

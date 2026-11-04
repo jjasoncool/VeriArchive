@@ -39,6 +39,11 @@ struct PhysicalDeviceInfo {
     // that reads the volume, kept in its media evidence; nothing where it
     // was not asked.
     std::optional<DeviceHealth> health;
+    // Runtime only, never identity (decision 0047): the device is behind an
+    // enclosure (a USB bridge or dock) that hides the device's own identity,
+    // so `serial` and `wwn` are the enclosure's, as the platform tells it
+    // without elevation; false where it cannot tell or nothing hides it.
+    bool enclosure_hides_identity = false;
 };
 
 struct VolumeInfo {

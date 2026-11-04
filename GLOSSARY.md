@@ -73,8 +73,16 @@ _Avoid_: root hash (the archive root is something else), tree hash, top hash
 ### Where it lives
 
 **Device**:
-A physical storage device (disk, SSD, USB bridge), known by model, serial, and WWN.
+A physical storage device (disk, SSD), known by model, serial, and WWN.
 _Avoid_: drive, disk (ambiguous with volume)
+
+**Enclosure**:
+The USB bridge or dock between a device and the computer. The system may report the enclosure's serial in place of the device's own, so the same device in another enclosure is seen with another serial while its filesystem stays the same. In the interface: 外接盒.
+_Avoid_: case, adapter, drive (an enclosure is no device)
+
+**Operator confirmation**:
+The operator's word that a carrier seen behind another enclosure holds the archive's device, given without the device's own serial matching the one confirmed before. It is recorded in the history with the FULL verification it starts, whatever that verification's result; a sector-by-sector clone passes that verification too, so it cannot catch a mistaken confirmation. In the interface: 由您確認.
+_Avoid_: override, acknowledgement
 
 **Volume**:
 A filesystem instance on one or more devices, known by its filesystem UUID.

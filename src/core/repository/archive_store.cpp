@@ -831,6 +831,29 @@ std::expected<std::optional<EvidenceRecord>, IoError> ArchiveStore::run_evidence
         statement->text(3), statement->text(4), statement->text(5)});
 }
 
+std::expected<std::vector<EvidenceRecord>, IoError> ArchiveStore::archive_evidence(const Uuid& archive_uuid)
+{
+    auto statement = database_.prepare(
+        "SELECT archive_uuid, run_id, seen_at, volume_json, match_result, operator_note FROM media_evidence "
+        "WHERE archive_uuid = ? ORDER BY id");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    statement->bind(1, archive_uuid);
+    std::vector<EvidenceRecord> evidence;
+    for (;;) {
+        const auto row = statement->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            return evidence;
+        }
+        evidence.push_back(EvidenceRecord{statement->text(0), statement->text(1), statement->text(2),
+            statement->text(3), statement->text(4), statement->text(5)});
+    }
+}
+
 std::expected<void, IoError> ArchiveStore::insert_file_rows(const Uuid& archive_uuid, std::uint32_t revision,
     const std::vector<Entry>& entries, std::uint64_t chunk_size)
 {

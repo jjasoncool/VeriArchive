@@ -869,6 +869,12 @@ string(JSON no_relocation TYPE "${last_output}" runs 0 relocation)
 if(NOT no_relocation STREQUAL "NULL")
     message(FATAL_ERROR "--json history gives a verification a relocation:\n${last_output}")
 endif()
+# Decision 0047: the command line never goes on past a changed enclosure, so
+# no run of it carries a carrier confirmation; the member is there, null.
+string(JSON no_confirmation TYPE "${last_output}" runs 0 carrier_confirmed)
+if(NOT no_confirmation STREQUAL "NULL")
+    message(FATAL_ERROR "--json history gives a verification a carrier confirmation:\n${last_output}")
+endif()
 
 # Decision 0027 (Windows): a folder reached through a drive letter made with
 # subst is registered and verified through the letter, and recorded by its

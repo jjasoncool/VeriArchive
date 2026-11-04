@@ -1,10 +1,13 @@
 #pragma once
 // The verification history as people read it (`history <uuid>`, the GUI's
 // History and a run's result page). Every run is a verification of its
-// archive; some are also a relocation's (decision 0026), and the history says
-// so beside them.
+// archive; some are also a relocation's (decision 0026), and some went on past
+// a changed enclosure with a carrier confirmation (decision 0047): the history
+// says so beside them.
 #include "app/text.h"
 #include "core/repository/archive_store.h"
+
+#include <nlohmann/json.hpp>
 
 #include <string>
 #include <string_view>
@@ -28,8 +31,22 @@ inline constexpr std::string_view history_chain_limits =
 // attempt" for an attempt of a relocation that was interrupted (recorded
 // INCOMPLETE against the revision it verifies, it never verified the
 // archive's carrier), and "relocation from rN" for the FULL verification of
-// the new carrier that recorded the relocation's revision. Empty for any other
-// run.
+// the new carrier that recorded the relocation's revision. A run that went on
+// past a changed enclosure (decision 0047), whatever its result, says how the
+// enclosure was confirmed: "enclosure changed, same device by its serial"
+// (the device's own serial was the archive's confirmed device), "enclosure
+// changed, confirmed by the operator after reading the device's serial", or
+// "enclosure changed, confirmed by the operator without the serial". Empty
+// for any other run.
 std::string history_note(const Text& text, const VerifyRunRecord& run);
+
+// One run as `history --json` gives it: run_id, revision, mode, started,
+// finished (UTC), result, failure_classes, host, coverage_bytes (null where
+// not recorded); `relocation`: the relocation the run belongs to (decision
+// 0026: run_id, from_revision, interrupted_attempt), or null; `device_alerts`
+// (decision 0044); `carrier_confirmed`: the confirmation it went on with past
+// a changed enclosure (decision 0047: how, device where read, the enclosures,
+// from_revision), or null. Never translated.
+nlohmann::json history_run_json(const VerifyRunRecord& run);
 
 } // namespace va::app

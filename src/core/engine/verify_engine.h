@@ -8,8 +8,16 @@
 // current revision has no chunk size, as V1 registered it, can also hash the
 // chunks of its files in the same read, and records the next revision with
 // the same entries and their chunk hashes when every entry matched.
+//
+// A changed enclosure (decision 0047): a FULL verify of an archive whose
+// filesystem is seen behind another enclosure (MIGRATED, enclosure_changed)
+// goes on only with a carrier confirmation, records the confirmation in its
+// run whatever its result, and, when it passed with every entry matched as a
+// relocation requires, records the next revision with the new carrier, as a
+// relocation does (decision 0004).
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/candidates.h"
+#include "core/engine/carrier_confirmation.h"
 #include "core/engine/device_alerts.h"
 #include "core/engine/read_speed.h"
 #include "core/identity/matcher.h"
@@ -44,6 +52,17 @@ struct VerifyRequest {
     // The clock that times the read of each hundredth of the content
     // (decision 0044); unset, the steady clock. Tests give their own.
     ReadSpeedMeter::Clock read_clock = {};
+    // Decision 0047: the confirmation that the carrier found behind another
+    // enclosure holds the archive's device. Used only by a verification of
+    // the archive named by `archive_uuid` (a root alone matches every archive,
+    // and a confirmation names enclosures, not an archive), only where
+    // identity matching gives MIGRATED and enclosure_changed holds, for the
+    // enclosures it names (as recorded, as seen now); there, without it, the
+    // verification stops as every MIGRATED does (exit 12, naming relocation).
+    // Ignored where the carrier matches as recorded. A resumed run goes on
+    // with the confirmation its record carries, and with no other. Never
+    // together with add_chunk_hashes.
+    std::optional<CarrierConfirmation> carrier_confirmation = std::nullopt;
 };
 
 struct VerifyServices {
@@ -103,6 +122,15 @@ struct VerifyOutcome {
     std::uint64_t added_chunks = 0;
     std::string added_merkle_root;
     std::string not_added;
+    // Decision 0047: the confirmation this run went on with past a changed
+    // enclosure, as its counts record it (also of an INCOMPLETE or FAILED
+    // run). Once the run has recorded the new carrier, the revision that
+    // records it (then also `revision`); when it finished without (FAILED, or
+    // passed and could not record it), why: the cause alone, an engine
+    // sentence, as `not_added` holds one. Neither while INCOMPLETE.
+    std::optional<RecordedConfirmation> carrier_confirmed;
+    std::uint32_t carrier_revision = 0;
+    std::string carrier_not_recorded;
 };
 
 // Verification could not start: the media needs an operator decision

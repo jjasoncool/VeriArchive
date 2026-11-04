@@ -5,6 +5,7 @@
 #include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/engine/add_chunk_hashes.h"
+#include "core/engine/carrier_confirmation.h"
 #include "core/engine/comparison.h"
 #include "core/engine/heartbeat.h"
 #include "core/engine/recorded_manifest.h"
@@ -820,33 +821,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         item.run_id = outcome.run_id;
     }
 
-    ManifestHeader header = manifest->header;
-    header.revision = outcome.revision;
-    header.supersedes = previous_revision;
-    header.created = current_timestamp();
-    header.app_version = services.host.app_version;
-    header.os = services.host.os;
-    header.host = services.host.host;
-    header.identity = *volume;
-    header.root_subpath = *root_subpath;
-    header.root_hint = path_to_utf8(request.root);
-
     outcome.manifest = manifest_path(services.layout.manifests(), uuid, outcome.revision);
-    std::error_code directory_error;
-    std::filesystem::create_directories(outcome.manifest.parent_path(), directory_error);
-    // rN's chunk size, and rN's chunk hashes of every matched file
-    // (decision 0032); a revision without a chunk size stays without. The
-    // writer computes the Merkle root again: rN's, unless a link's target
-    // was translated (decision 0008), whose new hash is a leaf.
     const auto chunk_size = manifest->header.chunk_size;
-    ManifestWriter writer(services.writer, services.repository_files, outcome.manifest, chunk_size);
-    for (const auto& entry : comparison.current_entries) {
-        if (auto added = writer.add(entry); !added) {
-            return stopped_by(Kind::Repository, "cannot write the manifest: " + added.error().message);
-        }
-    }
     // Written and flushed without a lock; not at its name yet.
-    auto written = writer.finish(header);
+    auto written = write_new_carrier_revision(services.writer, services.repository_files, outcome.manifest,
+        manifest->header, comparison.current_entries, services.host, *volume, *root_subpath,
+        path_to_utf8(request.root));
     if (!written) {
         return stopped_by(Kind::Repository, "cannot write the manifest: " + written.error().message);
     }
@@ -963,7 +943,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             return updated;
         }
         RevisionRecord revision{uuid, creates, "manifests/" + uuid + "/" + path_to_utf8(outcome.manifest.filename()),
-            written->header_line, written->header_blake3, written->header.body_blake3, "", header.created,
+            written->header_line, written->header_blake3, written->header.body_blake3, "", written->header.created,
             merkle_root_of(written->header)};
         if (auto inserted = store.insert_revision(revision); !inserted) {
             return inserted;
@@ -1011,6 +991,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         // Finished: its record and its checkpoints go.
         if (auto removed = store.remove_relocation(uuid, run_id); !removed) {
             return removed;
+        }
+        // Decision 0047: the archive is on a carrier whose device nobody
+        // confirmed: the cached confirmed device goes, as confirmed_device
+        // ends it at a relocation.
+        if (auto uncached = store.remove_setting(device_identity_key(uuid)); !uncached) {
+            return uncached;
         }
         if (auto named = written->file->commit(); !named) {
             return named;
@@ -1062,6 +1048,37 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     }
     stop_mark.ended = true;
     return outcome;
+}
+
+std::expected<WrittenManifest, IoError> write_new_carrier_revision(IFileWriter& writer,
+    IFileSystemAccess& repository_files, const std::filesystem::path& path, const ManifestHeader& previous,
+    const std::vector<Entry>& entries, const HostInfo& host, const VolumeInfo& carrier,
+    const std::string& root_subpath, const std::string& root_hint)
+{
+    ManifestHeader header = previous;
+    header.revision = previous.revision + 1;
+    header.supersedes = previous.revision;
+    header.created = current_timestamp();
+    header.app_version = host.app_version;
+    header.os = host.os;
+    header.host = host.host;
+    header.identity = carrier;
+    header.root_subpath = root_subpath;
+    header.root_hint = root_hint;
+
+    std::error_code directory_error;
+    std::filesystem::create_directories(path.parent_path(), directory_error);
+    // rN's chunk size, and rN's chunk hashes of every matched file
+    // (decision 0032); a revision without a chunk size stays without. The
+    // writer computes the Merkle root again: rN's, unless a link's target
+    // was translated (decision 0008), whose new hash is a leaf.
+    ManifestWriter manifest(writer, repository_files, path, previous.chunk_size);
+    for (const auto& entry : entries) {
+        if (auto added = manifest.add(entry); !added) {
+            return std::unexpected(added.error());
+        }
+    }
+    return manifest.finish(header);
 }
 
 std::optional<RelocationPart> relocation_part(const VerifyRunRecord& run)

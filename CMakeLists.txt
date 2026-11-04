@@ -79,6 +79,7 @@ add_library(veriarchive_core
     src/core/engine/attached.cpp
     src/core/engine/compare_archives.cpp
     src/core/engine/candidates.cpp
+    src/core/engine/carrier_confirmation.cpp
     src/core/engine/comparison.cpp
     src/core/engine/device_alerts.cpp
     src/core/engine/item_rules.cpp
@@ -167,6 +168,7 @@ add_library(veriarchive_app
     src/app/adding_chunk_hashes.cpp
     src/app/attached_devices.cpp
     src/app/device_alerts.cpp
+    src/app/enclosure_words.cpp
     src/app/history.cpp
     src/app/local_time.cpp
     src/app/plain_words.cpp
@@ -342,6 +344,7 @@ if(BUILD_TESTING)
         tests/unit/compare_choices_test.cpp
         tests/unit/archive_store_test.cpp
         tests/unit/canonical_json_test.cpp
+        tests/unit/carrier_confirmation_test.cpp
         tests/unit/config_test.cpp
         tests/unit/device_health_test.cpp
         tests/unit/device_rows_test.cpp
