@@ -202,10 +202,13 @@ target_compile_features(veriarchive_cli PRIVATE cxx_std_23)
 target_compile_definitions(veriarchive_cli PRIVATE VERIARCHIVE_VERSION="${PROJECT_VERSION}")
 target_link_libraries(veriarchive_cli PRIVATE VeriArchive::app)
 
-# GTK4 GUI (M5, decision 0016). Built when GTK4 is available.
-pkg_check_modules(GTK4 IMPORTED_TARGET gtk4>=4.10)
+# GTK4 GUI built with libadwaita (M5, decisions 0016 and 0046). Built when GTK4
+# is available; it then needs libadwaita too, so an image with GTK4 but without
+# libadwaita fails here instead of quietly building no GUI.
+pkg_check_modules(GTK4 IMPORTED_TARGET gtk4>=4.14)
 option(VERIARCHIVE_BUILD_GUI "Build the GTK4 GUI" ${GTK4_FOUND})
 if(VERIARCHIVE_BUILD_GUI)
+    pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET libadwaita-1>=1.5)
     add_executable(veriarchive_gui
         src/gui/archive_list_view.cpp
         src/gui/compare_view.cpp
@@ -224,12 +227,19 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/verify_view.cpp)
     set_target_properties(veriarchive_gui PROPERTIES OUTPUT_NAME veriarchive-gui WIN32_EXECUTABLE TRUE)
     target_compile_features(veriarchive_gui PRIVATE cxx_std_23)
+    # The GUI uses no API newer than the oldest CI image has (Ubuntu 24.04:
+    # GTK 4.14, libadwaita 1.5): a newer call warns here, where the headers are
+    # newer, before that image fails to compile it.
     target_compile_definitions(veriarchive_gui PRIVATE
         VERIARCHIVE_VERSION="${PROJECT_VERSION}"
-        VERIARCHIVE_WITHOUT_SESSION_BUS=$<BOOL:${WIN32}>)
+        VERIARCHIVE_WITHOUT_SESSION_BUS=$<BOOL:${WIN32}>
+        GDK_VERSION_MIN_REQUIRED=GDK_VERSION_4_14
+        GDK_VERSION_MAX_ALLOWED=GDK_VERSION_4_14
+        ADW_VERSION_MIN_REQUIRED=ADW_VERSION_1_5
+        ADW_VERSION_MAX_ALLOWED=ADW_VERSION_1_5)
     # libintl: the GUI resets GTK's translation cache when the language changes.
     find_package(Intl REQUIRED)
-    target_link_libraries(veriarchive_gui PRIVATE VeriArchive::app PkgConfig::GTK4 Intl::Intl)
+    target_link_libraries(veriarchive_gui PRIVATE VeriArchive::app PkgConfig::GTK4 PkgConfig::LIBADWAITA Intl::Intl)
     if(WIN32)
         target_sources(veriarchive_gui PRIVATE src/platform/windows/veriarchive.rc)
     endif()

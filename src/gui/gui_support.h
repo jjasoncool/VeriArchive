@@ -7,7 +7,7 @@
 #include "app/text.h"
 #include "core/interfaces.h"
 
-#include <gtk/gtk.h>
+#include <adwaita.h>
 
 #include <atomic>
 #include <chrono>

@@ -119,7 +119,7 @@ file(INSTALL "${mingw}/share/icons/Adwaita" "${mingw}/share/icons/hicolor"
 
 # 5. Traditional Chinese texts of GTK's own widgets and dialogs (decision 0017);
 # GTK finds them under share/locale next to bin.
-foreach(domain gtk40 glib20 gdk-pixbuf)
+foreach(domain gtk40 glib20 gdk-pixbuf libadwaita)
     set(catalog "${mingw}/share/locale/zh_TW/LC_MESSAGES/${domain}.mo")
     if(EXISTS "${catalog}")
         file(INSTALL "${catalog}" DESTINATION "${prefix}/share/locale/zh_TW/LC_MESSAGES")

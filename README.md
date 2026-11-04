@@ -44,7 +44,7 @@ The views of the graphical interface, showing sample data made by
 ## Build
 
 Windows commands run in an **MSYS2 UCRT64** shell. Dependencies: GCC ≥ 14, CMake ≥ 3.28, Ninja,
-SQLite ≥ 3.40, OpenSSL 3, GLib ≥ 2.72, GTK4 ≥ 4.10 (for the GUI). BLAKE3 and nlohmann/json are
+SQLite ≥ 3.40, OpenSSL 3, GLib ≥ 2.72, GTK4 ≥ 4.14 and libadwaita ≥ 1.5 (for the GUI). BLAKE3 and nlohmann/json are
 downloaded at configure time when not installed.
 
 ```sh

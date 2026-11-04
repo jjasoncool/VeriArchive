@@ -5,10 +5,10 @@ and where it keeps its records.
 
 Third-party components
 ----------------------
-VeriArchive is dynamically linked against third-party libraries, among them GTK, GLib, GStreamer,
-Pango, Cairo and gdk-pixbuf, which are licensed under the GNU Lesser General Public License (LGPL)
-version 2.1 or later, and against HarfBuzz (MIT), SQLite (public domain), OpenSSL (Apache-2.0),
-the GCC runtime (GPL with the GCC Runtime Library Exception) and others.
+VeriArchive is dynamically linked against third-party libraries, among them GTK, libadwaita, GLib,
+GStreamer, Pango, Cairo and gdk-pixbuf, which are licensed under the GNU Lesser General Public
+License (LGPL) version 2.1 or later, and against HarfBuzz (MIT), SQLite (public domain), OpenSSL
+(Apache-2.0), the GCC runtime (GPL with the GCC Runtime Library Exception) and others.
 
 share\licenses\THIRD-PARTY.txt lists every bundled DLL and the MSYS2 package it comes from;
 share\licenses\<package>\ holds that package's license. The libraries are unmodified builds from

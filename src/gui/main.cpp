@@ -55,7 +55,9 @@ int main(int argc, char* argv[])
     state.jobs.on_change([&state](std::uint64_t job) {
         va::gui::guarded([&] { va::gui::job_changed(state, job); }, [](const va::gui::Report&) {});
     });
-    state.application = gtk_application_new("io.veriarchive.Gui", G_APPLICATION_NON_UNIQUE);
+    // An AdwApplication loads libadwaita's style and follows the system's
+    // light or dark appearance (decision 0046).
+    state.application = GTK_APPLICATION(adw_application_new("io.veriarchive.Gui", G_APPLICATION_NON_UNIQUE));
     g_signal_connect(state.application, "activate",
         G_CALLBACK(+[](GtkApplication*, gpointer data) {
             auto& state = *static_cast<va::gui::GuiState*>(data);
