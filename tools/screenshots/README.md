@@ -15,6 +15,8 @@
 
 The pictures are 1100 × 720 and show the window only, title bar included. GTK draws them itself from what the window drew, so other windows on the desktop never appear in them.
 
+The user guides and the repository's `README.md` link to these files by name. Keep the names: a new picture saved under the same name replaces the old one in every document, with no change to the documents.
+
 ## Making them again
 
 You need a build with the GUI and a desktop session: the window appears for a few seconds while the tour runs. On Windows, run from the MSYS2 UCRT64 shell (or put the GTK DLLs on `PATH` some other way), once for each guide:

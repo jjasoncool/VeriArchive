@@ -17,6 +17,19 @@ creates backups. Windows and Linux, one codebase.
 VeriArchive detects accidental corruption and unintended change. Tamper evidence (signed
 manifests) is not part of this version.
 
+## Screenshots
+
+The views of the graphical interface, showing sample data made by
+[`tools/screenshots/`](tools/screenshots/README.md).
+
+| Archive List | Register Archive |
+|---|---|
+| ![Archive List](docs/images/en/02-archive-list.png) | ![Register Archive](docs/images/en/03-register.png) |
+| **Verify Archive** | **Compare Archives** |
+| ![Verify Archive](docs/images/en/04-verify.png) | ![Compare Archives](docs/images/en/06-compare.png) |
+| **Verification History** | **Settings** |
+| ![Verification History](docs/images/en/05-history.png) | ![Settings](docs/images/en/01-settings.png) |
+
 ## Documentation
 
 - [`docs/user-guide.md`](docs/user-guide.md) / [`docs/user-guide.zh-TW.md`](docs/user-guide.zh-TW.md):
