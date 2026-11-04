@@ -109,8 +109,9 @@ const std::regex label_form("ARCH-[0-9]{4,}");
 
 std::vector<VolumeRow> volume_rows(const app::Text& text, const std::vector<AttachedVolume>& volumes,
     std::span<const ArchiveCandidate> candidates, const std::vector<PendingRoot>& pending,
-    const std::vector<ArchiveName>& names, IdentityShown shown)
+    const std::vector<ArchiveName>& names, IdentityShown shown, VolumeUse use, const Uuid& relocated)
 {
+    const bool relocation = use == VolumeUse::Relocation;
     std::vector<VolumeInfo> identities;
     for (const auto& attached : volumes) {
         identities.push_back(attached.volume);
@@ -142,13 +143,32 @@ std::vector<VolumeRow> volume_rows(const app::Text& text, const std::vector<Atta
         row.details = joined(text, details);
 
         // What lies on it: the archives' roots, those of a filesystem seen on
-        // another device too, and the roots of unfinished registrations.
+        // another device too, and the roots of unfinished registrations; in a
+        // relocation, apart from them, the roots of the archive relocated.
         std::vector<std::string> held;
-        bool whole = false;      // one of them is the volume's root
-        bool in_folder = false;  // one of them is a folder in it
+        std::vector<std::string> own;
+        bool whole = false;          // one of them is the volume's root
+        bool in_folder = false;      // one of them is a folder in it
+        bool own_in_folder = false;  // a root of the archive relocated is a folder in it
         for (const auto& root : attachments.volumes[index]) {
             const auto label = label_of(names, root.archive_uuid);
             const auto where = path_to_utf8(root.root);
+            if (relocation && root.archive_uuid == relocated) {
+                own.push_back(root.match == MatchResult::Migrated
+                                  ? text.format("The filesystem of this archive is here, on another device than "
+                                                "recorded ({})",
+                                        where)
+                                  : text.format("This archive is here, as recorded ({})", where));
+                if (!root.root_subpath.empty()) {
+                    own_in_folder = true;
+                    // Its device in another enclosure, or its copy made
+                    // sector by sector: the new carrier itself.
+                    if (root.match == MatchResult::Migrated && row.own_root.empty()) {
+                        row.own_root = where;
+                    }
+                }
+                continue;
+            }
             held.push_back(root.match == MatchResult::Migrated
                                ? text.format("the filesystem of {}, behind another enclosure or on another device "
                                              "than recorded ({})",
@@ -164,7 +184,12 @@ std::vector<VolumeRow> volume_rows(const app::Text& text, const std::vector<Atta
             held.push_back(text.format("an unfinished registration of {} ({})", registration.label, registration.root));
             (folder_key(root) == folder_key(mount_point) ? whole : in_folder) = true;
         }
-        if (!held.empty()) {
+        const auto offer_folders = [&] {
+            row.folder_tooltip = text.format("Choose a folder in {}...", row.where);
+            // A GUID path is too long for a button.
+            row.folder_button = guid_path(mount_point) ? text("Choose a folder in it...") : row.folder_tooltip;
+        };
+        if (!relocation && !held.empty()) {
             const auto holds = text.format("Holds {}", listed(text, held));
             // Its own root alone: chosen, Options offers what applies there.
             row.selectable = whole && !in_folder;
@@ -174,10 +199,33 @@ std::vector<VolumeRow> volume_rows(const app::Text& text, const std::vector<Atta
                 row.note = text.format("{}; the whole volume cannot be registered: choose a folder in it that does not "
                                        "overlap them",
                     holds);
-                row.folder_tooltip = text.format("Choose a folder in {}...", row.where);
-                // A GUID path is too long for a button.
-                row.folder_button =
-                    guid_path(mount_point) ? text("Choose a folder in it...") : row.folder_tooltip;
+                offer_folders();
+            }
+        }
+        if (relocation) {
+            // Whole only where nothing else lies on it (decision 0001): the
+            // relocation refuses a new root that overlaps another root.
+            row.selectable = !whole && !in_folder && !own_in_folder;
+            std::vector<std::string> notes;
+            if (!held.empty()) {
+                const auto holds = text.format("Holds {}", listed(text, held));
+                // Two calls: the compiler checks each literal template against its values.
+                notes.push_back(whole ? text.format("{}; nothing on it can be the new root, which would overlap them",
+                                            holds)
+                                      : text.format("{}; the whole volume cannot be the new root: choose a folder in "
+                                                    "it that does not overlap them",
+                                            holds));
+            }
+            notes.insert(notes.end(), own.begin(), own.end());
+            for (const auto& note : notes) {
+                row.note = row.note.empty() ? note : row.note + "\n" + note;
+            }
+            if (!whole && !row.selectable) {
+                offer_folders();
+            }
+            if (!row.own_root.empty()) {
+                row.own_button = text("Use as the new root");
+                row.own_tooltip = text.format("Use {} as the new root", row.own_root);
             }
         }
         rows.push_back(std::move(row));

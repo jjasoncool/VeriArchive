@@ -31,8 +31,8 @@ void window_words_tests()
 
     // A one-line message is a heading alone.
     {
-        const auto words = alert_words("Another step of abandoning is running.");
-        CHECK(words.heading == "Another step of abandoning is running.");
+        const auto words = alert_words("Another step of the window is running; wait for it to end.");
+        CHECK(words.heading == "Another step of the window is running; wait for it to end.");
         CHECK(words.body.empty());
     }
     // A short first line heads the lines after it; the blank lines between

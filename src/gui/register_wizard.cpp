@@ -19,6 +19,7 @@
 // again confirmed (decision 0022, point 7). The report shows in the job's
 // details, and a toast says what it registered, with View archive.
 #include "gui/gui_app.h"
+#include "gui/off_thread.h"
 
 #include "app/typed_path.h"
 #include "common/utf8.h"
@@ -194,87 +195,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
         ToastAction{text("Details"), [id](GuiState& state) { open_job_details(state, id); }}, ToastKind::Started);
 }
 
-// ---- Reads off the window's thread ------------------------------------------
-
-// Runs `read` on a thread of its own (OffThreadReads); its result comes back
-// to the main thread, the only one allowed to touch widgets, through the GLib
-// main loop, where `done` takes it, unless the window is gone. An exception
-// of the read is its result's `failure`.
-template <typename Result>
-void read_off_thread(GuiState& state, std::function<Result()> read, std::function<void(GuiState&, Result&)> done)
-{
-    struct Posted {
-        GuiState* state;
-        Result result;
-        std::function<void(GuiState&, Result&)> done;
-    };
-    state.reads.prune();
-    auto finished = std::make_shared<std::atomic<bool>>(false);
-    auto posted = std::make_unique<Posted>(Posted{&state, Result{}, std::move(done)});
-    std::thread thread([read = std::move(read), posted = std::move(posted), finished]() mutable {
-        try {
-            posted->result = read();
-        } catch (const std::exception& error) {
-            log_failure(std::string("exception while reading for Register Archive: ") + error.what());
-            posted->result.failure = unexpected_error(error.what());
-        }
-        g_idle_add(
-            +[](gpointer data) -> gboolean {
-                std::unique_ptr<Posted> posted(static_cast<Posted*>(data));
-                auto& state = *posted->state;
-                if (state.window) {
-                    guarded([&] { posted->done(state, posted->result); },
-                        [&](const Report& report) { show_message(state, report); });
-                }
-                return G_SOURCE_REMOVE;
-            },
-            posted.release());
-        finished->store(true);
-    });
-    state.reads.reads.push_back({std::move(thread), std::move(finished)});
-}
-
-// The archives that matching finds on the volumes, from the latest
-// revisions' manifests (load_candidate_pool), and the roots of the
-// unfinished registrations; `unread` says why they could not be read.
-void read_archives(const RepositoryLayout& layout, std::vector<ArchiveCandidate>& candidates,
-    std::vector<PendingRoot>& pending, Report& unread)
-{
-    auto store = ArchiveStore::open_read_only(layout);
-    if (!store) {
-        unread = [message = store.error().message](const app::Text& text) {
-            return text.format("Cannot open the repository: {}", text(message));
-        };
-        return;
-    }
-    const auto repository_files = platform::make_file_system_access();
-    if (auto pool = load_candidate_pool(*store, *repository_files, layout)) {
-        candidates = std::move(pool->candidates);
-    } else {
-        unread = [message = pool.error().message](const app::Text& text) {
-            return text.format("Cannot open the repository: {}", text(message));
-        };
-        return;
-    }
-    if (const auto registrations = store->pending_registrations()) {
-        for (const auto& registration : *registrations) {
-            pending.push_back({registration.archive_uuid, registration.label, registration.root});
-        }
-    } else {
-        unread = [message = registrations.error().message](const app::Text& text) {
-            return text.format("Cannot read the unfinished operations: {}", text(message));
-        };
-    }
-}
-
-struct VolumesRead {
-    bool sample = false;                  // the screenshot mode's sample list
-    std::vector<AttachedVolume> volumes;
-    std::vector<ArchiveCandidate> candidates;
-    std::vector<PendingRoot> pending;
-    Report unread;                        // why the archives on them cannot be told
-    Report failure;                       // why the volumes cannot be listed
-};
+// ---- Reads off the window's thread (off_thread.h) ---------------------------
 
 struct SourceRead {
     std::optional<std::string> refused;   // app::root_not_taken, an English sentence
@@ -628,31 +549,7 @@ void read_volumes(GuiState& state)
     add_volume_row(wizard, words_row(state.text("Reading the attached volumes..."), "dim-label", true));
     const auto layout = state.session->context.repo;
     const bool sample = state.identity_shown == IdentityShown::Sample;
-    read_off_thread<VolumesRead>(state,
-        [layout, sample] {
-            VolumesRead read;
-            read.sample = sample;
-            if (sample) {
-                for (auto& volume : sample_volumes()) {
-                    read.volumes.push_back({std::move(volume.volume), volume.used_bytes});
-                }
-            } else {
-                const auto media = platform::make_media_enumerator();
-                auto listed = media->volumes();
-                if (!listed) {
-                    read.failure = [message = listed.error().message](const app::Text& text) {
-                        return text.format("Cannot list the attached volumes: {}", text(message));
-                    };
-                    return read;
-                }
-                for (auto& volume : *listed) {
-                    const auto used = app::volume_used_bytes(volume.mount_point);
-                    read.volumes.push_back({std::move(volume), used});
-                }
-            }
-            read_archives(layout, read.candidates, read.pending, read.unread);
-            return read;
-        },
+    read_off_thread<VolumesRead>(state, [layout, sample] { return read_attached_volumes(layout, sample); },
         [opened = wizard.opened](GuiState& state, VolumesRead& read) {
             if (is_open(state, opened)) {
                 show_volumes(state, read);
@@ -1210,6 +1107,9 @@ void close_dialogs(GuiState& state)
     }
     if (GtkWidget* compare = std::exchange(state.compare_dialog, {}).dialog) {
         adw_dialog_force_close(ADW_DIALOG(compare));
+    }
+    if (GtkWidget* relocation = std::exchange(state.relocate_dialog, {}).dialog) {
+        adw_dialog_force_close(ADW_DIALOG(relocation));
     }
 }
 

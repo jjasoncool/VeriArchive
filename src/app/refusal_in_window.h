@@ -1,25 +1,27 @@
 #pragma once
-// What the window says when Register Archive or a verification started in
-// Archives is refused because another operation that creates the archive's
-// next revision is unfinished (decisions 0025, 0026, 0033): a registration, a
-// relocation, or a FULL verify that adds chunk hashes. The command line names
-// its commands; the window names its own ways on in their place (decisions
-// 0033, 0046): first "Resume" and "Abandon..." on the operation's row under
-// Unfinished operations in Archives (decision 0022, point 7), then Register
-// Archive, the registration's root chosen there, whose options then resume it
-// ("Resume the interrupted registration"), or "Resume" in the archive's
-// details, where its stopped verification shows; a
-// relocation, which has no window and no Resume in the list, keeps its
-// command line for continuing, and a registration made for an older revision
-// can only be abandoned. While the operation that refuses still runs or is
-// held up, as Archives judges its row from one read, they say so, and to wait
-// for it: the window offers no way on for it then. Where one read cannot
-// tell, as for a record that says nothing of its state, they name the ways
-// on.
+// What the window says when Register Archive, a verification, a relocation or
+// the retirement of an archive started in Archives is refused because another
+// operation that creates the archive's next revision is unfinished (decisions
+// 0025, 0026, 0033, 0046): a registration, a relocation, or a FULL verify that
+// adds chunk hashes. The command line names its commands; the window names
+// its own ways on in their place (decisions 0033, 0046): first "Resume" and
+// "Abandon..." on the operation's row under Unfinished operations in Archives
+// (decision 0022, point 7), then Register Archive, the registration's root
+// chosen there, whose options then resume it ("Resume the interrupted
+// registration"), or "Resume" in the archive's details, where its stopped
+// verification or relocation shows; a registration or relocation made for an
+// older revision, and a relocation whose new carrier differs, can only be
+// abandoned. While the operation that refuses still runs or is held up, as
+// Archives judges its row from one read, they say so, and to wait for it: the
+// window offers no way on for it then. Where one read cannot tell, as for a
+// record that says nothing of its state, they name the ways on.
+#include "app/text.h"
 #include "app/unfinished_operations.h"
 #include "common/error.h"
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/register_engine.h"
+#include "core/engine/relocate_engine.h"
+#include "core/engine/retire_archive.h"
 #include "core/engine/verify_engine.h"
 #include "core/repository/archive_store.h"
 
@@ -85,5 +87,33 @@ std::string register_message_in_window(const RegisterFailure& failure, ArchiveSt
 // operation is then the verification refused, which wrote no record.
 std::string stop_message_in_window(const VerifyStop& stop, ArchiveStore& store, IProcessTable& processes,
     const std::string& host, std::chrono::sys_seconds now);
+
+// Whether the window says that `refusing` still runs: as
+// refusing_operation_runs judges it, through `processes` on this computer
+// (`host`) at `now`, with this process taken for one that runs no operation
+// (the window's operation is the one refused); not where it cannot be judged,
+// where the window names the ways on.
+bool runs_as_the_window_judges(ArchiveStore& store, const RefusingOperation& refusing, IProcessTable& processes,
+    const std::string& host, std::chrono::sys_seconds now);
+
+// What the window says of a relocation that did not record its revision, in
+// `text`'s language: where another operation, or the archive's own unfinished
+// relocation, refuses it (RelocateFailure::refusing), refusal_in_window,
+// `runs` as runs_as_the_window_judges says; where the relocation keeps its
+// saved progress (RelocateFailure::keeps_progress: interrupted, its device no
+// longer answering, or stopped by a failure, `cause`), that Resume under
+// Unfinished operations continues it, in place of the command line's
+// `archive relocate ... --resume`; a resume at a root where the new carrier is
+// not attached now (RelocateFailure::elsewhere), that the relocation dialog
+// resumes it at the root the operator gives there; one that another operation
+// overtook before it began (RelocateFailure::overtaken), to relocate again;
+// otherwise the failure's message.
+std::string relocation_message_in_window(const Text& text, const RelocateFailure& failure, bool runs);
+
+// What the window says of a retirement refused, in `text`'s language: where an
+// operation that would give the archive a new revision is unfinished
+// (RetireFailure::refusing), refusal_in_window, `runs` as above; otherwise the
+// failure's message.
+std::string retirement_message_in_window(const Text& text, const RetireFailure& failure, bool runs);
 
 } // namespace va::app

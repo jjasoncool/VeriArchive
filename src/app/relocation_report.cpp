@@ -69,4 +69,24 @@ std::string relocation_refusal(const Text& text, const RelocateFailure& failure)
     return refusal;
 }
 
+std::string relocation_refusal_in_window(const Text& text, const RelocateFailure& failure)
+{
+    // Its saved progress could not be removed: the record stays, marked as
+    // differing, which Abandon... removes (RelocateFailure::refusing).
+    if (!failure.refusing) {
+        return relocation_refusal(text, failure);
+    }
+    std::string refusal =
+        text.format("RELOCATION REFUSED: {}",
+            text.format("the new carrier does not hold the recorded content; nothing was changed, but the "
+                        "relocation's saved progress could not be removed: {}; abandon the relocation with "
+                        "Abandon... under Unfinished operations in Archives before relocating again",
+                text(failure.cause))) +
+        "\n";
+    for (const auto& item : failure.items) {
+        refusal += item_line(text, item);
+    }
+    return refusal;
+}
+
 } // namespace va::app

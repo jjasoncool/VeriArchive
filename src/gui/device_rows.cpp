@@ -1,7 +1,6 @@
 #include "gui/device_rows.h"
 
 #include "app/device_alerts.h"
-#include "common/shell_argument.h"
 #include "common/unicode.h"
 #include "common/utf8.h"
 #include "core/engine/candidates.h"
@@ -125,21 +124,28 @@ std::string not_attached_notice(const app::Text& text, const ArchiveStatus& stat
 }
 
 // MIGRATED: what it means, then, on a line of its own, how the archive is
-// moved to the new carrier, where the window does not do it yet (the
-// pointer, the one sentence that the window's relocation changes).
-std::string migrated_notice(const app::Text& text, const ArchiveAttachment& attachment)
+// moved to the new carrier in the window (decision 0046): Relocate to this
+// carrier... beside the notice, which opens the relocation dialog with the
+// root found there, or, where it is found at more than one root, Relocate to
+// a new carrier... in the menu of the details. A retired archive takes no new
+// revisions (decision 0003): its window offers neither, which it says.
+std::string migrated_notice(const app::Text& text, const ArchiveAttachment& attachment, bool retired)
 {
     const auto meaning = text.format("The filesystem of this archive is attached at {}, but on another device than "
                                      "the one recorded (MIGRATED): the archive's device in another enclosure, or a "
                                      "sector-by-sector clone of it. FULL verify does not read it there; a clone is "
                                      "registered as a separate archive in Register Archive.",
         roots_listed(text, attachment));
-    const auto root = attachment.places.size() == 1 ? shell_argument(path_to_utf8(attachment.places.front().root))
-                                                    : std::string("<root>");
-    const auto command = "archive relocate " + attachment.archive_uuid + " " + root;
-    const auto pointer = text.format("If it is this archive's device in another enclosure, or you moved the archive "
-                                     "to that device on purpose, relocate the archive to it on the command line: `{}`",
-        command);
+    if (retired) {
+        return meaning + "\n" + text("This archive is retired and takes no new revisions, so it is not relocated.");
+    }
+    const auto pointer = attachment.places.size() == 1
+                             ? text("If it is this archive's device in another enclosure, or you moved the archive to "
+                                    "that device on purpose, relocate the archive to it with Relocate to this "
+                                    "carrier..., which reads it in full first.")
+                             : text("If one of them is this archive's device in another enclosure, or you moved the "
+                                    "archive to that device on purpose, relocate the archive to it with Relocate to a "
+                                    "new carrier... in the menu of these details, which reads it in full first.");
     return meaning + "\n" + pointer;
 }
 
@@ -238,7 +244,13 @@ ArchiveAttached archive_attached(
     case MatchResult::Migrated:
         attached.line =
             AttachedLine{Attached::Migrated, text("The device differs from the one recorded"), roots_of(*attachment)};
-        attached.notice = migrated_notice(text, *attachment);
+        attached.notice = migrated_notice(text, *attachment, status.archive.status == "RETIRED");
+        // Relocate to this carrier... beside the notice, where one root holds
+        // the filesystem; never for a retired archive, which takes no new
+        // revisions.
+        if (attachment->places.size() == 1 && status.archive.status != "RETIRED") {
+            attached.relocate_root = path_to_utf8(attachment->places.front().root);
+        }
         attached.verify_tooltip = text("The filesystem of this archive is on another device than the one recorded "
                                        "(MIGRATED): FULL verify does not read it there.");
         attached.fields.push_back({text("Attached at"),

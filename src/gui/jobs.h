@@ -1,10 +1,10 @@
 #pragma once
-// The window's jobs (decision 0045): every registration, verification and
-// comparison started in the window runs as a job of its own, on a thread of
-// its own, so that several run at once. A job that reads a device waits while
-// an earlier job reads it (DeviceQueue): jobs of one device run one after
-// another, jobs of different devices at once; a comparison reads no media and
-// waits for nothing. Each job keeps the computer awake while it works
+// The window's jobs (decision 0045): every registration, verification,
+// comparison, relocation and export (decision 0046) started in the window runs
+// as a job of its own, on a thread of its own, so that several run at once. A
+// job that reads a device waits while an earlier job reads it (DeviceQueue):
+// jobs of one device run one after another, jobs of different devices at
+// once; a comparison and an export read no media and wait for nothing. Each job keeps the computer awake while it works
 // (decision 0043), and one that ends while no window of the program is active
 // is told in a notification. What the window shows of each job lives here, on
 // the main thread; the views and the Jobs page show it.

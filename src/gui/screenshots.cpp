@@ -1,15 +1,16 @@
 // Documentation screenshots (tools/screenshots/README.md). With
 // VERIARCHIVE_GUI_SCREENSHOTS=<folder> set, the GUI tours its views once the
 // window is shown, as a reader of the user guide would: it fills in forms,
-// opens Register Archive and the comparison dialog, starts a verification and
-// a comparison through the buttons' own handlers, saves each view as a PNG in
-// the folder, and quits.
+// opens Register Archive, the comparison dialog and the relocation dialog,
+// starts a verification and a comparison through the buttons' own handlers,
+// saves each view as a PNG in the folder, and quits.
 //
 // The archives and the folder come from the environment:
 //   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: selected in Archives, verified by its
 //                                     folder, compared, its runs in History, the result page of
 //                                     its FULL verification shown
-//   VERIARCHIVE_SCREENSHOT_COPY       uuid of archive B: compared with A
+//   VERIARCHIVE_SCREENSHOT_COPY       uuid of archive B: compared with A; its relocation dialog
+//                                     shown, a sample folder of a sample volume chosen
 //   VERIARCHIVE_SCREENSHOT_EARLIER    uuid of archive C, registered without chunk hashes as an
 //                                     earlier version registered archives: its details shown in
 //                                     Archives with the menu of FULL verify open, which offers
@@ -53,6 +54,11 @@ using Clock = std::chrono::steady_clock;
 // The window's size in every picture, as the user guide shows it.
 constexpr int picture_width = 1100;
 constexpr int picture_height = 720;
+
+// The new root that the relocation dialog's picture shows chosen: a folder on
+// the first of the sample volumes (sample_volumes), SAMPLE DATA, never a
+// folder of this computer.
+constexpr const char* sample_new_root = "/media/SAMPLE-VOLUME-1/備份資料";
 
 // After a view changes, GTK lays it out and draws it over the next frames; the
 // picture is taken once a frame was drawn and this much time has passed, so
@@ -422,9 +428,50 @@ public:
                     }
                 },
                 {}},
+            // The relocation dialog of archive B, as Relocate to a new
+            // carrier... in its details opens it, once the attached volumes
+            // were read (the fixed sample list), a sample folder on a sample
+            // volume typed in as the new root; not started.
+            {"11-relocate.png",
+                [this] {
+                    show("archives");
+                    select(copy_);
+                    open_relocation(state_, copy_);
+                    const auto& dialog = state_.relocate_dialog;
+                    if (!dialog.dialog || !dialog.folder) {
+                        throw std::runtime_error("the relocation dialog did not open for archive " + copy_);
+                    }
+                    gtk_editable_set_text(GTK_EDITABLE(dialog.folder), sample_new_root);
+                },
+                {},
+                [this] {
+                    const auto& dialog = state_.relocate_dialog;
+                    if (!dialog.dialog) {
+                        throw std::runtime_error("the relocation dialog closed");
+                    }
+                    // Its volumes read: the radios of the sample volumes.
+                    return !dialog.radios.empty();
+                },
+                [this] {
+                    const auto& dialog = state_.relocate_dialog;
+                    if (!dialog.start || !gtk_widget_get_sensitive(dialog.start)) {
+                        throw std::runtime_error("the relocation dialog does not offer Start relocation");
+                    }
+                    // As the reader sees it once the root is chosen: the
+                    // focus on Start relocation (the root typed is not shown
+                    // selected), the dialog from its top, which says first
+                    // what the operator does before a relocation.
+                    gtk_widget_grab_focus(dialog.start);
+                    gtk_editable_select_region(GTK_EDITABLE(dialog.folder), -1, -1);
+                }},
             // The jobs the tour started, the verification and the comparison,
             // ended (decision 0045); taken before the language list opens.
-            {"08-jobs.png", [this] { show("jobs"); }, {}},
+            {"08-jobs.png",
+                [this] {
+                    close_dialogs(state_);
+                    show("jobs");
+                },
+                {}},
             {"07-language.png",
                 [this] {
                     show("settings");

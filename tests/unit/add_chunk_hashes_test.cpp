@@ -1324,12 +1324,12 @@ void a_relocation_and_a_verification_that_adds_chunk_hashes_wait_for_each_other(
                                              " (to \"K:/SAMPLE\") exists; resume it with `archive relocate " + uuid +
                                              " K:/SAMPLE --resume`, or abandon it with `archive abandon-relocation " +
                                              uuid + "`");
-        // Verify Archive names the Archive List's Abandon...; a relocation
-        // has no window, so its command line goes on naming how to continue
-        // it (decision 0033).
-        const auto resume_or_abandon = "resume it on the command line with `archive relocate " + uuid +
-                                       " K:/SAMPLE --resume`, or abandon it with Abandon... under Unfinished "
-                                       "operations in Archives";
+        // The window names Resume and Abandon... on its row under Unfinished
+        // operations, and Resume in the archive's details, where the
+        // command line names its commands (decisions 0033, 0046).
+        const std::string resume_or_abandon =
+            "resume it with Resume, or abandon it with Abandon..., on its row under Unfinished operations in "
+            "Archives; or resume it in the archive's details";
         CHECK(!refused && refused.error().refusing &&
               refused.error().refusing->kind == va::RefusingOperation::Kind::Relocation &&
               refused.error().refusing->run_id == "c0ffee00-0000-4000-8000-0000000000c1" &&

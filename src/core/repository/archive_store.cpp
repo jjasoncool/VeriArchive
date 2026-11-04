@@ -1517,9 +1517,10 @@ std::expected<std::vector<PendingRegistration>, IoError> ArchiveStore::pending_r
             return std::unexpected(found.error());
         }
         registration.volume_root = *found && archive->text(0).empty();
-        // A registration over a lost manifest of an archive retired since
-        // (decision 0028, point 9): its resume is refused.
-        registration.archive_retired = *found && archive->text(1) == "RETIRED" && json_unsigned(plan, "lost_manifest");
+        // A registration of an archive retired since, over its lost manifest
+        // (decision 0028, point 9) or not (decision 0003): its resume is
+        // refused.
+        registration.archive_retired = *found && archive->text(1) == "RETIRED";
         archive->reset();
         // Made for an older revision (decision 0030): the plan creating
         // revision N+1 was made for N.
@@ -1810,7 +1811,7 @@ std::expected<std::vector<UnfinishedRelocation>, IoError> ArchiveStore::unfinish
     if (!records) {
         return std::unexpected(records.error());
     }
-    auto archive = database_.prepare("SELECT label, current_revision FROM archives WHERE archive_uuid = ?");
+    auto archive = database_.prepare("SELECT label, current_revision, status FROM archives WHERE archive_uuid = ?");
     // As a verification's checkpoints: each entry's size from the index of
     // the revision it verifies against, looked up by its primary key.
     auto matched = database_.prepare(
@@ -1853,10 +1854,13 @@ std::expected<std::vector<UnfinishedRelocation>, IoError> ArchiveStore::unfinish
         if (*found && relocation.label.empty()) {
             relocation.label = archive->text(0);
         }
+        // Its archive retired since (decision 0003): it never records.
+        relocation.archive_retired = *found && archive->text(2) == "RETIRED";
         // It resumes only while its archive is at the revision it verifies,
-        // and never once its new carrier was found to differ.
+        // and never once its new carrier was found to differ, nor once the
+        // archive is retired.
         relocation.resumable = *found && static_cast<std::uint32_t>(archive->integer(1)) == relocation.revision &&
-                               relocation.differs.empty();
+                               relocation.differs.empty() && !relocation.archive_retired;
         archive->reset();
         // Made for an older revision (decision 0030).
         const auto later = later_revision(relocation.archive_uuid, relocation.revision);

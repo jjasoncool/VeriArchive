@@ -514,6 +514,22 @@ void operations_in_details()
     CHECK(shown.adding_unfinished && shown.stopped &&
           shown.words.starts_with("The last FULL verification of this archive that adds chunk hashes stopped at "));
 
+    // A stopped relocation of the archive, which Resume in the details
+    // continues too (decision 0046); not one whose archive is retired since.
+    auto relocation = sample_verification("c0ffee00-0000-4000-9000-0000000000a6", true);
+    relocation.kind = va::app::OperationKind::Relocation;
+    relocation.key = "relocation:" + archive;
+    relocation.root = "Q:/SAMPLE-NEW";
+    shown = details_operations(english, watched({relocation}), archive, start, now);
+    CHECK(shown.stopped && shown.stopped->key == "relocation:" + archive && !shown.adding_unfinished &&
+          shown.words == "The relocation of this archive to Q:/SAMPLE-NEW stopped at 1.00 GiB of 2.00 GiB (50%). "
+                         "Resume continues it without reading again what matched.");
+    CHECK(details_operations(Text(va::app::Language::TraditionalChinese), watched({relocation}), archive, start, now)
+              .words == "此封存搬移至 Q:/SAMPLE-NEW 的作業停止於 1.00 GiB / 2.00 GiB（50%）。按「繼續」即可接續，已相符的不必重讀。");
+    relocation.archive_retired = true;
+    relocation.resumable = false;
+    CHECK(!details_operations(english, watched({relocation}), archive, start, now).stopped);
+
     // Resume: the run that this window interrupted last as it ran it, at
     // its root or by its uuid, with its strict metadata; any other exactly
     // as on its row under Unfinished operations, strict metadata as the

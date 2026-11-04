@@ -25,6 +25,7 @@
 #include "common/types.h"
 #include "core/engine/register_engine.h"
 #include "core/engine/registration_attempt.h"
+#include "core/engine/relocate_engine.h"
 #include "core/engine/verify_engine.h"
 #include "core/repository/archive_store.h"
 
@@ -66,14 +67,15 @@ struct UnfinishedOperation {
     bool recorded_stopped = false;     // its record says it stopped: a verification recorded INCOMPLETE,
                                        // a registration whose plan says "stopped", a relocation likewise
     bool resumable = true;             // false: a verification or relocation whose archive has a newer
-                                       // revision (R-104), or a relocation whose new carrier differs
+                                       // revision (R-104), or a relocation whose new carrier differs or whose
+                                       // archive is retired
     bool differs = false;              // a relocation whose record says that its new carrier does not hold
                                        // the recorded content (decision 0026): it can never finish
     bool later_revision = false;       // a registration or relocation made for an older revision: the archive
                                        // has a later one now, so it can never finish (decision 0030)
-    bool archive_retired = false;      // a registration over a lost manifest of an archive retired since: a
-                                       // retired archive takes no new revision, so it can never finish
-                                       // (decision 0028, point 9)
+    bool archive_retired = false;      // a registration (over a lost manifest, decision 0028, point 9, or
+                                       // not) or a relocation of an archive retired since: a retired archive
+                                       // takes no new revision (decision 0003), so it can never finish
     bool adds_chunk_hashes = false;    // a verification that adds chunk hashes (decision 0033): no other
                                        // operation creates the archive's next revision while it is unfinished
     std::optional<std::chrono::sys_seconds> updated;  // when the operation last said it was working, if it does
@@ -177,8 +179,8 @@ enum class OperationState {
                // hold the recorded content (decision 0026): it is never resumed, and waits to be abandoned
     LaterRevision,  // a registration or relocation stopped as Stopped says, made for an older revision
                     // than the archive has now (decision 0030): it never records, and waits to be abandoned
-    ArchiveRetired, // a registration over a lost manifest stopped as Stopped says, whose archive is retired
-                    // by now (decision 0028, point 9): it never records, and waits to be abandoned
+    ArchiveRetired, // a registration or relocation stopped as Stopped says, whose archive is retired by now
+                    // (decisions 0003, 0028 point 9): it never records, and waits to be abandoned
     Unknown,   // its progress is not counted and its record says nothing of its state (an older version)
 };
 
@@ -310,11 +312,11 @@ struct OperationRow {
                                      // (has_stopped), or a registration whose plan never says when it worked
                                      // (an older version's) shown quiet (OperationState::Quiet): the operator
                                      // may abandon it
-    bool offers_resume = false;      // a verification shown "stopped; it can be resumed", or a registration
-                                     // shown stopped (OperationState::Stopped) or, never saying when it worked,
-                                     // quiet, unless it can no longer finish: the list offers Resume, which
-                                     // continues it as its command-line resume does (decision 0022, point 7;
-                                     // verification_resume, registration_resume)
+    bool offers_resume = false;      // a verification or relocation shown "stopped; it can be resumed", or a
+                                     // registration shown stopped (OperationState::Stopped) or, never saying when
+                                     // it worked, quiet, unless it can no longer finish: the list offers Resume,
+                                     // which continues it as its command-line resume does (decision 0022, point
+                                     // 7; verification_resume, registration_resume, relocation_resume)
     bool resume_asks_first = false;  // Resume is offered on a registration shown quiet, whose plan never says
                                      // when it worked and names no process (an older version's), or that an
                                      // older version took up (OperationWatch::taken_up): that version may still
@@ -360,6 +362,13 @@ VerifyRequest verification_resume(const UnfinishedOperation& verification, const
 // a resume of any other registration needs none (decision 0022, point 7).
 RegisterRequest registration_resume(const UnfinishedOperation& registration, const Config& config,
     bool confirmed = false);
+// A stopped relocation (decision 0026), as `archive relocate <archive_uuid>
+// <root> --resume`: its archive, and the new root its record names, made as
+// the command line makes a root typed there (typed_root), which the resume
+// checks as that command checks it (root_not_taken, with the record's root as
+// typed) before anything of it is read; the readers as the config's override
+// says, as without --io.
+RelocateRequest relocation_resume(const UnfinishedOperation& relocation, const Config& config);
 
 // What a resume of a registration that an older version of VeriArchive left,
 // and that may still run it, says before the operator confirms it: the

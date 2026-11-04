@@ -173,6 +173,7 @@ add_library(veriarchive_app
     src/app/progress_estimate.cpp
     src/app/refusal_in_window.cpp
     src/app/relocation_report.cpp
+    src/app/retirement_report.cpp
     src/app/unfinished_operations.cpp
     src/app/session.cpp
     src/app/text.cpp
@@ -212,6 +213,7 @@ option(VERIARCHIVE_BUILD_GUI "Build the GTK4 GUI" ${GTK4_FOUND})
 if(VERIARCHIVE_BUILD_GUI)
     pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET libadwaita-1>=1.5)
     add_executable(veriarchive_gui
+        src/gui/archive_actions.cpp
         src/gui/archive_detail.cpp
         src/gui/archive_rows.cpp
         src/gui/archives_page.cpp
@@ -222,6 +224,7 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/devices_poll.cpp
         src/gui/displayed_identity.cpp
         src/gui/ended_notification.cpp
+        src/gui/export_dialog.cpp
         src/gui/gui_app.cpp
         src/gui/gui_support.cpp
         src/gui/history_page.cpp
@@ -231,12 +234,16 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/jobs.cpp
         src/gui/jobs_page.cpp
         src/gui/main.cpp
+        src/gui/off_thread.cpp
         src/gui/operations_poll.cpp
+        src/gui/progress_wording.cpp
         src/gui/report.cpp
         src/gui/result_page.cpp
         src/gui/run_result.cpp
         src/gui/register_choices.cpp
         src/gui/register_wizard.cpp
+        src/gui/relocate_dialog.cpp
+        src/gui/retire_dialog.cpp
         src/gui/screenshots.cpp
         src/gui/settings_page.cpp
         src/gui/unfinished_actions.cpp
@@ -325,6 +332,7 @@ if(BUILD_TESTING)
         tests/unit/test_main.cpp
         tests/unit/abandon_registration_test.cpp
         tests/unit/add_chunk_hashes_test.cpp
+        tests/unit/archive_actions_test.cpp
         tests/unit/archive_rows_test.cpp
         tests/unit/attached_test.cpp
         tests/unit/attached_devices_test.cpp
@@ -354,6 +362,7 @@ if(BUILD_TESTING)
         tests/unit/manifest_test.cpp
         tests/unit/merkle_test.cpp
         tests/unit/plain_words_test.cpp
+        tests/unit/progress_wording_test.cpp
         tests/unit/read_speed_test.cpp
         tests/unit/register_choices_test.cpp
         tests/unit/run_result_test.cpp
@@ -407,12 +416,14 @@ if(BUILD_TESTING)
     # notification that an operation ended, the queue of its jobs and what it
     # says of them, what the window says around its pages, what Archives says
     # of each archive, what History lists, what the result page of a run says,
-    # what Register Archive and the comparison dialog offer and say, and what
-    # Devices and Archives say of the devices attached now, are plain C++
-    # without GTK, so they are tested also where the GUI is not built.
-    target_sources(veriarchive_tests PRIVATE src/gui/archive_rows.cpp src/gui/compare_choices.cpp
+    # what Register Archive and the comparison dialog offer and say, what
+    # Devices and Archives say of the devices attached now, how a job's
+    # progress is worded, and what the relocation, export and retirement of an
+    # archive offer and say, are plain C++ without GTK, so they are tested also
+    # where the GUI is not built.
+    target_sources(veriarchive_tests PRIVATE src/gui/archive_actions.cpp src/gui/archive_rows.cpp src/gui/compare_choices.cpp
         src/gui/device_rows.cpp src/gui/displayed_identity.cpp src/gui/ended_notification.cpp src/gui/history_rows.cpp
-        src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/register_choices.cpp src/gui/report.cpp
+        src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/progress_wording.cpp src/gui/register_choices.cpp src/gui/report.cpp
         src/gui/run_result.cpp src/gui/window_words.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)
     if(VERIARCHIVE_BUILD_GUI AND WIN32 AND NOT EXISTS "$ENV{SystemRoot}/System32/opengl32.dll")

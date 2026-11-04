@@ -20,6 +20,7 @@ std::unexpected<RetireFailure> fail(RetireFailure::Kind kind, std::string messag
 struct UnfinishedRegistration {
     std::uint32_t revision = 0;
     std::string root;
+    nlohmann::json plan;
 };
 
 std::expected<std::optional<UnfinishedRegistration>, IoError> unfinished_registration(
@@ -29,7 +30,7 @@ std::expected<std::optional<UnfinishedRegistration>, IoError> unfinished_registr
     if (!stored) {
         return std::unexpected(stored.error());
     }
-    const auto plan = nlohmann::json::parse(*stored, nullptr, false);
+    auto plan = nlohmann::json::parse(*stored, nullptr, false);
     const auto revision = plan.is_object() ? plan.find("revision") : plan.end();
     if (stored->empty() || !plan.is_object() || revision == plan.end() || !revision->is_number_unsigned()) {
         return std::optional<UnfinishedRegistration>{};
@@ -45,16 +46,75 @@ std::expected<std::optional<UnfinishedRegistration>, IoError> unfinished_registr
     }
     const auto root = plan.find("root");
     registration.root = root != plan.end() && root->is_string() ? root->get<std::string>() : std::string{};
+    registration.plan = std::move(plan);
     return std::optional<UnfinishedRegistration>(std::move(registration));
 }
 
-} // namespace
-
-std::expected<Retirement, RetireFailure> retire_archive(ArchiveStore& store, IFileSystemAccess& repository_files,
-    const RepositoryLayout& layout, const RetireRequest& request)
+// Why the archive is not retired now: an operation that would give it a new
+// revision is unfinished (decision 0046), a registration of it in the words
+// of a registration that meets it (decision 0025), also one made for an older
+// revision (decision 0030), which can no longer finish but is abandoned
+// first; then a relocation (decision 0026) or a FULL verify that adds chunk
+// hashes (decision 0033), in the words of an operation that meets them.
+// Nothing when none is. Read in the caller's transaction, or on their own.
+std::expected<std::optional<RetireFailure>, IoError> refused_by_an_operation(
+    ArchiveStore& store, const ArchiveRecord& archive)
 {
     using Kind = RetireFailure::Kind;
-    const auto& uuid = request.archive_uuid;
+    const auto& uuid = archive.archive_uuid;
+    const auto unfinished = unfinished_registration(store, uuid);
+    if (!unfinished) {
+        return std::unexpected(unfinished.error());
+    }
+    if (*unfinished) {
+        const auto& registration = **unfinished;
+        const auto later = store.later_revision(uuid, registration.revision - 1);
+        if (!later) {
+            return std::unexpected(later.error());
+        }
+        RetireFailure refused{Kind::Refused,
+            *later ? "the unfinished registration of archive " + uuid + " (root \"" + registration.root +
+                         "\") would create revision " + std::to_string(registration.revision) +
+                         ", but the archive now has a later revision (" + std::to_string(**later) +
+                         "); the registration can no longer finish: abandon it with `archive "
+                         "abandon-registration " +
+                         uuid + "`"
+                   : "an unfinished registration of archive " + uuid + " (root \"" + registration.root +
+                         "\") is creating revision " + std::to_string(registration.revision) +
+                         "; nothing was changed (finish it with `register " + shell_argument(registration.root) +
+                         " --resume` first, or abandon it with `archive abandon-registration " + uuid + "`)"};
+        refused.refusing = refusing_registration(uuid, registration.plan);
+        refused.refusing->later_revision = *later;
+        return std::optional<RetireFailure>(std::move(refused));
+    }
+    // A relocation or a verification that adds chunk hashes, whose revision
+    // is not recorded (the registration has been looked at above).
+    auto another = another_operation_creates_the_revision(store, archive);
+    if (!another) {
+        return std::unexpected(another.error());
+    }
+    if (!*another) {
+        return std::optional<RetireFailure>{};
+    }
+    RetireFailure refused{Kind::Refused, (*another)->message};
+    refused.refusing = std::move((*another)->refusing);
+    // A relocation made for an older revision (decision 0030) is told so.
+    if (refused.refusing->kind == RefusingOperation::Kind::Relocation) {
+        const auto later = store.later_revision(uuid, refused.refusing->revision);
+        if (!later) {
+            return std::unexpected(later.error());
+        }
+        refused.refusing->later_revision = *later;
+    }
+    return std::optional<RetireFailure>(std::move(refused));
+}
+
+// The archive, and what retiring it would do, as matching judges its latest
+// manifest (decision 0028, point 9): see retire_archive.
+std::expected<std::pair<ArchiveRecord, Retirement>, RetireFailure> judged(ArchiveStore& store,
+    IFileSystemAccess& repository_files, const RepositoryLayout& layout, const Uuid& uuid)
+{
+    using Kind = RetireFailure::Kind;
     const auto found = store.find_archive(uuid);
     if (!found) {
         return fail(Kind::Repository, found.error().message);
@@ -96,6 +156,43 @@ std::expected<Retirement, RetireFailure> retire_archive(ArchiveStore& store, IFi
             }
         }
     }
+    return std::pair{archive, std::move(retirement)};
+}
+
+} // namespace
+
+std::expected<Retirement, RetireFailure> retirement_of(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const Uuid& archive_uuid)
+{
+    auto read = judged(store, repository_files, layout, archive_uuid);
+    if (!read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    auto& [archive, retirement] = *read;
+    if (retirement.already_retired) {
+        return std::move(retirement);
+    }
+    const auto refused = refused_by_an_operation(store, archive);
+    if (!refused) {
+        return fail(RetireFailure::Kind::Repository, refused.error().message);
+    }
+    if (*refused) {
+        return std::unexpected(std::move(**refused));
+    }
+    return std::move(retirement);
+}
+
+std::expected<Retirement, RetireFailure> retire_archive(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, const RetireRequest& request)
+{
+    using Kind = RetireFailure::Kind;
+    const auto& uuid = request.archive_uuid;
+    auto read = judged(store, repository_files, layout, uuid);
+    if (!read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    const auto archive = read->first;
+    auto retirement = std::move(read->second);
     // Retired before: there is nothing to change, nor to confirm.
     if (retirement.already_retired) {
         return retirement;
@@ -130,35 +227,17 @@ std::expected<Retirement, RetireFailure> retire_archive(ArchiveStore& store, IFi
                         "; nothing was changed (run the command again)"};
                 return {};
             }
-            // A registration of the archive that is unfinished would give it
-            // a new revision, which a retired archive takes no more; one made
-            // for an older revision can no longer finish (decision 0030). In
-            // the words of a registration that meets them (decision 0025).
-            const auto unfinished = unfinished_registration(store, uuid);
-            if (!unfinished) {
-                return std::unexpected(unfinished.error());
-            }
-            if (*unfinished) {
-                const auto& registration = **unfinished;
-                const auto later = store.later_revision(uuid, registration.revision - 1);
-                if (!later) {
-                    return std::unexpected(later.error());
-                }
-                refused = RetireFailure{Kind::Refused,
-                    *later ? "the unfinished registration of archive " + uuid + " (root \"" + registration.root +
-                                 "\") would create revision " + std::to_string(registration.revision) +
-                                 ", but the archive now has a later revision (" + std::to_string(**later) +
-                                 "); the registration can no longer finish: abandon it with `archive "
-                                 "abandon-registration " +
-                                 uuid + "`"
-                           : "an unfinished registration of archive " + uuid + " (root \"" + registration.root +
-                                 "\") is creating revision " + std::to_string(registration.revision) +
-                                 "; nothing was changed (finish it with `register " +
-                                 shell_argument(registration.root) +
-                                 " --resume` first, or abandon it with `archive abandon-registration " + uuid +
-                                 "`)"};
-                return {};
-            }
+        }
+        // An unfinished operation that would give the archive a new
+        // revision, which a retired archive takes no more (decision 0046):
+        // in this transaction, so none begins before the archive is retired.
+        auto blocking = refused_by_an_operation(store, **now);
+        if (!blocking) {
+            return std::unexpected(blocking.error());
+        }
+        if (*blocking) {
+            refused = std::move(**blocking);
+            return {};
         }
         auto retired = **now;
         retired.status = "RETIRED";

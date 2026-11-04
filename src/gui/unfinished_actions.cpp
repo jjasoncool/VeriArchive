@@ -1,6 +1,7 @@
 // Resume and Abandon... of the unfinished operations that Archives lists
-// (decision 0022, point 7): a verification or registration there that has
-// stopped can be resumed, wherever it was started. A registration that has
+// (decision 0022, point 7): a verification, registration or relocation
+// (decision 0046) there that has stopped can be resumed, wherever it was
+// started. A registration that has
 // stopped can be abandoned (decision 0025), as when its media failed, and so
 // can a stopped relocation (decision 0026) and a stopped verification that
 // adds chunk hashes (decision 0033). An older version's registration, whose
@@ -75,8 +76,12 @@ bool can_abandon(GuiState& state)
     if (state.session && !state.job.running() && state.archives_page.abandoning) {
         return true;
     }
-    show_message(state, fixed_message(state.session ? "Another step of abandoning is running."
-                                                    : "Open a repository first (Settings)."));
+    // The window's step is also the upgrade of the database and retiring an
+    // archive (decision 0046); without Archives' bar, the page is not built.
+    if (!state.session || state.job.running()) {
+        show_message(state, fixed_message(state.session ? "Another step of the window is running; wait for it to end."
+                                                        : "Open a repository first (Settings)."));
+    }
     return false;
 }
 
@@ -450,18 +455,19 @@ namespace {
 
 // ---- Resuming a verification or registration (decision 0022, point 7) -------
 
-// The verification or registration `key` of the latest read, as a copy (the
-// view a resume brings into view may have the list read again), or nothing,
-// saying so, where it is no longer listed as one Resume continues.
+// The verification, registration or relocation `key` of the latest read, as
+// a copy (the view a resume brings into view may have the list read again),
+// or nothing, saying so, where it is no longer listed.
 std::optional<app::UnfinishedOperation> listed_for_resume(GuiState& state, const std::string& key)
 {
     const auto& watches = state.operations.watches;
     const auto found = std::ranges::find(watches, key,
         [](const app::OperationWatch& watch) -> const std::string& { return watch.operation().key; });
-    if (key.empty() || found == watches.end() || found->operation().kind == app::OperationKind::Relocation) {
-        show_message(state, fixed_message(key.starts_with("run:")
-                                              ? "This verification is no longer listed as unfinished."
-                                              : "This registration is no longer listed as unfinished."));
+    if (key.empty() || found == watches.end()) {
+        const char* gone = key.starts_with("run:")          ? "This verification is no longer listed as unfinished."
+                           : key.starts_with("relocation:") ? "This relocation is no longer listed as unfinished."
+                                                            : "This registration is no longer listed as unfinished.";
+        show_message(state, fixed_message(gone));
         return std::nullopt;
     }
     return found->operation();
@@ -470,16 +476,22 @@ std::optional<app::UnfinishedOperation> listed_for_resume(GuiState& state, const
 // Continues `operation` exactly as its command-line resume does, as a job,
 // shown where an operation of its kind started in this window shows it; what
 // is wrong with it by now (its media not attached, its archive at another
-// revision) the resume itself says there, in the command line's words.
-// `confirmed`: a registration that an older version left, which the
-// operator confirmed in the question (as --confirm).
+// revision) the resume itself says there. `confirmed`: a registration that an
+// older version left, which the operator confirmed in the question (as
+// --confirm).
 void resume_operation(GuiState& state, const app::UnfinishedOperation& operation, bool confirmed = false)
 {
-    if (operation.kind == app::OperationKind::Verification) {
+    switch (operation.kind) {
+    case app::OperationKind::Verification:
         resume_verification(state, operation);
-    } else {
-        resume_registration(state, operation, confirmed);
+        return;
+    case app::OperationKind::Relocation:
+        resume_relocation(state, operation);
+        return;
+    case app::OperationKind::Registration:
+        break;
     }
+    resume_registration(state, operation, confirmed);
 }
 
 // What the operator is asked about, carried into the question's answer
@@ -506,7 +518,7 @@ bool can_resume(GuiState& state)
     if (state.session && !state.job.running()) {
         return true;
     }
-    show_message(state, fixed_message(state.session ? "Another step of abandoning is running."
+    show_message(state, fixed_message(state.session ? "Another step of the window is running; wait for it to end."
                                                     : "Open a repository first (Settings)."));
     return false;
 }

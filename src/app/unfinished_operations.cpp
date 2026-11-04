@@ -289,6 +289,9 @@ UnfinishedOperation relocation_operation(const UnfinishedRelocation& relocation,
     operation.resumable = relocation.resumable;
     operation.differs = !relocation.differs.empty();
     operation.later_revision = relocation.later_revision;
+    // Its archive retired since (decision 0003): it never records, as a
+    // registration of an archive retired since never does.
+    operation.archive_retired = relocation.archive_retired;
     operation.done_counted = relocation.done_counted;
     // Otherwise the process the record names tells whether it still runs
     // (decision 0024).
@@ -654,16 +657,15 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     row.abandonable = ((operation.kind != OperationKind::Verification || operation.adds_chunk_hashes) &&
                           has_stopped(row.state_kind)) ||
                       quiet_registration;
-    // Decision 0022, point 7: a verification that has stopped and can be
-    // resumed (R-104), and a registration that has stopped or is quiet as
-    // above, may be resumed from the list, as their command-line resumes
-    // continue them. Not one that runs, waits for its first progress, is held
-    // up or whose state is not known, nor one that can no longer finish (a
-    // later revision, decision 0030; an archive retired since, decision 0028,
-    // point 9). Nor a relocation: the GUI does not relocate, and its resume
-    // stays `archive relocate --resume`.
-    row.offers_resume = (operation.kind != OperationKind::Relocation && row.state_kind == OperationState::Stopped &&
-                            operation.resumable) ||
+    // Decision 0022, point 7: a verification or relocation that has stopped
+    // and can be resumed (R-104, decision 0026), and a registration that has
+    // stopped or is quiet as above, may be resumed from the list, as their
+    // command-line resumes continue them (decision 0046: the window
+    // relocates). Not one that runs, waits for its first progress, is held up
+    // or whose state is not known, nor one that can no longer finish (a later
+    // revision, decision 0030; a new carrier that differs, decision 0026; an
+    // archive retired since, decision 0003).
+    row.offers_resume = (row.state_kind == OperationState::Stopped && operation.resumable) ||
                         (quiet_registration && !operation.later_revision && !operation.archive_retired);
     // Resume on a quiet registration as above asks first (operator,
     // 2026-10-20) where its plan names no process, as an older version's
@@ -835,6 +837,19 @@ RegisterRequest registration_resume(const UnfinishedOperation& registration, con
     request.write_media_copy = false;
     request.rotational_override = config.rotational_override;
     request.confirmed = confirmed;
+    return request;
+}
+
+RelocateRequest relocation_resume(const UnfinishedOperation& relocation, const Config& config)
+{
+    // As `archive relocate <archive_uuid> <root> --resume` makes its request:
+    // the new root its record names typed, no --io: the readers as the
+    // config's override says.
+    RelocateRequest request;
+    request.archive_uuid = relocation.archive_uuid;
+    request.root = typed_root(relocation.root);
+    request.resume = true;
+    request.rotational_override = config.rotational_override;
     return request;
 }
 

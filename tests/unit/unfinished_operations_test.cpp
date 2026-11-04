@@ -1588,9 +1588,10 @@ void a_registration_of_an_archive_retired_since_waits_to_be_abandoned()
 // then A is retired, as a version before that point retired it without
 // looking at its registrations (sample damage of the archive's record). The
 // registration reads as stopped and resumable until A is retired, then as
-// one to abandon, without Resume; an interrupted registration of a new
-// revision of another archive retired since, which is no registration over
-// a lost manifest, is not told so.
+// one to abandon, without Resume; so does an interrupted registration of a
+// new revision of another archive retired since, which is no registration
+// over a lost manifest: a retired archive takes no new revision (decision
+// 0003), and the registration's resume is refused.
 void reads_a_registration_of_an_archive_retired_since()
 {
     test::EngineFixture fixture;
@@ -1647,8 +1648,10 @@ void reads_a_registration_of_an_archive_retired_since()
     fixture.repository.execute("UPDATE archives SET status = 'RETIRED'");
     auto after = states();
     CHECK((after[archive_uuid] == std::pair<std::string, bool>{"archive is retired; abandon it", false}));
-    // Not a registration over a lost manifest: not told so.
-    CHECK(after[b->archive_uuid].first != "archive is retired; abandon it");
+    // A registration of its next revision, as a version that retired an
+    // archive beside its unfinished registration let it be retired, can no
+    // longer finish either (decision 0003): told so too.
+    CHECK((after[b->archive_uuid] == std::pair<std::string, bool>{"archive is retired; abandon it", false}));
 }
 
 // The repository tells which unfinished registration and relocation were
@@ -2075,13 +2078,31 @@ void offers_resume_only_where_it_continues()
     beating.updated = wall_now - 20s;
     CHECK(offered(beating, OperationState::Running, false, false, false));
 
-    // A relocation: abandoned in the list, resumed on the command line.
+    // A relocation: resumed and abandoned in the list (decision 0046), but
+    // not once it can no longer finish: its new carrier differs, the archive
+    // has a later revision, or it is retired.
     auto relocating = registration(20, 10 * mib);
     relocating.kind = va::app::OperationKind::Relocation;
     relocating.key = "relocation:c0ffee00-0000-4000-8000-000000000001";
     relocating.recorded_stopped = true;
     row = row_of(relocating);
-    CHECK(row.state == "stopped; it can be resumed" && !row.offers_resume && row.abandonable);
+    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && row.abandonable &&
+          !row.resume_asks_first);
+    auto relocating_retired = relocating;
+    relocating_retired.archive_retired = true;
+    relocating_retired.resumable = false;
+    row = row_of(relocating_retired);
+    CHECK(row.state_kind == OperationState::ArchiveRetired && row.state == "archive is retired; abandon it" &&
+          !row.offers_resume && row.abandonable);
+    CHECK(va::app::describe_operation(va::app::Text(va::app::Language::TraditionalChinese), [&] {
+        OperationWatch watch;
+        watch.update(relocating_retired, Clock::time_point{}, wall_now);
+        return watch;
+    }(), Clock::time_point{}, wall_now).state == "封存已停用；請放棄它");
+    auto relocating_older = relocating;
+    relocating_older.later_revision = true;
+    relocating_older.resumable = false;
+    CHECK(row_of(relocating_older).state_kind == OperationState::LaterRevision && !row_of(relocating_older).offers_resume);
     relocating.differs = true;
     relocating.resumable = false;
     CHECK(row_of(relocating).state_kind == OperationState::Differs && !row_of(relocating).offers_resume);
@@ -2213,6 +2234,67 @@ void a_stopped_registration_resumes_from_the_list_as_on_the_command_line()
     const auto resumed = fixture.register_root(request);
     CHECK(resumed && resumed->archive_uuid == archive_uuid && resumed->revision == 1 && resumed->counts.files == 6);
     CHECK(saved && fixture.archive.bytes_read == 6000 - 1000 * saved->size());
+    CHECK(read_operations(fixture).empty());
+}
+
+// Resume on a stopped relocation (decision 0046) continues it as `archive
+// relocate <uuid> <root> --resume` does: its archive, the new root its record
+// names, made as the command line makes a root typed there, and the readers
+// as the config's override says, for the window has no --io. What matched
+// before is not read again, the next revision is recorded, and nothing is
+// left to resume. (A sample volume and a sample second disk, sample files.)
+void a_stopped_relocation_resumes_from_the_list_as_on_the_command_line()
+{
+    test::EngineFixture fixture(sample_root());
+    auto second = test::fake_volume(sample_root() / "new");
+    second.filesystem_uuid = "SAMPLE-NEW-FILESYSTEM";
+    second.devices.front().serial = "SAMPLE-NEW-DISK";
+    fixture.media.extra_volumes.push_back(second);
+    for (int index = 1; index <= 6; ++index) {
+        const auto content = std::string(1000, static_cast<char>('a' + index));
+        fixture.archive.add_file("old/f" + std::to_string(index), content);
+        fixture.archive.add_file("new/f" + std::to_string(index), content); // the operator's copy
+    }
+    const auto registered = fixture.register_root(sample_root() / "old");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    fixture.archive.node("new/f4").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::RelocateServices services{fixture.archive, *fixture.repository.files, *fixture.repository.writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid,
+        fixture.host, fixture.processes};
+    const auto interrupted = va::relocate_archive(services,
+        {registered->archive_uuid, sample_root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
+          interrupted.error().keeps_progress && !interrupted.error().not_answering && !interrupted.error().refusing);
+    fixture.archive.node("new/f4").open_error.reset();
+
+    const auto operations = read_operations(fixture);
+    CHECK(operations.size() == 1);
+    if (operations.size() != 1) {
+        return;
+    }
+    const auto& operation = operations.front();
+    const auto row = row_of(operation);
+    CHECK(row.kind == "Relocation" && row.state == "stopped; it can be resumed" && row.offers_resume &&
+          row.abandonable && !row.resume_asks_first);
+
+    va::Config config;
+    config.rotational_override["SAMPLE-NEW-DISK"] = false; // R-111, a sample serial
+    const auto request = va::app::relocation_resume(operation, config);
+    CHECK(request.archive_uuid == registered->archive_uuid && request.resume &&
+          request.root == sample_root() / "new" && request.root == va::app::typed_root(operation.root) &&
+          !request.rotational && request.rotational_override == config.rotational_override);
+    const auto saved = fixture.store.progress_count(operation.run_id, registered->archive_uuid, 1);
+    CHECK(saved && saved->files >= 3 && saved->files < 6);  // f1..f3 matched before
+    fixture.archive.bytes_read = 0;
+    const auto resumed = va::relocate_archive(services, request, fixture.cancel, fixture.progress);
+    CHECK(resumed && resumed->resumed && resumed->revision == 2);
+    if (!resumed) {
+        std::cerr << "  the resume: " << resumed.error().message << '\n';
+    }
+    CHECK(saved && fixture.archive.bytes_read == 6000 - 1000 * saved->files);
     CHECK(read_operations(fixture).empty());
 }
 
@@ -2523,6 +2605,7 @@ void unfinished_operations_tests()
     offers_resume_only_where_it_continues();
     a_stopped_verification_resumes_from_the_list_as_on_the_command_line();
     a_stopped_registration_resumes_from_the_list_as_on_the_command_line();
+    a_stopped_relocation_resumes_from_the_list_as_on_the_command_line();
     an_older_versions_quiet_registration_is_resumed_or_abandoned();
     leaves_out_the_verifications_of_a_retired_archive_whose_manifest_is_lost();
     follows_operations_between_polls();

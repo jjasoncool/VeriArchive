@@ -16,6 +16,7 @@
 // while the process that runs its attempt still runs (decision 0024), nor once
 // an attempt found that the new carrier does not hold the recorded content
 // (its record then says "differs", and the relocation waits to be abandoned).
+#include "core/engine/add_chunk_hashes.h"
 #include "core/engine/candidates.h"
 #include "core/engine/device_alerts.h"
 #include "core/interfaces.h"
@@ -75,6 +76,33 @@ struct RelocateFailure {
     Kind kind;
     std::string message;
     std::vector<VerifyItemRecord> items;    // for Differs: what does not match
+    // Refused because another operation that creates the archive's next
+    // revision is unfinished, or the archive's own unfinished relocation
+    // stands in the way (decisions 0025, 0026, 0030, 0033): that operation, as
+    // the refusal found it, whose ways on the windows name in their own words
+    // in place of the commands that `message` names (app::refusal_in_window).
+    std::optional<RefusingOperation> refusing = std::nullopt;
+    // The attempt ended without finishing, interrupted (Incomplete) or stopped
+    // by a failure, and the relocation keeps its record and saved progress:
+    // `archive relocate <uuid> <root> --resume`, which `message` names,
+    // continues it (decision 0026). `not_answering`: interrupted because the
+    // device of the new carrier stopped answering (decision 0034). `cause`:
+    // for one stopped by a failure, that failure (an engine sentence), before
+    // the way on.
+    bool keeps_progress = false;
+    bool not_answering = false;
+    std::string cause = {};
+    // A resume refused at the root it was given (decision 0026): the volume
+    // there cannot be identified (`cause` says why), or it, or the folder, is
+    // not the one the unfinished relocation started on (with `refusing`), as
+    // when the new carrier is attached at another drive letter or mount point
+    // now, where `archive relocate <uuid> <root> --resume` with its root there
+    // resumes it.
+    bool elsewhere = false;
+    // Refused before it began: another operation recorded a later revision of
+    // the archive meanwhile (`cause` says which). Nothing was changed; a new
+    // relocation begins from that revision.
+    bool overtaken = false;
 };
 
 std::expected<RelocateOutcome, RelocateFailure> relocate_archive(

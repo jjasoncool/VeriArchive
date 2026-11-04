@@ -3954,8 +3954,67 @@ void abandoning_removes_saved_chunk_hashes()
 
 } // namespace
 
+namespace {
+
+// A retired archive takes no new revision (decision 0003). A new revision of
+// an archive (sample data) whose archive is retired while it hashes (sample
+// damage of the archive's record, as a version that retired an archive beside
+// its unfinished registration left it; this version's retirement refuses
+// then): nothing is recorded, the archive's status being read again in the
+// transaction that would record the revision, and the archive stays retired
+// at its revision. Its plan stays, said stopped: the list reads it as one to
+// abandon, and its resume is refused, saying so.
+void a_registration_never_sets_a_retired_archive_back()
+{
+    test::EngineFixture fixture;
+    for (int index = 100; index < 140; ++index) {
+        fixture.archive.add_file("a/f" + std::to_string(index) + ".bin", std::string(200, 'x'));
+    }
+    const auto first = fixture.register_root(fixture.archive.root() / "a");
+    CHECK(first.has_value());
+    if (!first) {
+        return;
+    }
+    const auto& archive_uuid = first->archive_uuid;
+    fixture.archive.add_file("a/f140.bin", "added (sample data)");
+    const auto retire = "UPDATE archives SET status = 'RETIRED' WHERE archive_uuid = " + test::sql_text(archive_uuid);
+    test::HookedFiles hooked(fixture.archive, "f120.bin", [&] { fixture.repository.execute(retire.c_str()); });
+    va::RegisterServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media_writer,
+        fixture.media, fixture.store, fixture.repository.context.repo, fixture.host, fixture.processes};
+    va::RegisterRequest again;
+    again.root = fixture.archive.root() / "a";
+    again.new_revision = true;
+    const auto second = va::register_archive(services, again, fixture.cancel, fixture.progress);
+    CHECK(!second && second.error().kind == va::RegisterFailure::Kind::Refused &&
+          second.error().message == "archive " + archive_uuid +
+                                        " was retired while this registration ran; a retired archive takes no new "
+                                        "revisions");
+    if (second) {
+        std::cerr << "  registered revision " << second->revision << " of a retired archive\n";
+    }
+    const auto archive = fixture.store.find_archive(archive_uuid);
+    CHECK(archive && *archive && (*archive)->status == "RETIRED" && (*archive)->current_revision == 1);
+    const auto revisions = fixture.store.revisions(archive_uuid);
+    CHECK(revisions && revisions->size() == 1);
+
+    const auto pending = fixture.store.pending_registrations();
+    CHECK(pending && pending->size() == 1 && pending->front().archive_retired && !pending->front().stopped.empty());
+    va::RegisterRequest resume;
+    resume.root = fixture.archive.root() / "a";
+    resume.resume = true;
+    const auto resumed = fixture.register_root(resume);
+    CHECK(!resumed && resumed.error().kind == va::RegisterFailure::Kind::Refused &&
+          resumed.error().message == "archive " + archive_uuid +
+                                         " is retired and takes no new revisions: abandon its unfinished registration "
+                                         "with `archive abandon-registration " +
+                                         archive_uuid + "`");
+}
+
+} // namespace
+
 void register_engine_tests()
 {
+    a_registration_never_sets_a_retired_archive_back();
     first_registration_writes_manifest_and_index();
     an_archive_is_created_when_its_manifest_is();
     malformed_values_are_invalid();

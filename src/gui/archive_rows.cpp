@@ -464,13 +464,21 @@ std::string stopped_verification_words(const app::Text& text, const app::Operati
                      row.progress);
 }
 
+std::string stopped_relocation_words(const app::Text& text, const app::OperationRow& row)
+{
+    return text.format("The relocation of this archive to {} stopped at {}. Resume continues it without reading again "
+                       "what matched.",
+        row.root, row.progress);
+}
+
 DetailsOperations details_operations(const app::Text& text, const std::vector<app::OperationWatch>& watches,
     const Uuid& archive, app::OperationWatch::Clock::time_point now, std::chrono::sys_seconds wall_now)
 {
     DetailsOperations shown;
     for (const auto& watch : watches) {
         const auto& operation = watch.operation();
-        if (operation.archive_uuid != archive || operation.kind != app::OperationKind::Verification) {
+        const bool relocation = operation.kind == app::OperationKind::Relocation;
+        if (operation.archive_uuid != archive || (operation.kind != app::OperationKind::Verification && !relocation)) {
             continue;
         }
         shown.adding_unfinished = shown.adding_unfinished || operation.adds_chunk_hashes;
@@ -480,7 +488,8 @@ DetailsOperations details_operations(const app::Text& text, const std::vector<ap
         // As its row under Unfinished operations offers Resume.
         auto row = app::describe_operation(text, watch, now, wall_now);
         if (row.offers_resume) {
-            shown.words = stopped_verification_words(text, row, operation.adds_chunk_hashes);
+            shown.words = relocation ? stopped_relocation_words(text, row)
+                                     : stopped_verification_words(text, row, operation.adds_chunk_hashes);
             shown.stopped = std::move(row);
         }
     }

@@ -515,7 +515,6 @@ void translation_tests()
     // made for an older revision; once it has stopped and while it runs.
     const std::string choose_again = "在「註冊封存」再選一次這個資料夾或磁碟區，在選項中繼續它";
     const std::string choose_root = "在「註冊封存」選擇它的根目錄，在選項中繼續它";
-    const std::string in_list = "或在「封存」頁的「未完成的作業」中按「放棄…」放棄它";
     CHECK(chinese.format("Not registered: {}",
               chinese("an interrupted registration of this root exists (archive " + sample + "); finish it " +
                       on_its_row + "; or choose this folder or volume again in Register Archive, whose options then "
@@ -547,17 +546,26 @@ void translation_tests()
     CHECK(chinese(older + ", and is still running: wait for it to stop, then abandon it with Abandon... under "
                           "Unfinished operations in Archives") ==
           older_chinese + "，而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它");
-    // ... and while a relocation is unfinished: it is continued on the command line.
+    // ... and while a relocation is unfinished: Resume on its row, or in the
+    // archive's details, continues it (decision 0046).
     const std::string relocation = "an unfinished relocation of archive " + sample + " (to \"K:\\SAMPLE\") exists";
     const std::string relocation_chinese = "封存 " + sample + " 有一個未完成的搬移（至「K:\\SAMPLE」）";
-    const std::string resume_on_command_line = "resume it on the command line with `archive relocate " + sample +
-                                               " K:\\SAMPLE --resume`, or abandon it with Abandon... under "
-                                               "Unfinished operations in Archives";
-    const std::string resume_chinese = "請在命令列以 `archive relocate " + sample + " K:\\SAMPLE --resume` 繼續，" + in_list;
-    CHECK(chinese.format("Not verified: {}", chinese(relocation + "; " + resume_on_command_line)) ==
+    const std::string resume_in_window = "resume it with Resume, or abandon it with Abandon..., on its row under "
+                                         "Unfinished operations in Archives; or resume it in the archive's details";
+    const std::string resume_chinese =
+        "請在「封存」頁「未完成的作業」中它那一列按「繼續」接續，或按「放棄…」放棄它；也可以在封存的詳細資料中按「繼續」";
+    CHECK(chinese.format("Not verified: {}", chinese(relocation + "; " + resume_in_window)) ==
           "未能驗證：" + relocation_chinese + "；" + resume_chinese);
-    CHECK(chinese(relocation + " and is still running; wait for it to finish; if it stops, " + resume_on_command_line) ==
+    CHECK(chinese(relocation + " and is still running; wait for it to finish; if it stops, " + resume_in_window) ==
           relocation_chinese + "，而且仍在執行；請等它完成；若它停止了，" + resume_chinese);
+    // One made for an older revision (decision 0030): only abandoned.
+    const std::string relocation_older = "the unfinished relocation of archive " + sample +
+                                         " (to \"K:\\SAMPLE\") verifies revision 1, but the archive now has a later "
+                                         "revision (3); the relocation can no longer finish";
+    CHECK(chinese(relocation_older + ": abandon it with Abandon... under Unfinished operations in Archives, then "
+                                     "relocate again") ==
+          "封存 " + sample + " 未完成的搬移（至「K:\\SAMPLE」）驗證的是版次 1，但封存現在已有較新的版次（3）；這次搬移"
+                             "再也無法完成：請在「封存」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移");
     const std::string differs = "the unfinished relocation of archive " + sample +
                                 " (to \"K:\\SAMPLE\") found that the new carrier does not hold the recorded content";
     const std::string differs_chinese = "封存 " + sample + " 未完成的搬移（至「K:\\SAMPLE」）發現新載體上的內容與記錄不符";

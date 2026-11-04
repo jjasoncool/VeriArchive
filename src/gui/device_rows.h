@@ -85,7 +85,9 @@ enum class Attached {
 // What Archives shows of where an archive is attached, from the latest read:
 // its row's first line (`line`): its root, or that it is not attached, that
 // its device differs from the one recorded, that more than one volume looks
-// like it; the notice of its details, where it is not attached as recorded;
+// like it; the notice of its details, where it is not attached as recorded
+// (with, for MIGRATED, the root the relocation dialog its notice opens
+// starts with);
 // the tooltip of FULL verify, which stays offered (the read may be old, and
 // the verification looks for the archive itself); and, in the group Device of
 // its details, where it is attached. Nothing where no read is at hand (`read`
@@ -103,6 +105,10 @@ struct ArchiveAttached {
     std::optional<std::string> notice;
     std::optional<std::string> verify_tooltip;
     std::vector<Field> fields;
+    // MIGRATED at one root, of an archive that is not retired: the root that
+    // Relocate to this carrier... beside the notice opens the relocation
+    // dialog with (decision 0046).
+    std::optional<std::string> relocate_root;
     bool operator==(const ArchiveAttached&) const = default;
 };
 

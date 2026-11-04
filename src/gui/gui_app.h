@@ -158,12 +158,13 @@ struct GuiState {
     HostInfo host;
     std::optional<app::Session> session;   // empty until a repository is open
     Report session_error;                  // why no repository is open
-    // The registrations, verifications and comparisons started in the
-    // window, each a job of its own (decision 0045).
+    // The registrations, verifications, comparisons, relocations and exports
+    // started in the window, each a job of its own (decisions 0045, 0046).
     Jobs jobs;
     // A step that runs besides the jobs, one at a time: the upgrade of the
-    // repository's database as it opens (decision 0032), and abandoning an
-    // unfinished operation (decisions 0025, 0026, 0033).
+    // repository's database as it opens (decision 0032), abandoning an
+    // unfinished operation (decisions 0025, 0026, 0033), and retiring an
+    // archive (decisions 0003, 0046).
     Job job;
     OperationsPoll operations;             // every unfinished operation, for Archives
     DevicesPoll devices;                   // the devices attached now, for Devices and Archives
@@ -181,9 +182,9 @@ struct GuiState {
     IdentityShown identity_shown = IdentityShown::Recorded;
 
     // What Archives shows, kept across windows: the archive selected, whose
-    // details show beside the list; the verification that each archive's
-    // details show (decision 0045: the last one started there, or by Resume
-    // of its stopped verification); and the run that the window interrupted
+    // details show beside the list; the job that each archive's details show
+    // (decision 0045: the last verification or relocation started there, or
+    // by Resume of its stopped one); and the run that the window interrupted
     // last (R-104), which Resume in its archive's details continues as the
     // window ran it (details_resume).
     std::optional<Uuid> archive_selected;
@@ -289,7 +290,8 @@ struct GuiState {
         GtkWidget* refresh = nullptr;          // Refresh, which holds the focus while what had it is made anew
         GtkWidget* abandoning = nullptr;       // progress while a step of abandoning a registration
                                                // (decision 0025), a relocation (decision 0026) or a
-                                               // verification that adds chunk hashes (decision 0033) runs
+                                               // verification that adds chunk hashes (decision 0033) runs,
+                                               // or of retiring an archive (decision 0046)
         GtkWidget* operations = nullptr;       // "Unfinished operations", hidden when there are none
         GtkWidget* operations_note = nullptr;  // what the group shows, or why it cannot
         GtkWidget* operations_list = nullptr;  // GtkListBox, a row for each operation
@@ -400,6 +402,35 @@ struct GuiState {
         std::vector<Uuid> copies;               // item i of B
         bool filling = false;                   // a change of the code's, not the operator's
     } compare_dialog;
+
+    // The relocation dialog (decisions 0004, 0046): what relocation does,
+    // the attached volumes (read off the window's thread, a fixed sample list
+    // in the screenshot mode) and the new root, typed, pasted or chosen, and
+    // what the relocation will do; Start relocation checks the new root off
+    // the window's thread, saying in the dialog why it is refused, and once
+    // it is taken starts its job (decision 0045). Where the archive's
+    // relocation stopped, the dialog resumes it (Resume relocation), its root
+    // as its record names it, or another where the new carrier is attached at
+    // another drive letter or mount point now. Its widgets while it is open;
+    // nothing otherwise.
+    struct RelocateDialog {
+        GtkWidget* dialog = nullptr;            // AdwDialog
+        Uuid archive;                           // the archive it relocates
+        std::optional<app::UnfinishedOperation> resuming;  // the stopped relocation it resumes, as listed
+        GtkWidget* volumes = nullptr;           // AdwPreferencesGroup of the attached volumes
+        std::vector<GtkWidget*> volume_rows;    // its rows, as it shows them now
+        std::vector<GtkWidget*> radios;         // the radio of each volume that can be chosen whole
+        GtkWidget* folder = nullptr;            // AdwEntryRow: the new root
+        GtkWidget* problem = nullptr;           // AdwActionRow under it: why the new root is refused, hidden without
+        GtkWidget* summary = nullptr;           // AdwPreferencesGroup: what it will do
+        GtkWidget* summary_row = nullptr;       // its one row of fields
+        GtkWidget* start = nullptr;             // Start relocation, or Resume relocation
+        GtkWidget* checking = nullptr;          // GtkSpinner beside it while the new root is checked
+        bool checking_root = false;             // the new root is being checked
+        bool filling = false;                   // a change of the code's, not the operator's
+        std::uint64_t opened = 0;               // which opening of the dialog this is, whose reads it takes
+    } relocate_dialog;
+    std::uint64_t relocations_opened = 0;       // the openings of the relocation dialog so far
 
     // The Jobs page and the header's jobs button (decisions 0045, 0046): a
     // row for each job in the group it is in, the button's popover with the
@@ -685,9 +716,10 @@ void stop_watching(GuiState& state, GtkWidget* page);
 
 // ---- Resume and Abandon... of the unfinished operations (unfinished_actions.cpp)
 
-// The operator chose Resume on the stopped verification or registration `key`
-// of the latest read (decision 0022, point 7): it continues as its
-// command-line resume does. ask_to_resume asks first, for a registration that
+// The operator chose Resume on the stopped verification, registration or
+// relocation `key` of the latest read (decision 0022, point 7; decision 0046):
+// it continues as its command-line resume does. ask_to_resume asks first, for
+// a registration that
 // an older version left and that may have stopped
 // (OperationRow::resume_asks_first), and resumes only once the operator chose
 // Resume. ask_to_abandon reads what abandoning the registration, relocation
@@ -814,7 +846,8 @@ void verify_root(GuiState& state, const Uuid& shown_in, const std::filesystem::p
 // Resume in the details of `archive` on its stopped verification `key` (as
 // the latest read lists it), as details_resume makes its request: the run
 // that this window interrupted last as the window ran it, where it is that
-// one; otherwise as Resume on its row under Unfinished operations.
+// one; otherwise as Resume on its row under Unfinished operations; and on its
+// stopped relocation, as Resume on its row (resume_relocation).
 void resume_in_details(GuiState& state, const Uuid& archive, const std::string& key);
 
 // Whether `archive` (whose recorded root is `root`, which may be empty)
@@ -857,9 +890,50 @@ void compare_with(GuiState& state, const Uuid& reference, const std::optional<Uu
 // keeping A and B where they are listed.
 void refresh_compare_dialog(GuiState& state);
 
-// Closes Register Archive and the comparison dialog at once, whatever they
-// show (a language change replaces the window they belong to; the screenshot
-// tour, before its next picture).
+// ---- Relocation, export, retirement (relocate_dialog.cpp, export_dialog.cpp,
+// retire_dialog.cpp; decision 0046) ------------------------------------------
+
+// "Relocate to a new carrier..." of an archive's details, and the button of
+// its notice where its filesystem is on another device than recorded
+// (MIGRATED), which gives the root found there as `preset_root`: the
+// relocation dialog for `archive`, not started; where the latest read of the
+// unfinished operations lists a stopped relocation of the archive, the dialog
+// that resumes it, its root preset (`preset_root`, or as its record names
+// it). It reads the attached volumes off the window's thread: in the
+// screenshot mode, a fixed sample list instead (sample_volumes). Says in a
+// message why it does not open: no repository is open, a job of the window
+// waits or works on the archive, or its unfinished relocation cannot be
+// resumed now (relocation_choice).
+void open_relocation(GuiState& state, const Uuid& archive, const std::optional<std::string>& preset_root = {});
+
+// Resume on a stopped relocation under Unfinished operations, and in its
+// archive's details: continues it as `archive relocate <uuid> <root>
+// --resume` does (app::relocation_resume), as a job shown in its archive's
+// details, which it brings into view. The caller has made sure that a
+// repository is open and that no job of the window reads it
+// (refused_while_a_job_reads).
+void resume_relocation(GuiState& state, const app::UnfinishedOperation& relocation);
+
+// "Export manifest...": asks for a folder (GtkFileDialog), then exports the
+// archive's latest manifest and identity.json into a folder of its own in it
+// (export_folder_name), as a job with a bar of the bytes copied, which Stop
+// cancels (R-94); refused in a message where the folder lies in the root of
+// an attached archive (export_refusal).
+void export_manifest(GuiState& state, const Uuid& archive);
+
+// "Retire archive...": reads what retiring it would do (retirement_of) as
+// the window's single step, then asks (AdwAlertDialog, Cancel the default):
+// what retiring means, and for a lost manifest the command line's explanation
+// with an explicit confirmation; Retire retires it as the window's step.
+// Refused in a message while a job of the window waits or works on the
+// archive, while a step runs, or as the engine refuses it (an unfinished
+// operation that would give the archive a new revision, in the window's
+// words).
+void ask_to_retire(GuiState& state, const Uuid& archive);
+
+// Closes Register Archive, the comparison dialog and the relocation dialog at
+// once, whatever they show (a language change replaces the window they belong
+// to; the screenshot tour, before its next picture).
 void close_dialogs(GuiState& state);
 
 // History with its filter set to `archive`, its runs listed.

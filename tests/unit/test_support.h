@@ -42,6 +42,8 @@ void run_result_tests();
 void history_rows_tests();
 void register_choices_tests();
 void compare_choices_tests();
+void archive_actions_tests();
+void progress_wording_tests();
 void attached_tests();
 void attached_devices_tests();
 void device_rows_tests();

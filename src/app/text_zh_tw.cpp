@@ -532,6 +532,8 @@ constexpr CatalogEntry entries[] = {
     // src/gui/gui_support.cpp
     {"Scanning: {}", "掃描中：{}", Match::FormatOnly},
     {"Hashing: {}", "計算雜湊中：{}", Match::FormatOnly},
+    // src/gui/progress_wording.cpp: an export's bar, the manifest's bytes copied (R-94).
+    {"Copying: {}", "複製中：{}", Match::FormatOnly},
     {"Comparing: {} / {} entries", "比較中：{} / {} 個項目"},
     {"Comparing: {} / {} entry", "比較中：{} / {} 個項目"},
     {"Starting...", "正在啟動……"},
@@ -656,6 +658,35 @@ constexpr CatalogEntry entries[] = {
     {"See where it slowed", "查看變慢的位置"},
     {"Cannot read the verifications of this archive: {}", "無法讀取此封存的驗證：{}", Match::FormatOnly},
     {"Every verification of this archive in History ({})", "在「歷程」中查看此封存的全部驗證（{}）", Match::FormatOnly},
+    // src/gui/archive_detail.cpp, src/gui/archive_actions.cpp: the rest of the
+    // details' menu (decision 0046): the export of the archive's manifest, its
+    // relocation to a new carrier and its retirement, where each applies.
+    {"Export manifest...", "匯出清單檔…"},
+    {"Relocate to a new carrier...", "搬移到新的載體…"},
+    {"Retire archive...", "停用封存…"},
+    {"The manifest of its latest revision cannot be used, and a relocation compares the new carrier with it.",
+        "它最新版次的清單檔無法使用，而搬移需要拿新載體與它比對。"},
+    {"After you copied the archive to another device, or put its device in another enclosure: reads the new carrier "
+     "in full and records it as the archive's next revision.",
+        "您把封存複製到另一個裝置，或把它的裝置換了外接盒之後：完整讀取新的載體，並記錄為封存的下一個版次。"},
+    {"The manifest of its latest revision cannot be used: there is nothing to export.",
+        "它最新版次的清單檔無法使用：沒有可以匯出的內容。"},
+    {"Writes the manifest of revision {} and identity.json into a folder named for the archive inside the folder "
+     "you choose; `import` on the command line takes it into this repository or another.",
+        "在您選擇的資料夾中建立以封存命名的資料夾，寫入版次 {} 的清單檔與 identity.json；可在命令列以 `import` 匯入此"
+        "儲存庫或另一個儲存庫。",
+        Match::FormatOnly},
+    // While the archive has an unfinished relocation, no second one begins
+    // (decision 0026): the stopped one is resumed.
+    {"Resumes the stopped relocation to {}, also at another root where the new carrier is attached at another drive "
+     "letter or mount point now.",
+        "繼續已停止、搬移至 {} 的作業；如果新的載體現在接在另一個磁碟機代號或掛載點，也可以改在那裡的根目錄繼續。",
+        Match::FormatOnly},
+    {"An unfinished relocation of this archive to {} is listed under Unfinished operations in Archives ({}).",
+        "此封存有一個搬移至 {} 的未完成作業，列在「封存」頁的「未完成的作業」中（{}）。", Match::FormatOnly},
+    {"This archive is retired already.", "這個封存已經停用。"},
+    {"It is no longer expected to be verified and keeps its history. A retired archive cannot be made active again.",
+        "它不必再驗證，並保留其歷程。已停用的封存無法再恢復使用。"},
     // src/gui/device_rows.cpp, src/gui/archives_page.cpp,
     // src/gui/archive_detail.cpp: where an archive is attached now, as the
     // latest read of the attached devices found it (decision 0046): the first
@@ -680,10 +711,20 @@ constexpr CatalogEntry entries[] = {
         "這個封存的檔案系統出現在 {}，但裝置與記錄中的不同（已遷移）：可能是封存的裝置換了外接盒，也可能是逐磁區複製"
         "出來的複本。「完整驗證」不會讀取那裡；複本要在「註冊封存」中註冊為另一個封存。",
         Match::FormatOnly},
+    // ... and how the archive is relocated to it in the window (decision 0046).
     {"If it is this archive's device in another enclosure, or you moved the archive to that device on purpose, "
-     "relocate the archive to it on the command line: `{}`",
-        "如果那是這個封存的裝置換了外接盒，或是您有意把封存移到那個裝置，請在命令列把封存搬移到這個新的載體：`{}`",
-        Match::FormatOnly},
+     "relocate the archive to it with Relocate to this carrier..., which reads it in full first.",
+        "如果那是這個封存的裝置換了外接盒，或是您有意把封存移到那個裝置，請按「搬移到這個載體…」把封存搬移過去；"
+        "搬移前會先完整讀取它。"},
+    {"If one of them is this archive's device in another enclosure, or you moved the archive to that device on "
+     "purpose, relocate the archive to it with Relocate to a new carrier... in the menu of these details, which "
+     "reads it in full first.",
+        "如果其中之一是這個封存的裝置換了外接盒，或是您有意把封存移到那個裝置，請在這些詳細資料的選單中按「搬移到新的"
+        "載體…」把封存搬移過去；搬移前會先完整讀取它。"},
+    {"Relocate to this carrier...", "搬移到這個載體…"},
+    // ... and a retired archive's, which is not relocated (decision 0003).
+    {"This archive is retired and takes no new revisions, so it is not relocated.",
+        "此封存已停用，不再接受新的版次，因此不會搬移。"},
     {"More than one attached volume looks like this archive ({}), as a device and a sector-by-sector clone of it "
      "would: a verification by its UUID cannot tell which one to read. Choose \"Verify a folder or volume...\" in "
      "the menu beside \"FULL verify\", then choose the root of the one to verify, one of those above.",
@@ -943,11 +984,11 @@ constexpr CatalogEntry entries[] = {
     {"Jobs: {} running, {} waiting", "工作：{} 個執行中、{} 個等候中", Match::FormatOnly},
     {"Jobs: {} running", "工作：{} 個執行中", Match::FormatOnly},
     {"Jobs: none running", "工作：沒有執行中的工作"},
-    {"Each registration, verification and comparison started in this window runs as a job. Jobs that read the "
-     "same device wait for one another; the others run at once. A job stopped keeps what it did: it can be resumed "
-     "without reading again what it read.",
-        "在這個視窗開始的每個註冊、驗證和比較，都會成為一個工作。讀取同一個裝置的工作會依序等候，其他的同時執行。停止的工作會"
-        "保留已完成的部分：之後可以繼續，已讀過的不必重讀。"},
+    {"Each registration, verification, comparison, relocation and export started in this window runs as a job. "
+     "Jobs that read the same device wait for one another; the others run at once. A stopped registration, "
+     "verification or relocation keeps what it did: it can be resumed without reading again what it read.",
+        "在這個視窗開始的每個註冊、驗證、比較、搬移和匯出，都會成為一個工作。讀取同一個裝置的工作會依序等候，其他的同時"
+        "執行。停止的註冊、驗證或搬移會保留已完成的部分：之後可以繼續，已讀過的不必重讀。"},
     {"Clear ended jobs", "清除已結束的工作"},
     {"No jobs yet.", "還沒有工作。"},
     {"Stop", "停止"},
@@ -991,7 +1032,6 @@ constexpr CatalogEntry entries[] = {
     // A registration over a lost manifest resumed in Register Archive (decision 0028, point 8).
     {"Revision {}, whose manifest was lost, was left out of the index; its verifications stay in the history.",
         "清單檔已無法取回的版次 {} 已從索引移除；它的驗證紀錄仍保留在歷程中。", Match::FormatOnly},
-    {"Another step of abandoning is running.", "已有另一個放棄步驟正在執行。"},
     {"Open a repository first (Settings).", "請先開啟儲存庫（見「設定」）。"},
     {"Cannot open the repository: {}", "無法開啟儲存庫：{}"},
     {"Not registered: {}", "未能註冊：{}"},
@@ -1033,6 +1073,18 @@ constexpr CatalogEntry entries[] = {
     {"Holds {}", "已有 {}", Match::FormatOnly},
     {"{}; the whole volume cannot be registered: choose a folder in it that does not overlap them",
         "{}；整個磁碟區不能註冊，可以選其中不重疊的資料夾", Match::FormatOnly},
+    // ... and in the relocation dialog (src/gui/relocate_dialog.cpp): what
+    // lies on a volume besides the archive relocated, and where that archive
+    // lies on it, as recorded or its filesystem on another device.
+    {"{}; the whole volume cannot be the new root: choose a folder in it that does not overlap them",
+        "{}；整個磁碟區不能作為新的根目錄，可以選其中不重疊的資料夾", Match::FormatOnly},
+    {"{}; nothing on it can be the new root, which would overlap them",
+        "{}；其中沒有任何位置能作為新的根目錄，否則會與它們重疊", Match::FormatOnly},
+    {"The filesystem of this archive is here, on another device than recorded ({})",
+        "此封存的檔案系統在這裡，但裝置與記錄中的不同（{}）", Match::FormatOnly},
+    {"This archive is here, as recorded ({})", "此封存在這裡，與記錄相同（{}）", Match::FormatOnly},
+    {"Use as the new root", "設為新的根目錄"},
+    {"Use {} as the new root", "將 {} 設為新的根目錄", Match::FormatOnly},
     {"Choose a folder in {}...", "選擇 {} 裡的資料夾…", Match::FormatOnly},
     // The button of a volume known by its GUID path alone, too long for it.
     {"Choose a folder in it...", "選擇其中的資料夾…"},
@@ -1159,6 +1211,15 @@ constexpr CatalogEntry entries[] = {
     {"Run: {}", "執行：{}"},
     {"Choose the folder or volume to verify.", "請選擇要驗證的資料夾或磁碟區。"},
     {"Not verified: {}", "未能驗證：{}"},
+    // The filesystem of an archive on another device than recorded
+    // (MIGRATED), verified by folder: the window relocates it (decision 0046).
+    {"Not verified: the filesystem of this folder or volume is that of archive {}, but on another device than the one "
+     "recorded (MIGRATED).",
+        "未能驗證：這個資料夾或磁碟區的檔案系統屬於封存 {}，但裝置與記錄中的不同（已遷移）。", Match::FormatOnly},
+    {"If it is that archive's device in another enclosure, or you moved the archive to that device on purpose, "
+     "relocate the archive to it with Relocate to a new carrier... in the menu of its details.",
+        "如果那是該封存的裝置換了外接盒，或是您有意把封存移到那個裝置，請在它的詳細資料選單中按「搬移到新的載體…」把"
+        "封存搬移過去。"},
     // An archive that more than one attached volume holds (decision 0022,
     // point 7), verified in Archives by its uuid: "Verify a folder or
     // volume..." verifies the one meant.
@@ -1222,6 +1283,90 @@ constexpr CatalogEntry entries[] = {
     {"Compare", "比較"},
     {"stopped", "已停止"},
     {"not compared", "未能比較"},
+    // src/gui/relocate_dialog.cpp, src/gui/archive_actions.cpp: the
+    // relocation dialog (decisions 0004, 0046), the job's title and its toast;
+    // the rest of its words are Register Archive's and the relocation's own.
+    {"Relocate to a new carrier", "搬移到新的載體"},
+    {"VeriArchive copies nothing: first copy the archive's files to the new carrier with your own tools, then "
+     "choose here the folder or volume that holds them.",
+        "VeriArchive 不會複製任何東西：請先用您自己的工具把封存的檔案複製到新的載體，再在這裡選擇存放這些檔案的資料夾"
+        "或磁碟區。"},
+    // ... where it resumes a stopped relocation (decision 0026).
+    {"Resume the relocation", "繼續搬移"},
+    {"Resume relocation", "繼續搬移"},
+    {"The relocation of this archive to {} stopped. Resume relocation continues it without reading again what "
+     "matched; where the new carrier is attached at another drive letter or mount point now, give its root below.",
+        "此封存搬移至 {} 的作業已停止。按「繼續搬移」即可接續，已相符的不必重讀；如果新的載體現在接在另一個磁碟機代號"
+        "或掛載點，請在下方輸入它的根目錄。",
+        Match::FormatOnly},
+    {"The relocation reads the new carrier in full and accepts it only when every entry matches revision {}; it "
+     "then records revision {} with the new carrier, and the archive keeps its UUID and its history.",
+        "搬移時會完整讀取新的載體，只有在每個項目都與版次 {} 相符時才接受它；接著以新的載體記錄版次 {}，封存保留它的 "
+        "UUID 與歷程。",
+        Match::FormatOnly},
+    {"New root", "新根目錄"},
+    {"The folder or volume on the new carrier that holds the archive's files now. You can also type or paste its "
+     "path, including a volume's GUID path.",
+        "新載體上現在存放封存檔案的資料夾或磁碟區。也可以直接輸入或貼上路徑，包括磁碟區的 GUID 路徑。"},
+    {"Choose the new root of the archive", "選擇封存的新根目錄"},
+    {"What the relocation does", "這次搬移會做的事"},
+    {"Start relocation", "開始搬移"},
+    {"Recorded root", "記錄中的根目錄"},
+    {"not chosen yet", "尚未選擇"},
+    {"Reads", "讀取"},
+    {"{} ({}), each in full", "{}（{}），每個都完整讀取", Match::FormatOnly},
+    {"Records", "記錄"},
+    {"revision {} with the new carrier, once every entry matches", "所有項目都相符時，以新的載體記錄版次 {}",
+        Match::FormatOnly},
+    {"Relocate {} to {}", "把 {} 搬移至 {}", Match::FormatOnly},
+    {"Resume the relocation of {} to {}", "繼續把 {} 搬移至 {}", Match::FormatOnly},
+    {"{}: relocated as revision {}", "{}：已搬移，成為版次 {}", Match::FormatOnly},
+    {"Relocation of {}: stopped", "{} 的搬移：已停止", Match::FormatOnly},
+    {"Not relocated: {}", "未能搬移：{}", Match::FormatOnly},
+    // The details' notice of a stopped relocation (src/gui/archive_rows.cpp).
+    {"The relocation of this archive to {} stopped at {}. Resume continues it without reading again what matched.",
+        "此封存搬移至 {} 的作業停止於 {}。按「繼續」即可接續，已相符的不必重讀。", Match::FormatOnly},
+    // src/gui/export_dialog.cpp, src/gui/archive_actions.cpp: the export of an
+    // archive's manifest (R-87, decision 0046), into a folder of its own.
+    {"Choose the folder to export {} into", "選擇要把 {} 匯出到哪個資料夾", Match::FormatOnly},
+    {"{} lies in the root of {} ({}): an export there would add files that its next FULL verification reports as "
+     "added. Choose a folder outside every archive.",
+        "{} 位於 {} 的根目錄（{}）中：匯出到那裡會多出檔案，下一次完整驗證會把它們報告為新增的項目。請選擇不在任何封存"
+        "中的資料夾。",
+        Match::FormatOnly},
+    {"Export the manifest of {}", "匯出 {} 的清單檔", Match::FormatOnly},
+    {"Exported the manifest of revision {} of {}", "已匯出 {1} 版次 {0} 的清單檔", Match::FormatOnly},
+    {"Identity file: {}", "身分檔案：{}", Match::FormatOnly},
+    {"This repository or another takes it in with `import <file.vam>` on the command line, also to put back a lost "
+     "manifest; it is checked there against the revisions that repository holds.",
+        "此儲存庫或另一個儲存庫可以在命令列以 `import <file.vam>` 匯入它，也可藉此放回無法取回的清單檔；匯入時會與該"
+        "儲存庫已有的版次比對。"},
+    {"Exported the manifest of {}", "已匯出 {} 的清單檔", Match::FormatOnly},
+    {"Export of {}: stopped", "{} 的匯出：已停止", Match::FormatOnly},
+    {"Not exported: {}", "未能匯出：{}", Match::FormatOnly},
+    // src/gui/retire_dialog.cpp, src/gui/archive_actions.cpp: retiring an
+    // archive (decisions 0003, 0046): the question, its confirmation for a
+    // lost manifest, the steps and their refusals.
+    {"Retire {}?", "要停用 {} 嗎？", Match::FormatOnly},
+    {"Retire", "停用"},
+    {"A retired archive is no longer expected to be verified and is never overdue. It keeps its verification "
+     "history and is still recognised when attached, but it takes no new revisions. A retired archive cannot be "
+     "made active again.",
+        "已停用的封存不必再驗證，也不會逾期。它保留驗證歷程，接上時仍會被辨識，但不再接受新的版次。已停用的封存無法再"
+        "恢復使用。"},
+    {"`import` and `register --lost-manifest` are commands of the command line.",
+        "`import` 與 `register --lost-manifest` 都是命令列的命令。"},
+    {"A retired archive cannot be made active again.", "已停用的封存無法再恢復使用。"},
+    {"I confirm that this manifest is lost for good and the device is gone",
+        "我確認這個清單檔已無法取回，而且裝置也已不在"},
+    {"Retired {}", "已停用 {}", Match::FormatOnly},
+    {"Reading the archive {} ...", "正在讀取封存 {}……", Match::FormatOnly},
+    {"Retiring {} ...", "正在停用 {}……", Match::FormatOnly},
+    {"Not retired: {}", "未能停用：{}", Match::FormatOnly},
+    {"Another step of the window is running; wait for it to end.", "視窗的另一個步驟正在執行；請等它結束。"},
+    {"Its latest manifest was found lost meanwhile: choose Retire archive... again, which asks for the confirmation "
+     "that this needs.",
+        "這段期間發現它最新的清單檔已無法取回：請再按一次「停用封存…」，它會請您做出所需的確認。"},
 
     // Engine and repository messages
     // src/core/engine/register_engine.cpp
@@ -1337,6 +1482,9 @@ constexpr CatalogEntry entries[] = {
     {"archive {} is retired and takes no new revisions: abandon its unfinished registration with "
         "`archive abandon-registration {}`",
         "封存 {} 已停用，不再接受新的版次：請以 `archive abandon-registration {}` 放棄它未完成的註冊"},
+    // ... nor one retired while the registration ran (decision 0003).
+    {"archive {} was retired while this registration ran; a retired archive takes no new revisions",
+        "封存 {} 在這次註冊期間被停用；已停用的封存不再接受新的版次"},
     {"the manifest of revision {} of archive {} can be used: register its next revision with `register <root_path> "
         "--new-revision`",
         "封存 {1} 版次 {0} 的清單檔可以使用：請以 `register <root_path> --new-revision` 註冊它的下一個版次"},
@@ -1539,17 +1687,71 @@ constexpr CatalogEntry entries[] = {
         "abandon it with Abandon... under Unfinished operations in Archives",
         "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成，"
         "而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
-    // ... and while a relocation of the archive is unfinished: a relocation
-    // has no window, so it is continued on the command line (decision 0026).
-    {"an unfinished relocation of archive {} (to \"{}\") exists; resume it on the command line with `archive "
-        "relocate {} {} --resume`, or abandon it with Abandon... under Unfinished operations in Archives",
-        "封存 {} 有一個未完成的搬移（至「{}」）；請在命令列以 `archive relocate {} {} --resume` 繼續，"
-        "或在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
+    // ... and while a relocation of the archive is unfinished: Resume on its
+    // row, or in the archive's details, continues it (decision 0046).
+    {"an unfinished relocation of archive {} (to \"{}\") exists; resume it with Resume, or abandon it with "
+        "Abandon..., on its row under Unfinished operations in Archives; or resume it in the archive's details",
+        "封存 {} 有一個未完成的搬移（至「{}」）；請在「封存」頁「未完成的作業」中它那一列按「繼續」接續，或按「放棄…」"
+        "放棄它；也可以在封存的詳細資料中按「繼續」"},
     {"an unfinished relocation of archive {} (to \"{}\") exists and is still running; wait for it to finish; if it "
-        "stops, resume it on the command line with `archive relocate {} {} --resume`, or abandon it with "
-        "Abandon... under Unfinished operations in Archives",
-        "封存 {} 有一個未完成的搬移（至「{}」），而且仍在執行；請等它完成；若它停止了，請在命令列以 "
-        "`archive relocate {} {} --resume` 繼續，或在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
+        "stops, resume it with Resume, or abandon it with Abandon..., on its row under Unfinished operations in "
+        "Archives; or resume it in the archive's details",
+        "封存 {} 有一個未完成的搬移（至「{}」），而且仍在執行；請等它完成；若它停止了，請在「封存」頁「未完成的作業」中"
+        "它那一列按「繼續」接續，或按「放棄…」放棄它；也可以在封存的詳細資料中按「繼續」"},
+    // A relocation made for an older revision (decision 0030): only abandoned.
+    {"the unfinished relocation of archive {} (to \"{}\") verifies revision {}, but the archive now has a later "
+        "revision ({}); the relocation can no longer finish: abandon it with Abandon... under Unfinished operations "
+        "in Archives, then relocate again",
+        "封存 {} 未完成的搬移（至「{}」）驗證的是版次 {}，但封存現在已有較新的版次（{}）；這次搬移再也無法完成："
+        "請在「封存」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移"},
+    {"the unfinished relocation of archive {} (to \"{}\") verifies revision {}, but the archive now has a later "
+        "revision ({}); the relocation can no longer finish, and is still running: wait for it to stop, then "
+        "abandon it with Abandon... under Unfinished operations in Archives, then relocate again",
+        "封存 {} 未完成的搬移（至「{}」）驗證的是版次 {}，但封存現在已有較新的版次（{}）；這次搬移再也無法完成，"
+        "而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它，然後重新搬移"},
+    // What the window says of a relocation that stopped and keeps its saved
+    // progress (src/app/refusal_in_window.cpp, decision 0046): Resume in the
+    // window continues it, in place of `archive relocate ... --resume`.
+    {"relocation was interrupted: the device of the new carrier stopped answering ({} entries in a row could not be "
+        "read); unplug it and attach it again, then continue it with Resume under Unfinished operations in Archives; "
+        "if it stops again at the same place, the device may be damaged",
+        "搬移已中斷：新載體的裝置停止回應（連續 {} 個項目無法讀取）；請拔除它再重新連接，然後在「封存」頁的「未完成的"
+        "作業」中按「繼續」接續；如果它又在同一個地方停止，裝置可能已經損壞",
+        Match::FormatOnly},
+    {"relocation was interrupted; continue it with Resume under Unfinished operations in Archives, or in the "
+        "archive's details, without reading again what matched",
+        "搬移已中斷；請在「封存」頁的「未完成的作業」中，或在封存的詳細資料中按「繼續」接續，已相符的不必重讀"},
+    {"{}; the relocation keeps its saved progress: continue it with Resume under Unfinished operations in Archives "
+        "once that is dealt with",
+        "{}；搬移保留其已儲存的進度：處理好之後，請在「封存」頁的「未完成的作業」中按「繼續」接續", Match::FormatOnly},
+    // A resume where the new carrier is not attached now, as when a drive
+    // letter changed: the relocation dialog resumes it at the root given.
+    {"the volume or folder of this root is not the one the unfinished relocation of archive {} started on (\"{}\"); "
+        "where the new carrier is attached at another drive letter or mount point now, choose Relocate to a new "
+        "carrier... in the archive's details and give its root there, which resumes the relocation; otherwise attach "
+        "it as it was and choose Resume again, or abandon the relocation with Abandon... under Unfinished operations "
+        "in Archives",
+        "此根目錄所在的磁碟區或資料夾，不是封存 {} 未完成的搬移開始時的那一個（「{}」）；如果新的載體現在接在另一個"
+        "磁碟機代號或掛載點，請在封存的詳細資料中按「搬移到新的載體…」並在那裡輸入它的根目錄，即可繼續搬移；否則請照"
+        "原樣接上後再按「繼續」，或在「封存」頁的「未完成的作業」中按「放棄…」放棄這次搬移",
+        Match::FormatOnly},
+    {"{}; where the new carrier is attached at another drive letter or mount point now, choose Relocate to a new "
+        "carrier... in the archive's details and give its root there, which resumes the relocation; otherwise attach "
+        "it as it was and choose Resume again, or abandon the relocation with Abandon... under Unfinished operations "
+        "in Archives",
+        "{}；如果新的載體現在接在另一個磁碟機代號或掛載點，請在封存的詳細資料中按「搬移到新的載體…」並在那裡輸入它的"
+        "根目錄，即可繼續搬移；否則請照原樣接上後再按「繼續」，或在「封存」頁的「未完成的作業」中按「放棄…」放棄這次"
+        "搬移",
+        Match::FormatOnly},
+    // Another operation recorded a later revision before it began.
+    {"{}; nothing was changed: relocate again", "{}；未做任何變更：請重新搬移", Match::FormatOnly},
+    // src/app/relocation_report.cpp: its saved progress could not be removed.
+    {"the new carrier does not hold the recorded content; nothing was changed, but the relocation's saved progress "
+        "could not be removed: {}; abandon the relocation with Abandon... under Unfinished operations in Archives "
+        "before relocating again",
+        "新載體上的內容與記錄不符；未做任何變更，但無法刪除搬移已儲存的進度：{}；重新搬移之前，請在「封存」頁的"
+        "「未完成的作業」中按「放棄…」放棄這次搬移",
+        Match::FormatOnly},
     {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
         "content and cannot be resumed; abandon it with Abandon... under Unfinished operations in Archives, then "
         "relocate again",
@@ -1796,9 +1998,15 @@ constexpr CatalogEntry entries[] = {
     {"revision {} of archive {} was recorded by another operation before this relocation could begin; nothing was "
         "changed (run `archive relocate` again)",
         "封存 {1} 的版次 {0} 已在這次搬移開始前由其他作業記錄；未做任何變更（請再執行一次 `archive relocate`）"},
+    {"revision {} of archive {} was recorded by another operation before this relocation could begin",
+        "封存 {1} 的版次 {0} 已在這次搬移開始前由其他作業記錄"},
     {"cannot start the relocation: {}", "無法開始搬移：{}", Match::Cause},
     {"the unfinished relocation of archive {} was abandoned while this attempt ran; nothing was changed",
         "封存 {} 未完成的搬移已在這次執行期間被放棄；未做任何變更"},
+    // A retired archive takes no new revision, also one retired while the
+    // relocation ran (decision 0003): it stays retired.
+    {"archive {} was retired while this relocation ran; a retired archive takes no new revisions",
+        "封存 {} 在這次搬移期間被停用；已停用的封存不再接受新的版次"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; this relocation recorded "
         "nothing (finish that registration with `register {} --resume`, then relocate again; or abandon it with "
         "`archive abandon-registration {}`, then continue this relocation with `archive relocate {} {} --resume`)",

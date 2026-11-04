@@ -33,4 +33,10 @@ nlohmann::json relocation_json(const RelocateOutcome& outcome);
 // 67,108,864)"); one line each, each ending with a newline.
 std::string relocation_refusal(const Text& text, const RelocateFailure& failure);
 
+// What the window's job of a relocation says of it (decision 0046): as
+// relocation_refusal, but where the relocation's saved progress could not be
+// removed (RelocateFailure::refusing, `cause`), that Abandon... under
+// Unfinished operations removes it, in place of `archive abandon-relocation`.
+std::string relocation_refusal_in_window(const Text& text, const RelocateFailure& failure);
+
 } // namespace va::app

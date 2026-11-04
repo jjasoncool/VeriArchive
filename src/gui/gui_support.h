@@ -7,6 +7,7 @@
 #include "app/text.h"
 #include "core/interfaces.h"
 #include "gui/job_shown.h"
+#include "gui/progress_wording.h"
 #include "gui/report.h"
 
 #include <adwaita.h>
@@ -104,28 +105,6 @@ void guarded(const std::function<void()>& work, const std::function<void(Report)
 // exception, a fatal GLib message); call it once, first thing in main.
 void install_failure_log();
 void log_failure(std::string_view what) noexcept;
-
-// What the items of a progress update are: files read and hashed (register,
-// verify), or manifest entries compared, with no bytes read.
-enum class Counting { Files, Entries };
-
-// Words an operation's progress for a bar (BarState), at most five times a second, and
-// always for the report that completes the count, so a finished operation's
-// bar ends full rather than where the update before left it. Every report
-// feeds the estimate, also those not shown.
-class ProgressWording {
-public:
-    ProgressWording(const app::Text& text, Counting counting) : text_(text), counting_(counting) {}
-    std::optional<BarState> update(const Progress& progress);
-
-private:
-    app::Text text_;
-    Counting counting_;
-    // The engines report regularly (hashing five times a second), so a long
-    // silence is a pause, such as the computer sleeping.
-    app::ProgressEstimate estimate_{app::ProgressEstimate::Reports::regular};
-    std::chrono::steady_clock::time_point last_{};
-};
 
 // Says in a notification of the system that an operation of the window
 // ended, unless a window of the program is the active one, where the

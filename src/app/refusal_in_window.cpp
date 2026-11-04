@@ -1,6 +1,6 @@
 #include "app/refusal_in_window.h"
 
-#include "common/shell_argument.h"
+#include "core/engine/volume_watch.h"
 
 #include <nlohmann/json.hpp>
 
@@ -25,9 +25,10 @@ std::string text_member(const nlohmann::json& record, const char* name)
 
 // The ways on that the operation's row under Unfinished operations in
 // Archives offers once it has stopped: Resume, which continues a stopped
-// registration or verification exactly as its command-line resume does
-// (decision 0022, point 7), and Abandon... (decisions 0025, 0033). The windows
-// name them first, then the refused view's own way to finish it.
+// registration, verification or relocation exactly as its command-line
+// resume does (decision 0022, point 7; decision 0046), and Abandon...
+// (decisions 0025, 0026, 0033). The windows name them first, then the refused
+// view's own way to finish it.
 constexpr std::string_view on_its_row =
     "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives";
 
@@ -75,10 +76,11 @@ std::string registration_refusal(const RefusingOperation& refusing, bool runs)
                 : creating + "; nothing was changed (finish it first " + ways;
 }
 
-// A relocation of the archive (decision 0026), which has no window: it is
-// continued on the command line, the new root written as it can be typed
-// (decision 0022, point 9), or abandoned under Unfinished operations. One
-// whose new carrier differs can never finish, and is only abandoned.
+// A relocation of the archive (decision 0026): finished with Resume on its row
+// under Unfinished operations, or in the archive's details in Archives, where
+// its stopped relocation shows (decision 0046), or abandoned there. One whose
+// new carrier differs, or made for an older revision (decision 0030), can
+// never finish, and is only abandoned.
 std::string relocation_refusal(const RefusingOperation& refusing, bool runs)
 {
     const auto& uuid = refusing.archive_uuid;
@@ -90,8 +92,15 @@ std::string relocation_refusal(const RefusingOperation& refusing, bool runs)
                               "Unfinished operations in Archives, abandon it there with Abandon..., then relocate again"
                     : found + " and cannot be resumed; " + std::string(abandon_it) + ", then relocate again";
     }
-    const auto ways = "resume it on the command line with `archive relocate " + uuid + " " +
-                      shell_argument(refusing.root) + " --resume`, or " + std::string(abandon_it);
+    if (refusing.later_revision) {
+        const auto made = "the unfinished relocation of archive " + uuid + to + " verifies revision " +
+                          std::to_string(refusing.revision) + ", but the archive now has a later revision (" +
+                          std::to_string(*refusing.later_revision) + "); the relocation can no longer finish";
+        return runs ? made + ", and is still running: wait for it to stop, then " + std::string(abandon_it) +
+                          ", then relocate again"
+                    : made + ": " + std::string(abandon_it) + ", then relocate again";
+    }
+    const auto ways = "resume it " + std::string(on_its_row) + "; or resume it in the archive's details";
     return runs ? "an unfinished relocation of archive " + uuid + to +
                       " exists and is still running; wait for it to finish; if it stops, " + ways
                 : "an unfinished relocation of archive " + uuid + to + " exists; " + ways;
@@ -202,12 +211,6 @@ std::expected<bool, IoError> refusing_operation_runs(ArchiveStore& store, const 
     return state == OperationState::Running || state == OperationState::Silent;
 }
 
-namespace {
-
-// Whether the window says that `refusing` still runs: as
-// refusing_operation_runs judges it, with this process taken for one that
-// runs no operation (judge_attempt without `runs_an_operation`); not where it
-// cannot be judged, where the window names its ways on.
 bool runs_as_the_window_judges(ArchiveStore& store, const RefusingOperation& refusing, IProcessTable& processes,
     const std::string& host, std::chrono::sys_seconds now)
 {
@@ -215,7 +218,62 @@ bool runs_as_the_window_judges(ArchiveStore& store, const RefusingOperation& ref
     return runs && *runs;
 }
 
-} // namespace
+std::string relocation_message_in_window(const Text& text, const RelocateFailure& failure, bool runs)
+{
+    // A resume at a root where its new carrier is not attached now, as when
+    // a drive letter changed: the relocation dialog resumes it at the root the
+    // operator gives (decision 0046), as `archive relocate <uuid> <root>
+    // --resume` does.
+    if (failure.elsewhere) {
+        if (failure.refusing) {
+            return text.format("the volume or folder of this root is not the one the unfinished relocation of "
+                               "archive {} started on (\"{}\"); where the new carrier is attached at another drive "
+                               "letter or mount point now, choose Relocate to a new carrier... in the archive's "
+                               "details and give its root there, which resumes the relocation; otherwise attach it "
+                               "as it was and choose Resume again, or abandon the relocation with Abandon... under "
+                               "Unfinished operations in Archives",
+                failure.refusing->archive_uuid, failure.refusing->root);
+        }
+        return text.format("{}; where the new carrier is attached at another drive letter or mount point now, choose "
+                           "Relocate to a new carrier... in the archive's details and give its root there, which "
+                           "resumes the relocation; otherwise attach it as it was and choose Resume again, or abandon "
+                           "the relocation with Abandon... under Unfinished operations in Archives",
+            text(failure.cause));
+    }
+    if (failure.refusing) {
+        return text(refusal_in_window(*failure.refusing, RefusedIn::Archives, runs));
+    }
+    // Another operation recorded a later revision before it began: it is
+    // started again, in the window as on the command line.
+    if (failure.overtaken) {
+        return text.format("{}; nothing was changed: relocate again", text(failure.cause));
+    }
+    if (!failure.keeps_progress) {
+        return text(failure.message);
+    }
+    // Interrupted, or stopped by a failure: the record and the saved
+    // progress stay, and Resume in the window continues it (decision 0046).
+    if (failure.kind == RelocateFailure::Kind::Incomplete) {
+        if (failure.not_answering) {
+            return text.format("relocation was interrupted: the device of the new carrier stopped answering ({} "
+                               "entries in a row could not be read); unplug it and attach it again, then continue "
+                               "it with Resume under Unfinished operations in Archives; if it stops again at the "
+                               "same place, the device may be damaged",
+                io_errors_that_stop);
+        }
+        return text("relocation was interrupted; continue it with Resume under Unfinished operations in Archives, or "
+                    "in the archive's details, without reading again what matched");
+    }
+    return text.format("{}; the relocation keeps its saved progress: continue it with Resume under Unfinished "
+                       "operations in Archives once that is dealt with",
+        text(failure.cause));
+}
+
+std::string retirement_message_in_window(const Text& text, const RetireFailure& failure, bool runs)
+{
+    return failure.refusing ? text(refusal_in_window(*failure.refusing, RefusedIn::Archives, runs))
+                            : text(failure.message);
+}
 
 std::string register_message_in_window(const RegisterFailure& failure, ArchiveStore& store,
     IProcessTable& processes, const std::string& host, std::chrono::sys_seconds now)

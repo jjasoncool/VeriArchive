@@ -264,7 +264,9 @@ void archives_say_where_they_are_attached()
               .notice == "這個封存的磁碟區（SAMPLE-VOLUME）目前沒有連接。接上之後就能驗證。");
 
     // MIGRATED: its filesystem on another device; the notice says what it
-    // means, then, on a line of its own, how it is relocated.
+    // means, then, on a line of its own, how it is relocated in the window
+    // (decision 0046): Relocate to this carrier... beside it, the root found
+    // there chosen.
     const auto cloned_status = status_of(cloned, "ARCH-SAMPLE-3", candidates()[2].identity);
     const auto moved = va::gui::archive_attached(chinese, &read, cloned_status, IdentityShown::Recorded);
     const auto clone_root = native(std::filesystem::path("/media/SAMPLE-C") / "Clone");
@@ -273,16 +275,31 @@ void archives_say_where_they_are_attached()
     CHECK(moved.notice &&
           moved.notice->starts_with("這個封存的檔案系統出現在 " + clone_root + "，但裝置與記錄中的不同（已遷移）"));
     CHECK(moved.notice && moved.notice->contains("「完整驗證」不會讀取那裡"));
-    CHECK(moved.notice && moved.notice->contains("\n如果那是這個封存的裝置換了外接盒，或是您有意把封存移到那個裝置，請在命令列"
-                                                 "把封存搬移到這個新的載體：`archive relocate " + cloned + " "));
+    CHECK(moved.notice && moved.notice->ends_with("\n如果那是這個封存的裝置換了外接盒，或是您有意把封存移到那個裝置，"
+                                                  "請按「搬移到這個載體…」把封存搬移過去；搬移前會先完整讀取它。"));
+    CHECK(moved.notice && !moved.notice->contains("archive relocate"));
+    CHECK(moved.relocate_root == clone_root);
     CHECK(moved.verify_tooltip && moved.verify_tooltip->contains("已遷移") &&
           moved.verify_tooltip->contains("「完整驗證」不會讀取那裡"));
     const auto moved_english = va::gui::archive_attached(english, &read, cloned_status, IdentityShown::Recorded);
     CHECK(moved_english.notice &&
           moved_english.notice->starts_with("The filesystem of this archive is attached at " + clone_root + ", ") &&
           moved_english.notice->contains("(MIGRATED)") &&
-          moved_english.notice->contains("\nIf it is this archive's device in another enclosure, ") &&
-          moved_english.notice->ends_with("`archive relocate " + cloned + " " + clone_root + "`"));
+          moved_english.notice->ends_with("\nIf it is this archive's device in another enclosure, or you moved the "
+                                          "archive to that device on purpose, relocate the archive to it with Relocate "
+                                          "to this carrier..., which reads it in full first."));
+    // Retired, it takes no new revisions: no relocation is offered, nor
+    // named, and the notice says why.
+    auto retired_clone = cloned_status;
+    retired_clone.archive.status = "RETIRED";
+    const auto retired_moved = va::gui::archive_attached(english, &read, retired_clone, IdentityShown::Recorded);
+    CHECK(!retired_moved.relocate_root);
+    CHECK(retired_moved.notice && !retired_moved.notice->contains("Relocate") &&
+          retired_moved.notice->ends_with(
+              "\nThis archive is retired and takes no new revisions, so it is not relocated."));
+    const auto retired_chinese = va::gui::archive_attached(chinese, &read, retired_clone, IdentityShown::Recorded);
+    CHECK(retired_chinese.notice && !retired_chinese.notice->contains("搬移到") &&
+          retired_chinese.notice->ends_with("\n此封存已停用，不再接受新的版次，因此不會搬移。"));
 
     // AMBIGUOUS: more than one volume looks like it.
     const auto twin_status = status_of(twin, "ARCH-SAMPLE-5", candidates()[4].identity);

@@ -4,6 +4,7 @@
 #include "manifest_samples.h"
 
 #include "app/history.h"
+#include "app/refusal_in_window.h"
 #include "app/relocation_report.h"
 #include "app/unfinished_operations.h"
 #include "common/shell_argument.h"
@@ -516,6 +517,23 @@ void a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it()
                           "relocation's saved progress could not be removed: cannot run SQL: sample failure; "
                           "abandon the relocation with `archive abandon-relocation " +
                               fixture.archive_uuid + "` before relocating again");
+    // The window names Abandon... in place of the command (decision 0046),
+    // and lists the entry that differs.
+    if (!differs) {
+        CHECK(differs.error().refusing && differs.error().refusing->differs &&
+              differs.error().cause == "cannot run SQL: sample failure");
+        const auto refusal = va::app::relocation_refusal_in_window(va::app::Text{}, differs.error());
+        CHECK(refusal.starts_with("RELOCATION REFUSED: the new carrier does not hold the recorded content; nothing "
+                                  "was changed, but the relocation's saved progress could not be removed: cannot run "
+                                  "SQL: sample failure; abandon the relocation with Abandon... under Unfinished "
+                                  "operations in Archives before relocating again\n  "));
+        CHECK(refusal.contains("videos/v139.bin") && !refusal.contains("archive abandon-relocation"));
+        // Without a record left, as the command line words it.
+        auto plain = differs.error();
+        plain.refusing.reset();
+        CHECK(va::app::relocation_refusal_in_window(va::app::Text{}, plain) ==
+              va::app::relocation_refusal(va::app::Text{}, plain));
+    }
     // Nothing of it went: the 20 photos matched before, and the 19 videos
     // that matched now. The record says the new carrier differs.
     const auto record = fixture.record();
@@ -1180,6 +1198,32 @@ void a_resume_needs_the_volume_it_started_on()
     const auto formatted = fixture.relocate(fixture.archive.root() / "new", true);
     CHECK(!formatted && formatted.error().kind == va::RelocateFailure::Kind::Refused &&
           formatted.error().message == refusal);
+    // Decision 0046: the window says how it resumes the relocation where the
+    // new carrier is attached now, in place of the commands.
+    CHECK(!formatted && formatted.error().elsewhere && formatted.error().refusing &&
+          formatted.error().refusing->kind == va::RefusingOperation::Kind::Relocation);
+    if (!formatted) {
+        const va::app::Text english;
+        const va::app::Text chinese(va::app::Language::TraditionalChinese);
+        const auto ways = "; where the new carrier is attached at another drive letter or mount point now, choose "
+                          "Relocate to a new carrier... in the archive's details and give its root there, which "
+                          "resumes the relocation; otherwise attach it as it was and choose Resume again, or abandon "
+                          "the relocation with Abandon... under Unfinished operations in Archives";
+        CHECK(va::app::relocation_message_in_window(english, formatted.error(), false) ==
+              "the volume or folder of this root is not the one the unfinished relocation of archive " +
+                  fixture.archive_uuid + " started on (\"" + va::path_to_utf8(fixture.archive.root() / "new") +
+                  "\")" + ways);
+        CHECK(va::app::relocation_message_in_window(chinese, formatted.error(), false)
+                  .starts_with("此根目錄所在的磁碟區或資料夾，不是封存 " + fixture.archive_uuid + " 未完成的搬移開始時的那一個"));
+        // No volume to be told at the root given: its cause, then the same ways on.
+        va::RelocateFailure unattached{va::RelocateFailure::Kind::Media,
+            "cannot identify the volume of the new root: no volume (sample)", {}};
+        unattached.elsewhere = true;
+        unattached.cause = unattached.message;
+        CHECK(va::app::relocation_message_in_window(english, unattached, false) ==
+              "cannot identify the volume of the new root: no volume (sample)" + std::string(ways));
+        CHECK(!va::app::relocation_message_in_window(chinese, unattached, false).contains("archive "));
+    }
     disk.filesystem_uuid = "5555666677778888";
     disk.filesystem_uuid_short = "77778888";
     disk.devices.front().serial = "OTHER-ENCLOSURE"; // sample data
@@ -1513,6 +1557,13 @@ void a_resume_needs_the_revision_it_verifies()
                                                      "relocation verifies; it cannot be resumed (abandon it with "
                                                      "`archive abandon-relocation " +
                                                      fixture.archive_uuid + "`)");
+    // The window names Abandon... (decision 0046), never the command.
+    CHECK(!refused && refused.error().refusing && refused.error().refusing->later_revision == 2u);
+    if (!refused) {
+        const auto words = va::app::relocation_message_in_window(va::app::Text{}, refused.error(), false);
+        CHECK(words.contains("abandon it with Abandon... under Unfinished operations in Archives") &&
+              !words.contains("archive abandon-relocation"));
+    }
     CHECK(fixture.record() == ahead);
     CHECK(fixture.archive.bytes_read == 0);
 }
@@ -2652,6 +2703,18 @@ void a_relocation_overtaken_before_its_record_writes_nothing()
                              "changed (run `archive relocate` again)";
         CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused &&
               relocated.error().message == refusal);
+        // The window says to relocate again (decision 0046), in place of the command.
+        if (!relocated) {
+            CHECK(relocated.error().overtaken &&
+                  va::app::relocation_message_in_window(va::app::Text{}, relocated.error(), false) ==
+                      "revision " + std::to_string(imported) + " of archive " + fixture.archive_uuid +
+                          " was recorded by another operation before this relocation could begin; nothing was "
+                          "changed: relocate again");
+            CHECK(va::app::relocation_message_in_window(
+                      va::app::Text(va::app::Language::TraditionalChinese), relocated.error(), false) ==
+                  "封存 " + fixture.archive_uuid + " 的版次 " + std::to_string(imported) +
+                      " 已在這次搬移開始前由其他作業記錄；未做任何變更：請重新搬移");
+        }
         if (!relocated && relocated.error().message != refusal) {
             std::cerr << "  overtaken by revision " << imported << ": " << relocated.error().message << '\n';
         }
@@ -3115,8 +3178,142 @@ void a_translated_link_changes_the_merkle_root()
 
 } // namespace
 
+namespace {
+
+// A retired archive takes no new revision (decision 0003). Here it is retired
+// while the relocation reads the new carrier (sample damage of the archive's
+// record, as a version that retired an archive beside its unfinished
+// relocation would leave it; this version's retirement refuses then): the
+// relocation records nothing, re-reading the archive's status in the
+// transaction that would record the revision, and the archive stays retired
+// at its revision. Its record stays, said stopped, for the operator to
+// abandon: the list reads it as "archive is retired; abandon it", without
+// Resume, in both languages, and a resume is refused.
+void a_relocation_never_sets_a_retired_archive_back()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    const auto retire = "UPDATE archives SET status = 'RETIRED' WHERE archive_uuid = " +
+                        test::sql_text(fixture.archive_uuid);
+    test::HookedFiles hooked(fixture.archive, "v130.bin", [&] { fixture.repository.execute(retire.c_str()); });
+    va::RelocateServices services{hooked, *fixture.repository.files, *fixture.repository.writer, fixture.media,
+        fixture.store, fixture.repository.context.repo, fixture.repository.context.repository_uuid, fixture.host,
+        fixture.processes};
+    const auto relocated = va::relocate_archive(services,
+        {fixture.archive_uuid, fixture.archive.root() / "new", std::nullopt}, fixture.cancel, fixture.progress);
+    CHECK(!relocated && relocated.error().kind == va::RelocateFailure::Kind::Refused &&
+          relocated.error().message == "archive " + fixture.archive_uuid +
+                                           " was retired while this relocation ran; a retired archive takes no new "
+                                           "revisions");
+    if (relocated) {
+        std::cerr << "  relocated a retired archive as revision " << relocated->revision << '\n';
+    }
+    const auto archive = fixture.store.find_archive(fixture.archive_uuid);
+    CHECK(archive && *archive && (*archive)->status == "RETIRED" && (*archive)->current_revision == 1);
+    const auto revisions = fixture.store.revisions(fixture.archive_uuid);
+    CHECK(revisions && revisions->size() == 1);
+    CHECK(manifest_names(fixture) == std::set<std::string>{"r0001.vam"});
+    CHECK(fixture.record().is_object() && fixture.record().contains("stopped"));
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    CHECK(chinese(relocated.error().message) ==
+          "封存 " + fixture.archive_uuid + " 在這次搬移期間被停用；已停用的封存不再接受新的版次");
+
+    const va::app::AttemptCheck attempts{&fixture.processes, fixture.host.host, {}};
+    const auto read = va::app::read_unfinished_operations(fixture.repository.context.repo, {},
+        [](const std::filesystem::path&) -> std::optional<std::uint64_t> { return std::nullopt; }, attempts);
+    CHECK(read && read->operations.size() == 1);
+    if (read && read->operations.size() == 1) {
+        const auto& operation = read->operations.front();
+        CHECK(operation.kind == va::app::OperationKind::Relocation && operation.archive_retired && !operation.resumable);
+        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        CHECK(va::app::state_code(va::app::state_of_one_read(operation, now)) == "archive_retired");
+        va::app::OperationWatch watch;
+        const va::app::OperationWatch::Clock::time_point start{};
+        watch.update(operation, start, now);
+        const auto row = va::app::describe_operation(va::app::Text{}, watch, start, now);
+        CHECK(row.state == "archive is retired; abandon it" && !row.offers_resume && row.abandonable);
+        CHECK(va::app::describe_operation(chinese, watch, start, now).state == "封存已停用；請放棄它");
+        CHECK(va::app::describe_for_archive(va::app::Text{}, operation, now).ends_with("; archive is retired; abandon it"));
+    }
+    const auto resumed = fixture.relocate(fixture.archive.root() / "new", true);
+    CHECK(!resumed && resumed.error().kind == va::RelocateFailure::Kind::Refused &&
+          resumed.error().message == "a retired archive takes no new revisions");
+}
+
+// Decision 0046: what the window says of a relocation that did not record its
+// revision, in its own ways on where the command line names commands: one
+// interrupted (Resume under Unfinished operations or in the details), one whose
+// device stopped answering, one stopped by a failure (its cause, then Resume),
+// and one refused by the archive's own unfinished relocation, whose refusal
+// names it (RelocateFailure::refusing), running or not; in both languages.
+void the_window_words_a_relocation_that_did_not_record()
+{
+    RelocationFixture fixture(true);
+    fixture.copy_to_new_disk();
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+    fixture.archive.node("new/videos/v120.bin").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    const auto interrupted = fixture.relocate(fixture.archive.root() / "new");
+    fixture.archive.node("new/videos/v120.bin").open_error.reset();
+    CHECK(!interrupted && interrupted.error().kind == va::RelocateFailure::Kind::Incomplete &&
+          interrupted.error().keeps_progress && !interrupted.error().not_answering && !interrupted.error().refusing);
+    if (!interrupted) {
+        return;
+    }
+    CHECK(va::app::relocation_message_in_window(english, interrupted.error(), false) ==
+          "relocation was interrupted; continue it with Resume under Unfinished operations in Archives, or in the "
+          "archive's details, without reading again what matched");
+    CHECK(va::app::relocation_message_in_window(chinese, interrupted.error(), false) ==
+          "搬移已中斷；請在「封存」頁的「未完成的作業」中，或在封存的詳細資料中按「繼續」接續，已相符的不必重讀");
+
+    // Its device no longer answering, and a failure that stopped it (their
+    // failures as the engine gives them).
+    auto not_answering = interrupted.error();
+    not_answering.not_answering = true;
+    CHECK(va::app::relocation_message_in_window(english, not_answering, false) ==
+          "relocation was interrupted: the device of the new carrier stopped answering (10 entries in a row could "
+          "not be read); unplug it and attach it again, then continue it with Resume under Unfinished operations in "
+          "Archives; if it stops again at the same place, the device may be damaged");
+    va::RelocateFailure stopped{va::RelocateFailure::Kind::Media, "cannot scan the new root: access denied (sample)"
+                                                                  "; the relocation keeps its saved progress: ...", {}};
+    stopped.keeps_progress = true;
+    stopped.cause = "cannot scan the new root: access denied (sample)";
+    CHECK(va::app::relocation_message_in_window(english, stopped, false) ==
+          "cannot scan the new root: access denied (sample); the relocation keeps its saved progress: continue it "
+          "with Resume under Unfinished operations in Archives once that is dealt with");
+    CHECK(va::app::relocation_message_in_window(chinese, stopped, false).ends_with(
+        "；搬移保留其已儲存的進度：處理好之後，請在「封存」頁的「未完成的作業」中按「繼續」接續"));
+
+    // A new relocation while that one is unfinished: refused by it.
+    const auto again = fixture.relocate(fixture.archive.root() / "new");
+    CHECK(!again && again.error().kind == va::RelocateFailure::Kind::Refused && again.error().refusing &&
+          again.error().refusing->kind == va::RefusingOperation::Kind::Relocation &&
+          again.error().refusing->root == va::path_to_utf8(fixture.archive.root() / "new") &&
+          !again.error().refusing->differs && !again.error().refusing->later_revision);
+    if (again || !again.error().refusing) {
+        return;
+    }
+    const auto exists = "an unfinished relocation of archive " + fixture.archive_uuid + " (to \"" +
+                        va::path_to_utf8(fixture.archive.root() / "new") + "\") exists";
+    const std::string ways = "resume it with Resume, or abandon it with Abandon..., on its row under Unfinished "
+                             "operations in Archives; or resume it in the archive's details";
+    CHECK(va::app::relocation_message_in_window(english, again.error(), false) == exists + "; " + ways);
+    CHECK(va::app::relocation_message_in_window(english, again.error(), true) ==
+          exists + " and is still running; wait for it to finish; if it stops, " + ways);
+    CHECK(!va::app::relocation_message_in_window(english, again.error(), false).contains("archive relocate"));
+    // Judged as Archives judges its row: its attempt has ended (its record
+    // says it stopped).
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    CHECK(!va::app::runs_as_the_window_judges(
+        fixture.store, *again.error().refusing, fixture.processes, fixture.host.host, now));
+}
+
+} // namespace
+
 void relocate_tests()
 {
+    a_relocation_never_sets_a_retired_archive_back();
+    the_window_words_a_relocation_that_did_not_record();
     relocation_keeps_identity_and_history();
     a_relocation_carries_copy_of_forward();
     an_earlier_revision_is_read_only_where_matching_needs_it();

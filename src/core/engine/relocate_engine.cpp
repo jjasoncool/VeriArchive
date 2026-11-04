@@ -74,17 +74,28 @@ std::optional<Unfinished> unfinished_from(const std::string& stored)
         std::move(record), static_cast<std::uint32_t>(*revision), std::move(run_id), std::move(root), differs};
 }
 
+// The archive's unfinished relocation as the operation that refuses this
+// one (RelocateFailure::refusing): its record, whose new carrier may differ,
+// and the archive's revision where it is made for an older one.
+RefusingOperation refusing_unfinished(
+    const Uuid& uuid, const nlohmann::json& record, std::optional<std::uint32_t> later = std::nullopt)
+{
+    auto refusing = refusing_relocation(uuid, record);
+    refusing.later_revision = later;
+    return refusing;
+}
+
 // Why a relocation whose new carrier was found to differ is neither resumed
 // nor replaced by a new one: it can never finish, and only the operator
 // abandons it (decision 0026).
-RelocateFailure differs_refusal(const Uuid& uuid, const std::string& root)
+RelocateFailure differs_refusal(const Uuid& uuid, const Unfinished& unfinished)
 {
     return RelocateFailure{RelocateFailure::Kind::Refused,
-        "the unfinished relocation of archive " + uuid + " (to \"" + root +
+        "the unfinished relocation of archive " + uuid + " (to \"" + unfinished.root +
             "\") found that the new carrier does not hold the recorded content and cannot be resumed; abandon it "
             "with `archive abandon-relocation " +
             uuid + "`, then relocate again",
-        {}};
+        {}, refusing_unfinished(uuid, unfinished.record)};
 }
 
 // A relocation made for an older revision never records (decision 0030). A
@@ -92,9 +103,9 @@ RelocateFailure differs_refusal(const Uuid& uuid, const std::string& root)
 // an import of N+2, gives the archive a later revision, recording N+1 would
 // set the archive back (R-15). Its record and saved progress stay until the
 // operator abandons it; every attempt that meets it, and a relocation that
-// is not a resume, stops with this.
-RelocateFailure made_for_an_older_revision(
-    const Uuid& uuid, const std::string& root, std::uint32_t verifies, std::uint32_t archive_revision)
+// is not a resume, stops with this. `record`: the relocation's record.
+RelocateFailure made_for_an_older_revision(const Uuid& uuid, const std::string& root, std::uint32_t verifies,
+    std::uint32_t archive_revision, const nlohmann::json& record)
 {
     return RelocateFailure{RelocateFailure::Kind::Refused,
         "the unfinished relocation of archive " + uuid + " (to \"" + root + "\") verifies revision " +
@@ -102,7 +113,7 @@ RelocateFailure made_for_an_older_revision(
             std::to_string(archive_revision) +
             "); the relocation can no longer finish: abandon it with `archive abandon-relocation " + uuid +
             "`, then relocate again",
-        {}};
+        {}, refusing_unfinished(uuid, record, archive_revision)};
 }
 
 // Whether `volume` and the folder `root_subpath` on it are where the
@@ -161,7 +172,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
 
     const auto volume = services.media.volume_for_path(request.root);
     if (!volume) {
-        return fail(Kind::Media, "cannot identify the volume of the new root: " + volume.error().message);
+        auto failure = fail(Kind::Media, "cannot identify the volume of the new root: " + volume.error().message);
+        // A resume at a root where its new carrier is not attached now.
+        if (request.resume) {
+            failure.error().elsewhere = true;
+            failure.error().cause = failure.error().message;
+        }
+        return failure;
     }
     const auto root_subpath = root_subpath_of(request.root, *volume);
     if (!root_subpath) {
@@ -281,12 +298,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         }
         if (!request.resume) {
             if (unfinished && !dead && unfinished->differs) {
-                refused = differs_refusal(uuid, unfinished->root);
+                refused = differs_refusal(uuid, *unfinished);
                 store.rollback();
                 return {};
             }
             if (unfinished && later) {
-                refused = made_for_an_older_revision(uuid, unfinished->root, unfinished->revision, *later);
+                refused = made_for_an_older_revision(
+                    uuid, unfinished->root, unfinished->revision, *later, unfinished->record);
                 store.rollback();
                 return {};
             }
@@ -297,7 +315,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                         shell_argument(unfinished->root) + " --resume`, or abandon it with `archive "
                         "abandon-relocation " +
                         uuid + "`",
-                    {}};
+                    {}, refusing_unfinished(uuid, unfinished->record)};
                 store.rollback();
                 return {};
             }
@@ -312,11 +330,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                 return std::unexpected(now.error());
             }
             if (*now && (*now)->current_revision > previous_revision) {
-                refused = RelocateFailure{Kind::Refused,
-                    "revision " + std::to_string((*now)->current_revision) + " of archive " + uuid +
-                        " was recorded by another operation before this relocation could begin; nothing was "
-                        "changed (run `archive relocate` again)",
-                    {}};
+                const auto overtaken = "revision " + std::to_string((*now)->current_revision) + " of archive " +
+                                       uuid + " was recorded by another operation before this relocation could begin";
+                refused = RelocateFailure{
+                    Kind::Refused, overtaken + "; nothing was changed (run `archive relocate` again)", {}};
+                refused->overtaken = true;
+                refused->cause = overtaken;
                 store.rollback();
                 return {};
             }
@@ -328,7 +347,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                 return std::unexpected(adding.error());
             }
             if (*adding) {
-                refused = RelocateFailure{Kind::Refused, adding_verification_refusal(**adding), {}};
+                refused = RelocateFailure{
+                    Kind::Refused, adding_verification_refusal(**adding), {}, refusing_verification(**adding)};
                 store.rollback();
                 return {};
             }
@@ -364,18 +384,21 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         // Its new carrier did not hold the recorded content: what matched
         // there says nothing of a carrier copied again (decision 0026).
         if (unfinished->differs) {
-            refused = differs_refusal(uuid, unfinished->root);
+            refused = differs_refusal(uuid, *unfinished);
             store.rollback();
             return {};
         }
         // Made for an older revision (decision 0030): it can no longer
         // finish, and stays for the operator to abandon.
         if (later) {
-            refused = made_for_an_older_revision(uuid, unfinished->root, unfinished->revision, *later);
+            refused = made_for_an_older_revision(
+                uuid, unfinished->root, unfinished->revision, *later, unfinished->record);
             store.rollback();
             return {};
         }
         // R-104: it resumes only while the revision it verifies is unchanged.
+        // It can no longer finish, and is only abandoned, as one made for an
+        // older revision is (refusing: the archive's revision now).
         if (unfinished->revision != previous_revision) {
             refused = RelocateFailure{Kind::Refused,
                 "archive " + uuid + " is at revision " + std::to_string(previous_revision) + ", not at revision " +
@@ -383,7 +406,7 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                     " that its unfinished relocation verifies; it cannot be resumed (abandon it with `archive "
                     "abandon-relocation " +
                     uuid + "`)",
-                {}};
+                {}, refusing_unfinished(uuid, unfinished->record, previous_revision)};
             store.rollback();
             return {};
         }
@@ -400,7 +423,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
                     " started on (\"" + unfinished->root + "\"); resume it there, or abandon it with `archive "
                     "abandon-relocation " +
                     uuid + "` and start again",
-                {}};
+                {}, refusing_unfinished(uuid, unfinished->record)};
+            refused->elsewhere = true;
             store.rollback();
             return {};
         }
@@ -591,13 +615,17 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         return fail(Kind::Refused, "the unfinished relocation of archive " + uuid +
                                        " was abandoned while this attempt ran; nothing was changed");
     };
+    // This relocation as the operation that stands in the way of the next one
+    // (RelocateFailure::refusing): what its record says of it.
+    const nlohmann::json this_record{{"archive_uuid", uuid}, {"root", path_to_utf8(request.root)},
+        {"revision", previous_revision}, {"run_id", run_id}, {"started", started}};
     // The archive has a later revision than the one this relocation verifies
     // (decision 0030): it stops, recording nothing. Its record keeps its
     // saved progress, and says last that it stopped, for the operator to
     // abandon.
     const auto made_for_older = [&] {
-        return std::unexpected(
-            made_for_an_older_revision(uuid, path_to_utf8(request.root), previous_revision, *later_revision));
+        return std::unexpected(made_for_an_older_revision(
+            uuid, path_to_utf8(request.root), previous_revision, *later_revision, this_record));
     };
     // An attempt that ends without finishing, interrupted or stopped by a
     // failure, says to go on with `--resume` (decision 0026), unless the
@@ -659,29 +687,35 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         });
     };
     // An interrupted attempt, recorded as such, and continued with `--resume`.
-    const auto interrupted = [&] {
+    const auto interrupted = [&]() -> std::unexpected<RelocateFailure> {
         if (made_for_older_by_now()) {
             return made_for_older();
         }
         record_interruption(comparison);
+        RelocateFailure failure{Kind::Incomplete, "relocation was interrupted; " + resume_hint, {}};
         if (comparison.device_stop == DeviceStop::NotAnswering) {
-            return fail(Kind::Incomplete,
+            failure.message =
                 std::format("relocation was interrupted: the device of the new carrier stopped answering ({} entries "
                             "in a row could not be read); unplug it and attach it again, then {}; if it stops again "
                             "at the same place, the device may be damaged",
-                    io_errors_that_stop, resume_hint));
+                    io_errors_that_stop, resume_hint);
+            failure.not_answering = true;
         }
-        return fail(Kind::Incomplete, "relocation was interrupted; " + resume_hint);
+        failure.keeps_progress = true;
+        return std::unexpected(std::move(failure));
     };
     // An attempt that a failure stops (its scan, its manifest, its record)
     // keeps the relocation's record and checkpoints as an interrupted one
     // does, and its failure says how to go on once the cause is dealt with
     // (decision 0026); it keeps its kind (exit 11), as registration's does.
-    const auto stopped_by = [&](Kind kind, const std::string& failure) {
+    const auto stopped_by = [&](Kind kind, const std::string& cause) -> std::unexpected<RelocateFailure> {
         if (made_for_older_by_now()) {
             return made_for_older();
         }
-        return fail(kind, failure + "; the relocation keeps its saved progress: " + resume_hint);
+        RelocateFailure failure{kind, cause + "; the relocation keeps its saved progress: " + resume_hint, {}};
+        failure.keeps_progress = true;
+        failure.cause = cause;
+        return std::unexpected(std::move(failure));
     };
     if (lost) {
         return lost_to_another();
@@ -729,14 +763,20 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         }();
         if (!removed) {
             // Still there: the operator abandons it, so that the next
-            // relocation reads the whole carrier.
+            // relocation reads the whole carrier. `refusing`: this relocation,
+            // whose new carrier differs, as the next attempt finds it.
             store.rollback();
-            return fail(Kind::Differs,
+            auto failure = fail(Kind::Differs,
                 "the new carrier does not hold the recorded content; nothing was changed, but the relocation's "
                 "saved progress could not be removed: " +
                     removed.error().message + "; abandon the relocation with `archive abandon-relocation " + uuid +
                     "` before relocating again",
                 comparison.items);
+            auto differing = this_record;
+            differing["differs"] = current_timestamp();
+            failure.error().refusing = refusing_unfinished(uuid, differing);
+            failure.error().cause = removed.error().message;
+            return failure;
         }
         stop_mark.ended = true;
         // The way on is the operator's copy, made again from the archive's
@@ -819,6 +859,8 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
     // record and checkpoints go in the same transaction (decision 0026).
     bool cancelled_waiting = false;         // cancelled while it waited for the write lock
     std::optional<std::string> registering; // the root of a registration that has saved files of the revision
+    nlohmann::json registering_plan;        // and its plan, as the operation that refuses this one
+    bool retired_meanwhile = false;         // the archive was retired while this relocation ran
     const auto recorded = [&]() -> std::expected<void, IoError> {
         // The record of a large archive holds the write lock for seconds:
         // this one waits for it rather than fail.
@@ -864,6 +906,19 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             later_revision = *later;
             return std::unexpected(IoError{IoErrorKind::Other, 0, "the archive has a later revision"});
         }
+        // A retired archive takes no new revision (decision 0003): retired
+        // while this relocation ran (as a version that retired an archive
+        // beside an unfinished relocation retired it), it stays retired, and
+        // nothing is recorded. The archive's record is read again here, in
+        // the transaction that would write it, never taken from the start.
+        const auto now = store.find_archive(uuid);
+        if (!now) {
+            return std::unexpected(now.error());
+        }
+        if (*now && (*now)->status == "RETIRED") {
+            retired_meanwhile = true;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the archive was retired"});
+        }
         // An unfinished registration creating the same revision (`register
         // --new-revision`) checkpoints the files it has hashed under it
         // (R-104). Recorded over them, they would join this revision's index,
@@ -884,6 +939,9 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             }
             if (*plan) {
                 registering = **plan;
+                if (const auto stored = store.setting("registration:" + uuid)) {
+                    registering_plan = nlohmann::json::parse(*stored, nullptr, false);
+                }
                 return std::unexpected(IoError{IoErrorKind::Other, 0, "a registration creates the revision"});
             }
             if (auto cleared = store.delete_file_rows(uuid, creates); !cleared) {
@@ -896,9 +954,12 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         if (auto removed = store.remove_registration_plan(uuid, creates); !removed) {
             return removed;
         }
-        archive.current_revision = creates;
-        archive.root_subpath = *root_subpath;
-        if (auto updated = store.update_archive(archive); !updated) {
+        // The archive's record as it is now, with the new revision and root:
+        // what changed of it meanwhile (its label, say) stays.
+        auto changed = *now ? **now : archive;
+        changed.current_revision = creates;
+        changed.root_subpath = *root_subpath;
+        if (auto updated = store.update_archive(changed); !updated) {
             return updated;
         }
         RevisionRecord revision{uuid, creates, "manifests/" + uuid + "/" + path_to_utf8(outcome.manifest.filename()),
@@ -967,6 +1028,13 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         if (later_revision) {
             return made_for_older();
         }
+        // Its record and saved progress stay, and say last that it stopped:
+        // it can never finish, and waits for the operator to abandon it.
+        if (retired_meanwhile) {
+            return fail(Kind::Refused, "archive " + uuid +
+                                           " was retired while this relocation ran; a retired archive takes no new "
+                                           "revisions");
+        }
         if (registering) {
             // The registration keeps the revision (decision 0023) until it is
             // finished, or the operator abandons it, as when its root is gone
@@ -974,15 +1042,18 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
             // resume once the registration is abandoned; once the
             // registration records the revision, the relocation can never
             // finish, and its record goes (decision 0026).
-            return fail(Kind::Refused, "an unfinished registration of archive " + uuid + " (root \"" + *registering +
-                                           "\") is creating revision " + std::to_string(creates) +
-                                           "; this relocation recorded nothing (finish that registration with "
-                                           "`register " +
-                                           shell_argument(*registering) +
-                                           " --resume`, then relocate again; or abandon it with `archive "
-                                           "abandon-registration " +
-                                           uuid + "`, then continue this relocation with `archive relocate " + uuid +
-                                           " " + shell_argument(path_to_utf8(request.root)) + " --resume`)");
+            auto failure = fail(Kind::Refused,
+                "an unfinished registration of archive " + uuid + " (root \"" + *registering +
+                    "\") is creating revision " + std::to_string(creates) +
+                    "; this relocation recorded nothing (finish that registration with `register " +
+                    shell_argument(*registering) +
+                    " --resume`, then relocate again; or abandon it with `archive abandon-registration " + uuid +
+                    "`, then continue this relocation with `archive relocate " + uuid + " " +
+                    shell_argument(path_to_utf8(request.root)) + " --resume`)");
+            if (registering_plan.is_object()) {
+                failure.error().refusing = refusing_registration(uuid, registering_plan);
+            }
+            return failure;
         }
         if (cancelled_waiting) {
             return interrupted();

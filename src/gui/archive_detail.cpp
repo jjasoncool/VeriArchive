@@ -1,22 +1,26 @@
 // The details of an archive in Archives (decision 0046), beside the list: its
 // label, volume label and root, with a menu (compare it with another archive,
-// create a new revision, copy its UUID); a banner with the result of its last
+// create a new revision, copy its UUID, export its manifest, relocate it to a
+// new carrier, retire it); a banner with the result of its last
 // FULL verification with its mode, when it ended and how long ago, the last
 // verification of another mode, and OVERDUE with the limit that fired (R-21,
 // R-105); FULL verify, whose menu holds adding chunk hashes (decision 0033),
 // strict metadata and the verification of a folder or volume the operator
 // chooses, and View result, the result page of that last FULL verification;
 // the device alerts of its last verification (decision 0044); its job as a
-// card, with Stop and Details (decision 0045); a stopped verification that
-// Resume continues; and its device, its content, its copies and its recent
-// verifications, each of which opens its result page. Where it is attached
-// now, as the latest read of the attached devices found it
+// card, with Stop and Details (decision 0045); a stopped verification or
+// relocation that Resume continues; and its device, its content, its copies
+// and its recent verifications, each of which opens its result page. Where it
+// is attached now, as the latest read of the attached devices found it
 // (devices_poll.cpp): a notice above the banner where it is not attached as
-// recorded, the tooltip of FULL verify, and its volume and root in the group
-// Device.
+// recorded, with Relocate to this carrier... where its filesystem is on
+// another device than recorded, the tooltip of FULL verify, and its volume and
+// root in the group Device. A retired archive can still be verified (decision
+// 0003), but takes no new revision.
 #include "gui/gui_app.h"
 
 #include "core/engine/add_chunk_hashes.h"
+#include "gui/archive_actions.h"
 #include "platform/file_system.h"
 
 #include <chrono>
@@ -114,8 +118,19 @@ void add_to_menu(GtkWidget* popover, GtkWidget* item)
     gtk_box_append(GTK_BOX(gtk_popover_get_child(GTK_POPOVER(popover))), item);
 }
 
+// A line between groups of a menu's items.
+void add_separator(GtkWidget* popover)
+{
+    GtkWidget* line = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_set_margin_top(line, 4);
+    gtk_widget_set_margin_bottom(line, 4);
+    add_to_menu(popover, line);
+}
+
 // The archive's menu (⋯): compare it with another archive, create a new
-// revision, copy its UUID.
+// revision, copy its UUID; then export its manifest, relocate it to a new
+// carrier and retire it (decision 0046), each offered where it applies and
+// saying why not where it does not.
 GtkWidget* more_menu(GuiState& state, const ArchiveStatus& status)
 {
     const auto& text = state.text;
@@ -147,6 +162,18 @@ GtkWidget* more_menu(GuiState& state, const ArchiveStatus& status)
                                      archive.c_str());
                                  show_toast(state, state.text("Archive UUID copied"));
                              }));
+    add_separator(popover);
+    add_to_menu(popover, menu_item(state, popover, text("Export manifest..."), export_choice(text, status), uuid,
+                             [](GuiState& state, const Uuid& archive) { export_manifest(state, archive); }));
+    add_to_menu(popover, menu_item(state, popover, text("Relocate to a new carrier..."),
+                             relocation_choice(text, status,
+                                 listed_relocation(text, state.operations.watches, uuid,
+                                     app::OperationWatch::Clock::now(),
+                                     std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()))),
+                             uuid,
+                             [](GuiState& state, const Uuid& archive) { open_relocation(state, archive); }));
+    add_to_menu(popover, menu_item(state, popover, text("Retire archive..."), retire_choice(text, status), uuid,
+                             [](GuiState& state, const Uuid& archive) { ask_to_retire(state, archive); }));
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(button), popover);
     return button;
 }
@@ -203,6 +230,9 @@ GtkWidget* verify_button(GuiState& state, const ArchiveStatus& status, bool busy
         gtk_widget_set_sensitive(button, FALSE);
         gtk_widget_set_tooltip_text(button, archive_has_a_job(text, display_label(status)).c_str());
     }
+    // A retired archive can still be verified, as on the command line
+    // (decision 0003); it takes no new revision, so the menu offers no adding
+    // of chunk hashes for it (why_chunk_hashes_cannot_be_added).
     return button;
 }
 
@@ -680,14 +710,24 @@ void show_details_attached(GuiState& state)
         pango_attr_list_unref(no_hyphens);
         gtk_widget_set_hexpand(page.attached_words, TRUE);
         gtk_box_append(GTK_BOX(notice), page.attached_words);
+        // MIGRATED: the relocation dialog, the new root the read found
+        // chosen (decision 0046).
+        if (shown.relocate_root) {
+            GtkWidget* relocate = row_button(state, text("Relocate to this carrier..."), *state.archive_selected,
+                [root = *shown.relocate_root](GuiState& state, const Uuid& archive) {
+                    open_relocation(state, archive, root);
+                });
+            gtk_box_append(GTK_BOX(notice), relocate);
+        }
         gtk_box_append(GTK_BOX(page.attached_notice), notice);
     }
     gtk_widget_set_visible(page.attached_notice, shown.notice.has_value());
 
     // FULL verify stays offered: the read may be old, and the verification
     // looks for the archive itself, refusing as it refuses. Its tooltip says
-    // what the read found, unless the archive's job holds it.
-    if (page.verify && !page.verify_busy) {
+    // what the read found, unless the archive's job holds it or the archive
+    // is retired.
+    if (page.verify && !page.verify_busy && gtk_widget_get_sensitive(page.verify)) {
         gtk_widget_set_tooltip_text(page.verify, shown.verify_tooltip ? shown.verify_tooltip->c_str() : nullptr);
     }
 

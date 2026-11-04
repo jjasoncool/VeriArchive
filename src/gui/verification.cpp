@@ -223,6 +223,34 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
                         archive_name, roots);
                 };
             }
+            // MIGRATED: the filesystem of an archive on another device than
+            // recorded, which the window relocates (decision 0046), in place of
+            // the command line's `archive relocate`; a retired archive takes
+            // no new revisions. Named as its record names it, read here.
+            if (const auto& stop = outcome.error();
+                stop.identity.result == MatchResult::Migrated && !stop.identity.archives.empty()) {
+                const auto& migrated = stop.identity.archives.front();
+                std::string label = migrated.substr(0, 8);
+                bool retired = false;
+                if (const auto archive = store->find_archive(migrated); archive && *archive) {
+                    if (!(*archive)->label.empty()) {
+                        label = (*archive)->label;
+                    }
+                    retired = (*archive)->status == "RETIRED";
+                }
+                return [label, retired](const app::Text& text) {
+                    const auto found = text.format("Not verified: the filesystem of this folder or volume is that of "
+                                                   "archive {}, but on another device than the one recorded "
+                                                   "(MIGRATED).",
+                        label);
+                    return found + "\n" +
+                           (retired ? text("This archive is retired and takes no new revisions, so it is not "
+                                           "relocated.")
+                                    : text("If it is that archive's device in another enclosure, or you moved the "
+                                           "archive to that device on purpose, relocate the archive to it with "
+                                           "Relocate to a new carrier... in the menu of its details."));
+                };
+            }
             // Refused while another operation that creates the archive's
             // next revision is unfinished, it names the window's own ways
             // on, or says that that operation still runs, judged now as
@@ -491,13 +519,23 @@ void resume_in_details(GuiState& state, const Uuid& archive, const std::string& 
     const auto& watches = state.operations.watches;
     const auto found = std::ranges::find(watches, key,
         [](const app::OperationWatch& watch) -> const std::string& { return watch.operation().key; });
-    if (found == watches.end() || found->operation().kind != app::OperationKind::Verification ||
-        found->operation().archive_uuid != archive) {
-        show_message(state, fixed_message("This verification is no longer listed as unfinished."));
+    if (found == watches.end() || found->operation().archive_uuid != archive ||
+        found->operation().kind == app::OperationKind::Registration) {
+        show_message(state, fixed_message(key.starts_with("relocation:")
+                                              ? "This relocation is no longer listed as unfinished."
+                                              : "This verification is no longer listed as unfinished."));
         return;
     }
     // A copy: the job it starts may have the operations read again.
     const auto stopped = found->operation();
+    // A stopped relocation (decision 0046): exactly as Resume on its row,
+    // never while a job of the window reads it.
+    if (stopped.kind == app::OperationKind::Relocation) {
+        if (!refused_while_a_job_reads(state, stopped.root, stopped.archive_uuid)) {
+            resume_relocation(state, stopped);
+        }
+        return;
+    }
     auto request = details_resume(stopped, state.interrupted_run, state.session->context.config);
     if (refused_while_the_archive_has_a_job(
             state, archive, request.root ? path_to_utf8(*request.root) : stopped.root)) {

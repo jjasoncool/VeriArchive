@@ -66,6 +66,14 @@ struct VolumeRow {
     // volume in full.
     std::string folder_button;
     std::string folder_tooltip;
+    // A relocation's new root (VolumeUse::Relocation): where, in a folder of
+    // this volume, the filesystem of the archive relocated is on another
+    // device than recorded (MIGRATED: its device in another enclosure, or a
+    // copy made sector by sector), which `own_button` ("Use as the new root",
+    // `own_tooltip` naming the root) makes the new root; empty otherwise.
+    std::string own_root;
+    std::string own_button;
+    std::string own_tooltip;
 };
 
 // The volumes' rows, those with a drive letter or folder path first, by it,
@@ -74,10 +82,21 @@ struct VolumeRow {
 // registrations by their roots' text (path_within). `names`: the archives'
 // labels (an archive not among them is named by the start of its uuid).
 // `shown`: Recorded for the screenshot mode's sample list, which is sample
-// data itself.
+// data itself. `use`: what the volume is chosen for, which the note of a
+// volume not chosen whole names: Register Archive's source, or the new root
+// of a relocation (decision 0046) of the archive `relocated`. A relocation
+// never takes a root that overlaps another archive's, nor an unfinished
+// registration's (decision 0001): a volume is chosen whole there only where
+// nothing else lies on it, the archive's own filesystem at the volume's root
+// aside; a volume whose root is another's offers no folder either. The
+// archive's own roots (its filesystem on another device than recorded, or its
+// carrier as recorded) never stand in the way: a root of it in a folder,
+// MIGRATED, is offered as the new root (own_root).
+enum class VolumeUse { Registration, Relocation };
 std::vector<VolumeRow> volume_rows(const app::Text& text, const std::vector<AttachedVolume>& volumes,
     std::span<const ArchiveCandidate> candidates, const std::vector<PendingRoot>& pending,
-    const std::vector<ArchiveName>& names, IdentityShown shown);
+    const std::vector<ArchiveName>& names, IdentityShown shown, VolumeUse use = VolumeUse::Registration,
+    const Uuid& relocated = {});
 
 // The folder or volume chosen, as the read of it found it: the root as
 // app::typed_root made it, its volume (IMediaEnumerator::volume_for_path),

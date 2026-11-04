@@ -228,12 +228,18 @@ std::vector<RunRow> recent_runs(const app::Text& text, const std::vector<VerifyR
 // far it came, and that a resume does not read again what it read.
 std::string stopped_verification_words(const app::Text& text, const app::OperationRow& row, bool adds_chunk_hashes);
 
-// What the details show of the unfinished verifications of `archive`, from
-// the latest read of the unfinished operations (`watches`).
+// What the details say of a stopped relocation of the archive that Resume
+// continues (decision 0046): where it reads, how far it came, and that a
+// resume does not read again what matched.
+std::string stopped_relocation_words(const app::Text& text, const app::OperationRow& row);
+
+// What the details show of the unfinished verifications and relocations of
+// `archive`, from the latest read of the unfinished operations (`watches`).
 struct DetailsOperations {
     // The first that has stopped and that Resume continues, as its row under
     // Unfinished operations offers Resume (OperationRow::offers_resume), with
-    // the words of the details' notice (stopped_verification_words).
+    // the words of the details' notice (stopped_verification_words,
+    // stopped_relocation_words).
     std::optional<app::OperationRow> stopped;
     std::string words;
     // Whether a verification of the archive that adds chunk hashes is

@@ -179,6 +179,77 @@ void volume_rows_tell_what_each_holds()
     CHECK(sample_rows[0].details.starts_with("SAMPLE-DEVICE · sample · "));
 }
 
+// The same rows in the relocation dialog (decision 0046), for the archive
+// relocated: a volume is chosen whole only where nothing else lies on it;
+// another archive at the volume's root leaves nothing of it to choose; the
+// archive's own filesystem on another device than recorded (its device in
+// another enclosure) never stands in the way, and in a folder it is offered
+// as the new root.
+void volume_rows_of_a_relocation()
+{
+    const Text english;
+    const Text chinese(Language::TraditionalChinese);
+    using va::gui::VolumeUse;
+    const std::vector<va::gui::AttachedVolume> volumes{
+        // ARCH-SAMPLE-1 ("Photos") and the retired ARCH-SAMPLE-4 ("Old") in folders.
+        {volume("/media/SAMPLE-A", "1111000011110000", "SAMPLE-SERIAL-A", "SAMPLE-A"), std::nullopt},
+        // ARCH-SAMPLE-2 at the volume's root.
+        {volume("/media/SAMPLE-B", "2222000022220000", "SAMPLE-SERIAL-B", "SAMPLE-B"), std::nullopt},
+        // The filesystem of ARCH-SAMPLE-3 ("Clone") on another device: the
+        // archive relocated, its device in another enclosure.
+        {volume("/media/SAMPLE-C", "3333000033330000", "SAMPLE-SERIAL-Y", "SAMPLE-C"), std::nullopt},
+        // Nothing on it.
+        {volume("/media/SAMPLE-D", "5555000055550000", "SAMPLE-SERIAL-D", "SAMPLE-D"), std::nullopt},
+        // A copy of the whole of volume B, sector by sector, on another device.
+        {volume("/media/SAMPLE-G", "2222000022220000", "SAMPLE-SERIAL-G", "SAMPLE-B"), std::nullopt},
+    };
+    const auto rows = va::gui::volume_rows(english, volumes, candidates(), {}, names, IdentityShown::Recorded,
+        VolumeUse::Relocation, cloned);
+    CHECK(rows.size() == 5);
+    if (rows.size() != 5) {
+        return;
+    }
+    // Folders of other archives: a folder that overlaps none of them.
+    CHECK(!rows[0].selectable && !rows[0].folder_button.empty() && rows[0].own_root.empty());
+    CHECK(rows[0].note.ends_with("; the whole volume cannot be the new root: choose a folder in it that does not "
+                                 "overlap them"));
+    // Another archive at the volume's root: nothing on it can be the new root.
+    CHECK(!rows[1].selectable && rows[1].folder_button.empty());
+    CHECK(rows[1].note == "Holds ARCH-SAMPLE-2 (" + native(std::filesystem::path("/media/SAMPLE-B")) +
+                              "); nothing on it can be the new root, which would overlap them");
+    // The archive relocated, its filesystem in a folder on another device:
+    // offered as the new root, and named as its own, not as another's.
+    const auto clone_root = native(std::filesystem::path("/media/SAMPLE-C") / "Clone");
+    CHECK(!rows[2].selectable && rows[2].own_root == clone_root);
+    CHECK(rows[2].note == "The filesystem of this archive is here, on another device than recorded (" + clone_root +
+                              ")");
+    CHECK(rows[2].own_button == "Use as the new root" && rows[2].own_tooltip == "Use " + clone_root + " as the new root");
+    // Nothing on it: chosen whole.
+    CHECK(rows[3].selectable && rows[3].note.empty() && rows[3].folder_button.empty() && rows[3].own_button.empty());
+    // A copy of another archive's whole volume: nothing on it either.
+    CHECK(!rows[4].selectable && rows[4].note.starts_with("Holds the filesystem of ARCH-SAMPLE-2, behind another "
+                                                          "enclosure") &&
+          rows[4].note.ends_with("; nothing on it can be the new root, which would overlap them"));
+
+    // The relocation of ARCH-SAMPLE-2, whose filesystem is the whole of
+    // volume G on another device: G chosen whole, B (its carrier as
+    // recorded) too, nothing else lying on them.
+    const auto own = va::gui::volume_rows(english, volumes, candidates(), {}, names, IdentityShown::Recorded,
+        VolumeUse::Relocation, whole);
+    CHECK(own.size() == 5 && own[1].selectable && own[4].selectable && own[4].own_root.empty());
+    CHECK(own.size() == 5 && own[1].note == "This archive is here, as recorded (" +
+                                                native(std::filesystem::path("/media/SAMPLE-B")) + ")");
+    CHECK(own.size() == 5 && own[4].note.starts_with("The filesystem of this archive is here, on another device"));
+
+    // In Chinese, with the catalog's words.
+    const auto chinese_rows = va::gui::volume_rows(chinese, volumes, candidates(), {}, names, IdentityShown::Recorded,
+        VolumeUse::Relocation, cloned);
+    CHECK(chinese_rows.size() == 5 && chinese_rows[1].note.ends_with("；其中沒有任何位置能作為新的根目錄，否則會與它們重疊"));
+    CHECK(chinese_rows.size() == 5 && chinese_rows[2].note == "此封存的檔案系統在這裡，但裝置與記錄中的不同（" +
+                                                                    clone_root + "）" &&
+          chinese_rows[2].own_button == "設為新的根目錄");
+}
+
 va::gui::ChosenSource source_at(const std::string& mount_point, const std::string& subpath, const va::VolumeInfo& on)
 {
     va::gui::ChosenSource source;
@@ -551,6 +622,7 @@ void sample_volumes_are_plainly_sample()
 void register_choices_tests()
 {
     volume_rows_tell_what_each_holds();
+    volume_rows_of_a_relocation();
     options_apply_as_a_registration_judges_the_root();
     options_shown_and_the_request_they_make();
     a_new_revision_is_of_the_archive_asked_for();

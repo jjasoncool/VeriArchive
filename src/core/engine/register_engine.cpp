@@ -792,11 +792,13 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                 store.rollback();
                 return {};
             }
-            // A registration over the lost manifest of an archive that is
-            // retired by now, as a version before decision 0028, point 9
-            // let one begin: a retired archive takes no new revision, so it
+            // A registration of an archive that is retired by now: one over
+            // its lost manifest, as a version before decision 0028, point 9
+            // let one begin, or any other, as a version that retired an
+            // archive beside its unfinished registration let it be retired.
+            // A retired archive takes no new revision (decision 0003), so it
             // can no longer finish, and waits to be abandoned.
-            if (plan.lost_revision) {
+            {
                 const auto archive = store.find_archive(plan.archive_uuid);
                 if (!archive) {
                     return std::unexpected(archive.error());
@@ -1087,9 +1089,10 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
                     store.rollback();
                     return {};
                 }
-                // Retired since it was named (decision 0028, point 9): the
-                // archive takes no new revision over its lost manifest.
-                if (lost && *now && (*now)->status == "RETIRED") {
+                // Retired since it was found (decision 0003), also over
+                // its lost manifest (decision 0028, point 9): the archive
+                // takes no new revision.
+                if (*now && (*now)->status == "RETIRED") {
                     refused = RegisterFailure{Kind::Refused, retired_takes_no_revision};
                     store.rollback();
                     return {};
@@ -1436,6 +1439,7 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
     // and the commit leaves a manifest that is not recorded, which the next
     // attempt replaces.
     bool cancelled_waiting = false; // cancelled while it waited for the write lock
+    bool retired_meanwhile = false; // the archive was retired while this attempt ran
     const auto record = [&]() -> std::expected<void, IoError> {
         // The record of a large archive, another attempt's among them, holds
         // the write lock for seconds: this one waits for it, and then finds
@@ -1487,9 +1491,24 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
             later_revision = *later;
             return std::unexpected(IoError{IoErrorKind::Other, 0, "the archive has a later revision"});
         }
+        // A retired archive takes no new revision (decision 0003): retired
+        // while this attempt ran, as a version that retired an archive beside
+        // its unfinished registration retired it, it stays retired, and
+        // nothing is recorded; the plan stays for the operator to abandon.
+        // The archive's record is read again here, in the transaction that
+        // writes it, never taken from when the registration began.
+        const auto now = store.find_archive(plan.archive_uuid);
+        if (!now) {
+            return std::unexpected(now.error());
+        }
+        if (*now && (*now)->status == "RETIRED") {
+            retired_meanwhile = true;
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the archive was retired"});
+        }
         ArchiveRecord archive;
         if (existing) {
-            archive = *existing;
+            // As it is now: what changed of it meanwhile (its label, say) stays.
+            archive = *now ? **now : *existing;
         } else {
             archive = {plan.archive_uuid, plan.label, plan.created, 0, "", "", ""};
         }
@@ -1579,6 +1598,11 @@ std::expected<RegisterOutcome, RegisterFailure> register_archive(
         }
         if (later_revision) {
             return made_for_an_older_revision(plan.archive_uuid, plan.root, plan.revision, *later_revision);
+        }
+        if (retired_meanwhile) {
+            return fail(Kind::Refused, "archive " + plan.archive_uuid +
+                                           " was retired while this registration ran; a retired archive takes no "
+                                           "new revisions");
         }
         if (cancelled_waiting) {
             return interrupted(store, plan, "registration was cancelled");

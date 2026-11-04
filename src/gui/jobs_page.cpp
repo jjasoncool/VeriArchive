@@ -529,9 +529,10 @@ GtkWidget* build_jobs_page(GuiState& state)
     set_margins(box, 24);
     GtkWidget* intro = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 18);
     GtkWidget* explanation =
-        make_label(text("Each registration, verification and comparison started in this window runs as a job. Jobs "
-                        "that read the same device wait for one another; the others run at once. A job stopped "
-                        "keeps what it did: it can be resumed without reading again what it read."));
+        make_label(text("Each registration, verification, comparison, relocation and export started in this window "
+                        "runs as a job. Jobs that read the same device wait for one another; the others run at once. A "
+                        "stopped registration, verification or relocation keeps what it did: it can be resumed "
+                        "without reading again what it read."));
     gtk_widget_set_hexpand(explanation, TRUE);
     gtk_widget_add_css_class(explanation, "dim-label");
     page.clear = gtk_button_new_with_label(text("Clear ended jobs").c_str());

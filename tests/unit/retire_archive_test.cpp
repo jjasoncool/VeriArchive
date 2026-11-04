@@ -5,6 +5,8 @@
 
 #include "engine_fixture.h"
 
+#include "app/refusal_in_window.h"
+#include "app/retirement_report.h"
 #include "common/shell_argument.h"
 
 #include "core/engine/abandon_registration.h"
@@ -104,6 +106,9 @@ void an_archive_whose_manifest_can_be_used_is_retired_at_once()
     CHECK(again && again->already_retired && !again->lost_manifest);
 
     // A first registration that never finished: the archive has no revision.
+    // While that registration is unfinished, which would give the archive its
+    // first revision, it is not retired (decision 0046); without a plan, it
+    // is retired at once.
     fixture.archive.node("c/SAMPLE-three.txt").open_error =
         va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged (sample)"};
     const auto interrupted = fixture.register_root(fixture.archive.root() / "c");
@@ -112,6 +117,15 @@ void an_archive_whose_manifest_can_be_used_is_retired_at_once()
     CHECK(archives && archives->size() == 3);
     if (archives && archives->size() == 3) {
         const auto& c = archives->back();
+        const auto refused = retire(fixture, c.archive_uuid, false);
+        CHECK(!refused && refused.error().kind == va::RetireFailure::Kind::Refused && refused.error().refusing &&
+              refused.error().refusing->kind == va::RefusingOperation::Kind::Registration &&
+              refused.error().refusing->revision == 1 &&
+              refused.error().message.starts_with("an unfinished registration of archive " + c.archive_uuid));
+        CHECK(status_of(fixture, c.archive_uuid) == "REGISTRATION_INCOMPLETE");
+        // Its plan gone (sample damage of the repository's settings), the
+        // archive without a revision is retired at once.
+        fixture.repository.execute(("DELETE FROM settings WHERE key = 'registration:" + c.archive_uuid + "'").c_str());
         const auto first = retire(fixture, c.archive_uuid, false);
         CHECK(first && first->revision == 0 && !first->lost_manifest);
         CHECK(status_of(fixture, c.archive_uuid) == "RETIRED");
@@ -607,10 +621,128 @@ void retiring_writes_nothing_beside_a_registration_or_a_later_revision()
     }
 }
 
+// Decision 0046: an archive is not retired while an operation that would give
+// it a new revision is unfinished: a relocation (its record, sample data) and
+// a FULL verify that adds chunk hashes (its run's record, sample data), as a
+// registration (above). Each refusal names the operation (refusing), which
+// the window words in its own ways on (app::retirement_message_in_window);
+// retirement_of says the same without writing anything. Once the operation is
+// gone, the archive is retired.
+void retiring_waits_for_every_operation_that_makes_a_revision()
+{
+    test::EngineFixture fixture;
+    fixture.archive.add_file("a/SAMPLE-one.txt", "one (sample data)");
+    const auto registered = fixture.register_root(fixture.archive.root() / "a");
+    CHECK(registered.has_value());
+    if (!registered) {
+        return;
+    }
+    const auto& uuid = registered->archive_uuid;
+    const auto& layout = fixture.repository.context.repo;
+    const va::app::Text english;
+    const va::app::Text chinese(va::app::Language::TraditionalChinese);
+
+    // What retiring it would do, read only: nothing lost, not retired yet.
+    const auto preview = va::retirement_of(fixture.store, *fixture.repository.files, layout, uuid);
+    CHECK(preview && preview->archive_uuid == uuid && preview->revision == 1 && !preview->lost_manifest &&
+          !preview->already_retired);
+    CHECK(status_of(fixture, uuid) == "REGISTERED");
+
+    // An unfinished relocation to another disk.
+    const auto relocation = "INSERT INTO settings(key, value) VALUES('relocation:" + uuid +
+                            "', '{\"archive_uuid\":\"" + uuid +
+                            "\",\"revision\":1,\"run_id\":\"c0ffee00-0000-4000-8000-0000000000d1\","
+                            "\"root\":\"K:/SAMPLE-COPY\",\"stopped\":\"2026-10-16T00:00:00Z\"}')";
+    fixture.repository.execute(relocation.c_str());
+    const auto refused = retire(fixture, uuid, false);
+    CHECK(!refused && refused.error().kind == va::RetireFailure::Kind::Refused && refused.error().refusing &&
+          refused.error().refusing->kind == va::RefusingOperation::Kind::Relocation &&
+          refused.error().refusing->root == "K:/SAMPLE-COPY" && !refused.error().refusing->later_revision &&
+          refused.error().message == "an unfinished relocation of archive " + uuid +
+                                         " (to \"K:/SAMPLE-COPY\") exists; resume it with `archive relocate " + uuid +
+                                         " K:/SAMPLE-COPY --resume`, or abandon it with `archive abandon-relocation " +
+                                         uuid + "`");
+    CHECK(status_of(fixture, uuid) == "REGISTERED");
+    if (!refused) {
+        return;
+    }
+    const auto in_window = va::app::retirement_message_in_window(english, refused.error(), false);
+    CHECK(in_window == "an unfinished relocation of archive " + uuid +
+                           " (to \"K:/SAMPLE-COPY\") exists; resume it with Resume, or abandon it with Abandon..., on "
+                           "its row under Unfinished operations in Archives; or resume it in the archive's details");
+    CHECK(va::app::retirement_message_in_window(chinese, refused.error(), false).contains("「未完成的作業」"));
+    const auto read_only = va::retirement_of(fixture.store, *fixture.repository.files, layout, uuid);
+    CHECK(!read_only && read_only.error().kind == va::RetireFailure::Kind::Refused && read_only.error().refusing &&
+          read_only.error().message == refused.error().message);
+    fixture.repository.execute(("DELETE FROM settings WHERE key = 'relocation:" + uuid + "'").c_str());
+
+    // An unfinished FULL verify that adds chunk hashes to revision 1.
+    const auto adding = "INSERT INTO settings(key, value) VALUES('run:c0ffee00-0000-4000-8000-0000000000d2', "
+                        "'{\"archive_uuid\":\"" +
+                        uuid +
+                        "\",\"revision\":1,\"root\":\"K:/SAMPLE\",\"add_chunk_hashes\":67108864,"
+                        "\"started\":\"2026-10-16T00:00:00Z\"}')";
+    fixture.repository.execute(adding.c_str());
+    const auto waits = retire(fixture, uuid, false);
+    CHECK(!waits && waits.error().kind == va::RetireFailure::Kind::Refused && waits.error().refusing &&
+          waits.error().refusing->kind == va::RefusingOperation::Kind::AddingVerification &&
+          waits.error().refusing->run_id == "c0ffee00-0000-4000-8000-0000000000d2");
+    CHECK(!waits && va::app::retirement_message_in_window(english, waits.error(), false)
+                        .contains("on its row under Unfinished operations in Archives"));
+    CHECK(status_of(fixture, uuid) == "REGISTERED");
+    fixture.repository.execute("DELETE FROM settings WHERE key = 'run:c0ffee00-0000-4000-8000-0000000000d2'");
+
+    // Nothing unfinished: retired; retired before, says so.
+    const auto retired = retire(fixture, uuid, false);
+    CHECK(retired && !retired->already_retired && status_of(fixture, uuid) == "RETIRED");
+    const auto after = va::retirement_of(fixture.store, *fixture.repository.files, layout, uuid);
+    CHECK(after && after->already_retired);
+}
+
+// Decision 0028, point 9: what retiring an archive whose latest manifest is
+// lost declares, as the command line says it before --confirm and the window
+// before its confirmation (app::retirement_explanation), in both languages;
+// nothing for an archive whose manifest is not lost. retirement_of tells that
+// a confirmation is needed, without writing anything.
+void a_lost_manifest_is_explained_before_the_retirement()
+{
+    test::EngineFixture fixture;
+    const auto archive_uuid = registered_twice(fixture);
+    std::filesystem::remove(va::manifest_path(fixture.repository.context.repo.manifests(), archive_uuid, 2));
+    const auto preview =
+        va::retirement_of(fixture.store, *fixture.repository.files, fixture.repository.context.repo, archive_uuid);
+    CHECK(preview && preview->lost_manifest && preview->revision == 2 && !preview->already_retired);
+    CHECK(status_of(fixture, archive_uuid) == "REGISTERED");
+    if (!preview) {
+        return;
+    }
+    const va::app::Text english;
+    CHECK(va::app::retirement_explanation(english, *preview) ==
+          "Lost manifest of ARCH-0001 (" + archive_uuid + "), revision 2\n  the manifest of revision 2 (manifests/" +
+              archive_uuid +
+              "/r0002.vam) is missing\nRetiring the archive declares that manifest lost for good: do this only "
+              "where no backup of the repository, export of revision 2 or media copy holds it, and the device that "
+              "held the archive is gone as well (broken, lost or wiped); otherwise put the manifest back with "
+              "`import`, or register the archive's next revision from its folder or volume with `register "
+              "<root_path> --lost-manifest " +
+              archive_uuid +
+              "`. The archive keeps its verification history and its hash chain, but can no longer be verified or "
+              "take a new revision. It no longer stops the registration of a new folder or volume or a relocation: "
+              "retired, it is no longer taken as a possible owner of one, as identity matching cannot use its "
+              "latest manifest.\n");
+    CHECK(va::app::retirement_explanation(va::app::Text(va::app::Language::TraditionalChinese), *preview)
+              .starts_with("無法取回的清單檔：ARCH-0001（" + archive_uuid + "），版次 2\n  "));
+    auto kept = *preview;
+    kept.lost_manifest.reset();
+    CHECK(va::app::retirement_explanation(english, kept).empty());
+}
+
 } // namespace
 
 void retire_archive_tests()
 {
+    retiring_waits_for_every_operation_that_makes_a_revision();
+    a_lost_manifest_is_explained_before_the_retirement();
     an_archive_whose_manifest_can_be_used_is_retired_at_once();
     an_archive_whose_manifest_is_lost_is_retired_once_confirmed();
     an_archive_whose_manifest_changed_only_in_its_body_is_retired_at_once();

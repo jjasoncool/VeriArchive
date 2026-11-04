@@ -25,6 +25,8 @@ int main()
     history_rows_tests();
     register_choices_tests();
     compare_choices_tests();
+    archive_actions_tests();
+    progress_wording_tests();
     hash_tests();
     merkle_tests();
     fs_access_tests();

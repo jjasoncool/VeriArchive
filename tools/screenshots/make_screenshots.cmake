@@ -146,7 +146,7 @@ if(NOT imported STREQUAL earlier)
 endif()
 
 set(pictures 01-settings.png 02-archive-list.png 03-register.png 04-verify.png 05-history.png
-    06-compare.png 07-language.png 08-jobs.png 09-result.png 10-devices.png)
+    06-compare.png 07-language.png 08-jobs.png 09-result.png 10-devices.png 11-relocate.png)
 file(MAKE_DIRECTORY "${OUT}")
 foreach(picture IN LISTS pictures)
     file(REMOVE "${OUT}/${picture}")

@@ -389,33 +389,7 @@ void guarded(const std::function<void()>& work, const std::function<void(Report)
     }
 }
 
-// ---- Progress, notifications -----------------------------------------------
-
-std::optional<BarState> ProgressWording::update(const Progress& progress)
-{
-    const auto now = std::chrono::steady_clock::now();
-    estimate_.update(progress, now);
-    const bool complete = progress.items_total > 0 && progress.items_done == progress.items_total;
-    if (!complete && now - last_ < std::chrono::milliseconds(200)) {
-        return std::nullopt;
-    }
-    last_ = now;
-    BarState bar;
-    if (progress.items_total == 0) {
-        bar.pulse = true;
-        bar.text = text_.format("Scanning: {}", app::count_of(text_, progress.items_done, app::Counted::Entry));
-    } else if (counting_ == Counting::Entries) {
-        bar.fraction = static_cast<double>(progress.items_done) / static_cast<double>(progress.items_total);
-        // Two calls: the compiler checks each literal template against its values.
-        bar.text = progress.items_total == 1
-                       ? text_.format("Comparing: {} / {} entry", progress.items_done, progress.items_total)
-                       : text_.format("Comparing: {} / {} entries", progress.items_done, progress.items_total);
-    } else {
-        bar.fraction = estimate_.fraction().value_or(0);
-        bar.text = text_.format("Hashing: {}", app::describe_progress(text_, estimate_));
-    }
-    return bar;
-}
+// ---- Notifications ----------------------------------------------------------
 
 void notify_if_away(const std::string& report, const std::string& id)
 {
