@@ -808,18 +808,20 @@ constexpr CatalogEntry entries[] = {
     {"Volumes whose device is not known", "裝置不明的磁碟區"},
     {"The filesystem belongs to {}, but the device differs from the one recorded (MIGRATED)",
         "檔案系統屬於 {}，但裝置與記錄中的不同（已遷移）", Match::FormatOnly},
+    {"The filesystem belongs to {}, but the enclosure differs from the one recorded (MIGRATED)",
+        "檔案系統屬於 {}，但外接盒與記錄中的不同（已遷移）", Match::FormatOnly},
     {"Register this volume", "註冊這個磁碟區"},
     {"Being registered: {}", "正在註冊 {}", Match::FormatOnly},
     // The device's own serial behind its enclosure (decision 0047), read
     // with administrator permission on the operator's request.
     {"Through a USB enclosure, the system often sees only the enclosure's serial, not that of the device inside. "
      "There you can read the device's own serial once, with administrator permission; once it is recorded, "
-     "VeriArchive tells the device by it after a change of enclosure. A serial read here is not recorded: it is "
-     "recorded when you register with \"Record the device's own serial\" on, or when the FULL verify after a change "
-     "of enclosure passes.",
+     "VeriArchive tells the device by it after a change of enclosure. A serial read here is not recorded by itself: "
+     "it is recorded when you then register this device (Register Archive takes the read kept here), or when the "
+     "FULL verify after a change of enclosure passes.",
         "透過 USB 外接盒連接時，系統常常只看得到外接盒的序號，看不到裡面裝置本身的序號。這時可以用系統管理員權限讀取一次"
-        "裝置本身的序號；記下之後，換了外接盒再讀取一次，VeriArchive 就能認出是同一個裝置。這裡讀到的序號不會記錄；註冊"
-        "時開啟「記錄裝置本身的序號」，或換了外接盒、確認後的完整驗證通過時，才會記下。"},
+        "裝置本身的序號；記下之後，換了外接盒再讀取一次，VeriArchive 就能認出是同一個裝置。這裡讀到的序號本身不會記錄；"
+        "之後註冊這個裝置時（「註冊封存」會採用這裡保留的讀取），或換了外接盒、確認後的完整驗證通過時，才會記下。"},
     {"Device's own serial", "裝置本身的序號"},
     {"This enclosure does not pass the device's own serial on.", "這個外接盒不會轉送裝置本身的序號。"},
     {"Read the device's own serial...", "讀取裝置本身的序號…"},

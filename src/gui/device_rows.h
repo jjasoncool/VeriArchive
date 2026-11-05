@@ -156,6 +156,10 @@ struct EnclosureCase {
 std::optional<EnclosureCase> enclosure_case_of(
     const ArchiveAttachment& attachment, std::span<const VolumeInfo> volumes, const VolumeInfo& recorded, bool retired);
 std::optional<EnclosureCase> enclosure_case(const AttachedRead* read, const ArchiveStatus& status, IdentityShown shown);
+// The archives among `statuses` for which enclosure_case holds on `read`, as
+// Devices names them under their volume (device_cards).
+std::vector<Uuid> enclosure_cases(
+    const AttachedRead& read, const std::vector<ArchiveStatus>& statuses, IdentityShown shown);
 
 // A device's health as a pill (decision 0044): "Healthy" (健康, Success),
 // "Warning (predicting failure)" (警告（預測即將故障）, Warning), "Unhealthy
@@ -233,11 +237,14 @@ struct DeviceCard {
 // as the latest read of them found), each named on its volume in place of
 // Register this volume. `reads`: the reads of the devices' own serials kept
 // (decision 0047); `reader`: this computer has a device identity reader;
-// `reading`: the device whose own serial is being read, if one is.
+// `reading`: the device whose own serial is being read, if one is;
+// `enclosure_changed`: the archives found behind a changed enclosure
+// (enclosure_cases), whose MIGRATED root says that the enclosure differs, as
+// Archives says it, where any other says that the device differs.
 std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& read,
     const std::vector<ArchiveName>& names, IdentityShown shown,
     const std::vector<std::filesystem::path>& registering = {}, const KeptDeviceReads& reads = {},
-    bool reader = false, const std::string& reading = {});
+    bool reader = false, const std::string& reading = {}, const std::vector<Uuid>& enclosure_changed = {});
 
 // The head of Devices: "3 devices attached", or that none is.
 std::string devices_status(const app::Text& text, const AttachedRead& read);

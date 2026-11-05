@@ -623,6 +623,34 @@ void devices_offer_to_read_the_devices_own_serial()
     const auto plain = read_with(enclosed_device(enclosure_now));
     cards = va::gui::device_cards(chinese, plain, names, IdentityShown::Recorded, {}, {}, true);
     CHECK(!cards.empty() && !cards.front().own && field(cards.front().fields, "序號") == enclosure_now);
+
+    // Under its volume, the archive found behind a changed enclosure says
+    // that the enclosure differs, as Archives says it; every other MIGRATED,
+    // that the device does.
+    const auto archive_title = [](const std::vector<va::gui::DeviceCard>& shown) {
+        return shown.size() == 1 && shown.front().volumes.size() == 1 &&
+                       shown.front().volumes.front().archives.size() == 1
+                   ? std::optional(shown.front().volumes.front().archives.front())
+                   : std::nullopt;
+    };
+    const std::vector<va::ArchiveStatus> statuses{status_of(archive, recorded_carrier())};
+    const auto changed = va::gui::enclosure_cases(plain, statuses, IdentityShown::Recorded);
+    CHECK((changed == std::vector<va::Uuid>{archive}));
+    CHECK(va::gui::enclosure_cases(plain, statuses, IdentityShown::Sample).empty());
+    const auto on_volume =
+        archive_title(va::gui::device_cards(chinese, plain, names, IdentityShown::Recorded, {}, {}, true, {}, changed));
+    CHECK(on_volume && on_volume->migrated &&
+          on_volume->title == "檔案系統屬於 ARCH-SAMPLE-47，但外接盒與記錄中的不同（已遷移）");
+    const auto english_volume = archive_title(
+        va::gui::device_cards(Text(), plain, names, IdentityShown::Recorded, {}, {}, true, {}, changed));
+    CHECK(english_volume && english_volume->title == "The filesystem belongs to ARCH-SAMPLE-47, but the enclosure "
+                                                     "differs from the one recorded (MIGRATED)");
+    const auto internal = read_with(enclosed_device("SAMPLE-INTERNAL", "sata"));
+    CHECK(va::gui::enclosure_cases(internal, statuses, IdentityShown::Recorded).empty());
+    const auto relocation = archive_title(va::gui::device_cards(chinese, internal, names, IdentityShown::Recorded,
+        {}, {}, true, {}, va::gui::enclosure_cases(internal, statuses, IdentityShown::Recorded)));
+    CHECK(relocation && relocation->migrated &&
+          relocation->title == "檔案系統屬於 ARCH-SAMPLE-47，但裝置與記錄中的不同（已遷移）");
 }
 
 void register_archive_offers_to_record_the_serial()

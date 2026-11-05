@@ -250,6 +250,18 @@ std::optional<EnclosureCase> enclosure_case(const AttachedRead* read, const Arch
         status.archive.status == "RETIRED");
 }
 
+std::vector<Uuid> enclosure_cases(
+    const AttachedRead& read, const std::vector<ArchiveStatus>& statuses, IdentityShown shown)
+{
+    std::vector<Uuid> found;
+    for (const auto& status : statuses) {
+        if (enclosure_case(&read, status, shown)) {
+            found.push_back(status.archive.archive_uuid);
+        }
+    }
+    return found;
+}
+
 std::vector<Field> details_device_fields(
     const app::Text& text, std::vector<Field> recorded, const ArchiveAttached& attached)
 {
@@ -373,7 +385,7 @@ Pill health_pill(const app::Text& text, const std::optional<DeviceHealth>& healt
 
 std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& read,
     const std::vector<ArchiveName>& names, IdentityShown shown, const std::vector<std::filesystem::path>& registering,
-    const KeptDeviceReads& reads, bool reader, const std::string& reading)
+    const KeptDeviceReads& reads, bool reader, const std::string& reading, const std::vector<Uuid>& enclosure_changed)
 {
     // The sample list is sample data itself, shown as it is.
     const auto identity = read.sample ? IdentityShown::Recorded : shown;
@@ -399,11 +411,19 @@ std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& 
         for (const auto& root : roots) {
             const auto label = label_of(names, root.archive_uuid);
             const bool migrated = root.match == MatchResult::Migrated;
+            // Decision 0047: behind a changed enclosure, as Archives says it,
+            // never that the device differs, which the guide gives as a
+            // relocation's or a clone's.
+            const bool enclosure = migrated && std::ranges::find(enclosure_changed, root.archive_uuid) !=
+                                                   enclosure_changed.end();
             line.archives.push_back({root.archive_uuid,
-                migrated ? text.format("The filesystem belongs to {}, but the device differs from the one recorded "
-                                       "(MIGRATED)",
-                               label)
-                         : label,
+                enclosure ? text.format("The filesystem belongs to {}, but the enclosure differs from the one "
+                                        "recorded (MIGRATED)",
+                                label)
+                : migrated ? text.format("The filesystem belongs to {}, but the device differs from the one recorded "
+                                         "(MIGRATED)",
+                                 label)
+                           : label,
                 path_to_utf8(root.root), migrated});
         }
         // Registered as a whole only where nothing lies on it that matching

@@ -275,7 +275,8 @@ void refresh_devices(GuiState& state)
                                   archive_names(state.archives_page.statuses, state.identity_shown),
                                   state.identity_shown, registering_roots(state), state.device_reads,
                                   reader_available(state),
-                                  state.device_reading ? state.device_reading->device_ref : std::string{})
+                                  state.device_reading ? state.device_reading->device_ref : std::string{},
+                                  enclosure_cases(*read, state.archives_page.statuses, state.identity_shown))
                             : std::vector<DeviceCard>{};
     // The same as drawn: the keyboard focus stays where it is.
     if (page.shown.has_value() == (read != nullptr) && (!read || *page.shown == cards)) {
@@ -355,8 +356,8 @@ GtkWidget* build_devices_page(GuiState& state)
         text("Through a USB enclosure, the system often sees only the enclosure's serial, not that of the device "
              "inside. There you can read the device's own serial once, with administrator permission; once it is "
              "recorded, VeriArchive tells the device by it after a change of enclosure. A serial read here is not "
-             "recorded: it is recorded when you register with \"Record the device's own serial\" on, or when the "
-             "FULL verify after a change of enclosure passes."));
+             "recorded by itself: it is recorded when you then register this device (Register Archive takes the "
+             "read kept here), or when the FULL verify after a change of enclosure passes."));
     gtk_widget_add_css_class(page.enclosures, "dim-label");
     gtk_widget_set_visible(page.enclosures, reader_available(state));
     gtk_box_append(GTK_BOX(box), page.enclosures);
