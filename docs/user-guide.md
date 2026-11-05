@@ -7,7 +7,7 @@ The whole workflow is two steps:
 1. **Register**: read every file of a folder or volume once and store its fingerprints (BLAKE3 and SHA-256) as the **baseline**.
 2. **Verify**: later, re-read every registered byte from the disk, compare it with the baseline, and report what changed.
 
-With pictures of the graphical interface (`veriarchive-gui.exe`) as it really looks, this guide takes you step by step through creating the repository, registering an archive, verifying it, reading its result and history, relocating it, and **confirming that a copy and the original are exactly the same**. Most sections explain the window first, then the command line (`veriarchive-cli.exe`).
+With pictures of the graphical interface (`veriarchive-gui.exe`) as it really looks, this guide takes you step by step through creating the repository, registering an archive, verifying it, reading its result and history, saving a verification report, relocating it, and **confirming that a copy and the original are exactly the same**. Most sections explain the window first, then the command line (`veriarchive-cli.exe`).
 
 All data in the screenshots is sample data. This guide is public, so its screenshots cannot show what a real device holds. The archives are folders of sample files on one volume, under `D:\va-sample`: `原始資料` (`ARCH-0001`, the original) and `備份資料` (`ARCH-0002`, its copy); `舊版封存` (`ARCH-0003`) stands for an archive that an earlier version registered, still without chunk hashes (see "Adding chunk hashes to an archive registered earlier"); and the picture of Register Archive registers a fourth sample folder, `新的資料`, as `ARCH-0009`. While the screenshots are made, VeriArchive replaces the identity of that volume and its device (volume label, device model, serial and capacity) with fixed sample values (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, `SAMPLE0001`, 1.0 TiB), lists a fixed set of sample devices and volumes (`SAMPLE-DEVICE-01`, `/media/SAMPLE-VOLUME-1`, ...) on the Devices page and in the dialogs in place of this computer's, answers a read of a device's own serial with a fixed sample identity (`SAMPLE-OWN-SERIAL-01`) without asking Windows for administrator permission, and names the computer `SAMPLE-HOST`, so no real device ever shows. The times, durations and read speeds are those of the run that made the pictures. In real use you usually register a whole volume of a device, such as `H:\`, chosen among the attached volumes (see "Registering an archive"), and Archives shows its real volume label, model and capacity; everything else works as in the screenshots.
 
@@ -335,7 +335,7 @@ With a uuid, or its first 8 or more characters, VeriArchive finds the archive on
 
 **View result**, in an archive's details, on a row of Recent verifications or History, on an ended verification in Jobs, or in the message that a verification ended, opens the run's **result page**:
 
-- **The banner**: the result with its mode, for example "FULL VERIFY PASSED", the archive, and when the run ended; a PASSED run adds "100% of the registered content was read and matched".
+- **The banner**: the result with its mode, for example "FULL VERIFY PASSED", the archive, and when the run ended; a PASSED run adds "100% of the registered content was read and matched". Beside it, **Save report...** saves the run's verification report (see "Saving a verification report" below).
 - The run's device alerts, in red.
 - For a FAILED or PASSED_WITH_WARNINGS run, its items come first: every entry with a problem, with its status and detail.
 - **The figures**: read and matched, entries compared, duration and average read speed.
@@ -388,6 +388,42 @@ Item statuses:
 | Unbaselined | unreadable at registration, so there is no hash to compare. When everything else matched and the archive is not retired, the report suggests registering a new revision, which takes a baseline for it (`register <root> --new-revision`, or "Create a new revision..." in the menu of the archive's details) |
 | Unrepresentable | the name cannot exist on this operating system, and the revision verified was recorded on another one (for example a name with `?`, registered on Linux and verified on Windows): a warning. Verified on the system that recorded the revision, such an entry that is gone is Missing |
 | SkippedMountPoint | another volume is mounted at this folder: it is not part of the archive and is not read. Where the archive recorded nothing there (the volume was mounted there at registration already), it changes no result; where it covers recorded files or folders, those are listed with this status and the run fails |
+
+### Saving a verification report
+
+A **verification report** is one file that says what one verification found: to keep with the archive's papers, or to send to someone who does not use VeriArchive. It is an HTML file that any browser opens, also offline. It holds no script and loads nothing from elsewhere, so opening it runs nothing.
+
+In the window, press **Save report...** in the banner of the run's result page (see "Reading the result" above). Only a run that reached a result (PASSED, PASSED_WITH_WARNINGS or FAILED) has a report; the banner of an INCOMPLETE run's page has no Save report... and says "A report cannot be saved for a verification that has not finished." under its result. The save dialog proposes a name such as `ARCH-0001 verification report 2026-11-04 PASSED.html` (the archive's label, the date the run ended and its result, in the interface language), in your Documents folder, or in the folder where you last saved a report while the window has been open; it asks before it replaces a file of that name. The message at the foot of the window then says "Saved report: ..." with **Open**, which opens the file in your browser; where the report cannot be saved, it says "The report ... was not saved:" and why.
+
+What the report holds:
+
+- What the result page shows, in the same words: the result with its mode, the archive and when the run ended, the device alerts, the figures, the read speed with its chart, every item (not 200 at a time), Device and identity, and Technical details with the run's id and what VeriArchive detects.
+- For a run that went on past a changed enclosure after a read of the device's own serial (see "A device moved to another enclosure"): the model, serial and WWN that were read, under "The device's own identity, read behind its enclosure". The result page does not show them.
+- "Runs of this archive": every recorded run of the archive, newest first, with this run marked "This run".
+- "History chain when this report was made": the result of the same check as "Check history chain" on the History page, for the history of every archive, and "This run's hash in the history chain (row_hash)".
+- At its end, when, on which computer and by which version of VeriArchive it was made.
+
+On screen it follows your system's light or dark style. Printed, it fits A4 and needs no background colours, and a long list of items repeats its heading on each page.
+
+**Where it cannot be saved.** Not in the root of an archive that is attached now, nor in any folder inside that root: the report would be a new file there, which that archive's next FULL verification reports as New, so that the verification fails. Where an archive is a whole volume, such as `H:\`, that is every folder of that volume. VeriArchive refuses such a folder and names the archive, for example "H:\Reports lies in the root of ARCH-0001 (H:\): a report saved there would add a file that its next FULL verification reports as added. Choose a folder outside every archive.", also when you reach the folder through a symbolic link or a junction to it, through a drive letter made with `subst`, or by a short name such as `PROGRA~1`. Save reports elsewhere, for example in Documents.
+
+**Checking a report later.** The file is not signed, so it cannot show by itself that someone changed it after it was made: the repository is the record, and the report says what the repository recorded when it was made. To check a report, make a new report of the same run from the repository (Save report... on its result page, or `veriarchive-cli report` below) and compare the two: they must say the same of this run (its result, its figures and its items), this run's hash in the history chain (row_hash) must be the same, and the history chain must still be intact (it then counts the runs recorded since as well). The same hash shows only that the repository's record of the run has not changed; whether the old file was changed shows only in what the two say. The end of the report says how to make the new one as well.
+
+On the command line:
+
+```text
+veriarchive-cli report <run_id> --out D:\Reports\ARCH-0001.html
+```
+
+`<run_id>` is the run's whole id, as `veriarchive-cli history <uuid>` lists it, `verify --json` gives it (`run_id`) and the result page shows it under Technical details ("Run"). The command makes the same file as the window, in the language of `--lang` (without it, as "Interface language" above describes). `report` records nothing in the repository: it adds no run and changes no history (as with every command, the first one that a new version runs upgrades an older database; see "After updating VeriArchive"). It says "Wrote the verification report of run ... (ARCH-0001: FULL VERIFY PASSED) to ..."; with `--json` it gives `run_id`, `archive_uuid`, `result` and `out` (the file written).
+
+| Exit code | When |
+|---|---|
+| 0 | the report was written |
+| 10 | nothing was written: a usage error (no run id, no `--out`); the file is there already ("... exists already; a report never replaces a file, so name another one"); the run is not recorded ("no run ..."); the run is INCOMPLETE ("run ... did not finish (INCOMPLETE); a report is made only of a run that reached a result"); the file's folder lies in the root of an attached archive (see above) |
+| 11 | the repository cannot be opened or read, or the file cannot be written |
+
+`report` never replaces a file that is there when it starts, unlike `export-sha256sums`, which replaces its file without asking; in the window, the save dialog asks you first.
 
 ### Resuming an interrupted run
 
@@ -605,7 +641,7 @@ veriarchive-cli archive retire <uuid>                      # --confirm where its
 
 ## Export and import
 
-In the window, "Export manifest..." in the menu of an archive's details writes the manifest of its current revision and its `identity.json` into a folder named for the archive (its label and the start of its UUID) inside the folder you choose, so that exports of several archives into one folder never replace each other. A folder inside the root of an attached archive is refused: its next FULL verification would report the files as new. The export runs as a job; Stop cancels it and writes nothing. Importing, and the list for `sha256sum`, are on the command line:
+In the window, "Export manifest..." in the menu of an archive's details writes the manifest of its current revision and its `identity.json` into a folder named for the archive (its label and the start of its UUID) inside the folder you choose, so that exports of several archives into one folder never replace each other. A folder inside the root of an attached archive is refused, also when you reach it through a symbolic link or a junction, a drive letter made with `subst` or a short name: its next FULL verification would report the files as new (a verification report is refused there too; see "Saving a verification report"). The export runs as a job; Stop cancels it and writes nothing. Importing, and the list for `sha256sum`, are on the command line:
 
 ```text
 veriarchive-cli export-sha256sums <uuid> --out sums.txt   # sha256sum-format list

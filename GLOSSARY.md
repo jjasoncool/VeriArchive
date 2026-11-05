@@ -149,6 +149,10 @@ _Avoid_: diff, verification
 Writing the manifest of an archive's latest revision, with its identity file, into a folder outside the repository, from which an import takes it into this repository or another. It copies a baseline, never the archive's files. In the interface: 匯出.
 _Avoid_: backup (VeriArchive makes none), save, report (a report says what a run found)
 
+**Verification report**:
+A file that says what one verification run found, as its result page says it, with the archive's runs and the state of the history chain when it was made. Only a run that reached a result has one. It says what the repository recorded when it was made and is not signed: the repository stays the record. In the interface: 驗證報告.
+_Avoid_: export (an export copies a baseline), certificate (it certifies nothing and is not signed)
+
 **Unfinished operation**:
 A registration, relocation or verification recorded in the repository that has not finished, wherever it was started (the window or the command line): still running, stopped and resumable, or one that can no longer finish and waits to be abandoned. It lives in the repository, not in a program. In the interface: 未完成的作業.
 _Avoid_: pending job (a job is the window's), interrupted run (a run is one verification), incomplete operation (INCOMPLETE is a run result)

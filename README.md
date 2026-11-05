@@ -13,6 +13,11 @@ creates backups. Windows and Linux, one codebase.
   recorded run that was changed or removed, but not the removal of the newest runs, nor runs
   changed with the chain computed again; history signatures, which would detect those, are not
   part of this version.
+- A **verification report** says what one run found as one self-contained HTML file (no script
+  and nothing loaded from elsewhere; a light and a dark style, and A4 printing), with the archive's
+  runs, the state of the history chain when it was made and the run's hash in it, saved from the
+  run's result page or by `veriarchive-cli report` (decision 0048). It is not signed: the
+  repository stays the record.
 
 VeriArchive detects accidental corruption and unintended change. Tamper evidence (signed
 manifests) is not part of this version.
@@ -108,6 +113,7 @@ veriarchive-cli archive list                    # last FULL verify, last verify,
 veriarchive-cli archive compare <uuid_a> <uuid_b>   # does copy B hold what archive A holds?
 veriarchive-cli history <uuid>
 veriarchive-cli repo verify-history             # check the history hash chain
+veriarchive-cli report <run_id> --out run.html  # the verification report of one run, as HTML
 veriarchive-cli export-sha256sums <uuid> --out sums.txt   # sha256sum -c, run in the archive's root
 ```
 
@@ -137,10 +143,11 @@ loses the verification history.
 unfinished operations, the archives with where each is attached now and the details of the one
 chosen, from which it is verified, compared, given a new revision, exported, relocated or
 retired), Devices (the attached devices, their health, volumes and archives), Jobs, History (the
-runs of every archive, each with its result page) and Settings; Register Archive and Compare
-Archives are dialogs. Every registration, verification, comparison, relocation and export runs as
-a job with its progress, which Stop ends; interrupted registrations, verifications and relocations
-can be resumed, and unfinished ones abandoned. A device moved to another USB enclosure is verified
+runs of every archive, each with its result page, from which the verification report of a run
+that reached a result is saved) and Settings; Register Archive and Compare Archives are dialogs.
+Every registration, verification, comparison, relocation and export runs as a job with its
+progress, which Stop ends; interrupted registrations, verifications and relocations can be
+resumed, and unfinished ones abandoned. A device moved to another USB enclosure is verified
 in full once you confirm that it is the same device, by its own serial or on your word; the
 confirmation is recorded in the hash-chained history, and only a pass records the new enclosure
 (decision 0047). The GUI runs unprivileged: only to read a device's own serial behind its
