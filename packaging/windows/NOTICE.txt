@@ -17,9 +17,15 @@ LGPL you may replace any of these DLLs with a compatible build of your own.
 
 Compiled into the programs
 --------------------------
-Two more libraries are compiled into bin\veriarchive-cli.exe and bin\veriarchive-gui.exe:
+Two more libraries are compiled into bin\veriarchive-cli.exe and bin\veriarchive-gui.exe, and
+nlohmann/json also into bin\veriarchive-device-identity.exe:
 - nlohmann/json (https://github.com/nlohmann/json), copyright Niels Lohmann, under the MIT
   License: share\licenses\nlohmann-json\LICENSE.MIT
 - the BLAKE3 C implementation (https://github.com/BLAKE3-team/BLAKE3), released into the public
   domain with CC0 1.0 and, at your choice, also licensed under the Apache License 2.0, with or
   without the LLVM exceptions: share\licenses\blake3\
+
+bin\veriarchive-device-identity.exe, the device identity reader, is linked statically, so that it
+loads no DLL from the program's folder: it also holds the GCC runtime (GPL with the GCC Runtime
+Library Exception: share\licenses\libgcc\ and share\licenses\libstdc++\) and MinGW-w64's
+winpthreads (MIT License: share\licenses\libwinpthread\COPYING).

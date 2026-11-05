@@ -15,6 +15,7 @@ int main()
     attached_devices_tests();
     device_rows_tests();
     device_health_tests();
+    device_identity_tests();
     displayed_identity_tests();
     ended_notification_tests();
     job_queue_tests();

@@ -1,5 +1,8 @@
 // VeriArchive GUI entry point. It runs unprivileged and never elevates itself
-// (R-08, R-12). VERIARCHIVE_GUI_SMOKE_TEST=1 builds every view without showing
+// (R-08, R-12); to read a device's own identity behind its enclosure, on the
+// operator's request, it starts the device identity reader, which Windows
+// runs only with administrator permission the operator allows (decision
+// 0047). VERIARCHIVE_GUI_SMOKE_TEST=1 builds every view without showing
 // the window, rebuilds it in the other language and back (as a language change
 // does), and exits, so a build can be checked without a desktop.
 // VERIARCHIVE_GUI_SCREENSHOTS=<folder> takes the documentation screenshots into
@@ -8,6 +11,7 @@
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
+#include "platform/device_identity_helper.h"
 
 #include <cstdlib>
 #include <exception>
@@ -45,6 +49,14 @@ int main(int argc, char* argv[])
     // address makes it skip D-Bus quietly. Linux desktops keep their bus.
     if (VERIARCHIVE_WITHOUT_SESSION_BUS && !g_getenv("DBUS_SESSION_BUS_ADDRESS")) {
         g_setenv("DBUS_SESSION_BUS_ADDRESS", "disabled:", TRUE);
+    }
+    // The device identity reader (decision 0047). The smoke test and the
+    // screenshot mode never ask for administrator permission, so they get
+    // none that reads.
+    if (smoke_test || state.screenshot_folder) {
+        state.device_identity = std::make_unique<va::NullDeviceIdentityHelper>();
+    } else {
+        state.device_identity = va::platform::make_device_identity_helper();
     }
     // Nobody watches the screenshot mode or the smoke test from another
     // window: their operations end without a notification (decision 0043).

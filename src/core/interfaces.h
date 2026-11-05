@@ -112,6 +112,64 @@ public:
         const std::string& device_ref) = 0;
 };
 
+class CancelToken;  // below
+
+// Reads a device's own identity (model, serial, WWN) where its enclosure, the
+// USB bridge or dock between it and the computer, reports its own serial in
+// place of the device's (decision 0047). Reading it needs administrator
+// permission, which the main program never holds (R-08, R-12): on Windows the
+// implementation starts a small program of its own, the device identity
+// reader, which the operating system starts only once the operator allows it
+// administrator permission; it sends the device ATA IDENTIFY DEVICE alone,
+// reads nothing of the device's content and writes nothing to it. Asked only
+// on the operator's request, for one device of a volume (its device_ref, as
+// IMediaEnumerator gives it). It waits for the operator's answer and for the
+// reader, so it is called off the window's thread; `cancel` stops the wait
+// once the operator has answered.
+//
+// Its error's kind tells why nothing was read (device_identity_failure):
+// NotSupported: no device identity reader on this platform; PermissionDenied:
+// the operator declined administrator permission, and only that;
+// CommandNotPassed: the device's enclosure passes no ATA command on to it;
+// Cancelled: `cancel` stopped the wait; any other: the device could not be
+// opened or read (NotFound where it is no longer attached, or another device
+// took its place while the operator answered; Timeout where it did not
+// answer in time), or the reader failed.
+class IDeviceIdentityHelper {
+public:
+    virtual ~IDeviceIdentityHelper() = default;
+
+    // Whether a read can be asked for at all, without asking for one (which
+    // would ask the operator for administrator permission): false where this
+    // platform has no device identity reader, or its program is missing (for
+    // example removed by an antivirus program). The window offers no read
+    // where it is false.
+    virtual bool available() const = 0;
+
+    virtual std::expected<DeviceIdentityRead, IoError> read_device_identity(
+        const std::string& device_ref, CancelToken& cancel) = 0;
+};
+
+enum class DeviceIdentityFailure { NotAvailable, Declined, NotPassed, Unreadable, Cancelled };
+
+// Why IDeviceIdentityHelper::read_device_identity read nothing, from its
+// error's kind.
+inline DeviceIdentityFailure device_identity_failure(const IoError& error)
+{
+    switch (error.kind) {
+    case IoErrorKind::NotSupported:
+        return DeviceIdentityFailure::NotAvailable;
+    case IoErrorKind::PermissionDenied:
+        return DeviceIdentityFailure::Declined;
+    case IoErrorKind::CommandNotPassed:
+        return DeviceIdentityFailure::NotPassed;
+    case IoErrorKind::Cancelled:
+        return DeviceIdentityFailure::Cancelled;
+    default:
+        return DeviceIdentityFailure::Unreadable;
+    }
+}
+
 struct ChangeTrackerState {
     std::string journal_id;
     std::string cursor;
@@ -225,6 +283,23 @@ public:
             IoErrorKind::NotSupported,
             0,
             "raw device access is not available",
+        });
+    }
+};
+
+// Where no device identity reader exists (Linux, decision 0047) and in the
+// tests: nothing is read and nothing asks for administrator permission.
+class NullDeviceIdentityHelper final : public IDeviceIdentityHelper {
+public:
+    bool available() const override { return false; }
+
+    std::expected<DeviceIdentityRead, IoError> read_device_identity(
+        const std::string&, CancelToken&) override
+    {
+        return std::unexpected(IoError{
+            IoErrorKind::NotSupported,
+            0,
+            "reading a device's own identity is not available on this platform",
         });
     }
 };

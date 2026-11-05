@@ -15,6 +15,10 @@ enum class IoErrorKind {
     // SQLITE_CORRUPT and SQLITE_NOTADB), wherever SQLite finds it (decision
     // 0036): `repo rebuild-index` makes it again.
     DatabaseDamaged,
+    // The enclosure (the USB bridge or dock between a device and the
+    // computer) passes no ATA command on to the device, so the device's own
+    // identity cannot be read through it (decision 0047).
+    CommandNotPassed,
     Other,
 };
 

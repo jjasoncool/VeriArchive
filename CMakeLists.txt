@@ -126,6 +126,9 @@ target_link_libraries(veriarchive_platform PUBLIC VeriArchive::core)
 if(WIN32)
     target_sources(veriarchive_platform PRIVATE
         src/platform/windows/device_health_status.cpp
+        src/platform/windows/device_id_descriptor.cpp
+        src/platform/windows/device_identity_helper_win.cpp
+        src/platform/windows/device_identity_reader.cpp
         src/platform/windows/file_writer_win.cpp
         src/platform/windows/fs_access_win.cpp
         src/platform/windows/interrupt_win.cpp
@@ -138,11 +141,40 @@ if(WIN32)
         src/platform/windows/subst_drive.cpp
         src/platform/windows/win_util.cpp
     )
-    # user32: the hidden window that hears of the session's end (interrupt_win.cpp).
-    target_link_libraries(veriarchive_platform PRIVATE mpr user32)
+    # user32: the hidden window that hears of the session's end (interrupt_win.cpp),
+    # and the window in front, which the start of the device identity reader
+    # names. shell32, ole32: that start, with administrator permission
+    # (device_identity_helper_win.cpp).
+    target_link_libraries(veriarchive_platform PRIVATE mpr user32 shell32 ole32)
+
+    # The device identity reader (decision 0047): a program of its own, the
+    # only one that runs with administrator permission, which its manifest
+    # asks Windows for; the window starts it on the operator's request to read
+    # a device's own identity behind its enclosure (ATA IDENTIFY DEVICE). It
+    # links nothing of VeriArchive but device_identity_reader.cpp, which the
+    # window's side and the unit tests share, and it is linked statically, so
+    # that the elevated program loads no DLL from the program's folder: only
+    # Windows' own.
+    add_executable(veriarchive_device_identity
+        src/platform/windows/helper/main.cpp
+        src/platform/windows/device_identity_reader.cpp
+        src/platform/windows/helper/veriarchive-device-identity.rc)
+    set_target_properties(veriarchive_device_identity PROPERTIES
+        OUTPUT_NAME veriarchive-device-identity WIN32_EXECUTABLE TRUE)
+    # Its version information (veriarchive-device-identity.rc) carries the
+    # project's version.
+    file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/device_identity_reader_version.h"
+        CONTENT "#define VERIARCHIVE_VERSION_TEXT \"@PROJECT_VERSION@\"
+#define VERIARCHIVE_VERSION_NUMBERS @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+" @ONLY)
+    target_include_directories(veriarchive_device_identity PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_compile_features(veriarchive_device_identity PRIVATE cxx_std_23)
+    target_link_libraries(veriarchive_device_identity PRIVATE nlohmann_json::nlohmann_json)
+    target_link_options(veriarchive_device_identity PRIVATE -municode -static)
 elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
         src/platform/linux/device_health_linux.cpp
+        src/platform/linux/device_identity_helper_linux.cpp
         src/platform/linux/file_writer_linux.cpp
         src/platform/linux/fs_access_linux.cpp
         src/platform/linux/interrupt_linux.cpp
@@ -269,6 +301,8 @@ if(VERIARCHIVE_BUILD_GUI)
     target_link_libraries(veriarchive_gui PRIVATE VeriArchive::app PkgConfig::GTK4 PkgConfig::LIBADWAITA Intl::Intl)
     if(WIN32)
         target_sources(veriarchive_gui PRIVATE src/platform/windows/veriarchive.rc)
+        # The window starts the device identity reader from its own folder.
+        add_dependencies(veriarchive_gui veriarchive_device_identity)
     endif()
 endif()
 
@@ -279,6 +313,9 @@ endif()
 install(TARGETS veriarchive_cli RUNTIME DESTINATION bin COMPONENT VeriArchive)
 if(VERIARCHIVE_BUILD_GUI)
     install(TARGETS veriarchive_gui RUNTIME DESTINATION bin COMPONENT VeriArchive)
+endif()
+if(WIN32)
+    install(TARGETS veriarchive_device_identity RUNTIME DESTINATION bin COMPONENT VeriArchive)
 endif()
 install(FILES docs/user-guide.md docs/user-guide.zh-TW.md
     DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
@@ -347,6 +384,7 @@ if(BUILD_TESTING)
         tests/unit/carrier_confirmation_test.cpp
         tests/unit/config_test.cpp
         tests/unit/device_health_test.cpp
+        tests/unit/device_identity_test.cpp
         tests/unit/device_rows_test.cpp
         tests/unit/displayed_identity_test.cpp
         tests/unit/ended_notification_test.cpp
@@ -390,7 +428,13 @@ if(BUILD_TESTING)
     # The platform layer's own names for failed calls (Win32 errors, errno),
     # and a sparse sample file made as each system makes one (R-48).
     if(WIN32)
-        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_win.cpp tests/unit/sparse_file_win.cpp)
+        target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_win.cpp tests/unit/sparse_file_win.cpp
+            tests/unit/device_identity_win_test.cpp)
+        # The window's side of the device identity reader is tested with the
+        # reader of this build, started without administrator permission.
+        add_dependencies(veriarchive_tests veriarchive_device_identity)
+        target_compile_definitions(veriarchive_tests PRIVATE
+            VERIARCHIVE_TEST_DEVICE_IDENTITY_READER="$<TARGET_FILE:veriarchive_device_identity>")
     elseif(UNIX AND NOT APPLE)
         target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_linux.cpp
             tests/unit/sparse_file_linux.cpp)
@@ -412,6 +456,7 @@ if(BUILD_TESTING)
     if(NOT WIN32)
         # Pure C++ path handling and parsing; tested on every OS although only Windows uses it.
         target_sources(veriarchive_tests PRIVATE src/platform/windows/device_health_status.cpp
+            src/platform/windows/device_id_descriptor.cpp src/platform/windows/device_identity_reader.cpp
             src/platform/windows/long_path.cpp src/platform/windows/root_kind.cpp
             src/platform/windows/subst_drive.cpp)
     endif()
@@ -446,6 +491,18 @@ if(BUILD_TESTING)
         endforeach()
     endif()
     if(WIN32)
+        # The device identity reader (decision 0047), started without
+        # administrator permission: with __COMPAT_LAYER=RunAsInvoker Windows
+        # starts it as the test runs, where it would otherwise refuse to (a
+        # program started as the test starts it never brings up a question).
+        # It refuses arguments it does not take, a result file that is there,
+        # and one that a junction leads elsewhere, and for a device number that
+        # no device has writes the error. No device that is there is opened.
+        add_test(NAME veriarchive_device_identity_reader
+            COMMAND ${CMAKE_COMMAND}
+                -DREADER=$<TARGET_FILE:veriarchive_device_identity>
+                -DWORK=${CMAKE_CURRENT_BINARY_DIR}/device-identity-reader
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/device_identity_reader.cmake)
         # R-121: the installed package runs with only Windows on PATH, also
         # after a second install over the first; its zip unzips into the
         # program folder (decision 0038).
@@ -476,13 +533,15 @@ if(BUILD_TESTING)
 endif()
 
 if(MSVC)
-    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_app veriarchive_cli veriarchive_gui veriarchive_tests)
+    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_app veriarchive_cli veriarchive_gui
+            veriarchive_device_identity veriarchive_tests)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE /W4 /permissive-)
         endif()
     endforeach()
 else()
-    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_app veriarchive_cli veriarchive_gui veriarchive_tests)
+    foreach(target veriarchive_common veriarchive_core veriarchive_platform veriarchive_app veriarchive_cli veriarchive_gui
+            veriarchive_device_identity veriarchive_tests)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
         endif()

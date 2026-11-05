@@ -1,0 +1,35 @@
+// The device identity reader's resources (decision 0047): its manifest, which
+// asks Windows for administrator permission, and its version information,
+// which names it in the file's properties (and, where Windows takes it from
+// there, in Windows' question for that permission).
+#include <winver.h>
+#include "device_identity_reader_version.h"
+
+1 24 "veriarchive-device-identity.manifest"
+
+1 VERSIONINFO
+FILEVERSION VERIARCHIVE_VERSION_NUMBERS
+PRODUCTVERSION VERIARCHIVE_VERSION_NUMBERS
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "VeriArchive device identity reader"
+            VALUE "ProductName", "VeriArchive"
+            VALUE "InternalName", "veriarchive-device-identity"
+            VALUE "OriginalFilename", "veriarchive-device-identity.exe"
+            VALUE "FileVersion", VERIARCHIVE_VERSION_TEXT
+            VALUE "ProductVersion", VERIARCHIVE_VERSION_TEXT
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

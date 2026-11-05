@@ -32,6 +32,7 @@ void platform_error_tests();
 void unicode_tests();
 void identity_tests();
 void device_health_tests();
+void device_identity_tests();
 void displayed_identity_tests();
 void ended_notification_tests();
 void job_queue_tests();

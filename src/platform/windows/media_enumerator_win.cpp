@@ -3,6 +3,8 @@
 // identification IOCTLs used here.
 #include "platform/media_enumerator.h"
 #include "platform/windows/device_health_status.h"
+#include "platform/windows/device_id_descriptor.h"
+#include "platform/windows/device_identity_start.h"
 #include "platform/windows/volume_list.h"
 #include "platform/windows/win_util.h"
 
@@ -13,6 +15,7 @@
 #include <algorithm>
 #include <format>
 #include <optional>
+#include <span>
 #include <vector>
 #include <winioctl.h>
 
@@ -74,13 +77,20 @@ std::string bus_name(STORAGE_BUS_TYPE bus)
     }
 }
 
-PhysicalDeviceInfo describe_disk(DWORD disk_number)
+std::string disk_ref(DWORD disk_number)
+{
+    return "\\\\.\\PhysicalDrive" + std::to_string(disk_number);
+}
+
+// The disk numbered `disk_number`; nothing where it cannot be opened (no
+// device has the number).
+std::optional<PhysicalDeviceInfo> describe_attached_disk(DWORD disk_number)
 {
     PhysicalDeviceInfo device;
-    device.device_ref = "\\\\.\\PhysicalDrive" + std::to_string(disk_number);
+    device.device_ref = disk_ref(disk_number);
     const auto disk = open_for_query(L"\\\\.\\PhysicalDrive" + std::to_wstring(disk_number));
     if (!disk.valid()) {
-        return device;
+        return std::nullopt;
     }
 
     STORAGE_PROPERTY_QUERY query{};
@@ -88,6 +98,7 @@ PhysicalDeviceInfo describe_disk(DWORD disk_number)
     query.QueryType = PropertyStandardQuery;
     std::vector<BYTE> buffer(4096);
     DWORD returned = 0;
+    bool removable_media = false;
     if (DeviceIoControl(disk.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
             buffer.data(), static_cast<DWORD>(buffer.size()), &returned, nullptr) &&
         returned >= sizeof(STORAGE_DEVICE_DESCRIPTOR)) {
@@ -98,10 +109,27 @@ PhysicalDeviceInfo describe_disk(DWORD disk_number)
         device.model = product.empty() ? vendor : product;
         device.serial = string_at(buffer, descriptor->SerialNumberOffset);
         device.bus = bus_name(descriptor->BusType);
+        removable_media = descriptor->RemovableMedia != FALSE;
         if (const auto wwn = nvme_wwn_from_windows_serial(device.serial)) {
             device.wwn = *wwn;
             device.serial.clear();
         }
+    }
+
+    // Decision 0047: behind a USB bridge, the device identification page
+    // (VPD 0x83) tells whether the device is named by its own worldwide
+    // identifier, or the enclosure hides it (only an identifier the bridge
+    // made up, or none). Only asked of a disk on bus usb whose medium is not
+    // removable: a USB flash memory or card reader has no enclosure.
+    if (device.bus == "usb" && !removable_media) {
+        query.PropertyId = StorageDeviceIdProperty;
+        std::vector<BYTE> identifiers(4096);
+        std::optional<std::span<const std::byte>> answer;
+        if (DeviceIoControl(disk.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
+                identifiers.data(), static_cast<DWORD>(identifiers.size()), &returned, nullptr)) {
+            answer = std::as_bytes(std::span(identifiers).first(std::min<std::size_t>(returned, identifiers.size())));
+        }
+        device.enclosure_hides_identity = windows::enclosure_hides_identity(device.bus, removable_media, answer);
     }
 
     query.PropertyId = StorageDeviceSeekPenaltyProperty;
@@ -117,6 +145,18 @@ PhysicalDeviceInfo describe_disk(DWORD disk_number)
             sizeof(geometry), &returned, nullptr)) {
         device.capacity_bytes = static_cast<std::uint64_t>(geometry.DiskSize.QuadPart);
     }
+    return device;
+}
+
+// The disk numbered `disk_number`, as volumes list it: its device_ref alone
+// where it cannot be opened.
+PhysicalDeviceInfo describe_disk(DWORD disk_number)
+{
+    if (auto device = describe_attached_disk(disk_number)) {
+        return std::move(*device);
+    }
+    PhysicalDeviceInfo device;
+    device.device_ref = disk_ref(disk_number);
     return device;
 }
 
@@ -324,6 +364,11 @@ public:
 std::unique_ptr<IMediaEnumerator> make_media_enumerator()
 {
     return std::make_unique<WindowsMediaEnumerator>();
+}
+
+std::optional<PhysicalDeviceInfo> windows::describe_physical_device(unsigned number)
+{
+    return describe_attached_disk(static_cast<DWORD>(number));
 }
 
 } // namespace va::platform

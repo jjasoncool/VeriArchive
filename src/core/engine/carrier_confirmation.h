@@ -33,23 +33,8 @@
 
 namespace va {
 
-// A device's own identity as the device identity reader reads it behind its
-// enclosure (ATA IDENTIFY): model, serial and WWN.
-struct DeviceIdentity {
-    std::string model;
-    std::string serial;
-    std::string wwn;
-};
-
-// One read of a device's own identity: what was read, how the reader read it
-// ("ata-pass-through", "sat", as the reader names its way), when, and which
-// device of the volume it read (its device_ref; empty where not known).
-struct DeviceIdentityRead {
-    DeviceIdentity device;
-    std::string how;
-    Timestamp read_at;
-    std::string device_ref;
-};
+// DeviceIdentity and DeviceIdentityRead (common/types.h) are what the device
+// identity reader (IDeviceIdentityHelper, core/interfaces.h) reads.
 
 // What confirms that a carrier whose enclosure changed holds the archive's
 // device. `device_serial`: the device's own serial was read and is the

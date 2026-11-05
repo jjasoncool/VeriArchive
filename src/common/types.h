@@ -42,8 +42,32 @@ struct PhysicalDeviceInfo {
     // Runtime only, never identity (decision 0047): the device is behind an
     // enclosure (a USB bridge or dock) that hides the device's own identity,
     // so `serial` and `wwn` are the enclosure's, as the platform tells it
-    // without elevation; false where it cannot tell or nothing hides it.
+    // without elevation. False where nothing hides it, for removable media
+    // (a USB flash memory or card reader has no enclosure), and where it
+    // cannot tell; false also where the device's identification page names
+    // the device by a worldwide identifier that the enclosure passes on, while
+    // `serial` may then still be the enclosure's. So false does not prove that
+    // `serial` is the device's own.
     bool enclosure_hides_identity = false;
+};
+
+// A device's own identity as the device identity reader reads it behind its
+// enclosure (ATA IDENTIFY DEVICE, decision 0047): model, serial and WWN.
+struct DeviceIdentity {
+    std::string model;
+    std::string serial;
+    std::string wwn;
+};
+
+// One read of a device's own identity: what was read, how the reader read it
+// ("ata": ATA pass-through; "sat": an ATA command inside a SCSI command, as
+// USB bridges take it), when, and which device of the volume it read (its
+// device_ref; empty where not known).
+struct DeviceIdentityRead {
+    DeviceIdentity device;
+    std::string how;
+    Timestamp read_at;
+    std::string device_ref;
 };
 
 struct VolumeInfo {

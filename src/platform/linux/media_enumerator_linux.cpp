@@ -236,6 +236,17 @@ PhysicalDeviceInfo describe_disk(const std::filesystem::path& disk)
         device.wwn = property(properties, "ID_WWN");
     }
     device.bus = bus_name(property(properties, "ID_BUS"), name);
+    // Decision 0047: udev's rules ask a disk behind a USB bridge for its ATA
+    // identity (ata_id, which udev runs with the rights this program lacks),
+    // but only a disk whose medium is not removable (ATTR{removable}=="0" in
+    // 60-persistent-storage.rules): a USB flash memory or card reader has no
+    // enclosure, its USB serial is its own. Where the bridge passes the
+    // identity on, the disk's bus is ata, its serial the device's own, and
+    // ID_ATA is set. A disk that is not removable and still on bus usb gave
+    // none, so its serial is the enclosure's (the bridge's USB serial).
+    // Without udev's data nothing tells, and the bus is unknown: false.
+    device.enclosure_hides_identity = device.bus == "usb" && read_text_file(disk / "removable") == "0" &&
+                                      property(properties, "ID_ATA") != "1";
 
     try {
         device.capacity_bytes = std::stoull(read_text_file(disk / "size")) * 512;

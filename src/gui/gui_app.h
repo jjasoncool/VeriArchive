@@ -12,6 +12,7 @@
 #include "app/unfinished_operations.h"
 #include "app/session.h"
 #include "core/engine/archive_status.h"
+#include "core/interfaces.h"
 #include "gui/archive_rows.h"
 #include "gui/device_rows.h"
 #include "gui/displayed_identity.h"
@@ -158,6 +159,12 @@ struct GuiState {
     HostInfo host;
     std::optional<app::Session> session;   // empty until a repository is open
     Report session_error;                  // why no repository is open
+    // Reads a device's own identity behind its enclosure, with administrator
+    // permission that Windows asks the operator for, on the operator's
+    // request only (decision 0047; none on Linux). Kept across windows; it is
+    // declared before every member that runs threads, so that it outlives
+    // them (members go in the reverse order).
+    std::unique_ptr<IDeviceIdentityHelper> device_identity;
     // The registrations, verifications, comparisons, relocations and exports
     // started in the window, each a job of its own (decisions 0045, 0046).
     Jobs jobs;

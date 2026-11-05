@@ -73,6 +73,33 @@ foreach(binary IN LISTS binaries)
     endforeach()
 endforeach()
 
+# The device identity reader (decision 0047) is in the package, and as it
+# runs with administrator permission, it loads only Windows' own DLLs, none
+# from the program's folder (it is linked statically). Windows looks for a DLL
+# that is not one of its known DLLs in the program's folder first, so no DLL
+# it imports may be in bin/, which the portable zip leaves writable to the
+# user. It is never started here: its manifest asks Windows for
+# administrator permission.
+set(reader "${PREFIX}/bin/veriarchive-device-identity.exe")
+if(NOT EXISTS "${reader}")
+    message(FATAL_ERROR "missing from the package: bin/veriarchive-device-identity.exe")
+endif()
+execute_process(COMMAND "${OBJDUMP}" -p "${reader}" OUTPUT_VARIABLE reader_headers)
+string(REGEX MATCHALL "DLL Name: [^\r\n]+" reader_imports "${reader_headers}")
+if(NOT reader_imports)
+    message(FATAL_ERROR "objdump finds no import of ${reader}")
+endif()
+foreach(import IN LISTS reader_imports)
+    string(REPLACE "DLL Name: " "" dll "${import}")
+    string(TOLOWER "${dll}" lower)
+    if(NOT lower MATCHES "^api-ms-|^ext-ms-" AND NOT EXISTS "$ENV{SystemRoot}/System32/${dll}")
+        message(FATAL_ERROR "${reader} imports ${dll}, which is no DLL of Windows")
+    endif()
+    if(EXISTS "${PREFIX}/bin/${dll}")
+        message(FATAL_ERROR "${reader} imports ${dll}, which bin/ also holds: the elevated reader would load that copy")
+    endif()
+endforeach()
+
 foreach(required
         "share/glib-2.0/schemas/gschemas.compiled"
         "lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
@@ -85,6 +112,10 @@ foreach(required
         "share/licenses/blake3/LICENSE_CC0"
         "share/licenses/blake3/LICENSE_A2"
         "share/licenses/blake3/LICENSE_A2LLVM"
+        # Linked into the device identity reader (NOTICE.txt).
+        "share/licenses/libgcc"
+        "share/licenses/libstdc++"
+        "share/licenses/libwinpthread/COPYING"
         "share/locale/zh_TW/LC_MESSAGES/gtk40.mo"
         "share/locale/zh_TW/LC_MESSAGES/libadwaita.mo"
         "share/doc/VeriArchive/NOTICE.txt"
@@ -124,7 +155,8 @@ endif()
 # NOTICE.txt names the code compiled into the programs and where its licenses
 # are (decision 0038).
 file(READ "${PREFIX}/share/doc/VeriArchive/NOTICE.txt" notice)
-foreach(named "nlohmann/json" "share\\licenses\\nlohmann-json\\LICENSE.MIT" "BLAKE3" "share\\licenses\\blake3\\")
+foreach(named "nlohmann/json" "share\\licenses\\nlohmann-json\\LICENSE.MIT" "BLAKE3" "share\\licenses\\blake3\\"
+        "bin\\veriarchive-device-identity.exe" "share\\licenses\\libwinpthread\\")
     string(FIND "${notice}" "${named}" found)
     if(found EQUAL -1)
         message(FATAL_ERROR "NOTICE.txt does not name ${named}")
