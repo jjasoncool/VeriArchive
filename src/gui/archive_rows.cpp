@@ -453,8 +453,17 @@ std::vector<RunRow> recent_runs(const app::Text& text, const std::vector<VerifyR
     return rows;
 }
 
-std::string stopped_verification_words(const app::Text& text, const app::OperationRow& row, bool adds_chunk_hashes)
+std::string stopped_verification_words(
+    const app::Text& text, const app::OperationRow& row, bool adds_chunk_hashes, bool carrier_confirmed)
 {
+    // A verification past a changed enclosure adds no chunk hashes (the
+    // engine refuses both at once).
+    if (carrier_confirmed && !adds_chunk_hashes) {
+        return text.format("The last FULL verification of this archive stopped at {}. Resume continues it without "
+                           "reading again what it read. Only once it is resumed and passes is the new enclosure "
+                           "recorded.",
+            row.progress);
+    }
     return adds_chunk_hashes
                ? text.format("The last FULL verification of this archive that adds chunk hashes stopped at {}. Resume "
                              "continues it without reading again what it read.",
@@ -489,7 +498,8 @@ DetailsOperations details_operations(const app::Text& text, const std::vector<ap
         auto row = app::describe_operation(text, watch, now, wall_now);
         if (row.offers_resume) {
             shown.words = relocation ? stopped_relocation_words(text, row)
-                                     : stopped_verification_words(text, row, operation.adds_chunk_hashes);
+                                     : stopped_verification_words(
+                                           text, row, operation.adds_chunk_hashes, operation.carrier_confirmed);
             shown.stopped = std::move(row);
         }
     }

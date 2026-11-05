@@ -5,6 +5,7 @@
 #include "common/time.h"
 #include "common/utf8.h"
 #include "core/engine/archive_status.h"
+#include "core/engine/carrier_confirmation.h"
 #include "core/engine/recorded_manifest.h"
 #include "core/repository/archive_store.h"
 #include "platform/file_system.h"
@@ -320,6 +321,8 @@ UnfinishedOperation verification_operation(const UnfinishedVerification& verific
     operation.files_total = verification.files_total;
     operation.bytes_total = verification.bytes_total;
     operation.adds_chunk_hashes = verification.adds_chunk_hashes > 0;
+    operation.carrier_confirmed =
+        carrier_confirmed_in_record(nlohmann::json::parse(verification.record, nullptr, false)).has_value();
     operation.recorded_stopped = verification.recorded_incomplete;
     operation.resumable = verification.resumable;
     operation.updated = parse_timestamp(verification.updated);

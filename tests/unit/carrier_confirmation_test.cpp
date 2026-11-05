@@ -918,13 +918,20 @@ void the_window_words()
           "The enclosure of SAMPLE: differs from the one recorded");
     CHECK(va::app::enclosure_question_title(chinese, "SAMPLE:") == "SAMPLE: 的外接盒與記錄中的不同");
     const auto asked = va::app::enclosure_question_body(chinese, with);
-    CHECK(asked.size() == 2 && asked[0].contains("SAMPLE-ENCLOSURE-A") && asked[0].contains("SAMPLE-ENCLOSURE-B") &&
+    // The two enclosures' serials are the window's to list beside it.
+    CHECK(asked.size() == 2 && asked[0] == "這個磁碟區的檔案系統 ID 和 ARCH-SAMPLE 記錄中的相同，但外接盒回報的序號換了。" &&
           asked[1] == "ARCH-SAMPLE 記錄了裝置本身的序號 SAMPLE-DEVICE-1。讀取這次的序號，就能判斷是不是同一個裝置。");
     const auto unknown = va::app::enclosure_question_body(english, without);
     CHECK(unknown.size() == 3 && unknown[1].contains("sector-by-sector clone") &&
           unknown[1].contains("passes a FULL verify too") && unknown[2].contains("label"));
     CHECK(va::app::enclosure_question_body(chinese, without)[1].contains("完整驗證也會通過"));
-    CHECK(va::app::device_identity_reader_note(chinese).starts_with("需要系統管理員權限"));
+    CHECK(va::app::enclosure_question_body(chinese, without)[1] == va::app::sector_clone_words(chinese));
+    // Named as Windows names an unsigned program, never in its words "to
+    // make changes to your device", whose device is the computer.
+    const auto note = va::app::device_identity_reader_note(chinese);
+    CHECK(note.starts_with("需要系統管理員權限") && note.contains("使用者帳戶控制") &&
+          note.contains("veriarchive-device-identity.exe") && note.contains("不明發行者") && !note.contains("變更"));
+    CHECK(!va::app::device_identity_reader_note(english).contains("make changes"));
     CHECK(va::app::device_read_declined(chinese).contains("不讀序號，自行確認"));
     // Another enclosure, never the device attached directly: taken out of its
     // enclosure, it is no changed enclosure (only a relocation accepts it).

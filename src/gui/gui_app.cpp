@@ -303,6 +303,9 @@ void activate(GuiState& state, bool smoke_test)
                         // The result pages' read speed chart, which the
                         // empty repository gives no run to draw.
                         check_sample_chart(state);
+                        // The enclosure question (decision 0047), which no
+                        // archive of the empty repository asks.
+                        check_sample_enclosure_dialog(state);
                         const auto start = state.text.language();
                         const auto other = start == app::Language::English ? app::Language::TraditionalChinese
                                                                            : app::Language::English;

@@ -1,6 +1,9 @@
 #include "gui/displayed_identity.h"
 
+#include "common/time.h"
+
 #include <cstdint>
+#include <expected>
 #include <utility>
 
 namespace va::gui {
@@ -89,13 +92,46 @@ std::vector<SampleVolume> sample_volumes()
     };
     const auto first = device("01", 2 * sample_capacity, "sample-usb", {HealthStatus::Healthy, {}});
     const auto second = device("02", sample_capacity, "sample-sata", {HealthStatus::Warning, {"predicting-failure"}});
-    const auto third = device("03", 64 * gib, "sample-usb", {});
+    // Behind a sample enclosure that hides the device's own serial, and
+    // passes nothing of its health on: its serial is the enclosure's
+    // (decision 0047).
+    auto third = device("03", 64 * gib, "sample-usb", {});
+    third.enclosure_hides_identity = true;
     return {
         volume(first, "/media/SAMPLE-VOLUME-1", "SAMPLE-VOLUME-1", "01", 2 * sample_capacity, 1'370 * gib),
         volume(second, "/media/SAMPLE-VOLUME-2", "SAMPLE-VOLUME-2", "02", 600 * gib, 412 * gib),
         volume(second, "/media/SAMPLE-VOLUME-3", "SAMPLE-VOLUME-3", "03", 424 * gib, 96 * gib, true),
         volume(third, "/media/SAMPLE-VOLUME-4", "", "04", 64 * gib, 18 * gib),
     };
+}
+
+namespace {
+
+// SAMPLE DATA: a device identity reader that reads nothing.
+class SampleDeviceIdentityHelper final : public IDeviceIdentityHelper {
+public:
+    bool available() const override { return true; }
+
+    std::expected<DeviceIdentityRead, IoError> read_device_identity(
+        const std::string& device_ref, CancelToken& cancel) override
+    {
+        if (cancel.cancelled()) {
+            return std::unexpected(IoError{IoErrorKind::Cancelled, 0, "cancelled"});
+        }
+        DeviceIdentityRead read;
+        read.device = DeviceIdentity{"SAMPLE-OWN-MODEL", sample_own_serial, "SAMPLE-OWN-WWN-01"};
+        read.how = "sample";
+        read.read_at = current_timestamp();
+        read.device_ref = device_ref;
+        return read;
+    }
+};
+
+} // namespace
+
+std::unique_ptr<IDeviceIdentityHelper> sample_device_identity_helper()
+{
+    return std::make_unique<SampleDeviceIdentityHelper>();
 }
 
 std::string displayed_host(const std::string& recorded, IdentityShown shown)

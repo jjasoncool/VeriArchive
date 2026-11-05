@@ -48,6 +48,7 @@ void progress_wording_tests();
 void attached_tests();
 void attached_devices_tests();
 void device_rows_tests();
+void enclosure_flow_tests();
 void hash_tests();
 void merkle_tests();
 void fs_access_tests();

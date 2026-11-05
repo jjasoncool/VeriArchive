@@ -253,10 +253,13 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/archives_page.cpp
         src/gui/compare_choices.cpp
         src/gui/compare_dialog.cpp
+        src/gui/device_reads.cpp
         src/gui/device_rows.cpp
         src/gui/devices_page.cpp
         src/gui/devices_poll.cpp
         src/gui/displayed_identity.cpp
+        src/gui/enclosure_dialog.cpp
+        src/gui/enclosure_flow.cpp
         src/gui/ended_notification.cpp
         src/gui/export_dialog.cpp
         src/gui/gui_app.cpp
@@ -387,6 +390,7 @@ if(BUILD_TESTING)
         tests/unit/device_identity_test.cpp
         tests/unit/device_rows_test.cpp
         tests/unit/displayed_identity_test.cpp
+        tests/unit/enclosure_flow_test.cpp
         tests/unit/ended_notification_test.cpp
         tests/unit/file_writer_test.cpp
         tests/unit/fs_access_test.cpp
@@ -466,11 +470,14 @@ if(BUILD_TESTING)
     # of each archive, what History lists, what the result page of a run says,
     # what Register Archive and the comparison dialog offer and say, what
     # Devices and Archives say of the devices attached now, how a job's
-    # progress is worded, and what the relocation, export and retirement of an
-    # archive offer and say, are plain C++ without GTK, so they are tested also
-    # where the GUI is not built.
+    # progress is worded, what the relocation, export and retirement of an
+    # archive offer and say, and what FULL verify asks of an archive whose
+    # device is seen behind another enclosure and what a read of a device's own
+    # serial tells (decision 0047), are plain C++ without GTK, so they are
+    # tested also where the GUI is not built.
     target_sources(veriarchive_tests PRIVATE src/gui/archive_actions.cpp src/gui/archive_rows.cpp src/gui/compare_choices.cpp
-        src/gui/device_rows.cpp src/gui/displayed_identity.cpp src/gui/ended_notification.cpp src/gui/history_rows.cpp
+        src/gui/device_reads.cpp src/gui/device_rows.cpp src/gui/displayed_identity.cpp src/gui/enclosure_flow.cpp
+        src/gui/ended_notification.cpp src/gui/history_rows.cpp
         src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/progress_wording.cpp src/gui/register_choices.cpp src/gui/report.cpp
         src/gui/run_result.cpp src/gui/window_words.cpp)
     add_test(NAME veriarchive_unit COMMAND veriarchive_tests)

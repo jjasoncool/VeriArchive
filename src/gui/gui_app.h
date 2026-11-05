@@ -14,8 +14,10 @@
 #include "core/engine/archive_status.h"
 #include "core/interfaces.h"
 #include "gui/archive_rows.h"
+#include "gui/device_reads.h"
 #include "gui/device_rows.h"
 #include "gui/displayed_identity.h"
+#include "gui/enclosure_flow.h"
 #include "gui/gui_support.h"
 #include "gui/history_rows.h"
 #include "gui/job_words.h"
@@ -85,6 +87,7 @@ struct DevicesPoll {
                                                 // read once more once it is back
     std::chrono::steady_clock::time_point started{};  // when the last read began
     std::chrono::steady_clock::duration took{};       // how long the last read took
+    std::chrono::steady_clock::time_point applied{};  // when the last read was shown (decision 0047)
     guint timer = 0;                            // the GLib timeout; 0 while neither page is shown
     GtkWidget* served = nullptr;                // the page (Archives or Devices) the timer serves
     // The RepositoryRoot whose archives the latest read matched (none: no
@@ -178,6 +181,37 @@ struct GuiState {
     // The roots of the registration jobs that wait or work, by job, which
     // Devices names on their volumes in place of Register this volume.
     std::map<std::uint64_t, std::filesystem::path> registering;
+    // Decision 0047: the reads of devices' own identities behind their
+    // enclosures that the operator asked for, kept while the system describes
+    // each device as it did then and the devices are watched (device_reads.h),
+    // which Devices shows and Register Archive records with no second question
+    // of Windows (the enclosure question always reads anew); and the read in
+    // flight, one at a time, which waits for Windows' question for
+    // administrator permission, then for the device identity reader
+    // (enclosure_dialog.cpp), and which closing the window tells to stop.
+    KeptDeviceReads device_reads;
+    struct DeviceReading {
+        std::string device_ref;
+        std::shared_ptr<CancelToken> cancel;
+        std::uint64_t id = 0;
+    };
+    std::optional<DeviceReading> device_reading;
+    std::uint64_t device_reads_started = 0;
+    // The confirmation that each verification job of the window went on with
+    // past a changed enclosure (given in the enclosure question, or carried
+    // by the run that a resume goes on with), by the job, until it ended: its
+    // archive's details say so meanwhile.
+    std::map<std::uint64_t, CarrierConfirmation> confirmed_verifications;
+    // What each archive's confirmed verification that ended recorded of its
+    // new enclosure (only carrier_* are set), and when, until a read of the
+    // attached devices begun since is shown: the read before matched the
+    // archive's earlier carrier, and would ask about the enclosure once more
+    // meanwhile.
+    struct CarrierRecorded {
+        VerifyOutcome carrier;
+        std::chrono::steady_clock::time_point at;
+    };
+    std::map<Uuid, CarrierRecorded> carriers_recorded;
     OffThreadReads reads;                  // what Register Archive reads off the window's thread
     int exit_status = 0;                   // 1 when an unexpected error cut the smoke test, the start or the screenshots short
     // Set from VERIARCHIVE_GUI_SCREENSHOTS: take the documentation screenshots
@@ -390,6 +424,25 @@ struct GuiState {
         // ... and the root its latest revision recorded, read once the
         // attached volumes were (where they hold the archive, if they do).
         std::optional<std::string> preset_root;
+        // Opened by Register as another archive... of the enclosure question
+        // (decision 0047): once its root is read, a separate archive, a copy
+        // of this one.
+        std::optional<Uuid> preset_copy;
+        // Decision 0047: Record the device's own serial, where the source's
+        // enclosure hides it (Options: an AdwSwitchRow, or the serial kept
+        // from before in an AdwActionRow); on Confirm, why the read that
+        // Start registration made first gave nothing, and the spinner beside
+        // it while that read is in flight.
+        std::optional<DeviceSerialOffer> serial_offer;
+        GtkWidget* device_serial = nullptr;
+        GtkWidget* device_serial_kept = nullptr;
+        GtkWidget* serial_notice = nullptr;
+        GtkWidget* serial_notice_words = nullptr;
+        GtkWidget* summary = nullptr;           // Confirm's boxed list of what it will do
+        GtkWidget* starting = nullptr;
+        std::optional<ReadProblem> serial_problem;
+        bool reading_serial = false;
+        std::shared_ptr<CancelToken> serial_cancel;  // stops that read's wait once the dialog closes
         bool reading_source = false;            // a read of the source is in flight
         bool filling = false;                   // a change of the code's, not the operator's
         std::uint64_t opened = 0;               // which opening of the dialog this is, whose reads it takes
@@ -440,6 +493,24 @@ struct GuiState {
         std::uint64_t opened = 0;               // which opening of the dialog this is, whose reads it takes
     } relocate_dialog;
     std::uint64_t relocations_opened = 0;       // the openings of the relocation dialog so far
+
+    // The enclosure question (decision 0047): what FULL verify of an archive
+    // whose device is seen behind another enclosure asks first, an AdwDialog
+    // whose content is made again for each step (enclosure_flow.h). Its
+    // widgets and what it asks about while it is open; nothing otherwise.
+    struct EnclosureDialog {
+        GtkWidget* dialog = nullptr;            // AdwDialog
+        GtkWidget* content = nullptr;           // the step shown
+        GtkWidget* answers = nullptr;           // its answers' buttons
+        Uuid archive;
+        bool strict = false;                    // FULL verify with strict metadata
+        EnclosureCase found;
+        app::EnclosureFacts facts;
+        EnclosureFlow flow;
+        std::shared_ptr<CancelToken> cancel;    // stops the wait of its read, once Windows' question is answered
+        std::uint64_t opened = 0;               // which opening of the dialog this is, whose read it takes
+    } enclosure_dialog;
+    std::uint64_t enclosures_opened = 0;
 
     // The Jobs page and the header's jobs button (decisions 0045, 0046): a
     // row for each job in the group it is in, the button's popover with the
@@ -498,6 +569,9 @@ struct GuiState {
         GtkWidget* problem = nullptr;      // why the latest read failed, or why the archives cannot be told;
         GtkWidget* problem_words = nullptr;  // hidden while there is nothing to say
         GtkWidget* cards = nullptr;        // GtkBox: a card for each device, or what is read
+        // What reading a device's own serial behind its enclosure is for
+        // (decision 0047), shown where this computer can read one.
+        GtkWidget* enclosures = nullptr;
         std::optional<std::vector<DeviceCard>> shown;  // what the cards show, once a read was drawn
     } devices_page;
 
@@ -866,6 +940,60 @@ void resume_in_details(GuiState& state, const Uuid& archive, const std::string& 
 // verification that Archives starts asks it first.
 bool refused_while_the_archive_has_a_job(GuiState& state, const Uuid& archive, const std::string& root);
 
+// A FULL verification of `archive` by its uuid that goes on past the changed
+// enclosure with `confirmation` (decision 0047), as the enclosure question
+// gives it, strict metadata where `strict` asks for it or the policy sets it;
+// a job shown in the archive's details, which say meanwhile that only a pass
+// records the new enclosure, and whose end toast says what it recorded.
+// False where it did not start (no repository open, a job of the archive
+// began meanwhile), which a message says.
+bool verify_confirmed(GuiState& state, const Uuid& archive, bool strict, CarrierConfirmation confirmation);
+
+// ---- A device's own identity behind its enclosure (enclosure_dialog.cpp, decision 0047)
+
+// What a read of a device's own identity gave: the read, or why none; and,
+// read with it from the repository, the archives whose confirmed device it
+// is (confirmed_device). `failure`: an exception of the read.
+struct OwnIdentityRead {
+    std::expected<DeviceIdentityRead, IoError> read =
+        std::unexpected(IoError{IoErrorKind::Cancelled, 0, "not read"});
+    std::vector<Uuid> confirmed_of;
+    Report failure;
+};
+
+// Reads `device`'s own identity with the device identity reader, off the
+// window's thread: Windows asks the operator for administrator permission
+// first, which the window waits for without being held up. One read at a
+// time: says so in a message, and reads nothing, while another waits or
+// works. A read that gave the identity is kept (state.device_reads) and
+// shown in Devices; `done` then gets it on the main thread, unless the
+// window is gone. `cancel`, if given, stops the wait once Windows' question
+// was answered (the dialog that asked for the read closed).
+bool read_own_identity(GuiState& state, const PhysicalDeviceInfo& device,
+    std::function<void(GuiState&, OwnIdentityRead&)> done, std::shared_ptr<CancelToken> cancel = nullptr);
+
+// FULL verify of an archive whose device is seen behind another enclosure
+// (`found`, enclosure_case): the enclosure question, an AdwDialog over the
+// window, which leads to a FULL verification with a carrier confirmation
+// (verify_confirmed), to Register Archive for the volume as another archive,
+// or to nothing. It always opens on its first step, and its read always reads
+// the device anew: a read kept from before cannot tell that the device behind
+// the enclosure is still the one read (device_reads.h). `strict`: FULL verify
+// with strict metadata.
+void ask_about_enclosure(GuiState& state, const Uuid& archive, bool strict, const EnclosureCase& found);
+
+// Read the device's own serial... of Devices: reads it (read_own_identity),
+// then Devices shows it; a toast says why where it gave nothing.
+void read_device_serial(GuiState& state, const std::string& device_ref);
+
+// The smoke test's check of the enclosure question, which no archive of the
+// smoke test's empty repository asks: makes it of sample data, made up for
+// the check (SAMPLE-* enclosures and serials), without and with a confirmed
+// device, and shows each of its steps in turn, never presented, nothing read
+// or verified. Throws where a step shows nothing; GTK says on the error
+// output what else went wrong, which fails the smoke test.
+void check_sample_enclosure_dialog(GuiState& state);
+
 // ---- Register Archive (register_wizard.cpp) and the comparison (compare_dialog.cpp)
 
 // Opens Register Archive on its first page, Choose the source: the sidebar's
@@ -888,6 +1016,13 @@ void register_new_revision(GuiState& state, const Uuid& archive, const std::stri
 // the volume at `root` (its mount point or GUID path) chosen, once the
 // attached volumes were read, ready for Next.
 void register_volume(GuiState& state, const std::string& root);
+
+// Register as another archive... of the enclosure question (decision 0047):
+// Register Archive for `root`, where the filesystem of `archive` is on
+// another device (most likely a sector-by-sector clone), read at once; then
+// on its Options page as a separate archive (--force-new-archive), a copy of
+// `archive`, not started.
+void register_as_copy(GuiState& state, const std::string& root, const Uuid& archive);
 
 // The comparison dialog with `reference` as A and `copy` as B, where the
 // repository lists them; without `copy`, B is a copy of A, or another
@@ -940,9 +1075,10 @@ void export_manifest(GuiState& state, const Uuid& archive);
 // words).
 void ask_to_retire(GuiState& state, const Uuid& archive);
 
-// Closes Register Archive, the comparison dialog and the relocation dialog at
-// once, whatever they show (a language change replaces the window they belong
-// to; the screenshot tour, before its next picture).
+// Closes Register Archive, the comparison dialog, the relocation dialog and
+// the enclosure question at once, whatever they show (a language change
+// replaces the window they belong to; the screenshot tour, before its next
+// picture).
 void close_dialogs(GuiState& state);
 
 // History with its filter set to `archive`, its runs listed.

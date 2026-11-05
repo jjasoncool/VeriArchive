@@ -120,8 +120,50 @@ GtkWidget* volume_row(GuiState& state, const VolumeLine& volume)
     return row;
 }
 
+// The device's own serial behind its enclosure (decision 0047): as read, or
+// Read the device's own serial... with what Windows asks, or a spinner while
+// it is read.
+GtkWidget* own_serial_row(GuiState& state, const OwnSerialLine& own)
+{
+    const auto& text = state.text;
+    GtkWidget* row = card_row(text("Device's own serial"), own.note.empty() ? own.value : own.value + "\n" + own.note);
+    adw_action_row_set_subtitle_selectable(ADW_ACTION_ROW(row), TRUE);
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+    if (own.reading) {
+        GtkWidget* spinner = gtk_spinner_new();
+        gtk_spinner_start(GTK_SPINNER(spinner));
+        gtk_widget_set_valign(spinner, GTK_ALIGN_CENTER);
+        // Said by a screen reader too, which a spinner says nothing of.
+        const auto waiting = text("Waiting for the User Account Control prompt and the device...");
+        gtk_widget_set_tooltip_text(spinner, waiting.c_str());
+        gtk_accessible_update_property(
+            GTK_ACCESSIBLE(spinner), GTK_ACCESSIBLE_PROPERTY_LABEL, waiting.c_str(), -1);
+        adw_action_row_add_suffix(ADW_ACTION_ROW(row), spinner);
+    } else if (own.offered) {
+        GtkWidget* read = gtk_button_new();
+        GtkWidget* content = adw_button_content_new();
+        adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(content), "security-high-symbolic");
+        adw_button_content_set_label(ADW_BUTTON_CONTENT(content), text("Read the device's own serial...").c_str());
+        gtk_button_set_child(GTK_BUTTON(read), content);
+        gtk_widget_set_valign(read, GTK_ALIGN_CENTER);
+        g_signal_connect_data(read, "clicked",
+            G_CALLBACK(+[](GtkButton*, gpointer data) {
+                const auto* action = static_cast<const CardAction*>(data);
+                auto& state = *action->state;
+                const auto device = action->target;
+                guarded([&] { read_device_serial(state, device); },
+                    [&](const Report& report) { show_message(state, report); });
+            }),
+            new CardAction{&state, own.device_ref},
+            +[](gpointer data, GClosure*) { delete static_cast<CardAction*>(data); }, GConnectFlags{});
+        adw_action_row_add_suffix(ADW_ACTION_ROW(row), read);
+    }
+    return row;
+}
+
 // A device's card: its head (model, bus and capacity, health), its serial,
-// then each volume with the archives on it.
+// the device's own serial where its enclosure hides it, then each volume with
+// the archives on it.
 GtkWidget* device_card(GuiState& state, const DeviceCard& card)
 {
     GtkWidget* list = gtk_list_box_new();
@@ -142,6 +184,9 @@ GtkWidget* device_card(GuiState& state, const DeviceCard& card)
     if (!card.fields.empty()) {
         gtk_list_box_append(GTK_LIST_BOX(list), make_fields_row(card.fields));
     }
+    if (card.own) {
+        gtk_list_box_append(GTK_LIST_BOX(list), own_serial_row(state, *card.own));
+    }
     for (const auto& volume : card.volumes) {
         gtk_list_box_append(GTK_LIST_BOX(list), volume_row(state, volume));
         for (const auto& archive : volume.archives) {
@@ -149,6 +194,13 @@ GtkWidget* device_card(GuiState& state, const DeviceCard& card)
         }
     }
     return list;
+}
+
+// Whether this computer can read a device's own serial behind its enclosure
+// (decision 0047; never on Linux, nor where the reader is missing).
+bool reader_available(const GuiState& state)
+{
+    return state.device_identity && state.device_identity->available();
 }
 
 // The roots that registrations work on: those of this window's registration
@@ -217,9 +269,13 @@ void refresh_devices(GuiState& state)
     gtk_label_set_text(GTK_LABEL(page.problem_words), problem ? problem->c_str() : "");
     gtk_widget_set_visible(page.problem, problem.has_value());
 
+    // Decision 0047: the devices' own serials read, and the one being read.
+    gtk_widget_set_visible(page.enclosures, reader_available(state));
     const auto cards = read ? device_cards(text, *read,
                                   archive_names(state.archives_page.statuses, state.identity_shown),
-                                  state.identity_shown, registering_roots(state))
+                                  state.identity_shown, registering_roots(state), state.device_reads,
+                                  reader_available(state),
+                                  state.device_reading ? state.device_reading->device_ref : std::string{})
                             : std::vector<DeviceCard>{};
     // The same as drawn: the keyboard focus stays where it is.
     if (page.shown.has_value() == (read != nullptr) && (!read || *page.shown == cards)) {
@@ -292,6 +348,18 @@ GtkWidget* build_devices_page(GuiState& state)
              "permission, and this page writes nothing to them."));
     gtk_widget_add_css_class(explanation, "dim-label");
     gtk_box_append(GTK_BOX(box), explanation);
+    // Decision 0047: where this computer can read a device's own serial
+    // behind its enclosure (never on Linux).
+    // What a read here does not do: record the serial.
+    page.enclosures = make_label(
+        text("Through a USB enclosure, the system often sees only the enclosure's serial, not that of the device "
+             "inside. There you can read the device's own serial once, with administrator permission; once it is "
+             "recorded, VeriArchive tells the device by it after a change of enclosure. A serial read here is not "
+             "recorded: it is recorded when you register with \"Record the device's own serial\" on, or when the "
+             "FULL verify after a change of enclosure passes."));
+    gtk_widget_add_css_class(page.enclosures, "dim-label");
+    gtk_widget_set_visible(page.enclosures, reader_available(state));
+    gtk_box_append(GTK_BOX(box), page.enclosures);
 
     page.problem = make_line_box("va-error", "dialog-warning-symbolic", "error");
     page.problem_words = make_words("", nullptr, true);

@@ -16,6 +16,7 @@
 #include "core/engine/register_engine.h"
 #include "core/identity/matcher.h"
 #include "gui/archive_rows.h"
+#include "gui/device_reads.h"
 #include "gui/displayed_identity.h"
 #include "gui/history_rows.h"
 
@@ -162,7 +163,42 @@ struct OptionsChosen {
     bool another_archive = false;     // --force-new-archive
     bool media_copy = false;          // R-89, off by default
     std::optional<Uuid> copy_of;      // decision 0005
+    // Decision 0047: read the device's own serial behind its enclosure as
+    // the registration starts (device_serial_offer), with administrator
+    // permission; off by default, the operator chooses.
+    bool record_device_serial = false;
 };
+
+// Register Archive's "Record the device's own serial" (decision 0047): for a
+// source whose one device is behind an enclosure that hides the device's own
+// serial (offers_device_read: this computer can read it), and for a
+// registration that is no resume, which goes on with the read its plan keeps.
+// `kept`: a read of that device kept from before (Devices, or the enclosure
+// question of a FULL verify), still of that device (kept_read_of): recorded
+// with the registration with no second question of Windows, in place of the
+// switch. Never in the screenshot mode (`shown` Sample), whose sources are
+// this computer's folders shown as the sample identity.
+struct DeviceSerialOffer {
+    PhysicalDeviceInfo device;
+    std::optional<DeviceIdentityRead> kept;
+};
+std::optional<DeviceSerialOffer> device_serial_offer(const ChosenSource& source, const SourceOptions& options,
+    IdentityShown shown, bool reader, const KeptDeviceReads& reads);
+
+// The lines under the switch: what recording the serial does, what Windows
+// asks (app::device_identity_reader_note), and when.
+std::string device_serial_note(const app::Text& text);
+
+// The Confirm page's "Device's own serial", where it is offered: the serial
+// kept, read; that it is read with administrator permission as the
+// registration starts, and recorded; or that it is not recorded (the switch
+// off, or a read that gave nothing: `unread`).
+std::optional<Field> device_serial_field(
+    const app::Text& text, const std::optional<DeviceSerialOffer>& offer, const OptionsChosen& chosen, bool unread);
+
+// The line that the report of a registration given a read adds: the serial
+// recorded, the archive's confirmed device from now on.
+std::string recorded_device_serial_line(const app::Text& text, const DeviceIdentityRead& read);
 
 // The rows of the Options page that apply, the lines under them, and why
 // Next is not offered yet. Where the root has an unfinished registration, it

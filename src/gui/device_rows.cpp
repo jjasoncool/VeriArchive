@@ -1,9 +1,11 @@
 #include "gui/device_rows.h"
 
 #include "app/device_alerts.h"
+#include "app/enclosure_words.h"
 #include "common/unicode.h"
 #include "common/utf8.h"
 #include "core/engine/candidates.h"
+#include "core/engine/carrier_confirmation.h"
 #include "core/engine/device_alerts.h"
 #include "gui/report.h"
 
@@ -218,6 +220,49 @@ const ArchiveAttachment* attachment_of(const AttachedRead& read, const Uuid& arc
     return found != read.archives.end() ? &*found : nullptr;
 }
 
+std::optional<EnclosureCase> enclosure_case_of(
+    const ArchiveAttachment& attachment, std::span<const VolumeInfo> volumes, const VolumeInfo& recorded, bool retired)
+{
+    if (retired || attachment.result != MatchResult::Migrated || attachment.places.size() != 1) {
+        return std::nullopt;
+    }
+    const auto& place = attachment.places.front();
+    if (place.volume >= volumes.size()) {
+        return std::nullopt;
+    }
+    const auto& now = volumes[place.volume];
+    if (!enclosure_changed(recorded, now)) {
+        return std::nullopt;
+    }
+    return EnclosureCase{path_to_utf8(now.mount_point.empty() ? place.root : now.mount_point), place.root, recorded, now};
+}
+
+std::optional<EnclosureCase> enclosure_case(const AttachedRead* read, const ArchiveStatus& status, IdentityShown shown)
+{
+    if (shown == IdentityShown::Sample || !read || !status.header) {
+        return std::nullopt;
+    }
+    const auto* attachment = attachment_of(*read, status.archive.archive_uuid);
+    if (!attachment) {
+        return std::nullopt;
+    }
+    return enclosure_case_of(*attachment, read->archive_volumes, status.header->identity,
+        status.archive.status == "RETIRED");
+}
+
+std::vector<Field> details_device_fields(
+    const app::Text& text, std::vector<Field> recorded, const ArchiveAttached& attached)
+{
+    if (!attached.enclosure_recorded.empty()) {
+        std::erase_if(recorded, [&](const Field& field) {
+            return (field.name == text("Serial") || field.name == text("WWN")) &&
+                   field.value == attached.enclosure_recorded;
+        });
+    }
+    recorded.insert(recorded.end(), attached.fields.begin(), attached.fields.end());
+    return recorded;
+}
+
 ArchiveAttached archive_attached(
     const app::Text& text, const AttachedRead* read, const ArchiveStatus& status, IdentityShown shown)
 {
@@ -242,6 +287,25 @@ ArchiveAttached archive_attached(
         break;
     }
     case MatchResult::Migrated:
+        // Decision 0047: the archive's device behind another enclosure, which
+        // FULL verify asks about first, in place of the relocation.
+        if (const auto found = enclosure_case(read, status, shown)) {
+            attached.line = AttachedLine{
+                Attached::Migrated, text("The enclosure differs from the one recorded"), roots_of(*attachment)};
+            attached.notice = text.format("The enclosure of {} differs from the one recorded. Before it is verified, "
+                                          "you are asked whether it is the same device.",
+                found->where);
+            attached.confirm_first = true;
+            // Never that its device changed enclosure: it may be a clone.
+            attached.verify_tooltip = text("This archive's enclosure differs from the one recorded: FULL verify asks "
+                                           "first whether it is the same device.");
+            attached.fields.push_back({text("Attached at"),
+                text.format("not as recorded: another enclosure ({})", path_to_utf8(found->root))});
+            attached.enclosure_recorded = enclosure_serial(found->recorded);
+            attached.fields.push_back({text("Enclosure serial"),
+                text.format("{} (recorded), now {}", attached.enclosure_recorded, enclosure_serial(found->now))});
+            break;
+        }
         attached.line =
             AttachedLine{Attached::Migrated, text("The device differs from the one recorded"), roots_of(*attachment)};
         attached.notice = migrated_notice(text, *attachment, status.archive.status == "RETIRED");
@@ -308,7 +372,8 @@ Pill health_pill(const app::Text& text, const std::optional<DeviceHealth>& healt
 }
 
 std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& read,
-    const std::vector<ArchiveName>& names, IdentityShown shown, const std::vector<std::filesystem::path>& registering)
+    const std::vector<ArchiveName>& names, IdentityShown shown, const std::vector<std::filesystem::path>& registering,
+    const KeptDeviceReads& reads, bool reader, const std::string& reading)
 {
     // The sample list is sample data itself, shown as it is.
     const auto identity = read.sample ? IdentityShown::Recorded : shown;
@@ -377,10 +442,35 @@ std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& 
         }
         card.subtitle = joined(text, parts);
         card.health = health_pill(text, device.health);
-        // As the device reports it (decision 0044 asks nothing more of it).
-        card.fields.push_back({text("Serial"), device.serial.empty() ? text("not reported") : device.serial});
+        // As the device reports it (decision 0044 asks nothing more of it);
+        // the enclosure's, where it hides the device's own (decision 0047).
+        card.fields.push_back({device.enclosure_hides_identity ? text("Enclosure serial") : text("Serial"),
+            device.serial.empty() ? text("not reported") : device.serial});
         if (!device.wwn.empty()) {
             card.fields.push_back({text("WWN"), device.wwn});
+        }
+        if (device.enclosure_hides_identity) {
+            OwnSerialLine own;
+            own.device_ref = device.device_ref;
+            if (const auto* kept = kept_read_of(reads, device)) {
+                std::vector<std::string> owners;
+                for (const auto& archive : kept->confirmed_of) {
+                    owners.push_back(label_of(names, archive));
+                }
+                // Not that it is no archive's device: an archive registered
+                // before decision 0047 records no device's own serial.
+                own.value = text.format("{} · {}", text.format("{} (read)", read_serial(kept->read.device)),
+                    owners.empty() ? text("no archive records this serial yet")
+                                   : text.format("the device of {} (confirmed)", listed(text, owners)));
+            } else {
+                own.value = text("This enclosure does not pass the device's own serial on.");
+                own.offered = offers_device_read(device, reader);
+                own.reading = own.offered && !reading.empty() && reading == device.device_ref;
+                if (own.offered) {
+                    own.note = app::device_identity_reader_note(text);
+                }
+            }
+            card.own = std::move(own);
         }
         const auto volumes = by_mount_point(attached.volumes);
         for (const auto index : volumes) {

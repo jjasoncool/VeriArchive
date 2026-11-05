@@ -15,8 +15,12 @@
 // (devices_poll.cpp): a notice above the banner where it is not attached as
 // recorded, with Relocate to this carrier... where its filesystem is on
 // another device than recorded, the tooltip of FULL verify, and its volume and
-// root in the group Device. A retired archive can still be verified (decision
-// 0003), but takes no new revision.
+// root in the group Device; where its device is seen behind another enclosure
+// (decision 0047), that FULL verify asks first whether it is the same device,
+// with Confirm and FULL verify..., and while a verification goes on with a
+// confirmation, that it was taken and only a pass records the new enclosure. A
+// retired archive can still be verified (decision 0003), but takes no new
+// revision.
 #include "gui/gui_app.h"
 
 #include "core/engine/add_chunk_hashes.h"
@@ -685,6 +689,31 @@ void show_details_attached(GuiState& state)
     }
     const auto& text = state.text;
     auto shown = archive_attached(text, attached_now(state), *found, state.identity_shown);
+    // Decision 0047: while its verification goes on with a carrier
+    // confirmation, the notice says that it was taken, and what a pass
+    // records, in place of the question; once one recorded the new carrier,
+    // what it recorded, until a read of the attached devices begun since
+    // (which no longer finds the enclosure changed) is shown.
+    bool confirmed = false;
+    if (const auto job = state.verification_jobs.find(*state.archive_selected);
+        job != state.verification_jobs.end() && active_job_of(state, *state.archive_selected)) {
+        if (const auto confirmation = state.confirmed_verifications.find(job->second);
+            confirmation != state.confirmed_verifications.end()) {
+            shown.notice = confirmed_running_notice(text, display_label(*found), confirmation->second);
+            shown.confirm_first = false;
+            shown.relocate_root.reset();
+            confirmed = true;
+        }
+    }
+    if (const auto recorded = state.carriers_recorded.find(*state.archive_selected);
+        !confirmed && shown.confirm_first && recorded != state.carriers_recorded.end()) {
+        shown.notice = app::carrier_line(text, recorded->second.carrier, true);
+        shown.confirm_first = false;
+        shown.verify_tooltip.reset();
+        shown.fields.clear();
+        shown.enclosure_recorded.clear();
+        confirmed = true;
+    }
     // As shown already: the keyboard focus on its words stays.
     if (page.attached_shown == shown) {
         return;
@@ -697,10 +726,12 @@ void show_details_attached(GuiState& state)
         gtk_box_remove(GTK_BOX(page.attached_notice), child);
     }
     page.attached_words = nullptr;
-    if (shown.notice && shown.line) {
-        const bool here_not = shown.line->state == Attached::Nowhere;
-        GtkWidget* notice = here_not ? line_box("va-neutral", "drive-harddisk-symbolic", "dim-label")
-                                     : line_box("va-warning", "dialog-warning-symbolic", "warning");
+    if (shown.notice && (shown.line || confirmed)) {
+        const bool here_not = confirmed || shown.line->state == Attached::Nowhere;
+        GtkWidget* notice =
+            here_not ? line_box("va-neutral", confirmed ? "drive-harddisk-usb-symbolic" : "drive-harddisk-symbolic",
+                           "dim-label")
+                     : line_box("va-warning", "dialog-warning-symbolic", "warning");
         page.attached_words = words_label(*shown.notice, nullptr, true);
         // It holds a command to copy, with a uuid and a root, which a hyphen
         // that Pango adds where it breaks a line would read as part of.
@@ -710,6 +741,14 @@ void show_details_attached(GuiState& state)
         pango_attr_list_unref(no_hyphens);
         gtk_widget_set_hexpand(page.attached_words, TRUE);
         gtk_box_append(GTK_BOX(notice), page.attached_words);
+        // Behind another enclosure (decision 0047): FULL verify, which asks
+        // first whether it is the same device.
+        if (shown.confirm_first) {
+            GtkWidget* confirm = row_button(state, text("Confirm and FULL verify..."), *state.archive_selected,
+                [](GuiState& state, const Uuid& archive) { verify_archive(state, archive, VerifyChoice::Full); });
+            gtk_widget_set_sensitive(confirm, !page.verify_busy);
+            gtk_box_append(GTK_BOX(notice), confirm);
+        }
         // MIGRATED: the relocation dialog, the new root the read found
         // chosen (decision 0046).
         if (shown.relocate_root) {
@@ -734,8 +773,7 @@ void show_details_attached(GuiState& state)
     // Where it is attached, under its carrier as recorded in the group
     // Device, each name beside its value as theirs.
     if (page.device_group && page.device_row) {
-        auto fields = page.device_fields;
-        fields.insert(fields.end(), shown.fields.begin(), shown.fields.end());
+        const auto fields = details_device_fields(text, page.device_fields, shown);
         keep_focus_from(state, page.device_row);
         adw_preferences_group_remove(ADW_PREFERENCES_GROUP(page.device_group), page.device_row);
         page.device_row = make_fields_row(fields);

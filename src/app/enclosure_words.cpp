@@ -35,10 +35,11 @@ std::string enclosure_question_title(const Text& text, const std::string& where)
 
 std::vector<std::string> enclosure_question_body(const Text& text, const EnclosureFacts& facts)
 {
+    // The two serials themselves are shown beside it, as a list.
     std::vector<std::string> body{
         text.format("The filesystem ID of this volume is the one {} records, but the serial its enclosure reports "
-                    "has changed: recorded {}, now {}.",
-            facts.label, facts.enclosure_recorded, facts.enclosure_now)};
+                    "has changed.",
+            facts.label)};
     if (facts.confirmed) {
         body.push_back(text.format("{} records the device's own serial {}. Reading the serial now tells whether this "
                                    "is the same device.",
@@ -46,9 +47,7 @@ std::vector<std::string> enclosure_question_body(const Text& text, const Enclosu
             facts.confirmed->device.serial.empty() ? facts.confirmed->device.wwn : facts.confirmed->device.serial));
         return body;
     }
-    body.push_back(text("It may be the same device in another enclosure, or a sector-by-sector clone of it. A clone "
-                        "holds exactly the same content and passes a FULL verify too, so the verification itself "
-                        "cannot tell them apart."));
+    body.push_back(sector_clone_words(text));
     body.push_back(text.format("{} records no serial of the device itself, so a serial read now has nothing to be "
                                "compared with: you compare it with the serial on the device's label. Only once you "
                                "confirm that it is the same device and the FULL verify passes is it recorded; when the "
@@ -57,11 +56,22 @@ std::vector<std::string> enclosure_question_body(const Text& text, const Enclosu
     return body;
 }
 
+std::string sector_clone_words(const Text& text)
+{
+    return text("It may be the same device in another enclosure, or a sector-by-sector clone of it. A clone holds "
+                "exactly the same content and passes a FULL verify too, so the verification itself cannot tell them "
+                "apart.");
+}
+
 std::string device_identity_reader_note(const Text& text)
 {
-    return text("Needs administrator permission: Windows asks whether to allow the VeriArchive device identity reader "
-                "of an unknown publisher. It reads only the model, serial and WWN that the device reports, and reads "
-                "or writes none of the data on the device.");
+    // Named as Windows names an unsigned program in its question: by its
+    // file name, its publisher unknown. Not in Windows' own words, whose
+    // "device" is the computer, not a device as VeriArchive names one.
+    return text("Needs administrator permission: Windows' User Account Control asks whether to allow "
+                "veriarchive-device-identity.exe (the VeriArchive device identity reader), from an unknown publisher. "
+                "It reads only the model, serial and WWN that the device reports, and reads or writes none of the "
+                "data on the device.");
 }
 
 std::string device_read_declined(const Text& text)

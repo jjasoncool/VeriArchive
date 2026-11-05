@@ -15,6 +15,7 @@
 #include "core/engine/archive_status.h"
 #include "core/engine/attached.h"
 #include "gui/archive_rows.h"
+#include "gui/device_reads.h"
 #include "gui/displayed_identity.h"
 #include "gui/history_rows.h"
 #include "gui/register_choices.h"
@@ -109,14 +110,52 @@ struct ArchiveAttached {
     // Relocate to this carrier... beside the notice opens the relocation
     // dialog with (decision 0046).
     std::optional<std::string> relocate_root;
+    // MIGRATED behind another enclosure (enclosure_case, decision 0047): the
+    // notice says that FULL verify asks first whether it is the same device,
+    // and Confirm and FULL verify... beside it does so; no relocation is
+    // offered beside it (the menu of the details still offers one). The
+    // enclosure's serial as recorded, which its field "Enclosure serial"
+    // shows beside the one seen now.
+    bool confirm_first = false;
+    std::string enclosure_recorded;
     bool operator==(const ArchiveAttached&) const = default;
 };
 
 ArchiveAttached archive_attached(
     const app::Text& text, const AttachedRead* read, const ArchiveStatus& status, IdentityShown shown);
 
+// The group Device of an archive's details: its carrier as recorded
+// (`recorded`, device_fields), then where it is attached now (`attached`'s
+// fields). Behind another enclosure, the serial recorded is the enclosure's,
+// which "Enclosure serial" shows beside the one seen now, so the recorded
+// "Serial" (or "WWN") of that value is left out.
+std::vector<Field> details_device_fields(
+    const app::Text& text, std::vector<Field> recorded, const ArchiveAttached& attached);
+
 // The archive's attachment in `read`, or none where the read did not match it.
 const ArchiveAttachment* attachment_of(const AttachedRead& read, const Uuid& archive);
+
+// The archive's device seen behind another enclosure (decision 0047): its
+// filesystem found at one root, on another device than recorded (MIGRATED),
+// where that is a changed enclosure (enclosure_changed: both behind a USB
+// bridge, or the one seen now behind an enclosure that hides its identity),
+// of an archive that is not retired (a retired archive takes no new
+// revisions). Its FULL verify by its uuid goes on only with a carrier
+// confirmation, which the window asks for first (enclosure_flow.h). `where`:
+// the volume's mount point, as the question names it; `now`'s one device is
+// the one whose own serial a read reads. enclosure_case_of judges an
+// attachment found on `volumes` (where_attached); enclosure_case the latest
+// read, and never in the screenshot mode (`shown` Sample), whose archives'
+// carriers are this computer's own volumes, whose serials no picture shows.
+struct EnclosureCase {
+    std::string where;
+    std::filesystem::path root;
+    VolumeInfo recorded;
+    VolumeInfo now;
+};
+std::optional<EnclosureCase> enclosure_case_of(
+    const ArchiveAttachment& attachment, std::span<const VolumeInfo> volumes, const VolumeInfo& recorded, bool retired);
+std::optional<EnclosureCase> enclosure_case(const AttachedRead* read, const ArchiveStatus& status, IdentityShown shown);
 
 // A device's health as a pill (decision 0044): "Healthy" (健康, Success),
 // "Warning (predicting failure)" (警告（預測即將故障）, Warning), "Unhealthy
@@ -152,16 +191,34 @@ struct VolumeLine {
     bool operator==(const VolumeLine&) const = default;
 };
 
+// The device's own serial on a device whose enclosure hides it (decision
+// 0047): a read of it kept (KeptDeviceRead), "SERIAL (read)" with whose
+// confirmed device it is ("The device of ARCH-0002 (confirmed)"), or that it
+// is no archive's; otherwise that the enclosure does not pass it on, with Read
+// the device's own serial... and the note of what Windows asks where this
+// computer can read it (offers_device_read), or that it is being read.
+struct OwnSerialLine {
+    std::string device_ref;
+    std::string value;
+    bool offered = false;
+    bool reading = false;
+    std::string note;
+    bool operator==(const OwnSerialLine&) const = default;
+};
+
 // A device in Devices: its model, its bus (bus_words) and capacity, its
-// health, its serial as it reports it (or its WWN), and its volumes; volumes
-// whose device cannot be told come last, in a card of their own without a
-// health. `bus` as the device reports it ("usb", ...), for its icon.
+// health, its serial as it reports it (or its WWN; "Enclosure serial" where
+// its enclosure hides the device's own, decision 0047, then the device's own
+// serial in `own`), and its volumes; volumes whose device cannot be told come
+// last, in a card of their own without a health. `bus` as the device reports
+// it ("usb", ...), for its icon.
 struct DeviceCard {
     std::string title;
     std::string subtitle;
     std::string bus;
     std::optional<Pill> health;
     std::vector<Field> fields;
+    std::optional<OwnSerialLine> own;
     std::vector<VolumeLine> volumes;
     bool operator==(const DeviceCard&) const = default;
 };
@@ -174,10 +231,13 @@ struct DeviceCard {
 // is, being sample data itself. `registering`: the roots that registrations
 // are working on (this window's jobs, and unfinished registrations that work
 // as the latest read of them found), each named on its volume in place of
-// Register this volume.
+// Register this volume. `reads`: the reads of the devices' own serials kept
+// (decision 0047); `reader`: this computer has a device identity reader;
+// `reading`: the device whose own serial is being read, if one is.
 std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& read,
     const std::vector<ArchiveName>& names, IdentityShown shown,
-    const std::vector<std::filesystem::path>& registering = {});
+    const std::vector<std::filesystem::path>& registering = {}, const KeptDeviceReads& reads = {},
+    bool reader = false, const std::string& reading = {});
 
 // The head of Devices: "3 devices attached", or that none is.
 std::string devices_status(const app::Text& text, const AttachedRead& read);
@@ -190,6 +250,12 @@ std::string reading_words(const app::Text& text, std::chrono::steady_clock::dura
 
 // How often the attached devices are read while Archives or Devices is shown.
 inline constexpr std::chrono::seconds devices_read_interval{30};
+// Decision 0047: the reads of the devices' own serials kept are dropped where
+// a read of the attached devices began more than this later than the reads'
+// spacing (read_due) lets it begin after the one before was shown: the
+// devices were not watched meanwhile (the computer slept, say), and another
+// device may have been put into an enclosure unseen.
+inline constexpr std::chrono::seconds devices_watch_pause{10};
 
 // Whether a timer that ticks `interval` apart reads again: every tick, unless
 // the last read took long (`took`, begun at `started`); then once ten times

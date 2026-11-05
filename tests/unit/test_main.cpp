@@ -14,6 +14,7 @@ int main()
     attached_tests();
     attached_devices_tests();
     device_rows_tests();
+    enclosure_flow_tests();
     device_health_tests();
     device_identity_tests();
     displayed_identity_tests();

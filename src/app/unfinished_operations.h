@@ -78,6 +78,9 @@ struct UnfinishedOperation {
                                        // takes no new revision (decision 0003), so it can never finish
     bool adds_chunk_hashes = false;    // a verification that adds chunk hashes (decision 0033): no other
                                        // operation creates the archive's next revision while it is unfinished
+    bool carrier_confirmed = false;    // a verification that goes on past a changed enclosure with a carrier
+                                       // confirmation its record carries (decision 0047): a resume goes on with it,
+                                       // and only a pass records the new enclosure
     std::optional<std::chrono::sys_seconds> updated;  // when the operation last said it was working, if it does
     bool done_counted = true;          // false: files_done and bytes_done are not known, as the checkpoints
                                        // are not counted where that would hold up the operation (a database

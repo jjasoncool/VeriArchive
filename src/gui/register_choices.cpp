@@ -1,6 +1,7 @@
 #include "gui/register_choices.h"
 
 #include "app/device_alerts.h"
+#include "app/enclosure_words.h"
 #include "app/plain_words.h"
 #include "common/archive_path.h"
 #include "common/unicode.h"
@@ -546,6 +547,49 @@ std::string registration_report(const app::Text& text, const RegisterOutcome& ou
                 ? "\n" + text("The baseline exists only in the repository: back up RepositoryRoot.") + "\n"
                 : "\n" + text.format("Media copy: {}", path_to_utf8(outcome.media_copy)) + "\n";
     return body;
+}
+
+std::optional<DeviceSerialOffer> device_serial_offer(const ChosenSource& source, const SourceOptions& options,
+    IdentityShown shown, bool reader, const KeptDeviceReads& reads)
+{
+    if (shown == IdentityShown::Sample || options.unfinished || source.volume.devices.size() != 1) {
+        return std::nullopt;
+    }
+    const auto& device = source.volume.devices.front();
+    const auto* kept = kept_read_of(reads, device);
+    if (!kept && !offers_device_read(device, reader)) {
+        return std::nullopt;
+    }
+    return DeviceSerialOffer{device, kept ? std::optional(kept->read) : std::nullopt};
+}
+
+std::string device_serial_note(const app::Text& text)
+{
+    return text("This enclosure does not pass the device's own serial on. Once it is recorded, VeriArchive tells "
+                "this device by its serial after a change of enclosure, without asking you.") +
+           "\n" + app::device_identity_reader_note(text) + "\n" +
+           text("Windows asks only once you start the registration.");
+}
+
+std::optional<Field> device_serial_field(
+    const app::Text& text, const std::optional<DeviceSerialOffer>& offer, const OptionsChosen& chosen, bool unread)
+{
+    if (!offer) {
+        return std::nullopt;
+    }
+    if (offer->kept) {
+        return Field{text("Device's own serial"), text.format("{} (read)", read_serial(offer->kept->device))};
+    }
+    return Field{text("Device's own serial"),
+        chosen.record_device_serial && !unread
+            ? text("read with administrator permission as the registration starts, and recorded")
+            : text("not recorded")};
+}
+
+std::string recorded_device_serial_line(const app::Text& text, const DeviceIdentityRead& read)
+{
+    return text.format("Device's own serial recorded: {} (the archive's confirmed device from now on)",
+        read_serial(read.device));
 }
 
 std::string registered_toast(const app::Text& text, const std::string& label, std::uint32_t revision)

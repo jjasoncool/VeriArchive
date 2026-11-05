@@ -225,8 +225,12 @@ std::vector<RunRow> recent_runs(const app::Text& text, const std::vector<VerifyR
 
 // What the details say of a stopped verification of the archive that Resume
 // continues (`row`, from the latest read of the unfinished operations): how
-// far it came, and that a resume does not read again what it read.
-std::string stopped_verification_words(const app::Text& text, const app::OperationRow& row, bool adds_chunk_hashes);
+// far it came, and that a resume does not read again what it read; for one
+// that goes on past a changed enclosure with a carrier confirmation
+// (`carrier_confirmed`, decision 0047), that only a pass once it is resumed
+// records the new enclosure.
+std::string stopped_verification_words(
+    const app::Text& text, const app::OperationRow& row, bool adds_chunk_hashes, bool carrier_confirmed = false);
 
 // What the details say of a stopped relocation of the archive that Resume
 // continues (decision 0046): where it reads, how far it came, and that a

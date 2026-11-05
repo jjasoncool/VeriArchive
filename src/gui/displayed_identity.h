@@ -9,8 +9,10 @@
 //
 // Plain C++ without GTK, so the unit tests can check it.
 #include "common/types.h"
+#include "core/interfaces.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -50,13 +52,23 @@ std::vector<PhysicalDeviceInfo> displayed_devices(const std::vector<PhysicalDevi
 // with the space in use on it; one has no label, one is read-only, and two
 // are on one device. Each device has the health it "reported" (one healthy,
 // one warning that it predicts its failure, one that cannot be read), so
-// Devices asks no device for its own. No registered archive matches any of
-// them.
+// Devices asks no device for its own. The one whose health cannot be read is
+// behind a sample enclosure that hides the device's own serial (decision
+// 0047), so Devices offers to read it, which the sample device identity
+// reader answers. No registered archive matches any of them.
 struct SampleVolume {
     VolumeInfo volume;
     std::uint64_t used_bytes = 0;
 };
 std::vector<SampleVolume> sample_volumes();
+
+// The device identity reader of the screenshot mode (decision 0047): SAMPLE
+// DATA, never a read of a device. It is available, and answers every read at
+// once, with no question of Windows for administrator permission, with the
+// fixed sample identity (model SAMPLE-OWN-MODEL, serial SAMPLE-OWN-SERIAL-01,
+// WWN SAMPLE-OWN-WWN-01, read "sample"), for the device named.
+inline constexpr const char* sample_own_serial = "SAMPLE-OWN-SERIAL-01";
+std::unique_ptr<IDeviceIdentityHelper> sample_device_identity_helper();
 
 // The computer that recorded a run (VerifyRunRecord::host), as a view shows
 // it: Sample, SAMPLE-HOST, since the name of the computer that takes the

@@ -9,14 +9,28 @@
 // recorded, or, where it recorded none, Details, its report. The result always carries
 // its mode (R-21) and the V1 guarantee (R-02). A stopped verification is
 // resumed from the unfinished operations or the archive's details.
+//
+// Decision 0047: FULL verify of an archive whose device the latest read of
+// the attached devices sees behind another enclosure asks first whether it is
+// the same device (enclosure_dialog.cpp), and goes on with the carrier
+// confirmation given there; its details say meanwhile that only a pass
+// records the new enclosure, and its toast what it recorded. A verification
+// that stops MIGRATED there anyway (the read was older than the change) says
+// to verify it from the details, which ask; one that stops MIGRATED anywhere
+// else names the relocation (decision 0046); every other refusal of the
+// engine, those of a confirmation included, is said in its own words.
 #include "gui/gui_app.h"
 
 #include "app/device_alerts.h"
+#include "app/enclosure_words.h"
 #include "app/plain_words.h"
 #include "app/typed_path.h"
 #include "app/verify_report.h"
 #include "common/utf8.h"
 #include "core/engine/add_chunk_hashes.h"
+#include "core/engine/attached.h"
+#include "core/engine/candidates.h"
+#include "core/engine/carrier_confirmation.h"
 #include "core/engine/verify_engine.h"
 #include "gui/archive_rows.h"
 #include "platform/file_system.h"
@@ -51,8 +65,12 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
         // Decision 0028: failed on its manifest before the media was looked for.
         body += text("Media: not read, as the manifest of this revision cannot be used") + "\n";
     } else {
-        body += text.format("Root: {}", path_to_utf8(outcome.root)) + "\n" +
-                text.format("Identity: {}", text(to_string(outcome.identity.result))) + "\n";
+        // Decision 0047: past a changed enclosure, how it was confirmed.
+        const auto identity = outcome.carrier_confirmed
+                                  ? app::confirmed_identity_words(text, outcome.carrier_confirmed->confirmation)
+                                  : text(to_string(outcome.identity.result));
+        body += text.format("Root: {}", path_to_utf8(outcome.root)) + "\n" + text.format("Identity: {}", identity) +
+                "\n";
         for (const auto& device : outcome.devices) {
             body += text.format("Device health: {}", app::device_health_words(text, device)) + "\n";
         }
@@ -88,6 +106,11 @@ std::string report(const app::Text& text, const VerifyOutcome& outcome)
     // Decision 0033: the revision that records the chunk hashes added, or why
     // there is none.
     if (const auto line = app::chunk_hashes_line(text, outcome, true); !line.empty()) {
+        body += "\n" + line + "\n";
+    }
+    // Decision 0047: the revision that records the new enclosure, or why
+    // there is none.
+    if (const auto line = app::carrier_line(text, outcome, true); !line.empty()) {
         body += "\n" + line + "\n";
     }
     if (const auto advice = app::unbaselined_advice(text, outcome, app::ReportedIn::Window)) {
@@ -128,6 +151,72 @@ std::string archive_name(const GuiState& state, const Uuid& archive_uuid)
     return archive_uuid.substr(0, 8);
 }
 
+// Decision 0047: where a verification of `archive` stopped MIGRATED, whether
+// its device is seen behind another enclosure now (enclosure_case_of), as
+// identity matching finds the archive's latest carrier on the volumes
+// attached now; the volume's mount point, if it is. Asked on the job's
+// thread; nothing where it cannot be told.
+std::optional<std::string> enclosure_seen(ArchiveStore& store, IFileSystemAccess& repository_files,
+    const RepositoryLayout& layout, IMediaEnumerator& media, const Uuid& archive)
+{
+    const auto pool = load_candidate_pool(store, repository_files, layout, archive);
+    if (!pool) {
+        return std::nullopt;
+    }
+    const auto candidate = std::ranges::find(pool->candidates, archive, &ArchiveCandidate::archive_uuid);
+    if (candidate == pool->candidates.end()) {
+        return std::nullopt;
+    }
+    const auto volumes = media.volumes();
+    if (!volumes) {
+        return std::nullopt;
+    }
+    const auto found = where_attached(*volumes, std::span(&*candidate, 1));
+    if (found.archives.empty()) {
+        return std::nullopt;
+    }
+    const auto seen = enclosure_case_of(found.archives.front(), *volumes, candidate->identity, false);
+    return seen ? std::optional(seen->where) : std::nullopt;
+}
+
+// Decision 0047: the carrier confirmation that the record of the unfinished
+// run `run_id` carries (run:<run_id>, as the engine reads it to resume the
+// run); nothing where it carries none, or cannot be read.
+std::optional<CarrierConfirmation> confirmation_carried(const GuiState& state, const std::string& run_id)
+{
+    if (!state.session) {
+        return std::nullopt;
+    }
+    auto store = ArchiveStore::open_read_only(state.session->context.repo);
+    if (!store) {
+        return std::nullopt;
+    }
+    const auto record = store->setting("run:" + run_id);
+    if (!record || record->empty()) {
+        return std::nullopt;
+    }
+    const auto carried = carrier_confirmed_in_record(nlohmann::json::parse(*record, nullptr, false));
+    return carried ? std::optional(carried->confirmation) : std::nullopt;
+}
+
+// The request of FULL verify of `archive` by its uuid, as `choice` asks for
+// it.
+VerifyRequest archive_request(const GuiState& state, const Uuid& archive, VerifyChoice choice)
+{
+    VerifyRequest request;
+    request.archive_uuid = archive;
+    // R-51: strict metadata as chosen, as the command line's
+    // --strict-metadata, or as the policy sets it.
+    request.strict_metadata =
+        choice == VerifyChoice::StrictMetadata || state.session->context.config.policy.strict_metadata;
+    // R-111: the window has no --io; the config's override by serial applies.
+    request.rotational_override = state.session->context.config.rotational_override;
+    // Decision 0033: offered only for an archive to which it adds them; the
+    // verification checks again.
+    request.add_chunk_hashes = choice == VerifyChoice::AddingChunkHashes;
+    return request;
+}
+
 // Runs `request` as a job (decision 0045), shown as a card in the details of
 // `shown_in` until another one is started there. A run left INCOMPLETE is the
 // one that Resume in its archive's details continues as the window ran it
@@ -148,8 +237,15 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
         Uuid archive_uuid;
         std::string label;  // as the verification read it
         std::string run_id; // the run it recorded, whose result page the toast opens
+        // Decision 0047: what it recorded of the new enclosure, which the
+        // toast says (only carrier_* are set).
+        VerifyOutcome carrier;
     };
     auto reached = std::make_shared<std::optional<Reached>>();
+    // Decision 0047: it stopped MIGRATED behind another enclosure that the
+    // latest read of the attached devices had not seen: `done` reads them
+    // again, so the details ask first. Set by the worker.
+    auto enclosure_unseen = std::make_shared<bool>(false);
     // The worker returns its report unworded; it is worded when shown, in the
     // language in use then.
     JobSpec job;
@@ -167,7 +263,7 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
             return devices_of_archive(layout, archive);
         };
     }
-    job.work = [&state, request, interrupted, reached](JobContext& context) -> Report {
+    job.work = [&state, request, interrupted, reached, enclosure_unseen](JobContext& context) -> Report {
         // Not verified, until a result says otherwise.
         context.tone = JobTone::Error;
         // Decision 0029: a root on a network share, or one written in the
@@ -226,9 +322,16 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
             // MIGRATED: the filesystem of an archive on another device than
             // recorded, which the window relocates (decision 0046), in place of
             // the command line's `archive relocate`; a retired archive takes
-            // no new revisions. Named as its record names it, read here.
-            if (const auto& stop = outcome.error();
-                stop.identity.result == MatchResult::Migrated && !stop.identity.archives.empty()) {
+            // no new revisions. Named as its record names it, read here. Only
+            // the stop that every MIGRATED without a confirmation makes: a
+            // refusal of a carrier confirmation (decision 0047: another
+            // archive's carrier there, the serial of another device, a retired
+            // archive, chunk hashes asked for, enclosures that changed since)
+            // carries the identity too, and is said in its own words below.
+            if (const auto& stop = outcome.error(); stop.kind == VerifyStop::Kind::Decision &&
+                                                    stop.identity.result == MatchResult::Migrated &&
+                                                    !stop.identity.archives.empty() &&
+                                                    stop.message.starts_with("MIGRATED:")) {
                 const auto& migrated = stop.identity.archives.front();
                 std::string label = migrated.substr(0, 8);
                 bool retired = false;
@@ -237,6 +340,18 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
                         label = (*archive)->label;
                     }
                     retired = (*archive)->status == "RETIRED";
+                }
+                // Decision 0047: behind another enclosure, which the latest
+                // read of the attached devices had not seen yet, or verified
+                // by its folder: FULL verify of its details asks first.
+                if (!retired) {
+                    if (auto where = enclosure_seen(
+                            *store, *repository_files, session.context.repo, *media, migrated)) {
+                        *enclosure_unseen = true;
+                        return [where = std::move(*where)](const app::Text& text) {
+                            return enclosure_stop_words(text, where);
+                        };
+                    }
                 }
                 return [label, retired](const app::Text& text) {
                     const auto found = text.format("Not verified: the filesystem of this folder or volume is that of "
@@ -267,7 +382,10 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
         context.tone = verification_tone(outcome->result);
         // A verification that returns an outcome has recorded its run, an
         // INCOMPLETE one and one that failed on its manifest included.
-        *reached = Reached{outcome->result, outcome->archive_uuid, outcome->label, outcome->run_id};
+        *reached = Reached{outcome->result, outcome->archive_uuid, outcome->label, outcome->run_id, {}};
+        (*reached)->carrier.carrier_confirmed = outcome->carrier_confirmed;
+        (*reached)->carrier.carrier_revision = outcome->carrier_revision;
+        (*reached)->carrier.carrier_not_recorded = outcome->carrier_not_recorded;
         if (outcome->result == "INCOMPLETE") {
             *interrupted = Interrupted{outcome->run_id, outcome->archive_uuid};
         } else if (request.resume_run && !outcome->media_read) {
@@ -278,9 +396,28 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
         }
         return [outcome = std::move(*outcome)](const app::Text& text) { return report(text, outcome); };
     };
-    job.done = [&state, request, interrupted, reached, name](std::uint64_t ended, const Report&) {
+    job.done = [&state, request, interrupted, reached, enclosure_unseen, name](std::uint64_t ended, const Report&) {
         guarded(
             [&] {
+                // Its details no longer say that it goes on with a confirmation.
+                state.confirmed_verifications.erase(ended);
+                // Decision 0047: a pass that recorded the new carrier, whose
+                // confirmation named the device read, makes that device the
+                // archive's confirmed device (Devices says so of its read);
+                // until the attached devices are read again, which they are
+                // at once, the details say what it recorded in place of the
+                // question, which the read before (of the earlier carrier)
+                // would still ask.
+                const bool carrier_recorded = *reached && (*reached)->carrier.carrier_revision > 0;
+                if (carrier_recorded) {
+                    const auto& found = **reached;
+                    if (found.carrier.carrier_confirmed && found.carrier.carrier_confirmed->confirmation.device) {
+                        note_confirmed(state.device_reads, *found.carrier.carrier_confirmed->confirmation.device,
+                            found.archive_uuid);
+                    }
+                    state.carriers_recorded[found.archive_uuid] =
+                        GuiState::CarrierRecorded{found.carrier, std::chrono::steady_clock::now()};
+                }
                 if (*interrupted) {
                     state.interrupted_run = InterruptedRun{
                         (*interrupted)->run_id, request.root, (*interrupted)->archive_uuid, request.strict_metadata};
@@ -299,6 +436,9 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
                 refresh_archives(state);
                 refresh_history(state);
                 start_poll(state);
+                if (*enclosure_unseen || carrier_recorded) {
+                    read_devices(state, DevicesReadWhy::Refresh);
+                }
                 // The archive as the list names it: by its uuid as the job's
                 // title does, by the root's archive once the verification
                 // found it; or, without a result, what the job verified.
@@ -309,7 +449,12 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
                     const auto archive = !request.root          ? name
                                          : found.archive_uuid.empty() ? found.label
                                                                       : archive_name(state, found.archive_uuid);
-                    show_toast(state, verified_toast(state.text, archive.empty() ? name : archive, found.result),
+                    // Decision 0047: and what it recorded of the new
+                    // enclosure, or that it recorded none.
+                    show_toast(state,
+                        confirmed_toast(state.text, verified_toast(state.text, archive.empty() ? name : archive,
+                                                        found.result),
+                            found.carrier),
                         ToastAction{state.text("View result"),
                             [run = found.run_id, uuid = found.archive_uuid](GuiState& state) {
                                 // Over Archives, the details of its archive behind it.
@@ -324,6 +469,15 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
     };
     const auto id = state.jobs.start(state.text, std::move(job));
     state.verification_jobs[shown_in] = id;
+    if (request.carrier_confirmation) {
+        state.confirmed_verifications[id] = *request.carrier_confirmation;
+    } else if (const auto carried = request.resume_run ? confirmation_carried(state, *request.resume_run)
+                                                       : std::nullopt) {
+        // Decision 0047: a resume goes on with the confirmation its run's
+        // record carries (as the engine reads it); its details say so as for
+        // the first attempt.
+        state.confirmed_verifications[id] = *carried;
+    }
     job_changed(state, id);
     // The details that started it show it.
     if (state.archive_selected == shown_in) {
@@ -376,18 +530,43 @@ void verify_archive(GuiState& state, const Uuid& archive, VerifyChoice choice)
     if (refused_while_the_archive_has_a_job(state, archive, recorded_root(state, archive))) {
         return;
     }
-    VerifyRequest request;
-    request.archive_uuid = archive;
-    // R-51: strict metadata as chosen, as the command line's
-    // --strict-metadata, or as the policy sets it.
-    request.strict_metadata =
-        choice == VerifyChoice::StrictMetadata || state.session->context.config.policy.strict_metadata;
-    // R-111: the window has no --io; the config's override by serial applies.
-    request.rotational_override = state.session->context.config.rotational_override;
-    // Decision 0033: offered only for an archive to which it adds them; the
-    // verification checks again.
-    request.add_chunk_hashes = choice == VerifyChoice::AddingChunkHashes;
+    // Decision 0047: its device seen behind another enclosure, as the latest
+    // read of the attached devices found it: the question first. The
+    // verification that accepts another enclosure adds no chunk hashes, which
+    // the engine would refuse.
+    const auto status = std::ranges::find_if(state.archives_page.statuses,
+        [&](const ArchiveStatus& listed) { return listed.archive.archive_uuid == archive; });
+    if (status != state.archives_page.statuses.end()) {
+        if (const auto found = enclosure_case(attached_now(state), *status, state.identity_shown)) {
+            if (choice == VerifyChoice::AddingChunkHashes) {
+                show_message(state, [](const app::Text& text) {
+                    return text.format("Not verified: {}",
+                        text("chunk hashes are not added by the verification that accepts another enclosure; verify "
+                             "the archive first, then add chunk hashes"));
+                });
+                return;
+            }
+            ask_about_enclosure(state, archive, choice == VerifyChoice::StrictMetadata, *found);
+            return;
+        }
+    }
+    run_verification(state, archive_request(state, archive, choice), archive);
+}
+
+bool verify_confirmed(GuiState& state, const Uuid& archive, bool strict, CarrierConfirmation confirmation)
+{
+    if (!state.session) {
+        show_message(state, fixed_message("Open a repository first (Settings)."));
+        return false;
+    }
+    // A job may have started on it while the question was shown.
+    if (refused_while_the_archive_has_a_job(state, archive, recorded_root(state, archive))) {
+        return false;
+    }
+    auto request = archive_request(state, archive, strict ? VerifyChoice::StrictMetadata : VerifyChoice::Full);
+    request.carrier_confirmation = std::move(confirmation);
     run_verification(state, std::move(request), archive);
+    return true;
 }
 
 void choose_and_verify_root(GuiState& state, const Uuid& shown_in)

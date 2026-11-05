@@ -32,7 +32,16 @@
 // use tells it, and no other volume of this computer is read; Archives and
 // Devices show of that only the archives' roots, their sample folders, and
 // the sample identity (Devices lists such a volume as SAMPLE-VOLUME on
-// SAMPLE-DEVICE, with a sample health, attached_read).
+// SAMPLE-DEVICE, with a sample health, attached_read). A read of a device's
+// own serial behind its enclosure (decision 0047) goes to a sample device
+// identity reader (sample_device_identity_helper), which answers with a fixed
+// sample identity and never asks Windows for administrator permission.
+//
+// No picture shows the enclosure question of a FULL verify: the sample
+// archives are folders on this computer's own volume, which identity matching
+// finds as recorded (MATCH). The question needs an archive's carrier seen
+// behind another enclosure, which only a made-up identity could give, and the
+// window behind the dialog would then show the archive attached as recorded.
 #include "gui/gui_app.h"
 
 #include "common/utf8.h"
@@ -271,6 +280,42 @@ public:
                     if (GtkWidget* viewport = card ? gtk_widget_get_ancestor(card, GTK_TYPE_VIEWPORT) : nullptr) {
                         gtk_viewport_scroll_to(GTK_VIEWPORT(viewport), card, nullptr);
                     }
+                    // Decision 0047: the sample device behind its sample
+                    // enclosure offers Read the device's own serial...
+                    if (std::ranges::none_of(*shown, [](const DeviceCard& listed) {
+                            return listed.own && listed.own->offered;
+                        })) {
+                        throw std::runtime_error("Devices offers no read of a device's own serial");
+                    }
+                }},
+            // Then Read the device's own serial... of that sample device (no
+            // picture), as the operator clicks it: the screenshot mode's
+            // sample device identity reader answers at once with its sample
+            // identity, asking Windows nothing (SAMPLE DATA), and Devices
+            // shows the serial read.
+            {"",
+                [this] {
+                    show("devices");
+                    const auto& shown = *state_.devices_page.shown;
+                    const auto card = std::ranges::find_if(
+                        shown, [](const DeviceCard& listed) { return listed.own && listed.own->offered; });
+                    read_device_serial(state_, card->own->device_ref);
+                    if (!state_.device_reading) {
+                        throw std::runtime_error("the device's own serial is not being read");
+                    }
+                },
+                {},
+                [this] {
+                    if (state_.device_reading) {
+                        return false;
+                    }
+                    const auto& shown = state_.devices_page.shown;
+                    if (!shown || std::ranges::none_of(*shown, [](const DeviceCard& listed) {
+                            return listed.own && listed.own->value.contains(sample_own_serial);
+                        })) {
+                        throw std::runtime_error("Devices does not show the device's own serial read");
+                    }
+                    return true;
                 }},
             {"03-register.png",
                 [this] {

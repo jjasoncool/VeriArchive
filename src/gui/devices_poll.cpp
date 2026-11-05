@@ -122,6 +122,7 @@ void apply_read(GuiState& state, DevicesResult& result)
         return;  // shutting down
     }
     auto& poll = state.devices;
+    const auto previous_took = poll.took;
     poll.took = result.took;
     if (result.repository != repository_open(state)) {
         // Another repository was opened while it ran: its archives are
@@ -131,6 +132,26 @@ void apply_read(GuiState& state, DevicesResult& result)
         poll.repository = std::move(result.repository);
         poll.read = std::move(result.read);
         poll.error = std::move(result.error);
+        // Decision 0047: a device's own serial read is kept only while the
+        // device is attached as it was described then, and only while the
+        // devices were watched without a pause much longer than the reads'
+        // interval: unwatched, another device may have been put into its
+        // enclosure, which the enclosure's description cannot tell.
+        if (poll.applied != std::chrono::steady_clock::time_point{} &&
+            poll.started - poll.applied > devices_read_interval + 10 * previous_took + devices_watch_pause) {
+            state.device_reads.clear();
+        }
+        poll.applied = std::chrono::steady_clock::now();
+        if (poll.read) {
+            std::vector<PhysicalDeviceInfo> attached;
+            for (const auto& device : poll.read->devices) {
+                attached.push_back(device.device);
+            }
+            keep_reads_of(state.device_reads, attached);
+        }
+        // A read begun after a confirmed verification recorded an archive's
+        // new carrier matched that carrier: the details show what it finds.
+        std::erase_if(state.carriers_recorded, [&](const auto& recorded) { return recorded.second.at < poll.started; });
         show_attached(state);
         refresh_devices(state);
     }
@@ -289,6 +310,10 @@ void stop_watching_devices(GuiState& state, GtkWidget* page)
         g_source_remove(poll.timer);
         poll.timer = 0;
         poll.served = nullptr;
+        // Decision 0047: no longer watched, a device may be put into another
+        // device's enclosure unseen: the reads of the devices' own serials
+        // kept are dropped (device_reads.h).
+        state.device_reads.clear();
     }
 }
 

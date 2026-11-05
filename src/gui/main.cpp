@@ -52,9 +52,13 @@ int main(int argc, char* argv[])
     }
     // The device identity reader (decision 0047). The smoke test and the
     // screenshot mode never ask for administrator permission, so they get
-    // none that reads.
-    if (smoke_test || state.screenshot_folder) {
+    // none that reads: the screenshot mode a sample one, which answers with a
+    // fixed sample identity (SAMPLE DATA) and asks Windows nothing, so its
+    // pictures show the read offered and answered on its sample devices.
+    if (smoke_test) {
         state.device_identity = std::make_unique<va::NullDeviceIdentityHelper>();
+    } else if (state.screenshot_folder) {
+        state.device_identity = va::gui::sample_device_identity_helper();
     } else {
         state.device_identity = va::platform::make_device_identity_helper();
     }
@@ -90,6 +94,12 @@ int main(int argc, char* argv[])
             auto& state = *static_cast<va::gui::GuiState*>(data);
             va::gui::guarded([&] { state.jobs.shut_down(); }, [](const va::gui::Report&) {});
             va::gui::guarded([&] { state.job.shut_down(); }, [](const va::gui::Report&) {});
+            // Decision 0047: a read of a device's own serial in flight stops
+            // waiting for the device identity reader once Windows' question
+            // is answered, which the program waits for before it ends.
+            if (state.device_reading && state.device_reading->cancel) {
+                state.device_reading->cancel->cancel();
+            }
             // The window is gone. GLib still runs the callbacks already queued
             // (a language change, say); they check this and do nothing.
             state.window = nullptr;

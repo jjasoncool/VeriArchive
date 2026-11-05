@@ -640,6 +640,11 @@ constexpr CatalogEntry entries[] = {
     {"The last FULL verification of this archive that adds chunk hashes stopped at {}. Resume continues it without "
      "reading again what it read.",
         "此封存上次加入區塊雜湊的完整驗證停止於 {}。按「繼續」即可接續，已讀過的不必重讀。", Match::FormatOnly},
+    // ... and one that goes on past a changed enclosure (decision 0047).
+    {"The last FULL verification of this archive stopped at {}. Resume continues it without reading again what it "
+     "read. Only once it is resumed and passes is the new enclosure recorded.",
+        "此封存上次的完整驗證停止於 {}。按「繼續」即可接續，已讀過的不必重讀。繼續之後若通過，才會記下新的外接盒。",
+        Match::FormatOnly},
     {"Device", "裝置"},
     {"Volume", "磁碟區"},
     {"Capacity", "容量"},
@@ -757,6 +762,29 @@ constexpr CatalogEntry entries[] = {
     {"not attached", "未連接"},
     {"not as recorded: the filesystem is on another device ({})", "與記錄中的不同：檔案系統在另一個裝置上（{}）",
         Match::FormatOnly},
+    // The archive's device behind another enclosure (decision 0047), which
+    // FULL verify asks about first: its row, notice, tooltip and fields.
+    {"The enclosure differs from the one recorded", "外接盒與記錄中的不同"},
+    {"The enclosure of {} differs from the one recorded. Before it is verified, you are asked whether it is the same "
+     "device.",
+        "{} 的外接盒與記錄中的不同。驗證前會先請您確認是不是同一個裝置。", Match::FormatOnly},
+    {"Confirm and FULL verify...", "確認並完整驗證…"},
+    {"This archive's enclosure differs from the one recorded: FULL verify asks first whether it is the same device.",
+        "這個封存的外接盒與記錄中的不同：「完整驗證」會先請您確認是不是同一個裝置。"},
+    {"not as recorded: another enclosure ({})", "與記錄中的不同：外接盒不同（{}）", Match::FormatOnly},
+    {"Enclosure serial", "外接盒的序號"},
+    {"{} (recorded), now {}", "{}（記錄中）・這次 {}", Match::FormatOnly},
+    // ... and while the verification that went on with a confirmation
+    // waits or works (src/gui/enclosure_flow.cpp).
+    {"Confirmed as the device of {} ({}). Only once this FULL verify passes is the new enclosure {} recorded; "
+     "whatever the result, the history records how it was confirmed.",
+        "已確認是 {} 的裝置（{}）。這次完整驗證通過之後，才會記下新的外接盒 {}；無論結果如何，歷程都會記錄這次的確認方式。",
+        Match::FormatOnly},
+    {"Confirmed as the device of {} ({}). Only once this FULL verify passes are the new enclosure {} and the device's "
+     "own serial {} recorded; whatever the result, the history records how it was confirmed.",
+        "已確認是 {} 的裝置（{}）。這次完整驗證通過之後，才會記下新的外接盒 {} 與裝置本身的序號 {}；無論結果如何，歷程都"
+        "會記錄這次的確認方式。",
+        Match::FormatOnly},
     // src/gui/devices_page.cpp, src/gui/device_rows.cpp,
     // src/gui/devices_poll.cpp: Devices (decision 0046), the devices attached
     // now with their volumes and the archives on them.
@@ -782,6 +810,24 @@ constexpr CatalogEntry entries[] = {
         "檔案系統屬於 {}，但裝置與記錄中的不同（已遷移）", Match::FormatOnly},
     {"Register this volume", "註冊這個磁碟區"},
     {"Being registered: {}", "正在註冊 {}", Match::FormatOnly},
+    // The device's own serial behind its enclosure (decision 0047), read
+    // with administrator permission on the operator's request.
+    {"Through a USB enclosure, the system often sees only the enclosure's serial, not that of the device inside. "
+     "There you can read the device's own serial once, with administrator permission; once it is recorded, "
+     "VeriArchive tells the device by it after a change of enclosure. A serial read here is not recorded: it is "
+     "recorded when you register with \"Record the device's own serial\" on, or when the FULL verify after a change "
+     "of enclosure passes.",
+        "透過 USB 外接盒連接時，系統常常只看得到外接盒的序號，看不到裡面裝置本身的序號。這時可以用系統管理員權限讀取一次"
+        "裝置本身的序號；記下之後，換了外接盒再讀取一次，VeriArchive 就能認出是同一個裝置。這裡讀到的序號不會記錄；註冊"
+        "時開啟「記錄裝置本身的序號」，或換了外接盒、確認後的完整驗證通過時，才會記下。"},
+    {"Device's own serial", "裝置本身的序號"},
+    {"This enclosure does not pass the device's own serial on.", "這個外接盒不會轉送裝置本身的序號。"},
+    {"Read the device's own serial...", "讀取裝置本身的序號…"},
+    {"Waiting for the User Account Control prompt and the device...", "正在等候 Windows 的詢問與裝置回應……"},
+    {"{} (read)", "{}（已讀取）", Match::FormatOnly},
+    {"the device of {} (confirmed)", "{} 的裝置（已確認）", Match::FormatOnly},
+    {"no archive records this serial yet", "還沒有封存記錄這個序號"},
+    {"The device's own serial is {}", "裝置本身的序號是 {}", Match::FormatOnly},
     // The head of Archives, while the attached devices cannot be read.
     {"Cannot read the attached devices; see Devices", "無法讀取已連接的裝置，詳情請看「裝置」"},
     // src/gui/archives_page.cpp, src/gui/unfinished_actions.cpp,
@@ -1199,6 +1245,28 @@ constexpr CatalogEntry entries[] = {
         "開始後會依實際讀取速度估計剩餘時間。註冊期間電腦不會自己進入睡眠；您可以離開，結束時若視窗不在前景會發出通知。"
         "中途停止也沒關係，之後可以繼續，已讀過的不必重讀。"},
     {"Start registration", "開始註冊"},
+    // Decision 0047: the device's own serial behind its enclosure, read as
+    // the registration starts, on the operator's choice; why it was not, and
+    // the registration started without it.
+    {"Record the device's own serial", "記錄裝置本身的序號"},
+    {"This enclosure does not pass the device's own serial on. Once it is recorded, VeriArchive tells this device by "
+     "its serial after a change of enclosure, without asking you.",
+        "這個外接盒不會轉送裝置本身的序號。記下之後，換了外接盒時再讀取一次，VeriArchive 就能認出是同一個裝置，不必再問"
+        "您。"},
+    {"Windows asks only once you start the registration.", "開始註冊時才會詢問。"},
+    {"read with administrator permission as the registration starts, and recorded", "開始時會詢問系統管理員權限，讀取並記下"},
+    {"not recorded", "不記錄"},
+    {"Administrator permission was not given, so the device's own serial is not recorded. You can start without "
+     "recording it, or go back.",
+        "沒有取得系統管理員權限，裝置本身的序號不會記錄。可以不記錄直接開始，或回上一步。"},
+    {"The device's own serial cannot be read: this enclosure does not pass ATA commands on. You can start without "
+     "recording it, or register it later through another enclosure.",
+        "讀不到裝置本身的序號：這個外接盒不轉送 ATA 指令。可以不記錄直接開始，或換一個外接盒後再註冊。"},
+    {"The device's own serial could not be read ({}). You can start without recording it, or go back and try again.",
+        "讀不到裝置本身的序號（{}）。可以不記錄直接開始，或回上一步再試一次。", Match::FormatOnly},
+    {"Start registration without the serial", "不記錄序號，開始註冊"},
+    {"Device's own serial recorded: {} (the archive's confirmed device from now on)",
+        "已記下裝置本身的序號：{}（從此是這個封存已確認的裝置）", Match::FormatOnly},
     // The toasts of its job, and of a comparison's.
     {"{}: started", "{}：已開始", Match::FormatOnly},
     {"Registered as {}", "已註冊為 {}", Match::FormatOnly},
@@ -1266,10 +1334,8 @@ constexpr CatalogEntry entries[] = {
     // (decision 0047): the question the FULL verify asks first, a read of the
     // device's own serial, and the operator confirmation (由您確認).
     {"The enclosure of {} differs from the one recorded", "{} 的外接盒與記錄中的不同", Match::FormatOnly},
-    {"The filesystem ID of this volume is the one {} records, but the serial its enclosure reports has changed: "
-     "recorded {}, now {}.",
-        "這個磁碟區的檔案系統 ID 和 {} 記錄中的相同，但外接盒回報的序號換了：記錄中是 {}，這次是 {}。",
-        Match::FormatOnly},
+    {"The filesystem ID of this volume is the one {} records, but the serial its enclosure reports has changed.",
+        "這個磁碟區的檔案系統 ID 和 {} 記錄中的相同，但外接盒回報的序號換了。", Match::FormatOnly},
     {"{} records the device's own serial {}. Reading the serial now tells whether this is the same device.",
         "{} 記錄了裝置本身的序號 {}。讀取這次的序號，就能判斷是不是同一個裝置。", Match::FormatOnly},
     {"It may be the same device in another enclosure, or a sector-by-sector clone of it. A clone holds exactly the "
@@ -1282,11 +1348,11 @@ constexpr CatalogEntry entries[] = {
         "{} 沒有記錄裝置本身的序號，所以這次讀到的序號沒有紀錄可以比對，要由您對照裝置外殼標籤上的序號判斷。您確認是"
         "同一個裝置、完整驗證也通過之後，才會記下它；之後再換外接盒，就能用序號判斷。",
         Match::FormatOnly},
-    {"Needs administrator permission: Windows asks whether to allow the VeriArchive device identity reader of an "
-     "unknown publisher. It reads only the model, serial and WWN that the device reports, and reads or writes none "
-     "of the data on the device.",
-        "需要系統管理員權限：Windows 會詢問是否允許「不明發行者」的 VeriArchive 裝置身分讀取程式。它只讀取裝置回報的"
-        "型號、序號與 WWN，不讀取或寫入裝置上的任何資料。"},
+    {"Needs administrator permission: Windows' User Account Control asks whether to allow "
+     "veriarchive-device-identity.exe (the VeriArchive device identity reader), from an unknown publisher. It reads "
+     "only the model, serial and WWN that the device reports, and reads or writes none of the data on the device.",
+        "需要系統管理員權限：Windows 的「使用者帳戶控制」會詢問是否允許「不明發行者」的 veriarchive-device-identity.exe"
+        "（VeriArchive 的裝置身分讀取程式）。它只讀取裝置回報的型號、序號與 WWN，不讀取或寫入裝置上的任何資料。"},
     {"Administrator permission was not given, so the device's own serial was not read. Choose \"Confirm without "
      "reading the serial\" only if you are sure that you moved this device into the new enclosure yourself.",
         "沒有取得系統管理員權限，未讀取裝置本身的序號。只有在您確定是自己把這個裝置換到新的外接盒時，才選「不讀序號，"
@@ -1330,6 +1396,73 @@ constexpr CatalogEntry entries[] = {
     // ... and what the run recorded of the new carrier, in the window's report.
     {"New enclosure recorded: revision {} records it ({})", "已記下新的外接盒：由版次 {} 記錄（{}）"},
     {"New enclosure not recorded: {}", "未記下新的外接盒：{}", Match::Cause},
+    // src/gui/enclosure_dialog.cpp, src/gui/enclosure_flow.cpp,
+    // src/gui/device_reads.cpp: the dialog that FULL verify of an archive
+    // behind another enclosure opens first (decision 0047), its answers, a
+    // read of the device's own serial and why one gave nothing.
+    {"Confirm without reading the serial...", "不讀序號，自行確認…"},
+    {"Read the device's own serial", "讀取裝置本身的序號"},
+    {"It is the same device, start the FULL verify", "是同一個裝置，開始完整驗證"},
+    {"No, it is another device", "不是，是另一個裝置"},
+    {"Register as another archive...", "註冊為另一個封存…"},
+    {"Another device", "是另一個裝置"},
+    {"Serial recorded", "記錄的序號"},
+    {"Serial read now", "這次的序號"},
+    {"Reading the device's own serial", "正在讀取裝置本身的序號"},
+    {"Answer the User Account Control prompt to allow veriarchive-device-identity.exe. Once it has read the serial, "
+     "VeriArchive continues here.",
+        "請回答 Windows「使用者帳戶控制」的詢問，是否允許 veriarchive-device-identity.exe。讀到序號之後，VeriArchive "
+        "會在這裡繼續。"},
+    {"This computer cannot read the device's own serial (the device identity reader is not available), so only you "
+     "can confirm that it is the same device.",
+        "這部電腦無法讀取裝置本身的序號（裝置身分讀取程式無法使用），只能由您確認是不是同一個裝置。"},
+    {"This device reports its own serial through its enclosure, so a read with administrator permission would tell "
+     "nothing more: only you can confirm that it is the same device.",
+        "這個裝置會透過外接盒回報自己的序號，用系統管理員權限讀取也不會多知道什麼：只能由您確認是不是同一個裝置。"},
+    // The enclosure's serial as recorded and as seen now, listed in the question.
+    {"Recorded", "記錄中"},
+    {"Seen now", "這次"},
+    {"This computer cannot read the device's own serial: the device identity reader is not available.",
+        "這部電腦無法讀取裝置本身的序號：裝置身分讀取程式無法使用。"},
+    {"The device's own serial could not be read ({}). Try again, or try another enclosure; when you are sure that it "
+     "is the same device, you can also confirm it yourself.",
+        "讀不到裝置本身的序號（{}）。可以再試一次，或換一個外接盒後再試；確定是同一個裝置時，也可以自行確認。",
+        Match::FormatOnly},
+    {"Administrator permission was not given, so the device's own serial was not read.",
+        "沒有取得系統管理員權限，未讀取裝置本身的序號。"},
+    {"The device's own serial cannot be read: this enclosure does not pass ATA commands on.",
+        "讀不到裝置本身的序號：這個外接盒不轉送 ATA 指令。"},
+    {"The device's own serial could not be read: {}", "讀不到裝置本身的序號：{}", Match::FormatOnly},
+    {"Another read of a device's own serial is waiting for the User Account Control prompt or for its device; answer "
+     "it or let it finish first.",
+        "另一個讀取裝置本身序號的動作正在等候 Windows 的詢問或裝置回應；請先回答，或等它結束。"},
+    {"Not verified: the enclosure of {} differs from the one recorded (MIGRATED). FULL verify in the archive's details "
+     "asks first whether it is the same device, then verifies it.",
+        "未能驗證：{} 的外接盒與記錄中的不同（已遷移）。在封存的詳細資料中按「完整驗證」，會先請您確認是不是同一個裝置，"
+        "再驗證它。",
+        Match::FormatOnly},
+    {"Cannot read the confirmed device of this archive: {}", "無法讀取這個封存已確認的裝置：{}", Match::Cause},
+    // Why the device identity reader read nothing (an error's message).
+    {"the device is no longer attached: {}", "裝置已不再連接：{}"},
+    {"the device is no longer attached (error {})", "裝置已不再連接（錯誤 {}）"},
+    {"the device did not answer IDENTIFY DEVICE in time (error {})", "裝置沒有及時回應 IDENTIFY DEVICE（錯誤 {}）"},
+    {"the device identity reader could not open the device (error {})", "裝置身分讀取程式無法開啟裝置（錯誤 {}）"},
+    {"the device identity reader did not finish in time", "裝置身分讀取程式沒有及時完成"},
+    {"the device changed while it was read: another device has its number now ({})",
+        "讀取期間裝置換了：現在是另一個裝置使用這個編號（{}）"},
+    {"the device identity reader wrote no result (exit {})", "裝置身分讀取程式沒有寫出結果（結束代碼 {}）"},
+    {"the device identity reader is missing: {}", "找不到裝置身分讀取程式：{}"},
+    {"no device of this computer by its number: {}", "這部電腦沒有這個編號的裝置：{}"},
+    {"no temporary folder: {}", "沒有暫存資料夾：{}", Match::Cause},
+    {"Windows gave no handle of the device identity reader it started", "Windows 沒有交回它啟動的裝置身分讀取程式"},
+    {"the device identity reader wrote a result larger than it writes", "裝置身分讀取程式寫出的結果比它會寫的大"},
+    {"the device identity reader wrote no result that it writes", "裝置身分讀取程式寫出的不是它會寫的結果"},
+    {"the device identity reader wrote an error that it does not write", "裝置身分讀取程式寫出了它不會寫的錯誤"},
+    {"the device identity reader wrote an identity that it does not write", "裝置身分讀取程式寫出了它不會寫的身分資料"},
+    // ... and why Register Archive's Start registration records no serial
+    // read before (src/gui/register_wizard.cpp).
+    {"the serial read before is no longer kept, as the device was detached or changed since",
+        "之前讀到的序號已不再保留，因為裝置在那之後拔除或改變了"},
     // src/gui/compare_dialog.cpp, src/gui/compare_choices.cpp: the comparison
     // dialog (decisions 0020, 0046) and the report of its job.
     {"ARCHIVES {}", "比較結果：{}"},

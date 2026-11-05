@@ -18,6 +18,18 @@
 // resume of a registration that an older version left asks first, then runs
 // again confirmed (decision 0022, point 7). The report shows in the job's
 // details, and a toast says what it registered, with View archive.
+//
+// Decision 0047: for a source whose device is behind an enclosure that hides
+// the device's own serial, where this computer can read it, Options offers
+// Record the device's own serial, off until the operator turns it on; Start
+// registration then reads it first, off the window's thread, Windows asking
+// for administrator permission, and gives the read to the registration
+// (RegisterRequest::device_read). A read that gave nothing leaves Confirm
+// saying why, with Start registration without the serial. A serial read
+// before (Devices, the enclosure question) of the same device is recorded
+// with no second question. Register as another archive... of the enclosure
+// question opens it for the root where an archive's filesystem is on another
+// device, as a separate archive, a copy of that one.
 #include "gui/gui_app.h"
 #include "gui/off_thread.h"
 
@@ -133,13 +145,26 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
         *registered = Registered{outcome->archive_uuid, outcome->label, outcome->revision};
         // Entries recorded without hashes, and warnings, ask to be read.
         context.tone = outcome->unreadable.empty() && outcome->warnings.empty() ? JobTone::Success : JobTone::Warning;
-        return [outcome = std::move(*outcome)](const app::Text& text) { return registration_report(text, outcome); };
+        // Decision 0047: the device's own serial it recorded, read as it
+        // started.
+        return [outcome = std::move(*outcome), read = request.device_read](const app::Text& text) {
+            auto report = registration_report(text, outcome);
+            if (read) {
+                report += recorded_device_serial_line(text, *read) + "\n";
+            }
+            return report;
+        };
     };
     job.done = [&state, request, typed, unconfirmed, registered, root](std::uint64_t ended, const Report&) {
         guarded(
             [&] {
                 // Devices offers its volume again where nothing was registered.
                 state.registering.erase(ended);
+                // Decision 0047: the device's own serial it recorded is the
+                // archive's confirmed device now, which Devices says of it.
+                if (*registered && request.device_read) {
+                    note_confirmed(state.device_reads, request.device_read->device, (*registered)->archive_uuid);
+                }
                 refresh_devices(state);
                 // The archive it registered, or the revision; its unfinished
                 // operation gone, or stopped.
@@ -574,6 +599,8 @@ OptionsChosen chosen_options(const Wizard& wizard)
     chosen.copy_of = selected != GTK_INVALID_LIST_POSITION && selected > 0 && selected <= wizard.copy_of_uuids.size()
                          ? std::optional(wizard.copy_of_uuids[selected - 1])
                          : std::nullopt;
+    chosen.record_device_serial =
+        wizard.device_serial && adw_switch_row_get_active(ADW_SWITCH_ROW(wizard.device_serial));
     return chosen;
 }
 
@@ -703,6 +730,25 @@ void push_options(GuiState& state)
              wizard.copy_of}) {
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(options), row);
     }
+    // Decision 0047: the device's own serial behind its enclosure, where it
+    // can be read: the switch, off until the operator turns it on; or the
+    // serial read before, which the registration records.
+    wizard.device_serial = nullptr;
+    wizard.device_serial_kept = nullptr;
+    if (wizard.serial_offer && wizard.serial_offer->kept) {
+        wizard.device_serial_kept = adw_action_row_new();
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(wizard.device_serial_kept), FALSE);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(wizard.device_serial_kept), text("Device's own serial").c_str());
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(wizard.device_serial_kept),
+            text.format("{} (read)", read_serial(wizard.serial_offer->kept->device)).c_str());
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(options), wizard.device_serial_kept);
+    } else if (wizard.serial_offer) {
+        wizard.device_serial = switch_row(text("Record the device's own serial"), wizard.chosen.record_device_serial);
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(wizard.device_serial), device_serial_note(text).c_str());
+        adw_action_row_add_prefix(ADW_ACTION_ROW(wizard.device_serial),
+            gtk_image_new_from_icon_name("security-high-symbolic"));
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(options), wizard.device_serial);
+    }
     gtk_box_append(GTK_BOX(content), options);
     gtk_box_append(GTK_BOX(content),
         notice_line("va-neutral", "dialog-information-symbolic", "dim-label", &wizard.blocked_words));
@@ -712,6 +758,9 @@ void push_options(GuiState& state)
     connect_switch(state, wizard.new_revision, wizard.another_archive);
     connect_switch(state, wizard.another_archive, wizard.new_revision);
     connect_switch(state, wizard.media_copy, nullptr);
+    if (wizard.device_serial) {
+        connect_switch(state, wizard.device_serial, nullptr);
+    }
     g_signal_connect(wizard.label, "changed", G_CALLBACK(+[](GtkEditable*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
         if (!state.register_wizard.filling) {
@@ -737,6 +786,62 @@ void push_options(GuiState& state)
 
 // ---- Confirm ----------------------------------------------------------------
 
+// The Confirm page's field of the device's own serial, its notice of why a
+// read gave nothing, and its Start registration, as the read stands now
+// (decision 0047).
+void show_confirm_serial(GuiState& state)
+{
+    auto& wizard = state.register_wizard;
+    if (!wizard.start) {
+        return;
+    }
+    const auto& text = state.text;
+    say(wizard.serial_notice, wizard.serial_notice_words,
+        wizard.serial_problem
+            ? std::optional(read_problem_words(text, *wizard.serial_problem, ReadShownIn::Registration))
+            : std::nullopt);
+    // What it will do, the device's own serial as the read stands now.
+    if (wizard.summary) {
+        while (GtkWidget* row = gtk_widget_get_first_child(wizard.summary)) {
+            gtk_list_box_remove(GTK_LIST_BOX(wizard.summary), row);
+        }
+        auto fields = registration_summary(
+            text, *wizard.source, wizard.options, wizard.chosen, wizard.names, state.identity_shown);
+        if (auto serial =
+                device_serial_field(text, wizard.serial_offer, wizard.chosen, wizard.serial_problem.has_value())) {
+            fields.push_back(std::move(*serial));
+        }
+        gtk_list_box_append(GTK_LIST_BOX(wizard.summary), make_fields_row(fields));
+    }
+    gtk_button_set_label(GTK_BUTTON(wizard.start),
+        wizard.serial_problem ? text("Start registration without the serial").c_str()
+                              : text("Start registration").c_str());
+    gtk_widget_set_sensitive(wizard.start, !wizard.reading_serial);
+    gtk_widget_set_visible(wizard.starting, wizard.reading_serial);
+    gtk_spinner_set_spinning(GTK_SPINNER(wizard.starting), wizard.reading_serial);
+}
+
+void push_confirm(GuiState& state);
+
+// Starts the registration, with `device_read` where the device's own serial
+// was read for it.
+void start_registration(GuiState& state, std::optional<DeviceIdentityRead> device_read)
+{
+    auto& wizard = state.register_wizard;
+    if (!wizard.source) {
+        return;
+    }
+    auto request = registration_request(
+        *wizard.source, wizard.options, wizard.chosen, state.session->context.config.rotational_override);
+    request.device_read = std::move(device_read);
+    // The dialog goes; the job's toast and Jobs show the registration.
+    // Forgotten at once (as close_dialogs does): it closes once its animation
+    // has ended, and no read in flight may fill it meanwhile.
+    GtkWidget* closing = std::exchange(state.register_wizard, {}).dialog;
+    adw_dialog_close(ADW_DIALOG(closing));
+    run_registration(state, std::move(request), std::nullopt);
+}
+
 void start_from_wizard(GuiState& state)
 {
     auto& wizard = state.register_wizard;
@@ -744,17 +849,80 @@ void start_from_wizard(GuiState& state)
         show_message(state, fixed_message("Open a repository first (Settings)."));
         return;
     }
-    if (!wizard.source) {
+    if (!wizard.source || wizard.reading_serial) {
         return;
     }
-    auto request = registration_request(
-        *wizard.source, wizard.options, wizard.chosen, state.session->context.config.rotational_override);
-    // The dialog goes; the job's toast and Jobs show the registration.
-    // Forgotten at once (as close_dialogs does): it closes once its animation
-    // has ended, and no read in flight may fill it meanwhile.
-    GtkWidget* closing = std::exchange(state.register_wizard, {}).dialog;
-    adw_dialog_close(ADW_DIALOG(closing));
-    run_registration(state, std::move(request), std::nullopt);
+    // Decision 0047: the serial read before is recorded, while the window
+    // still keeps it (it drops a read of a device detached or described
+    // otherwise since, and every read while it did not watch the devices);
+    // one asked for is read first, Windows asking for administrator
+    // permission; a read that gave nothing leaves Start registration without
+    // the serial.
+    if (wizard.serial_offer && wizard.serial_offer->kept) {
+        if (const auto* kept = kept_read_of(state.device_reads, wizard.serial_offer->device);
+            kept && same_device_identity(kept->read.device, wizard.serial_offer->kept->device)) {
+            start_registration(state, kept->read);
+            return;
+        }
+        // Gone since Options showed it: Confirm says so, and registers
+        // without it.
+        wizard.serial_offer->kept.reset();
+        wizard.serial_problem = ReadProblem{DeviceIdentityFailure::Unreadable,
+            "the serial read before is no longer kept, as the device was detached or changed since"};
+        show_confirm_serial(state);
+        return;
+    }
+    if (!wizard.serial_offer || !wizard.chosen.record_device_serial || wizard.serial_problem) {
+        start_registration(state, std::nullopt);
+        return;
+    }
+    // Read since the options were shown (in Devices, or here before Back).
+    if (const auto* kept = kept_read_of(state.device_reads, wizard.serial_offer->device)) {
+        start_registration(state, kept->read);
+        return;
+    }
+    wizard.reading_serial = true;
+    wizard.serial_cancel = std::make_shared<CancelToken>();
+    show_confirm_serial(state);
+    const auto started = read_own_identity(state, wizard.serial_offer->device,
+        [opened = wizard.opened](GuiState& state, OwnIdentityRead& result) {
+            auto& wizard = state.register_wizard;
+            if (!is_open(state, opened)) {
+                return;  // closed meanwhile: nothing is registered; the read is kept, shown in Devices
+            }
+            wizard.reading_serial = false;
+            // Back to Options meanwhile: nothing starts; the read is kept,
+            // and Start registration takes it.
+            if (!wizard.confirm_page) {
+                return;
+            }
+            if (result.failure) {
+                show_confirm_serial(state);
+                show_message(state, result.failure);
+                return;
+            }
+            if (result.read) {
+                // Only while Confirm still asks for this device's serial: the
+                // operator may have gone Back, turned the switch off or chosen
+                // another source meanwhile; the read stays kept for Start.
+                if (wizard.serial_offer && wizard.chosen.record_device_serial && !wizard.serial_offer->kept &&
+                    wizard.serial_offer->device.device_ref == result.read->device_ref) {
+                    start_registration(state, *result.read);
+                } else {
+                    show_confirm_serial(state);
+                }
+                return;
+            }
+            // Back on Confirm, saying why; Start registration then registers
+            // without it. A read cancelled says nothing.
+            wizard.serial_problem = read_problem(result.read.error());
+            show_confirm_serial(state);
+        },
+        wizard.serial_cancel);
+    if (!started) {
+        wizard.reading_serial = false;
+        show_confirm_serial(state);
+    }
 }
 
 void push_confirm(GuiState& state)
@@ -766,11 +934,16 @@ void push_confirm(GuiState& state)
         return;
     }
     GtkWidget* content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
+    // Decision 0047: why the read of the device's own serial gave nothing,
+    // hidden until one did; a new visit to Confirm asks again.
+    wizard.serial_problem.reset();
+    gtk_box_append(GTK_BOX(content),
+        notice_line("va-warning", "dialog-warning-symbolic", "warning", &wizard.serial_notice_words));
+    wizard.serial_notice = gtk_widget_get_last_child(content);
     GtkWidget* summary = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(summary), GTK_SELECTION_NONE);
     gtk_widget_add_css_class(summary, "boxed-list");
-    gtk_list_box_append(GTK_LIST_BOX(summary), make_fields_row(registration_summary(text, *wizard.source,
-                                                   wizard.options, wizard.chosen, wizard.names, state.identity_shown)));
+    wizard.summary = summary;
     gtk_box_append(GTK_BOX(content), summary);
     gtk_box_append(GTK_BOX(content),
         make_words(text("Registration reads every file of the folder or volume and records its fingerprints (BLAKE3 "
@@ -789,8 +962,10 @@ void push_confirm(GuiState& state)
         guarded([&] { start_from_wizard(state); }, [&](const Report& report) { show_message(state, report); });
     }), &state);
     wizard.start = start;
-    wizard.confirm_page = wizard_page(text, "Confirm", 3, content, back_button(state), start);
+    wizard.starting = gtk_spinner_new();
+    wizard.confirm_page = wizard_page(text, "Confirm", 3, content, back_button(state), start, wizard.starting);
     adw_navigation_view_push(ADW_NAVIGATION_VIEW(wizard.navigation), ADW_NAVIGATION_PAGE(wizard.confirm_page));
+    show_confirm_serial(state);
     gtk_widget_grab_focus(start);
 }
 
@@ -847,6 +1022,21 @@ void source_read(GuiState& state, SourceRead& read)
         wizard.chosen.another_archive = false;
     }
     wizard.preset_archive.reset();
+    // Register as another archive... of the enclosure question (decision
+    // 0047): where the filesystem of that archive is here on another device,
+    // a separate archive, a copy of it.
+    if (wizard.preset_copy) {
+        if (std::ranges::find(options.clones_here, *wizard.preset_copy) != options.clones_here.end()) {
+            wizard.chosen.another_archive = true;
+            wizard.chosen.new_revision = false;
+            wizard.chosen.copy_of = *wizard.preset_copy;
+        }
+        wizard.preset_copy.reset();
+    }
+    // Decision 0047: the device's own serial behind its enclosure, where it
+    // can be read, or was read before.
+    wizard.serial_offer = device_serial_offer(*read.source, options, state.identity_shown,
+        state.device_identity && state.device_identity->available(), state.device_reads);
     wizard.source = std::move(read.source);
     wizard.options = std::move(options);
     say(wizard.problem, wizard.problem_words, std::nullopt);
@@ -1037,11 +1227,13 @@ void open_wizard(GuiState& state, std::optional<Uuid> preset_archive = std::null
         auto& wizard = static_cast<GuiState*>(data)->register_wizard;
         if (GTK_WIDGET(page) == wizard.confirm_page) {
             wizard.confirm_page = wizard.start = nullptr;
+            wizard.serial_notice = wizard.serial_notice_words = wizard.summary = wizard.starting = nullptr;
         } else if (GTK_WIDGET(page) == wizard.options_page) {
             wizard.options_page = nullptr;
             wizard.label = wizard.label_group = wizard.new_revision = wizard.another_archive = nullptr;
             wizard.resume = wizard.media_copy = wizard.copy_of = nullptr;
             wizard.blocked = wizard.blocked_words = wizard.options_next = nullptr;
+            wizard.device_serial = wizard.device_serial_kept = nullptr;
         }
     }), &state);
     adw_dialog_set_child(dialog, wizard.navigation);
@@ -1051,6 +1243,11 @@ void open_wizard(GuiState& state, std::optional<Uuid> preset_archive = std::null
     g_signal_connect(dialog, "closed", G_CALLBACK(+[](AdwDialog* closed, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
         if (state.register_wizard.dialog == GTK_WIDGET(closed)) {
+            // A read of the device's own serial stops once Windows' question
+            // is answered (decision 0047).
+            if (state.register_wizard.serial_cancel) {
+                state.register_wizard.serial_cancel->cancel();
+            }
             state.register_wizard = {};
         }
     }), &state);
@@ -1088,6 +1285,23 @@ void register_volume(GuiState& state, const std::string& root)
     show_source_next(state);
 }
 
+void register_as_copy(GuiState& state, const std::string& root, const Uuid& archive)
+{
+    open_wizard(state);
+    auto& wizard = state.register_wizard;
+    if (!wizard.dialog || !wizard.folder) {
+        return;  // not opened: it said why
+    }
+    // Typed as the root where its filesystem is, and read at once, as Next
+    // reads it: Options then shows it as another archive, a copy of it.
+    wizard.preset_copy = archive;
+    wizard.filling = true;
+    gtk_editable_set_text(GTK_EDITABLE(wizard.folder), root.c_str());
+    wizard.filling = false;
+    show_source_next(state);
+    read_source(state);
+}
+
 void resume_registration(GuiState& state, const app::UnfinishedOperation& registration, bool confirmed)
 {
     // Exactly `register <root> --resume`, the root its plan names: no media
@@ -1103,14 +1317,27 @@ void close_dialogs(GuiState& state)
 {
     // Each forgets its widgets at once: a dialog closes once its animation
     // has ended, and the window it belongs to may be going first.
-    if (GtkWidget* wizard = std::exchange(state.register_wizard, {}).dialog) {
-        adw_dialog_force_close(ADW_DIALOG(wizard));
+    auto wizard = std::exchange(state.register_wizard, {});
+    if (wizard.serial_cancel) {
+        wizard.serial_cancel->cancel();
+    }
+    if (wizard.dialog) {
+        adw_dialog_force_close(ADW_DIALOG(wizard.dialog));
     }
     if (GtkWidget* compare = std::exchange(state.compare_dialog, {}).dialog) {
         adw_dialog_force_close(ADW_DIALOG(compare));
     }
     if (GtkWidget* relocation = std::exchange(state.relocate_dialog, {}).dialog) {
         adw_dialog_force_close(ADW_DIALOG(relocation));
+    }
+    // Decision 0047: its read, if one waits, stops once Windows' question is
+    // answered.
+    auto enclosure = std::exchange(state.enclosure_dialog, {});
+    if (enclosure.cancel) {
+        enclosure.cancel->cancel();
+    }
+    if (enclosure.dialog) {
+        adw_dialog_force_close(ADW_DIALOG(enclosure.dialog));
     }
 }
 

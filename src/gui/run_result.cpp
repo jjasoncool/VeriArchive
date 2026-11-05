@@ -1,6 +1,7 @@
 #include "gui/run_result.h"
 
 #include "app/device_alerts.h"
+#include "app/enclosure_words.h"
 #include "app/history.h"
 #include "app/local_time.h"
 #include "app/plain_words.h"
@@ -101,9 +102,15 @@ std::vector<Field> identity_fields(const app::Text& text, const RecordedRun& rec
             {text("Media identity"), text("not read, as the manifest of this revision cannot be used")});
         return fields;
     }
-    fields.push_back({text("Media identity"),
-        recorded.evidence && !recorded.evidence->match_result.empty() ? text(recorded.evidence->match_result)
-                                                                      : text("not known")});
+    // Decision 0047: a run that went on past a changed enclosure says how it
+    // was confirmed, as its counts record it.
+    if (const auto confirmed = carrier_confirmed(run)) {
+        fields.push_back({text("Media identity"), app::confirmed_identity_words(text, confirmed->confirmation)});
+    } else {
+        fields.push_back({text("Media identity"),
+            recorded.evidence && !recorded.evidence->match_result.empty() ? text(recorded.evidence->match_result)
+                                                                          : text("not known")});
+    }
     // The volume and its devices as the evidence holds them, the health each
     // reported as the run's counts record it, named as the views name them.
     const auto health = displayed_devices(recorded_device_health(run.counts_json), shown);
@@ -126,12 +133,15 @@ std::vector<Field> identity_fields(const app::Text& text, const RecordedRun& rec
         if (!device.bus.empty()) {
             fields.push_back({text("Bus"), bus_words(device.bus)});
         }
+        // Decision 0047: the enclosure's, where it hid the device's own (as
+        // the evidence records it), as Devices names it.
+        const auto serial = device.enclosure_hides_identity ? text("Enclosure serial") : text("Serial");
         if (!device.serial.empty()) {
-            fields.push_back({text("Serial"), device.serial});
+            fields.push_back({serial, device.serial});
         } else if (!device.wwn.empty()) {
             fields.push_back({text("WWN"), device.wwn});
         } else {
-            fields.push_back({text("Serial"), text("not known")});
+            fields.push_back({serial, text("not known")});
         }
         // The health that the device reported as the run started, where
         // the run recorded it: the devices of the counts are those of the

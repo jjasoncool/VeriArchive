@@ -62,10 +62,15 @@ CarrierConfirmation confirmation_by_operator(const EnclosureFacts& facts, const 
 // The question's heading, `where` the volume as the window names it (its
 // mount point or label): "The enclosure of X differs from the one recorded".
 std::string enclosure_question_title(const Text& text, const std::string& where);
-// Its paragraphs: what changed; then, with a confirmed device, that reading
+// Its paragraphs: what changed (the two serials themselves are the window's
+// to show, as a list after it); then, with a confirmed device, that reading
 // the serial tells; without one, that a sector-by-sector clone passes a FULL
-// verify too, and that the operator compares the serial with the label.
+// verify too (sector_clone_words), and that the operator compares the serial
+// with the label.
 std::vector<std::string> enclosure_question_body(const Text& text, const EnclosureFacts& facts);
+// That it may be the same device in another enclosure or a sector-by-sector
+// clone, which passes a FULL verify too.
+std::string sector_clone_words(const Text& text);
 // What the device identity reader asks and reads (the system's question for
 // administrator permission), shown beside every button that starts it.
 std::string device_identity_reader_note(const Text& text);
