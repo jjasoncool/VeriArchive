@@ -1,6 +1,6 @@
 # Implementation status
 
-Status of `master`, version 1.1.0: version 1.0.0 (tag `v1.0.0`, V1) with V1.1 stage 1 on top
+Status of `master`, version 1.2.0: version 1.0.0 (tag `v1.0.0`, V1) with V1.1 stage 1 on top
 (last section), against HANDOFF Part C. "Done" means implemented and covered by automated tests,
 on Windows (MSYS2 UCRT64, GCC 16) and in GitLab CI. A milestone is accepted only when its
 acceptance tests pass on both operating systems in CI (HANDOFF Part C); the hardware tests that CI
@@ -80,9 +80,10 @@ all 10 135 965 225 485 bytes of each read and matched, at about 180 MB/s on the 
 
 ## V1.1
 
-Stage 1, chunk hashes and the Merkle root (decisions 0031 to 0033), is done, and numbers the
+Stage 1, chunk hashes and the Merkle root (decisions 0031 to 0033), is done, and numbered the
 program 1.1.0 (`--version`, `repo info` and Settings show it, and every manifest and verification
-run records it):
+run records it); the window's jobs, its redesign, a device behind a changed enclosure and the
+verification report (decisions 0045 to 0048) number it 1.2.0:
 
 | Part | Implemented |
 |---|---|
