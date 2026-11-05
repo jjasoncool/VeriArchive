@@ -12,9 +12,8 @@
 // it ended.
 #include "gui/gui_app.h"
 
+#include "app/archive_roots.h"
 #include "common/utf8.h"
-#include "core/engine/attached.h"
-#include "core/engine/candidates.h"
 #include "core/engine/transfer.h"
 #include "gui/archive_actions.h"
 #include "platform/file_system.h"
@@ -46,9 +45,8 @@ std::string label_of(const GuiState& state, const Uuid& archive)
     return status ? display_label(*status) : archive.substr(0, 8);
 }
 
-// The roots of the archives on the attached volumes, as the latest read of
-// them found them (MATCH, MATCH_WEAK, MIGRATED, AMBIGUOUS alike: each is an
-// archive's folder there), named as Archives names them.
+} // namespace
+
 std::vector<AttachedArchiveRoot> attached_roots(const GuiState& state)
 {
     std::vector<AttachedArchiveRoot> roots;
@@ -64,37 +62,7 @@ std::vector<AttachedArchiveRoot> attached_roots(const GuiState& state)
     return roots;
 }
 
-// The roots of the archives on the volume of `folder` that hold it, as a read
-// of that volume now finds them (where_attached), named by their records'
-// labels: what the latest read of the attached devices may not know yet, as a
-// volume attached since. Nothing where the volume or the archives cannot be
-// read: the export writes no more than a file of its own then.
-std::vector<AttachedArchiveRoot> roots_holding(
-    ArchiveStore& store, const RepositoryLayout& layout, const std::filesystem::path& folder)
-{
-    std::vector<AttachedArchiveRoot> holding;
-    const auto media = platform::make_media_enumerator();
-    const auto volume = media->volume_for_path(folder);
-    if (!volume) {
-        return holding;
-    }
-    const auto repository_files = platform::make_file_system_access();
-    const auto pool = load_candidate_pool(store, *repository_files, layout);
-    if (!pool) {
-        return holding;
-    }
-    for (const auto& root : where_attached(std::span(&*volume, 1), pool->candidates).volumes.front()) {
-        if (!path_within(root.root, folder)) {
-            continue;
-        }
-        std::string label = root.archive_uuid.substr(0, 8);
-        if (const auto record = store.find_archive(root.archive_uuid); record && *record && !(*record)->label.empty()) {
-            label = (*record)->label;
-        }
-        holding.push_back({root.root, label});
-    }
-    return holding;
-}
+namespace {
 
 void start_export(GuiState& state, const Uuid& archive, const std::filesystem::path& folder)
 {
@@ -134,16 +102,18 @@ void start_export(GuiState& state, const Uuid& archive, const std::filesystem::p
             };
         }
         // Never into an archive's root, as its volume is now.
-        if (auto holding = roots_holding(*store, session.context.repo, folder); !holding.empty()) {
-            return [folder, holding = std::move(holding)](const app::Text& text) {
-                return export_refusal(text, folder, holding).value_or(std::string{});
+        const auto media = platform::make_media_enumerator();
+        const auto repository_files = platform::make_file_system_access();
+        if (const auto holding = app::roots_holding(*store, *repository_files, *media, session.context.repo, folder);
+            !holding.empty()) {
+            return [folder, root = holding.front()](const app::Text& text) {
+                return export_refusal_in_root(text, folder, root);
             };
         }
         std::uint32_t revision = 0;
         if (const auto record = store->find_archive(archive); record && *record) {
             revision = (*record)->current_revision;
         }
-        const auto repository_files = platform::make_file_system_access();
         auto exported = export_archive(*store, *repository_files, *session.writer, session.context.repo, archive,
             out, context.cancel, context.progress);
         if (!exported) {

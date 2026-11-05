@@ -9,6 +9,7 @@
 // failures and its run.
 //
 // Plain C++ without GTK, so the unit tests can check it.
+#include "app/history.h"
 #include "app/text.h"
 #include "common/error.h"
 #include "core/engine/archive_status.h"
@@ -75,18 +76,15 @@ std::size_t history_count(const std::vector<VerifyRunRecord>& runs, const std::o
 // recorded yet; of one archive, that it was never verified.
 std::string no_runs_words(const app::Text& text, const std::optional<Uuid>& only);
 
-// What the check of the chain found, as the page says it: the history of
-// every archive intact with the number of runs (Success), which the chain of
-// the whole repository holds whatever the filter lists; BROKEN at the first
-// run that does not link, named by its id and, where `runs` holds it, by its
+// What the check of the chain found, as the page says it (app::chain_words,
+// which the verification report of a run says too): the history of every
+// archive intact with the number of runs (Success), which the chain of the
+// whole repository holds whatever the filter lists; BROKEN at the first run
+// that does not link, named by its id and, where `runs` holds it, by its
 // archive (as `names` names it) and when it ended (Error); or why it could
 // not be checked (Error); and, under it, what such a check cannot detect
 // (app::history_chain_limits), where it was checked.
-struct ChainShown {
-    Tone tone = Tone::Neutral;
-    std::string result;
-    std::string limits;
-};
+using app::ChainShown;
 
 ChainShown chain_words(const app::Text& text, const std::expected<HistoryCheck, IoError>& check,
     const std::vector<VerifyRunRecord>& runs, const std::vector<ArchiveName>& names);

@@ -8,6 +8,7 @@
 // their jobs.
 //
 // Plain C++ without GTK, so the unit tests can check it.
+#include "app/archive_roots.h"
 #include "app/text.h"
 #include "app/unfinished_operations.h"
 #include "core/engine/archive_status.h"
@@ -111,18 +112,23 @@ std::string not_relocated_toast(const app::Text& text, const std::string& label,
 std::string export_folder_name(const ArchiveStatus& status);
 
 // An archive root where the attached volumes hold an archive now, as the
-// latest read of them found it: the export never writes into one, where its
-// files would be entries that the next FULL verification of that archive
-// reports as added.
-struct AttachedArchiveRoot {
-    std::filesystem::path root;
-    std::string label;
-};
+// latest read of them found it (attached_roots) or a read of a folder's
+// volume finds it (app::roots_holding): the export never writes into one,
+// where its files would be entries that the next FULL verification of that
+// archive reports as added.
+using app::AttachedArchiveRoot;
 
 // Why the export does not write into `folder`: it lies in, or is, the root of
-// an attached archive (path_within). Nothing where it does not.
+// an attached archive, as their paths are written (path_within). Nothing
+// where it does not.
 std::optional<std::string> export_refusal(
     const app::Text& text, const std::filesystem::path& folder, const std::vector<AttachedArchiveRoot>& roots);
+
+// The same words for `holding`, a root that holds `folder` as
+// app::roots_holding tells it, which may be as the file system names the two
+// (a symbolic link, a junction, a drive letter made with subst).
+std::string export_refusal_in_root(
+    const app::Text& text, const std::filesystem::path& folder, const AttachedArchiveRoot& holding);
 
 // The job's title, "Export the manifest of ARCH-0002"; its report, the two
 // files written ("Manifest: ...", "Identity file: ...") and what a repository

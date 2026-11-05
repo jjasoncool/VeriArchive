@@ -9,6 +9,7 @@
 #include "app/device_alerts.h"
 #include "app/enclosure_words.h"
 #include "app/plain_words.h"
+#include "app/run_words.h"
 #include "app/verify_report.h"
 
 #include "common/utf8.h"
@@ -26,11 +27,10 @@
 namespace va::cli {
 namespace {
 
-// R-02. Translated in text output; --json keeps the English sentence. It names
-// no version of the program (decision 0017).
-constexpr const char* guarantee =
-    "VeriArchive detects accidental corruption and unintended change; tamper evidence "
-    "(signed manifests) is not part of this version.";
+// R-02, as the window and the verification report say it. Translated in text
+// output; --json keeps the English sentence. It names no version of the
+// program (decision 0017).
+using app::guarantee;
 
 int result_code(const std::string& result)
 {

@@ -1,10 +1,48 @@
 #include "app/history.h"
 
+#include "app/local_time.h"
 #include "core/engine/carrier_confirmation.h"
 #include "core/engine/device_alerts.h"
 #include "core/engine/relocate_engine.h"
 
+#include <algorithm>
+
 namespace va::app {
+
+ChainShown chain_words(const Text& text, const std::expected<HistoryCheck, IoError>& check,
+    const std::vector<VerifyRunRecord>& runs, const std::map<Uuid, std::string>& labels)
+{
+    ChainShown shown;
+    if (!check) {
+        shown.tone = Tone::Error;
+        shown.result = text.format("Cannot check the history: {}", text(check.error().message));
+        return shown;
+    }
+    shown.limits = text(history_chain_limits);
+    if (check->first_broken_run) {
+        shown.tone = Tone::Error;
+        const auto& broken = *check->first_broken_run;
+        const auto run = std::ranges::find(runs, broken, &VerifyRunRecord::run_id);
+        if (run == runs.end()) {
+            shown.result = text.format("History BROKEN at run {}: {}", broken, text(check->problem));
+            return shown;
+        }
+        // Its archive and when it ended, as its row in History names them.
+        const auto label = labels.find(run->archive_uuid);
+        shown.result = text.format("History BROKEN at run {} ({} · {}): {}", broken,
+            label != labels.end() ? label->second : run->archive_uuid.substr(0, 8),
+            local_time(run->finished, text), text(check->problem));
+        return shown;
+    }
+    shown.tone = Tone::Success;
+    // Two calls: the compiler checks each literal template against its value.
+    shown.result =
+        check->runs == 1
+            ? text.format("The history of every archive is intact: {} verification run, hash chain verified.", check->runs)
+            : text.format("The history of every archive is intact: {} verification runs, hash chain verified.",
+                  check->runs);
+    return shown;
+}
 
 std::string history_note(const Text& text, const VerifyRunRecord& run)
 {

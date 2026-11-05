@@ -4,13 +4,18 @@
 // archive; some are also a relocation's (decision 0026), and some went on past
 // a changed enclosure with a carrier confirmation (decision 0047): the history
 // says so beside them.
+#include "app/run_words.h"
 #include "app/text.h"
+#include "common/error.h"
 #include "core/repository/archive_store.h"
 
 #include <nlohmann/json.hpp>
 
+#include <expected>
+#include <map>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace va::app {
 
@@ -26,6 +31,23 @@ inline constexpr std::string_view history_chain_limits =
     "Checking the chain detects a recorded run that was changed or removed, but not the removal of the newest "
     "runs, nor runs changed with the chain computed again; history signatures, which would detect those, are "
     "not part of this version.";
+
+// What a check of the chain found, as History and the verification report of
+// a run (decision 0048) say it: the history of every archive intact with the
+// number of runs (Success), which the chain of the whole repository holds
+// whatever a page lists; BROKEN at the first run that does not link, named
+// by its id and, where `runs` holds it, by its archive (as `labels` names it,
+// else by the start of its uuid) and when it ended (Error); or why it could
+// not be checked (Error); and, under it, what such a check cannot detect
+// (history_chain_limits), where it was checked.
+struct ChainShown {
+    Tone tone = Tone::Neutral;
+    std::string result;
+    std::string limits;
+};
+
+ChainShown chain_words(const Text& text, const std::expected<HistoryCheck, IoError>& check,
+    const std::vector<VerifyRunRecord>& runs, const std::map<Uuid, std::string>& labels);
 
 // What else a run is, in the words shown beside it: "interrupted relocation
 // attempt" for an attempt of a relocation that was interrupted (recorded

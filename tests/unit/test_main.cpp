@@ -24,6 +24,7 @@ int main()
     window_words_tests();
     archive_rows_tests();
     run_result_tests();
+    run_report_html_tests();
     history_rows_tests();
     register_choices_tests();
     compare_choices_tests();

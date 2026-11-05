@@ -437,6 +437,84 @@ if(NOT sum_lines EQUAL 4)
     message(FATAL_ERROR "expected 4 sha256sum lines, got ${sum_lines}")
 endif()
 
+# Decision 0048: the verification report of a run with a result, one HTML
+# file in the language of --lang (or the config file's), with the run and its
+# result; a second report to the same file is refused (exit 10) and leaves the
+# first as it is, as are a run that is not recorded and a usage error.
+run_cli("0;2" verify --full "${archive_uuid}" --json)
+string(JSON report_run GET "${last_output}" run_id)
+string(JSON report_result GET "${last_output}" result)
+set(report_file "${WORK}/report-${report_run}.html")
+run_cli("0" --lang en report "${report_run}" --out "${report_file}" --json)
+string(JSON reported_run GET "${last_output}" run_id)
+string(JSON reported_archive GET "${last_output}" archive_uuid)
+string(JSON reported_result GET "${last_output}" result)
+string(JSON reported_out GET "${last_output}" out)
+if(NOT EXISTS "${report_file}" OR NOT reported_run STREQUAL report_run OR NOT reported_archive STREQUAL archive_uuid
+        OR NOT reported_result STREQUAL report_result OR reported_out STREQUAL "")
+    message(FATAL_ERROR "report --json of run ${report_run}:\n${last_output}")
+endif()
+file(READ "${report_file}" report_html)
+string(FIND "${report_html}" "<!doctype html>\n<html lang=\"en\">" report_start)
+string(FIND "${report_html}" "${report_run}" report_names_run)
+string(FIND "${report_html}" "FULL VERIFY ${report_result}</h1>" report_says_result)
+string(FIND "${report_html}" "<script" report_script)
+if(NOT report_start EQUAL 0 OR report_names_run EQUAL -1 OR report_says_result EQUAL -1 OR NOT report_script EQUAL -1)
+    message(FATAL_ERROR "the verification report of run ${report_run} does not say its run and result:\n${report_html}")
+endif()
+run_cli("10" --lang en report "${report_run}" --out "${report_file}")
+string(FIND "${last_errors}" "exists already; a report never replaces a file" report_refused)
+file(READ "${report_file}" report_again)
+if(report_refused EQUAL -1 OR NOT report_again STREQUAL report_html)
+    message(FATAL_ERROR "a second report to the same file:\n${last_errors}")
+endif()
+# In the config file's language (zh-TW), and refused for a run not recorded.
+run_cli("0" report "${report_run}" --out "${WORK}/report-zh.html")
+file(READ "${WORK}/report-zh.html" report_chinese)
+string(FIND "${report_chinese}" "<html lang=\"zh-TW\">" report_chinese_lang)
+string(FIND "${report_chinese}" "完整驗證 " report_chinese_mode)
+run_cli("10" report "c0ffee00-0000-4000-9000-0000000000ff" --out "${WORK}/report-none.html")
+string(FIND "${last_errors}" "錯誤：找不到執行 c0ffee00-0000-4000-9000-0000000000ff" report_unknown)
+run_cli("10" report "${report_run}")
+if(report_chinese_lang EQUAL -1 OR report_chinese_mode EQUAL -1 OR report_unknown EQUAL -1
+        OR EXISTS "${WORK}/report-none.html")
+    message(FATAL_ERROR "the report in zh-TW, or of a run not recorded:\n${last_errors}")
+endif()
+# Never into the root of an archive attached now, nor below it (exit 10): the
+# file would be an entry that the archive's next FULL verification reports as
+# added, failing it.
+run_cli("10" --lang en report "${report_run}" --out "${ROOT}/report.html")
+string(FIND "${last_errors}" " lies in the root of " report_in_root)
+run_cli("10" report "${report_run}" --out "${ROOT}/中文/report.html")
+string(FIND "${last_errors}" " 的根目錄（" report_in_root_chinese)
+if(report_in_root EQUAL -1 OR report_in_root_chinese EQUAL -1 OR EXISTS "${ROOT}/report.html"
+        OR EXISTS "${ROOT}/中文/report.html")
+    file(REMOVE "${ROOT}/report.html" "${ROOT}/中文/report.html")
+    message(FATAL_ERROR "a report into the root of archive ${archive_uuid}:\n${last_errors}")
+endif()
+# Nor through another name of the root (decision 0029, point 6): a link to it
+# (a junction on Windows, a symbolic link on Linux, sample), whose path does
+# not hold the folder as written, names the folder of the root.
+set(root_link "${WORK}/link-to-archive-SAMPLE")
+if(CMAKE_HOST_WIN32)
+    file(TO_NATIVE_PATH "${root_link}" root_link_native)
+    file(TO_NATIVE_PATH "${ROOT}" root_native)
+    execute_process(COMMAND cmd /c mklink /J "${root_link_native}" "${root_native}"
+        RESULT_VARIABLE linked OUTPUT_QUIET ERROR_QUIET)
+else()
+    file(CREATE_LINK "${ROOT}" "${root_link}" RESULT linked SYMBOLIC)
+endif()
+if(NOT linked EQUAL 0)
+    message(FATAL_ERROR "cannot make a link to the sample archive: ${linked}")
+endif()
+run_cli("10" --lang en report "${report_run}" --out "${root_link}/report.html")
+string(FIND "${last_errors}" " lies in the root of " report_through_link)
+file(REMOVE "${root_link}")
+if(report_through_link EQUAL -1 OR EXISTS "${ROOT}/report.html")
+    file(REMOVE "${ROOT}/report.html")
+    message(FATAL_ERROR "a report into the root of archive ${archive_uuid} through a link to it:\n${last_errors}")
+endif()
+
 # A backup: a copy of the tree registered as an archive of its own. Another
 # root on the same volume is allowed while the roots do not overlap (decision
 # 0001). Comparing the two archives reads only their manifests (decision 0020).

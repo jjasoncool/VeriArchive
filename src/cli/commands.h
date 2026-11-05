@@ -13,5 +13,6 @@ int history_command(const Arguments& arguments);
 int export_sha256sums_command(const Arguments& arguments);
 int export_command(const Arguments& arguments);
 int import_command(const Arguments& arguments);
+int report_command(const Arguments& arguments);
 
 } // namespace va::cli

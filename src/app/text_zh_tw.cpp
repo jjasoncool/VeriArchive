@@ -84,6 +84,7 @@ constexpr CatalogEntry entries[] = {
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  archive abandon-verification <uuid> [--confirm]\n"
         "  history <uuid>\n"
+        "  report <run_id> --out FILE.html\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n",
         "用法：veriarchive-cli [--config P] [--repository P] [--lang en|zh-TW] [--json] <command>\n"
@@ -102,6 +103,7 @@ constexpr CatalogEntry entries[] = {
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  archive abandon-verification <uuid> [--confirm]\n"
         "  history <uuid>\n"
+        "  report <run_id> --out FILE.html\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n"},
     // src/cli/cli_support.cpp
@@ -499,6 +501,15 @@ constexpr CatalogEntry entries[] = {
     // A recorded revision's manifest put back by an import (decision 0028).
     {"Restored the manifest of {} ({}) revision {}: the file is the one the repository recorded.",
         "已還原 {}（{}）版次 {} 的清單檔：此檔案就是儲存庫所記錄的那一份。"},
+    // src/cli/report_commands.cpp: the verification report of a run (decision 0048).
+    {"usage: report <run_id> --out FILE.html", "用法：report <run_id> --out FILE.html"},
+    {"no run {}", "找不到執行 {}"},
+    {"run {} did not finish (INCOMPLETE); a report is made only of a run that reached a result",
+        "執行 {} 未得出結果（未完成）；只有得出結果的執行才能製作驗證報告"},
+    {"{} exists already; a report never replaces a file, so name another one",
+        "{} 已經存在；報告不會取代既有的檔案，請指定另一個檔名"},
+    {"Wrote the verification report of run {} ({}: {}) to {}", "已將執行 {}（{}：{}）的驗證報告寫入 {}",
+        Match::FormatOnly},
     // src/app/progress_estimate.cpp: the progress of hashing, after "hashing: "
     // (CLI) or "Hashing: " (GUI), e.g.
     // "計算雜湊中：2.16 TiB / 9.44 TiB（23%）・每秒 240 MiB・約剩 8～9 小時".
@@ -998,6 +1009,48 @@ constexpr CatalogEntry entries[] = {
     {"Computer", "電腦"},
     {"Program version", "程式版本"},
     {"Guarantee", "保證範圍"},
+    // The verification report of a run (decision 0048): Save report... of
+    // the result page (src/gui/result_page.cpp), and the file itself
+    // (src/app/run_report_html.cpp), which veriarchive-cli report makes too.
+    {"Save report...", "儲存報告…"},
+    {"Saves what this page says as one HTML file, a verification report, which a browser opens and which can be "
+     "sent to others.",
+        "將此頁的內容存成一個 HTML 檔（驗證報告），可以直接用瀏覽器打開，或寄給別人。"},
+    {"Save the verification report", "儲存驗證報告"},
+    {"HTML file", "HTML 檔"},
+    {"Saved report: {}", "已儲存報告：{}", Match::FormatOnly},
+    {"The report {} was not saved: {}", "無法儲存報告 {}：{}", Match::FormatOnly},
+    {"Open", "開啟"},
+    {"Cannot open {}: {}", "無法開啟 {}：{}", Match::FormatOnly},
+    {"{} verification report {} {}", "{} 驗證報告 {} {}", Match::FormatOnly},
+    {"Verification report", "驗證報告"},
+    {"Verification report · {}", "驗證報告・{}", Match::FormatOnly},
+    {"VeriArchive · {}", "VeriArchive・{}", Match::FormatOnly},
+    {"Status", "狀態"},
+    {"Path", "路徑"},
+    {"Detail", "說明"},
+    {"Result", "結果"},
+    {"The device's own identity, read behind its enclosure", "裝置本身的身分（透過外接盒讀取）"},
+    {"Runs of this archive ({})", "此封存的執行（{}）", Match::FormatOnly},
+    {"This run", "這次執行"},
+    {"History chain when this report was made", "製作此報告時的歷程鏈"},
+    {"This run's hash in the history chain (row_hash)", "這次執行在歷程鏈中的雜湊（row_hash）"},
+    {"Made {} by VeriArchive {}.", "由 VeriArchive {1} 製作於 {0}。", Match::FormatOnly},
+    {"Made {} on the computer {} by VeriArchive {}.", "由電腦 {1} 上的 VeriArchive {2} 製作於 {0}。",
+        Match::FormatOnly},
+    {"The repository is the record: this file says what the repository recorded when the file was made. The file "
+     "itself is not signed, so it cannot show a change made to it afterwards; to check it, make a new report of this "
+     "run from the repository (Save report... on its result page, or veriarchive-cli report) and compare the two: "
+     "this run's hash in the history chain and the chain's state.",
+        "儲存庫才是紀錄：此檔案說的是製作當時儲存庫所記錄的內容。此檔案本身沒有簽章，無法顯示事後是否被修改；若要核對，"
+        "請從儲存庫再製作一份這次執行的報告（在其結果頁按「儲存報告…」，或用 veriarchive-cli report），比對兩份報告中"
+        "這次執行在歷程鏈中的雜湊與歷程鏈的狀態。"},
+    // Where a report is not saved (report_refusal): in the window and, as an
+    // error translated, on the command line.
+    {"{} lies in the root of {} ({}): a report saved there would add a file that its next FULL verification reports "
+     "as added. Choose a folder outside every archive.",
+        "{} 位於 {} 的根目錄（{}）中：報告存到那裡會多出一個檔案，下一次完整驗證會把它報告為新增的項目。請選擇不在任何"
+        "封存中的資料夾。"},
     // src/gui/settings_page.cpp: its groups (decision 0046) and their rows.
     {"Repository", "儲存庫"},
     {"Interface", "介面"},

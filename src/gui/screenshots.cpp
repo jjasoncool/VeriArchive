@@ -4,6 +4,9 @@
 // opens Register Archive, the comparison dialog and the relocation dialog,
 // starts a registration, a verification and a comparison through the
 // buttons' own handlers, saves each view as a PNG in the folder, and quits.
+// It also saves the verification report of the result page it shows (decision
+// 0048) into the folder as report-sample-<language>.html, which is no picture
+// of the guides but a page to look at.
 //
 // The archives and the folders come from the environment:
 //   VERIARCHIVE_SCREENSHOT_REFERENCE  uuid of archive A: selected in Archives, verified by its
@@ -55,6 +58,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace va::gui {
@@ -515,6 +519,42 @@ public:
                     }
                 },
                 {}},
+            // Then the verification report of that run (no picture, decision
+            // 0048), as Save report... on its page saves it once a file is
+            // chosen, into the tour's folder as report-sample-<language>.html,
+            // to be looked at; not a picture of the guides. SAMPLE DATA: the
+            // sample repository's records, with the sample identity and
+            // computer the views show in this mode.
+            {"",
+                [this] {
+                    auto* navigation = ADW_NAVIGATION_VIEW(state_.archives_page.navigation);
+                    AdwNavigationPage* page = adw_navigation_view_get_visible_page(navigation);
+                    const char* run = page ? static_cast<const char*>(g_object_get_data(G_OBJECT(page), "va-run"))
+                                           : nullptr;
+                    auto* save =
+                        page ? static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(page), "va-save-report")) : nullptr;
+                    if (!run || !save || !gtk_widget_get_visible(save)) {
+                        throw std::runtime_error("the result page offers no Save report...");
+                    }
+                    report_ = *state_.screenshot_folder /
+                              ("report-sample-" + std::string(app::language_code(state_.text.language())) + ".html");
+                    save_report_to(state_, run, report_);
+                },
+                {},
+                [this] { return state_.reports_saving == 0; },
+                [this] {
+                    const auto& saved = state_.report_saved;
+                    if (!saved || saved->file != report_) {
+                        throw std::runtime_error("Save report... wrote no report");
+                    }
+                    if (saved->failure) {
+                        throw std::runtime_error("the report was not saved: " + saved->failure(app::Text()));
+                    }
+                    std::error_code error;
+                    if (!std::filesystem::is_regular_file(report_, error)) {
+                        throw std::runtime_error("there is no report " + path_to_utf8(report_));
+                    }
+                }},
             // The relocation dialog of archive B, as Relocate to a new
             // carrier... in its details opens it, once the attached volumes
             // were read (the fixed sample list), a sample folder on a sample
@@ -781,6 +821,7 @@ private:
     std::uint64_t registration_ = 0; // the registration after 03-register
     std::uint64_t job_ = 0;          // the verification of 04-verify
     std::uint64_t comparison_ = 0;   // the comparison after 06-compare
+    std::filesystem::path report_;   // the verification report saved after 09-result
     GtkWidget* popover_ = nullptr;   // the popover drawn over the picture (a reference of its own)
 };
 

@@ -198,6 +198,7 @@ endif()
 # Composition-root helpers shared by the CLI and the GUI (R-05).
 add_library(veriarchive_app
     src/app/adding_chunk_hashes.cpp
+    src/app/archive_roots.cpp
     src/app/attached_devices.cpp
     src/app/device_alerts.cpp
     src/app/enclosure_words.cpp
@@ -208,6 +209,9 @@ add_library(veriarchive_app
     src/app/refusal_in_window.cpp
     src/app/relocation_report.cpp
     src/app/retirement_report.cpp
+    src/app/run_report_html.cpp
+    src/app/run_result.cpp
+    src/app/run_words.cpp
     src/app/unfinished_operations.cpp
     src/app/session.cpp
     src/app/text.cpp
@@ -225,6 +229,7 @@ add_executable(veriarchive_cli
     src/cli/export_commands.cpp
     src/cli/media_commands.cpp
     src/cli/register_commands.cpp
+    src/cli/report_commands.cpp
     src/cli/verify_commands.cpp
     src/cli/repo_commands.cpp)
 set_target_properties(veriarchive_cli PROPERTIES OUTPUT_NAME veriarchive-cli)
@@ -410,6 +415,7 @@ if(BUILD_TESTING)
         tests/unit/progress_wording_test.cpp
         tests/unit/read_speed_test.cpp
         tests/unit/register_choices_test.cpp
+        tests/unit/run_report_html_test.cpp
         tests/unit/run_result_test.cpp
         tests/unit/platform_test.cpp
         tests/unit/unicode_test.cpp

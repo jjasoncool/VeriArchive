@@ -142,4 +142,14 @@ std::string displayed_host(const std::string& recorded, IdentityShown shown)
     return "SAMPLE-HOST";
 }
 
+app::ShownIdentity shown_identity(IdentityShown shown)
+{
+    if (shown == IdentityShown::Recorded) {
+        return {};
+    }
+    return {[](const VolumeInfo& recorded) { return displayed_identity(recorded, IdentityShown::Sample); },
+        [](const std::vector<PhysicalDeviceInfo>& read) { return displayed_devices(read, IdentityShown::Sample); },
+        [](const std::string& recorded) { return displayed_host(recorded, IdentityShown::Sample); }};
+}
+
 } // namespace va::gui

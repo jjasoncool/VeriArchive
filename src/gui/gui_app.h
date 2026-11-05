@@ -8,6 +8,7 @@
 // page of a run, which Archives and History open over themselves; and the
 // dialogs of Register Archive and of a comparison (decision 0020).
 #include "app/adding_chunk_hashes.h"
+#include "app/archive_roots.h"
 #include "app/refusal_in_window.h"
 #include "app/unfinished_operations.h"
 #include "app/session.h"
@@ -247,6 +248,20 @@ struct GuiState {
     // (nothing until it is checked), worded as it is shown.
     std::optional<Uuid> history_filter;
     std::optional<std::expected<HistoryCheck, IoError>> history_check;
+
+    // Decision 0048: the folder that Save report... of a result page last
+    // saved a verification report into in this window, where its dialog
+    // opens next (else the Documents folder); the reports being made and
+    // written off the window's thread; and what the last one written ended
+    // with, its file and why it was not saved (nothing where it was), which
+    // the screenshot tour waits for. Kept across windows.
+    std::optional<std::filesystem::path> report_folder;
+    int reports_saving = 0;
+    struct ReportSaved {
+        std::filesystem::path file;
+        Report failure;
+    };
+    std::optional<ReportSaved> report_saved;
 
     // The widgets below belong to the current window; a language change
     // replaces them. The Reports are what a view shows, kept so the new window
@@ -752,6 +767,13 @@ void stop_watching_devices(GuiState& state, GtkWidget* page);
 // another repository was opened.
 const AttachedRead* attached_now(const GuiState& state);
 
+// The roots of the archives on the attached volumes, as the latest read of
+// them found them (MATCH, MATCH_WEAK, MIGRATED, AMBIGUOUS alike: each is an
+// archive's folder there), named as Archives names them: where neither an
+// export (export_refusal) nor a verification report (app::report_refusal)
+// is written. Nothing before the first read.
+std::vector<app::AttachedArchiveRoot> attached_roots(const GuiState& state);
+
 // Draws Devices from the latest read: a card for each device, the problem of
 // the read, or that it is being read.
 void refresh_devices(GuiState& state);
@@ -851,6 +873,38 @@ void open_results_again(GuiState& state, ResultsOver over, const std::vector<std
 // the latest read lists its stopped verification with Resume (stopped_run)
 // and its archive has no job of the window that waits or works.
 void show_results_operations(GuiState& state);
+
+// Save report... of the result page of the run `run_id` (decision 0048):
+// asks where to save its verification report in a save dialog that
+// proposes `proposed` (app::report_file_name) in the folder the last report
+// went to in this window, or the Documents folder, and that asks before it
+// replaces a file; then saves it there (save_report_to).
+void save_report(GuiState& state, const std::string& run_id, const std::string& proposed);
+
+// Makes the verification report of the run `run_id` from the repository's
+// records as they are now, as the result page words them (its archive named
+// as Archives lists it, the identity the views show: the sample ones in the
+// screenshot mode), and writes it into `file`, off the window's thread
+// (read_off_thread; short, so neither its progress nor a way to stop it is
+// shown); then says in a toast that it was saved, with Open, which opens it
+// as the system opens such a file, or why not. Refused in a message where
+// the folder of `file` lies in the root of an archive attached now, as the
+// latest read of the attached devices found them (attached_roots), and on the
+// thread as a read of that folder's volume finds them, also through another
+// name of the folder (app::roots_holding): the file would be an entry that
+// the next FULL verification of that archive reports as added
+// (app::report_refusal). state.report_saved says how it ended.
+void save_report_to(GuiState& state, const std::string& run_id, const std::filesystem::path& file);
+
+// The smoke test's check of the verification report (decision 0048), which
+// no run of the smoke test's empty repository has: makes the report of a
+// fixed run of sample data, made up for the check, as Save report... makes
+// it, in the window's language, and checks that it is a whole page of that
+// language that escapes what it shows, and that an INCOMPLETE run has none.
+// Where VERIARCHIVE_GUI_SMOKE_CHART names a folder, writes it into it as
+// sample-report.html, as Save report... writes a report. Throws where
+// anything is wrong.
+void check_sample_report(GuiState& state);
 
 // The smoke test's check of the read speed chart (decision 0044), which no
 // run of the smoke test's empty repository has: draws a fixed chart of sample

@@ -303,6 +303,9 @@ void activate(GuiState& state, bool smoke_test)
                         // The result pages' read speed chart, which the
                         // empty repository gives no run to draw.
                         check_sample_chart(state);
+                        // The verification report (decision 0048), of a
+                        // run of sample data.
+                        check_sample_report(state);
                         // The enclosure question (decision 0047), which no
                         // archive of the empty repository asks.
                         check_sample_enclosure_dialog(state);

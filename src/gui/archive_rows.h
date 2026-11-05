@@ -10,6 +10,7 @@
 // show (displayed_identity): the sample one in the screenshot mode.
 //
 // Plain C++ without GTK, so the unit tests can check it.
+#include "app/run_words.h"
 #include "app/text.h"
 #include "app/unfinished_operations.h"
 #include "common/config.h"
@@ -29,20 +30,21 @@
 
 namespace va::gui {
 
-// How a result, an archive or a mark is shown: in the theme's colour for
-// success, warnings or errors, or in none.
-enum class Tone { Neutral, Success, Warning, Error };
+// How a result, an archive or a mark is shown (app/run_words.h): in the
+// theme's colour for success, warnings or errors, or in none; a few words in
+// a rounded box, a result or a mark beside it (a pill, make_pill); a name and
+// its value, a line of a group of the details. The words of a run are the
+// app's too, which the verification report says as well (decision 0048).
+using app::Field;
+using app::Pill;
+using app::Tone;
+using app::duration_words;
+using app::result_tone;
+using app::result_with_mode;
 
 // The style class that gives `tone` its colour in the window's style
 // (window.cpp): va-neutral, va-success, va-warning, va-error.
 const char* tone_class(Tone tone);
-
-// A few words in a rounded box: a result, or a mark beside it.
-struct Pill {
-    std::string words;
-    Tone tone = Tone::Neutral;
-    bool operator==(const Pill&) const = default;
-};
 
 // How long before `now` the UTC timestamp `then` was: "less than an hour
 // ago", "5 hours ago", "1 day ago", "3 days ago" (up to 13), "2 weeks ago"
@@ -51,19 +53,6 @@ struct Pill {
 // a moment after `now` (a clock set back) is "less than an hour ago". Empty
 // where `then` is no timestamp.
 std::string age_words(const app::Text& text, std::string_view then, std::chrono::sys_seconds now);
-
-// How long a run took, from its start to its end: "8 s", "5 min 37 s",
-// "12 h 44 min"; empty where either is no timestamp.
-std::string duration_words(const app::Text& text, std::string_view started, std::string_view finished);
-
-// A run's result with its mode, as its report's first line says it: "FULL
-// VERIFY PASSED" (完整驗證 通過) for a FULL verification, "QUICK PASSED" for a
-// mode that V1 does not run.
-std::string result_with_mode(const app::Text& text, const VerifyRunRecord& run);
-
-// PASSED Success, PASSED_WITH_WARNINGS Warning, INCOMPLETE Neutral (it claims
-// nothing), FAILED and anything else Error.
-Tone result_tone(std::string_view result);
 
 // A run's result alone, as a pill in the tone of the result: PASSED (通過),
 // PASSED_WITH_WARNINGS (通過（有警告）), FAILED (失敗), INCOMPLETE (未完成).
@@ -136,16 +125,6 @@ struct AlertLine {
 };
 
 std::vector<AlertLine> device_alert_lines(const app::Text& text, const ArchiveStatus& status, IdentityShown shown);
-
-// A name and its value, a line of a group of the details. A value that is a
-// path (a root) wraps at any character, filling its lines; any other between
-// words where it can.
-struct Field {
-    std::string name;
-    std::string value;
-    bool path = false;
-    bool operator==(const Field&) const = default;
-};
 
 // The group Device: the volume label and capacity of the current revision's
 // carrier, and of each of its devices the model, bus and serial (or WWN), as

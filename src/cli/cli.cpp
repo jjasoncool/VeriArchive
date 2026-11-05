@@ -30,6 +30,7 @@ void print_usage(const app::Text& text)
         "  archive abandon-registration <uuid> [--confirm] | abandon-relocation <uuid> [--confirm]\n"
         "  archive abandon-verification <uuid> [--confirm]\n"
         "  history <uuid>\n"
+        "  report <run_id> --out FILE.html\n"
         "  export-sha256sums <uuid> --out FILE\n"
         "  export <uuid> --out DIR | import <file.vam> [--force-rollback]\n");
 }
@@ -99,6 +100,9 @@ int run(std::vector<std::string> raw_arguments)
     }
     if (command == "import") {
         return import_command(arguments);
+    }
+    if (command == "report") {
+        return report_command(arguments);
     }
 
     // An unknown command: said, then the usage; with --json said as JSON.

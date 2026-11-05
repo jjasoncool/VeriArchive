@@ -203,6 +203,12 @@ void an_export_writes_into_a_folder_of_its_own()
                                         " lies in the root of ARCH-SAMPLE-1 ("));
     CHECK(va::gui::export_refusal(english, "/media/SAMPLE-1/photos", roots).has_value());
     CHECK(va::gui::export_refusal(chinese, "/media/SAMPLE-1/photos", roots)->contains("ARCH-SAMPLE-1"));
+    // The same words for a root that holds the folder as the file system
+    // names the two (app::roots_holding), a sample link that names it here.
+    CHECK(va::gui::export_refusal_in_root(english, "/media/SAMPLE-1/photos/exports", roots.front()) == *inside);
+    const auto linked = va::gui::export_refusal_in_root(chinese, "/home/SAMPLE/link-to-photos", roots.front());
+    CHECK(linked.starts_with(va::path_to_utf8(std::filesystem::path("/home/SAMPLE/link-to-photos")) +
+                             " 位於 ARCH-SAMPLE-1 的根目錄（"));
 
     const va::ExportResult written{"/media/SAMPLE-EXPORT/ARCH-SAMPLE-2 c0ffee00/r0002.vam",
         "/media/SAMPLE-EXPORT/ARCH-SAMPLE-2 c0ffee00/identity.json"};

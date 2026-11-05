@@ -1,4 +1,6 @@
-// The result page of a recorded run (src/gui/run_result.*, decision 0046).
+// The result page of a recorded run (decision 0046): what it says
+// (src/app/run_result.*, which the verification report says too, decision
+// 0048), as the window shows it (src/gui/run_result.*).
 // Every archive, run, item, device, computer and time below is sample data
 // made up for the test (ARCH-SAMPLE-*, c0ffee00-... uuids, RECORDED-* and
 // SAMPLE-* names); none is of a real archive, device or computer.

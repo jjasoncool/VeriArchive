@@ -157,10 +157,15 @@ file(WRITE "${new_folder}/文件/清單.csv" "item,count\n範例,1\n")
 
 set(pictures 01-settings.png 02-archive-list.png 03-register.png 04-verify.png 05-history.png
     06-compare.png 07-language.png 08-jobs.png 09-result.png 10-devices.png 11-relocate.png)
+# The verification report that the tour saves (decision 0048), SAMPLE DATA,
+# which never stays in OUT (see below): one left there by a run that stopped
+# before it was moved goes now.
+set(report "report-sample-${LANG}.html")
 file(MAKE_DIRECTORY "${OUT}")
 foreach(picture IN LISTS pictures)
     file(REMOVE "${OUT}/${picture}")
 endforeach()
+file(REMOVE "${OUT}/${report}")
 
 # The window appears on the desktop for a minute while the tour runs.
 file(TO_NATIVE_PATH "${reference_folder}" reference_folder_native)
@@ -181,6 +186,16 @@ execute_process(
     RESULT_VARIABLE code
     OUTPUT_VARIABLE output
     ERROR_VARIABLE errors)
+# The tour also saves the verification report of the run on 09-result
+# (decision 0048), SAMPLE DATA to look at, not a picture of the guides: it
+# goes beside the sample data, out of OUT (docs/images is packaged), at once,
+# also where the tour stopped at a later view. Copied, then removed: WORK may
+# lie on another volume, which file(RENAME) cannot move a file to. The next
+# run empties WORK, and the report with it.
+if(EXISTS "${OUT}/${report}")
+    file(COPY_FILE "${OUT}/${report}" "${WORK}/${report}")
+    file(REMOVE "${OUT}/${report}")
+endif()
 if(NOT code EQUAL 0)
     message(FATAL_ERROR "veriarchive-gui exit ${code}\n${output}\n${errors}")
 endif()
@@ -192,4 +207,7 @@ foreach(picture IN LISTS pictures)
         message(FATAL_ERROR "veriarchive-gui did not save ${OUT}/${picture}")
     endif()
 endforeach()
-message(STATUS "Screenshots saved in ${OUT}")
+if(NOT EXISTS "${WORK}/${report}")
+    message(FATAL_ERROR "veriarchive-gui did not save ${OUT}/${report}")
+endif()
+message(STATUS "Screenshots saved in ${OUT}; the sample verification report in ${WORK}/${report}")

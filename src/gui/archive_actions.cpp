@@ -188,12 +188,18 @@ std::optional<std::string> export_refusal(
 {
     for (const auto& attached : roots) {
         if (!attached.root.empty() && path_within(attached.root, folder)) {
-            return text.format("{} lies in the root of {} ({}): an export there would add files that its next FULL "
-                               "verification reports as added. Choose a folder outside every archive.",
-                path_to_utf8(folder), attached.label, path_to_utf8(attached.root));
+            return export_refusal_in_root(text, folder, attached);
         }
     }
     return std::nullopt;
+}
+
+std::string export_refusal_in_root(
+    const app::Text& text, const std::filesystem::path& folder, const AttachedArchiveRoot& holding)
+{
+    return text.format("{} lies in the root of {} ({}): an export there would add files that its next FULL "
+                       "verification reports as added. Choose a folder outside every archive.",
+        path_to_utf8(folder), holding.label, path_to_utf8(holding.root));
 }
 
 std::string export_title(const app::Text& text, const std::string& label)

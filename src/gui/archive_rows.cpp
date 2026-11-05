@@ -102,45 +102,6 @@ std::string age_words(const app::Text& text, std::string_view then, std::chrono:
     return years_ago(text, days / 365, std::min<long long>((days % 365) / 30, 11));
 }
 
-std::string duration_words(const app::Text& text, std::string_view started, std::string_view finished)
-{
-    const auto start = parse_timestamp(started);
-    const auto end = parse_timestamp(finished);
-    if (!start || !end) {
-        return {};
-    }
-    const auto seconds = std::max<long long>(0, (*end - *start).count());
-    if (seconds < 60) {
-        return text.format("{} s", seconds);
-    }
-    if (seconds < 3600) {
-        return text.format("{} min {} s", seconds / 60, seconds % 60);
-    }
-    return text.format("{} h {} min", seconds / 3600, (seconds % 3600) / 60);
-}
-
-std::string result_with_mode(const app::Text& text, const VerifyRunRecord& run)
-{
-    if (run.mode == "FULL") {
-        return text.format("FULL VERIFY {}", text(run.result));
-    }
-    return text.format("{} {}", text(run.mode), text(run.result));
-}
-
-Tone result_tone(std::string_view result)
-{
-    if (result == "PASSED") {
-        return Tone::Success;
-    }
-    if (result == "PASSED_WITH_WARNINGS") {
-        return Tone::Warning;
-    }
-    if (result == "INCOMPLETE") {
-        return Tone::Neutral;
-    }
-    return Tone::Error;
-}
-
 Pill result_pill(const app::Text& text, const VerifyRunRecord& run)
 {
     return {text(run.result), result_tone(run.result)};

@@ -8,6 +8,7 @@
 // every view therefore shows a fixed sample identity instead.
 //
 // Plain C++ without GTK, so the unit tests can check it.
+#include "app/shown_identity.h"
 #include "common/types.h"
 #include "core/interfaces.h"
 
@@ -75,5 +76,12 @@ std::unique_ptr<IDeviceIdentityHelper> sample_device_identity_helper();
 // published pictures is no more sample data than its volumes are; nothing
 // where none was recorded.
 std::string displayed_host(const std::string& recorded, IdentityShown shown);
+
+// The above as the app's pages of a run take them (the result page, the
+// verification report, decision 0048): Recorded shows what was recorded;
+// Sample the sample identity, devices and computer (displayed_identity,
+// displayed_devices, displayed_host), also for the computer that makes a
+// report.
+app::ShownIdentity shown_identity(IdentityShown shown);
 
 } // namespace va::gui

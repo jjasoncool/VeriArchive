@@ -40,6 +40,7 @@ void job_words_tests();
 void window_words_tests();
 void archive_rows_tests();
 void run_result_tests();
+void run_report_html_tests();
 void history_rows_tests();
 void register_choices_tests();
 void compare_choices_tests();
