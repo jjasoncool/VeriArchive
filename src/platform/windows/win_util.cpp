@@ -136,6 +136,14 @@ IoError error_from_win32(DWORD code, std::string operation)
     case ERROR_INVALID_FUNCTION:
         kind = IoErrorKind::NotSupported;
         break;
+    // Something of that name is there: a no-replace rename refused
+    // (IOutputFile::commit_new), or a folder or a file made where one was.
+    // Callers that make a temporary name of their own (CREATE_NEW) look at
+    // the code itself and try another name.
+    case ERROR_FILE_EXISTS:
+    case ERROR_ALREADY_EXISTS:
+        kind = IoErrorKind::AlreadyExists;
+        break;
     default:
         break;
     }

@@ -13,12 +13,13 @@
 // paths, uuids, hashes and serials, a result said in words beside its colour,
 // the read speed chart as inline SVG. The same records and the same time of
 // making give the same bytes. Only a run that reached a result has one: an
-// INCOMPLETE run claims nothing (R-21). The repository stays the record: the
-// file is not signed (tamper evidence is not part of this version).
+// INCOMPLETE run makes no PASS/FAIL claim (§A6). The repository stays the
+// record: the file is not signed (tamper evidence is not part of this
+// version).
 //
-// Making one reads a run's records and writes one small file: it is short,
-// so it takes no progress sink or cancel token (rule 7), as the retirement
-// preview does not.
+// Making one reads a run's records once and writes one file, which lists
+// every item of the run: it takes no progress sink or cancel token (rule 7),
+// as the retirement preview takes none (decision 0048, point 5).
 //
 // Plain C++ without GTK, so the unit tests can check it.
 #include "app/archive_roots.h"

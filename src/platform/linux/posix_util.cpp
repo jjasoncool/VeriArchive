@@ -48,6 +48,13 @@ IoError error_from_errno(int code, std::string operation)
     case ENOSYS:
         kind = IoErrorKind::NotSupported;
         break;
+    // Something of that name is there: a no-replace rename or link refused
+    // (IOutputFile::commit_new), or a folder or a file made where one was.
+    // Callers that make a temporary name of their own (O_EXCL) look at errno
+    // itself and try another name.
+    case EEXIST:
+        kind = IoErrorKind::AlreadyExists;
+        break;
     default:
         break;
     }

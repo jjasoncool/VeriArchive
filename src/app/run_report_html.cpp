@@ -413,7 +413,8 @@ void footer(Html& html, const Text& text, const ReportFacts& facts, const ShownI
         text("The repository is the record: this file says what the repository recorded when the file was made. "
              "The file itself is not signed, so it cannot show a change made to it afterwards; to check it, make a "
              "new report of this run from the repository (Save report... on its result page, or veriarchive-cli "
-             "report) and compare the two: this run's hash in the history chain and the chain's state."));
+             "report) and compare the two: what they say of this run, this run's hash in the history chain and the "
+             "chain's state."));
     html.raw("</footer>\n");
 }
 

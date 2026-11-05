@@ -463,11 +463,21 @@ void languages()
           html.contains("<h2>技術細節</h2>") && html.contains("<div class=\"name\">已讀取且相符</div>"));
     CHECK(html.contains("<p>由電腦 SAMPLE-MAKING-HOST 上的 VeriArchive 0.0.0-sample 製作於 " +
                         va::app::html_escaped(va::app::local_time(facts.made.at, chinese)) + "。</p>"));
-    CHECK(html.contains("<p>儲存庫才是紀錄："));
+    // How to check the file: a new report compared with it, in what the two
+    // say of the run as well as in the hash and the chain's state, since
+    // row_hash covers neither the run's items nor the file.
+    CHECK(html.contains("<p>儲存庫才是紀錄：此檔案說的是製作當時儲存庫所記錄的內容。此檔案本身沒有簽章，無法顯示事後是否被"
+                        "修改；若要核對，請從儲存庫再製作一份這次執行的報告（在其結果頁按「儲存報告…」，或用 "
+                        "veriarchive-cli report），比對兩份報告中這次執行的內容、這次執行在歷程鏈中的雜湊與歷程鏈的狀態。"
+                        "</p>\n</footer>"));
     const auto english = html_of(Text(), facts);
     CHECK(english.contains("<p>Made " + va::app::html_escaped(va::app::local_time(facts.made.at, Text())) +
                            " on the computer SAMPLE-MAKING-HOST by VeriArchive 0.0.0-sample.</p>") &&
-          english.contains("<p>The repository is the record: "));
+          english.contains("<p>The repository is the record: this file says what the repository recorded when the file "
+                           "was made. The file itself is not signed, so it cannot show a change made to it afterwards; "
+                           "to check it, make a new report of this run from the repository (Save report... on its "
+                           "result page, or veriarchive-cli report) and compare the two: what they say of this run, "
+                           "this run&#39;s hash in the history chain and the chain&#39;s state.</p>\n</footer>"));
 }
 
 // The same records and time of making give the same bytes.

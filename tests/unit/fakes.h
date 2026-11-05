@@ -215,6 +215,7 @@ public:
         const auto found = nodes_.find(key(absolute));
         return found == nodes_.end() ? std::string{} : found->second.content;
     }
+    bool holds(const std::filesystem::path& absolute) const { return nodes_.contains(key(absolute)); }
     void remove(const std::string& relative)
     {
         const auto prefix = key(path_of(relative));
@@ -372,6 +373,13 @@ private:
             files_.put(destination_, content_);
             return {};
         }
+        std::expected<void, va::IoError> commit_new() override
+        {
+            if (files_.holds(destination_)) {
+                return std::unexpected(va::IoError{va::IoErrorKind::AlreadyExists, 0, "already exists"});
+            }
+            return commit();
+        }
 
     private:
         FakeFileSystem& files_;
@@ -440,6 +448,13 @@ private:
                 on_naming_();
             }
             return inner_->commit();
+        }
+        std::expected<void, va::IoError> commit_new() override
+        {
+            if (on_naming_) {
+                on_naming_();
+            }
+            return inner_->commit_new();
         }
 
     private:

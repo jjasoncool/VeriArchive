@@ -1469,6 +1469,15 @@ private:
             writer_.files_.put(destination_, content_);
             return {};
         }
+        // Not asked by a registration, which replaces identity.json.
+        std::expected<void, va::IoError> commit_new() override
+        {
+            if (writer_.files_.holds(destination_)) {
+                return std::unexpected(va::IoError{va::IoErrorKind::AlreadyExists, 0, "already exists"});
+            }
+            writer_.files_.put(destination_, content_);
+            return {};
+        }
 
     private:
         RacingMediaWriter& writer_;

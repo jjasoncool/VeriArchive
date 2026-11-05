@@ -67,6 +67,15 @@ public:
 // A commit() with nothing written since then has only the rename left to do,
 // short enough to make while the repository database is locked: a manifest
 // gets its name in the transaction that records its revision (decision 0023).
+//
+// commit_new() names the file as commit() does, durably and as a whole, but
+// only where nothing of the destination's name is there at that moment, also
+// where something appeared there after create() (decision 0048: a verification
+// report never replaces a file). Where something is there, it fails with
+// IoErrorKind::AlreadyExists, leaves what is there as it was, names nothing
+// and removes its temporary file at once. Only on a file system that offers
+// neither a rename that replaces nothing nor hard links (Linux, some FUSE file
+// systems) can it merely look for the name just before it renames.
 class IOutputFile {
 public:
     virtual ~IOutputFile() = default;
@@ -74,6 +83,7 @@ public:
     virtual std::expected<void, IoError> write(std::span<const std::byte> data) = 0;
     virtual std::expected<void, IoError> flush() = 0;
     virtual std::expected<void, IoError> commit() = 0;
+    virtual std::expected<void, IoError> commit_new() = 0;
 };
 
 // Durable writes (decision 0011). Only the repository and manifests are written;

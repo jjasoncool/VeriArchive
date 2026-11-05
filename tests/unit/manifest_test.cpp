@@ -287,6 +287,14 @@ private:
             }
             return committed;
         }
+        std::expected<void, va::IoError> commit_new() override
+        {
+            auto committed = inner_->commit_new();
+            if (const auto after = std::exchange(after_, nullptr)) {
+                after();
+            }
+            return committed;
+        }
 
     private:
         std::unique_ptr<va::IOutputFile> inner_;

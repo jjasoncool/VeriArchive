@@ -32,6 +32,13 @@ void platform_error_tests()
         const auto error = error_from_win32(code, "ReadFile");
         CHECK(error.kind == IoErrorKind::Timeout && error.native_code == static_cast<int>(code));
     }
+    // Something of that name is there (decision 0048): what a rename that
+    // replaces nothing refuses with.
+    for (const DWORD code : {ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS}) {
+        const auto error = error_from_win32(code, "MoveFileExW");
+        CHECK(error.kind == IoErrorKind::AlreadyExists && error.native_code == static_cast<int>(code) &&
+              error.message.starts_with("already exists (MoveFileExW"));
+    }
     CHECK(error_from_win32(ERROR_PATH_NOT_FOUND, "CreateFileW").kind == IoErrorKind::NotFound);
     CHECK(error_from_win32(ERROR_ACCESS_DENIED, "CreateFileW").kind == IoErrorKind::PermissionDenied);
 }

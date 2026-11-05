@@ -1,11 +1,12 @@
 #include "core/write_file.h"
 
 namespace va {
+namespace {
 
-std::expected<void, IoError> write_file_atomically(
-    IFileWriter& writer,
-    const std::filesystem::path& destination,
-    std::string_view contents)
+enum class Naming { Replace, New };
+
+std::expected<void, IoError> write_whole_file(
+    IFileWriter& writer, const std::filesystem::path& destination, std::string_view contents, Naming naming)
 {
     auto file = writer.create(destination);
     if (!file) {
@@ -15,7 +16,25 @@ std::expected<void, IoError> write_file_atomically(
     if (auto written = (*file)->write(bytes); !written) {
         return written;
     }
-    return (*file)->commit();
+    return naming == Naming::New ? (*file)->commit_new() : (*file)->commit();
+}
+
+} // namespace
+
+std::expected<void, IoError> write_file_atomically(
+    IFileWriter& writer,
+    const std::filesystem::path& destination,
+    std::string_view contents)
+{
+    return write_whole_file(writer, destination, contents, Naming::Replace);
+}
+
+std::expected<void, IoError> write_new_file_atomically(
+    IFileWriter& writer,
+    const std::filesystem::path& destination,
+    std::string_view contents)
+{
+    return write_whole_file(writer, destination, contents, Naming::New);
 }
 
 std::expected<std::string, IoError> read_whole_file(

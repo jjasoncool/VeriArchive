@@ -6,6 +6,7 @@
 #include <chrono>
 #include <fstream>
 #include <iterator>
+#include <string_view>
 
 namespace {
 
@@ -97,6 +98,58 @@ void file_writer_tests()
         CHECK(writer->remove(verbatim / "sums.txt"));
         CHECK(!std::filesystem::exists(root / "sums.txt"));
     }
+
+    // Decision 0048: commit_new() names the file as commit() does, but only
+    // where nothing of that name is there when it is named, as `report`
+    // writes its FILE. Sample data: SAMPLE bytes in a folder of the temporary
+    // folder above, which the test makes and removes.
+    const auto reports = root / "SAMPLE-reports";
+    std::filesystem::create_directories(reports);
+    const auto first = reports / "SAMPLE report 1.html";
+    {
+        auto file = writer->create(first);
+        CHECK(file && (*file)->write(bytes("SAMPLE one")) && (*file)->commit_new());
+    }
+    CHECK(read_all(first) == "SAMPLE one");
+    CHECK(count_entries(reports) == 1);
+    // A file that another program makes under that name after create() is
+    // left as it is, and the temporary file goes at once, before the output
+    // file itself goes.
+    const auto second = reports / "SAMPLE report 2.html";
+    {
+        auto file = writer->create(second);
+        CHECK(file && (*file)->write(bytes("SAMPLE report")));
+        std::ofstream(second, std::ios::binary) << "SAMPLE made meanwhile";
+        if (file) {
+            const auto refused = (*file)->commit_new();
+            CHECK(!refused && refused.error().kind == va::IoErrorKind::AlreadyExists);
+        }
+        CHECK(read_all(second) == "SAMPLE made meanwhile");
+        CHECK(count_entries(reports) == 2);
+    }
+    CHECK(count_entries(reports) == 2);
+    // After a flush, the commit only renames (decision 0023), and refuses as
+    // well: here a folder of that name.
+    const auto folder = reports / "SAMPLE folder.html";
+    std::filesystem::create_directories(folder);
+    {
+        auto file = writer->create(folder);
+        CHECK(file && (*file)->write(bytes("SAMPLE flushed")) && (*file)->flush());
+        if (file) {
+            const auto refused = (*file)->commit_new();
+            CHECK(!refused && refused.error().kind == va::IoErrorKind::AlreadyExists);
+        }
+        CHECK(count_entries(reports) == 3); // the temporary file is gone at once
+    }
+    CHECK(std::filesystem::is_directory(folder) && count_entries(folder) == 0 && count_entries(reports) == 3);
+    // write_new_file_atomically: the same, in one call.
+    const auto refused = va::write_new_file_atomically(*writer, first, "SAMPLE two");
+    CHECK(!refused && refused.error().kind == va::IoErrorKind::AlreadyExists);
+    CHECK(read_all(first) == "SAMPLE one");
+    const auto third = reports / "SAMPLE report 3.html";
+    CHECK(va::write_new_file_atomically(*writer, third, "SAMPLE three"));
+    CHECK(read_all(third) == "SAMPLE three");
+    CHECK(count_entries(reports) == 4);
 
     std::error_code error;
     std::filesystem::remove_all(root, error);

@@ -19,6 +19,10 @@ enum class IoErrorKind {
     // computer) passes no ATA command on to the device, so the device's own
     // identity cannot be read through it (decision 0047).
     CommandNotPassed,
+    // Something of that name is there already: a file, a folder or a link
+    // (Windows ERROR_FILE_EXISTS and ERROR_ALREADY_EXISTS, Linux EEXIST);
+    // the refusal of IOutputFile::commit_new (decision 0048).
+    AlreadyExists,
     Other,
 };
 

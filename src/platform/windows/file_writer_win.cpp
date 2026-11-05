@@ -1,7 +1,9 @@
 // Windows durable writer: CREATE_NEW temporary file, WriteFile, FlushFileBuffers,
 // then MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH) over the destination. A
 // flush() ahead of the commit makes the data durable, and leaves the commit
-// only the rename (decision 0023).
+// only the rename (decision 0023). commit_new() renames with WRITE_THROUGH
+// alone, which Windows refuses where anything of the destination's name is
+// there, in the same call (decision 0048).
 #include "platform/file_writer.h"
 #include "platform/windows/long_path.h"
 #include "platform/windows/win_util.h"
@@ -29,8 +31,7 @@ public:
     ~WindowsOutputFile() override
     {
         if (!committed_) {
-            handle_.reset();
-            DeleteFileW(temporary_.c_str());
+            discard();
         }
     }
 
@@ -75,12 +76,45 @@ public:
         return {};
     }
 
+    std::expected<void, IoError> commit_new() override
+    {
+        if (!flushed_) {
+            if (auto flushed = flush(); !flushed) {
+                return flushed;
+            }
+        }
+        handle_.reset();
+        // No MOVEFILE_REPLACE_EXISTING: a file, a folder or a link of that
+        // name, also one made after create(), fails the rename itself
+        // (ERROR_ALREADY_EXISTS, or ERROR_FILE_EXISTS), which names nothing.
+        if (!MoveFileExW(temporary_.c_str(), destination_.c_str(), MOVEFILE_WRITE_THROUGH)) {
+            auto error = error_from_win32(GetLastError(), "MoveFileExW");
+            if (error.kind == IoErrorKind::AlreadyExists) {
+                discard();
+            }
+            return std::unexpected(std::move(error));
+        }
+        committed_ = true;
+        return {};
+    }
+
 private:
+    // Closes the temporary file and deletes it, once.
+    void discard()
+    {
+        handle_.reset();
+        if (!discarded_) {
+            DeleteFileW(temporary_.c_str());
+            discarded_ = true;
+        }
+    }
+
     UniqueHandle handle_;
     std::wstring temporary_;
     std::wstring destination_;
     bool flushed_ = false;   // flush() made every byte written durable
     bool committed_ = false;
+    bool discarded_ = false; // the temporary file was deleted
 };
 
 class WindowsFileWriter final : public IFileWriter {

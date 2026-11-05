@@ -2,13 +2,19 @@
 // of one recorded run that reached a result, as one self-contained HTML file,
 // the same file that the window's Save report... makes (app/run_report_html.h),
 // in the language of --lang or the config file. The run is named by its full
-// id, as `history` lists it. Refused: an INCOMPLETE run, which claims nothing
-// (R-21), an unknown run id, a FILE that is there already, which a report
-// never replaces (the window's save dialog asks first; here nothing can), and
-// a FILE in the root of an archive attached now (app::roots_holding), which
-// its next FULL verification would report as added, as the window refuses
-// it. It reads the run's records and writes one small file, so it shows no
-// progress and Ctrl+C has nothing to stop (rule 7).
+// id, as `history` lists it. Refused: an INCOMPLETE run, which makes no
+// PASS/FAIL claim (§A6); an unknown run id; a FILE that is there already,
+// which a report never replaces (the window's save dialog asks first; here
+// nothing can), looked for before the repository is opened and refused again
+// when the file is named (write_new_file_atomically), so that a FILE made
+// meanwhile is not replaced either (but for the one narrow window that
+// IOutputFile::commit_new names: a Linux file system with neither
+// RENAME_NOREPLACE nor hard links); and a FILE in the root of an archive
+// attached now (app::roots_holding), which its next FULL verification would
+// report as added, as the window refuses it. It reads the run's records and
+// writes one file, which lists every item of the run; it shows no progress
+// and takes no cancel (rule 7): Ctrl+C ends it, and the atomic writer leaves
+// no part of FILE (decision 0048, points 5 and 6).
 #include "cli/commands.h"
 
 #include "app/archive_roots.h"
@@ -38,18 +44,21 @@ int report_command(const Arguments& arguments)
     const auto& run_id = arguments.words[1];
     const auto destination = app::typed_path(*out);
     // A report never replaces a file: the one there may be another run's.
+    // Told before the repository is opened; the writer refuses one made
+    // meanwhile (IOutputFile::commit_new, but for its one narrow window).
+    const Failure exists_already{exit_code::usage,
+        path_to_utf8(destination) + " exists already; a report never replaces a file, so name another one"};
     std::error_code error;
     const auto there = std::filesystem::symlink_status(destination, error);
     if (std::filesystem::exists(there)) {
-        return report_failure(arguments,
-            {exit_code::usage, path_to_utf8(destination) + " exists already; a report never replaces a file, so name "
-                                                           "another one"});
+        return report_failure(arguments, exists_already);
     }
     auto session = open_session(arguments, false);
     if (!session) {
         return report_failure(arguments, session.error());
     }
-    // Only read: the report changes nothing in the repository.
+    // Read only: a report records nothing in the repository (past the open
+    // of every command, decision 0032's upgrade included).
     auto store = ArchiveStore::open_read_only(session->context.repo);
     if (!store) {
         return report_failure(arguments, {exit_code::repository, store.error().message});
@@ -93,7 +102,10 @@ int report_command(const Arguments& arguments)
     if (!html) {
         return report_failure(arguments, {exit_code::usage, html.error()});
     }
-    if (auto written = write_file_atomically(*session->writer, destination, *html); !written) {
+    if (auto written = write_new_file_atomically(*session->writer, destination, *html); !written) {
+        if (written.error().kind == IoErrorKind::AlreadyExists) {
+            return report_failure(arguments, exists_already);
+        }
         return report_failure(arguments, {exit_code::repository, written.error().message});
     }
     if (arguments.json) {

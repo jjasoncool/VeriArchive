@@ -1041,10 +1041,10 @@ constexpr CatalogEntry entries[] = {
     {"The repository is the record: this file says what the repository recorded when the file was made. The file "
      "itself is not signed, so it cannot show a change made to it afterwards; to check it, make a new report of this "
      "run from the repository (Save report... on its result page, or veriarchive-cli report) and compare the two: "
-     "this run's hash in the history chain and the chain's state.",
+     "what they say of this run, this run's hash in the history chain and the chain's state.",
         "儲存庫才是紀錄：此檔案說的是製作當時儲存庫所記錄的內容。此檔案本身沒有簽章，無法顯示事後是否被修改；若要核對，"
         "請從儲存庫再製作一份這次執行的報告（在其結果頁按「儲存報告…」，或用 veriarchive-cli report），比對兩份報告中"
-        "這次執行在歷程鏈中的雜湊與歷程鏈的狀態。"},
+        "這次執行的內容、這次執行在歷程鏈中的雜湊與歷程鏈的狀態。"},
     // Where a report is not saved (report_refusal): in the window and, as an
     // error translated, on the command line.
     {"{} lies in the root of {} ({}): a report saved there would add a file that its next FULL verification reports "

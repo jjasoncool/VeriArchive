@@ -32,6 +32,9 @@ void platform_error_tests()
         const auto error = error_from_errno(code, "pread");
         CHECK(error.kind == IoErrorKind::Timeout && error.native_code == code);
     }
+    // Something of that name is there (decision 0048): what a rename or a
+    // link that replaces nothing refuses with.
+    CHECK(error_from_errno(EEXIST, "renameat2").kind == IoErrorKind::AlreadyExists);
     CHECK(error_from_errno(ENOENT, "open").kind == IoErrorKind::NotFound);
     CHECK(error_from_errno(EACCES, "open").kind == IoErrorKind::PermissionDenied);
 }

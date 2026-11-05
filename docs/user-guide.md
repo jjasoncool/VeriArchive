@@ -401,13 +401,13 @@ What the report holds:
 - For a run that went on past a changed enclosure after a read of the device's own serial (see "A device moved to another enclosure"): the model, serial and WWN that were read, under "The device's own identity, read behind its enclosure". The result page does not show them.
 - "Runs of this archive": every recorded run of the archive, newest first, with this run marked "This run".
 - "History chain when this report was made": the result of the same check as "Check history chain" on the History page, for the history of every archive, and "This run's hash in the history chain (row_hash)".
-- At its end, when, on which computer and by which version of VeriArchive it was made.
+- At its end, when, on which computer and by which version of VeriArchive it was made, and how to check it later.
 
 On screen it follows your system's light or dark style. Printed, it fits A4 and needs no background colours, and a long list of items repeats its heading on each page.
 
 **Where it cannot be saved.** Not in the root of an archive that is attached now, nor in any folder inside that root: the report would be a new file there, which that archive's next FULL verification reports as New, so that the verification fails. Where an archive is a whole volume, such as `H:\`, that is every folder of that volume. VeriArchive refuses such a folder and names the archive, for example "H:\Reports lies in the root of ARCH-0001 (H:\): a report saved there would add a file that its next FULL verification reports as added. Choose a folder outside every archive.", also when you reach the folder through a symbolic link or a junction to it, through a drive letter made with `subst`, or by a short name such as `PROGRA~1`. Save reports elsewhere, for example in Documents.
 
-**Checking a report later.** The file is not signed, so it cannot show by itself that someone changed it after it was made: the repository is the record, and the report says what the repository recorded when it was made. To check a report, make a new report of the same run from the repository (Save report... on its result page, or `veriarchive-cli report` below) and compare the two: they must say the same of this run (its result, its figures and its items), this run's hash in the history chain (row_hash) must be the same, and the history chain must still be intact (it then counts the runs recorded since as well). The same hash shows only that the repository's record of the run has not changed; whether the old file was changed shows only in what the two say. The end of the report says how to make the new one as well.
+**Checking a report later.** The file is not signed, so it cannot show by itself that someone changed it after it was made: the repository is the record, and the report says what the repository recorded when it was made. To check a report, make a new report of the same run from the repository (Save report... on its result page, or `veriarchive-cli report` below) and compare the two: they must say the same of this run (its result, its figures and its items), this run's hash in the history chain (row_hash) must be the same, and the history chain must still be intact (it then counts the runs recorded since as well). The same hash shows only that the repository's record of the run has not changed; whether the old file was changed shows only in what the two say. The end of the report says how to check it as well.
 
 On the command line:
 
@@ -423,7 +423,7 @@ veriarchive-cli report <run_id> --out D:\Reports\ARCH-0001.html
 | 10 | nothing was written: a usage error (no run id, no `--out`); the file is there already ("... exists already; a report never replaces a file, so name another one"); the run is not recorded ("no run ..."); the run is INCOMPLETE ("run ... did not finish (INCOMPLETE); a report is made only of a run that reached a result"); the file's folder lies in the root of an attached archive (see above) |
 | 11 | the repository cannot be opened or read, or the file cannot be written |
 
-`report` never replaces a file that is there when it starts, unlike `export-sha256sums`, which replaces its file without asking; in the window, the save dialog asks you first.
+`report` does not replace a file: it refuses one that is there, also one that another program makes under that name while the report is being made, unlike `export-sha256sums`, which replaces its file without asking; in the window, the save dialog asks you first. Only on a Linux file system that offers neither a rename that replaces nothing nor hard links, such as exFAT through FUSE, can a file made in the moment before the report gets its name be replaced.
 
 ### Resuming an interrupted run
 
