@@ -78,7 +78,10 @@ the same tree into a folder. Installing into a folder that holds an earlier inst
 place; files the install does not write, such as `bin/config.json` and the repository in
 `bin/data`, are left as they are. The `veriarchive_package` test checks that the installed tree
 runs with only Windows on `PATH` and never imports `msys-2.0.dll` (R-121), also after a second
-install over the first, and that the zip unzips into an installed folder as such an update.
+install over the first, and that the zip unzips into an installed folder as such an update. It
+also checks that the device identity reader, the one program that runs with administrator
+permission, is in `bin` and imports only Windows' own DLLs, none that `bin` holds (it is linked
+statically, decision 0047).
 
 ### Editor (clangd)
 
@@ -137,7 +140,13 @@ retired), Devices (the attached devices, their health, volumes and archives), Jo
 runs of every archive, each with its result page) and Settings; Register Archive and Compare
 Archives are dialogs. Every registration, verification, comparison, relocation and export runs as
 a job with its progress, which Stop ends; interrupted registrations, verifications and relocations
-can be resumed, and unfinished ones abandoned. The GUI runs unprivileged.
+can be resumed, and unfinished ones abandoned. A device moved to another USB enclosure is verified
+in full once you confirm that it is the same device, by its own serial or on your word; the
+confirmation is recorded in the hash-chained history, and only a pass records the new enclosure
+(decision 0047). The GUI runs unprivileged: only to read a device's own serial behind its
+enclosure, on your request, does it start the device identity reader
+(`veriarchive-device-identity.exe`, Windows only), which Windows asks you to allow with
+administrator permission each time. The command line never asks for it.
 
 Only the command line shows every revision of an archive (`archive show`), imports manifests
 (`import`), writes a list for `sha256sum -c` (`export-sha256sums`), rebuilds the index

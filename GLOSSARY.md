@@ -77,12 +77,20 @@ A physical storage device (disk, SSD), known by model, serial, and WWN.
 _Avoid_: drive, disk (ambiguous with volume)
 
 **Enclosure**:
-The USB bridge or dock between a device and the computer. The system may report the enclosure's serial in place of the device's own, so the same device in another enclosure is seen with another serial while its filesystem stays the same. In the interface: 外接盒.
+The USB bridge or dock between a device and the computer. The system may report the enclosure's serial in place of the device's own, so the same device in another enclosure is seen with another serial while its filesystem stays the same. In the interface: 外接盒; the serial it reports, 外接盒的序號 (enclosure serial).
 _Avoid_: case, adapter, drive (an enclosure is no device)
 
+**Device's own serial**:
+The serial that a device itself holds, as its label shows it, where its enclosure reports another in its place. Through such an enclosure it is read only with administrator permission, by the device identity reader. Once recorded, with a registration or with the FULL verification that passes after a change of enclosure, it is the archive's confirmed device (已確認的裝置), which tells that device from a sector-by-sector clone when the enclosure changes again. In the interface: 裝置本身的序號.
+_Avoid_: drive serial, disk serial, hardware serial, real serial (the enclosure's serial is a real one too)
+
+**Device identity reader**:
+The small program of VeriArchive that reads a device's own model, serial and WWN behind its enclosure, with the administrator permission that the operator gives it each time it is asked; only the window starts it, on the operator's request. It reads nothing of the device's content and writes nothing to the device. Only on Windows. In the interface: 裝置身分讀取程式.
+_Avoid_: driver (it installs nothing), service (it runs for one read and ends), administrator tool
+
 **Operator confirmation**:
-The operator's word that a carrier seen behind another enclosure holds the archive's device, given without the device's own serial matching the one confirmed before. It is recorded in the history with the FULL verification it starts, whatever that verification's result; a sector-by-sector clone passes that verification too, so it cannot catch a mistaken confirmation. In the interface: 由您確認.
-_Avoid_: override, acknowledgement
+The operator's word that a carrier seen behind another enclosure holds the archive's device, given without the device's own serial matching the one confirmed before: without reading it, or after reading it where the archive has no confirmed device to compare it with. It is recorded in the history with the FULL verification it starts, whatever that verification's result; a sector-by-sector clone passes that verification too, so it cannot catch a mistaken confirmation. In the interface: 由您確認 (the answer that gives it without a read: 不讀序號，自行確認).
+_Avoid_: override, acknowledgement, manual verification (it verifies nothing; the FULL verification it starts does)
 
 **Volume**:
 A filesystem instance on one or more devices, known by its filesystem UUID.
