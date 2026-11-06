@@ -123,9 +123,11 @@ void volume_rows_tell_what_each_holds()
     CHECK(rows[0].root == rows[0].where);
     CHECK(rows[0].details == "SAMPLE-DEVICE · sample-usb · 1.0 TiB · " + va::gui::format_bytes(300 * gib) + " used");
     CHECK(!rows[0].selectable);
+    // The retired one is named so; the other archive's folder alone keeps the
+    // whole volume from being registered (decision 0051).
     CHECK(rows[0].note == "Holds ARCH-SAMPLE-1 (" + photos_root + "), ARCH-SAMPLE-4 (" + old_root +
-                              "); the whole volume cannot be registered: choose a folder in it that does not overlap "
-                              "them");
+                              ", retired); the whole volume cannot be registered: choose a folder in it that does not "
+                              "overlap them");
     CHECK(rows[0].folder_button == "Choose a folder in " + rows[0].where + "...");
     CHECK(rows[0].folder_tooltip == rows[0].folder_button);
 
@@ -166,8 +168,19 @@ void volume_rows_tell_what_each_holds()
     const auto chinese_rows =
         va::gui::volume_rows(chinese, volumes, archives, pending, names, IdentityShown::Recorded);
     CHECK(chinese_rows[0].note == "已有 ARCH-SAMPLE-1（" + photos_root + "）、ARCH-SAMPLE-4（" + old_root +
-                                      "）；整個磁碟區不能註冊，可以選其中不重疊的資料夾");
+                                      "，已停用）；整個磁碟區不能註冊，可以選其中不重疊的資料夾");
     CHECK(chinese_rows[0].folder_button == "選擇 " + rows[0].where + " 裡的資料夾…");
+    // A volume that holds only a retired archive's folder can be registered
+    // whole (decision 0051).
+    std::vector<va::ArchiveCandidate> only_retired;
+    for (const auto& listed : candidates()) {
+        if (listed.archive_uuid == retired) {
+            only_retired.push_back(listed);
+        }
+    }
+    const auto retired_rows = va::gui::volume_rows(english, volumes, only_retired, {}, names, IdentityShown::Recorded);
+    CHECK(retired_rows[0].selectable && retired_rows[0].note == "Holds ARCH-SAMPLE-4 (" + old_root + ", retired)" &&
+          retired_rows[0].folder_button.empty());
     CHECK(chinese_rows[2].note.starts_with("已有 ARCH-SAMPLE-3 的檔案系統，但外接盒或裝置與記錄中的不同（" + clone_root +
                                            "）"));
     CHECK(chinese_rows[6].title == "沒有標籤的磁碟區" && chinese_rows[6].folder_button == "選擇其中的資料夾…");
@@ -290,6 +303,10 @@ void options_apply_as_a_registration_judges_the_root()
     CHECK(va::gui::options_shown(english, options, {}, names).blocked ==
           "ARCH-SAMPLE-4 is retired and takes no new revision: register another archive, or choose another folder or "
           "volume.");
+    // A folder in a retired archive's root overlaps it without being refused
+    // (decision 0051).
+    options = va::gui::source_options(english, source_at("/media/SAMPLE-A", "Old/2019", on_a), candidates(), {}, names);
+    CHECK(!options.refusal && options.registered_here.empty() && !options.retired);
 
     // Two archives at one root (AMBIGUOUS, twins registered on purpose): neither
     // takes a new revision.

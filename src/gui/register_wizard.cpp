@@ -34,6 +34,7 @@
 #include "gui/off_thread.h"
 
 #include "app/typed_path.h"
+#include "common/unicode.h"
 #include "common/utf8.h"
 #include "core/engine/candidates.h"
 #include "core/engine/register_engine.h"
@@ -252,7 +253,10 @@ void read_earlier_carriers(const RepositoryLayout& layout, const ChosenSource& s
     const auto repository_files = platform::make_file_system_access();
     const MediaEvidence evidence{{}, source.volume, std::nullopt};
     for (auto candidate : read.candidates) {  // a copy: match_recorded keeps the earlier carriers in it
-        if (!roots_overlap(candidate.root_subpath, source.root_subpath)) {
+        // A retired archive's root refuses no root that contains it or lies
+        // in it (decision 0051); at its very root it still decides.
+        if (!roots_overlap(candidate.root_subpath, source.root_subpath) ||
+            (candidate.retired && unicode_fold(candidate.root_subpath) != unicode_fold(source.root_subpath))) {
             continue;
         }
         const auto match = match_recorded(*store, *repository_files, layout, evidence, candidate.root_subpath,

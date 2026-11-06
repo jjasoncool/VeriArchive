@@ -391,8 +391,13 @@ std::expected<std::optional<ArchiveCandidate>, RegisterFailure> check_existing_a
     for (auto& candidate : candidates) {
         // Only an archive whose root overlaps this one can refuse it
         // (decision 0001); its earlier carriers are read where its latest
-        // carrier does not match this volume (decision 0004).
-        if (!roots_overlap(candidate.root_subpath, root_subpath)) {
+        // carrier does not match this volume (decision 0004). A retired
+        // archive's root no longer keeps a root from containing it or lying
+        // in it (decision 0051): the archive is no longer expected to be
+        // verified, so a volume whose folder was archived can be archived
+        // whole. At its very root it still decides as below.
+        if (!roots_overlap(candidate.root_subpath, root_subpath) ||
+            (candidate.retired && unicode_fold(candidate.root_subpath) != unicode_fold(root_subpath))) {
             continue;
         }
         const auto matched = match_recorded(services.store, services.repository_files, services.layout, evidence,
@@ -579,6 +584,11 @@ std::expected<LostManifest, RegisterFailure> lost_manifest_target(RegisterServic
         // The archive itself, where matching reads its manifest's line 1,
         // which may be intact while its body is not.
         if (candidate.archive_uuid == uuid || !roots_overlap(candidate.root_subpath, root_subpath)) {
+            continue;
+        }
+        // A retired archive's root contains this one or lies in it without
+        // refusing it (decision 0051), as for any registration.
+        if (candidate.retired && unicode_fold(candidate.root_subpath) != unicode_fold(root_subpath)) {
             continue;
         }
         // The identity file takes no part here: one naming the archive

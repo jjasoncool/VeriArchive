@@ -112,7 +112,10 @@ std::optional<std::string> relocation_root_refusal(const app::Text& text, const 
     // contains the new root or lies in it.
     const auto found = where_attached(std::span(&volume, 1), candidates);
     for (const auto& root : found.volumes.front()) {
-        if (root.archive_uuid != archive && roots_overlap(root.root_subpath, root_subpath)) {
+        // A retired archive's root refuses none that contains it or lies in
+        // it (decision 0051), as the relocation judges it.
+        if (root.archive_uuid != archive && roots_overlap(root.root_subpath, root_subpath) &&
+            std::ranges::find(root.details, "retired") == root.details.end()) {
             return text.format("This folder or volume overlaps the root of {}: archive roots on one volume may not "
                                "contain each other. Choose a folder that does not overlap it.",
                 text.format("{} ({})", label_of(names, root.archive_uuid), path_to_utf8(root.root)));

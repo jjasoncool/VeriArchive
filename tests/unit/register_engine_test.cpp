@@ -357,6 +357,40 @@ void overlapping_roots_are_refused()
     CHECK(!other_case && other_case.error().kind == va::RegisterFailure::Kind::Refused);
 }
 
+// Decision 0051: a retired archive's root no longer keeps another root from
+// containing it or lying in it, so a volume whose folder was archived can be
+// archived whole once that archive is retired; an archive that is not retired
+// still refuses it, and the retired archive is still matched at its own root.
+void a_retired_root_refuses_no_overlapping_root()
+{
+    Fixture fixture;
+    fixture.archive.add_file("Photos/2026/a.txt", "a (sample data)");
+    fixture.archive.add_file("Documents/b.txt", "b (sample data)");
+    const auto folder = fixture.run(at("/vol/Photos"));
+    if (!folder) {
+        CHECK(false);
+        return;
+    }
+    const auto refused = fixture.run(at("/vol"));
+    CHECK(!refused && refused.error().kind == va::RegisterFailure::Kind::Refused &&
+          refused.error().message.contains("archive roots on one volume may not contain each other"));
+
+    auto archive = fixture.store.find_archive(folder->archive_uuid);
+    if (archive && *archive) {
+        (*archive)->status = "RETIRED";
+        CHECK(fixture.store.update_archive(**archive));
+    }
+    const auto whole = fixture.run(at("/vol"));
+    CHECK(whole && whole->archive_uuid != folder->archive_uuid && whole->revision == 1);
+    // A folder in them is still refused: it lies in the whole volume's root,
+    // which is not retired.
+    const auto inside = fixture.run(at("/vol/Photos/2026"));
+    CHECK(!inside && inside.error().kind == va::RegisterFailure::Kind::Refused);
+    // The retired archive keeps its root and is still verified there.
+    const auto verified = fixture.verify(fixture.archive.root() / "Photos");
+    CHECK(verified && verified->archive_uuid == folder->archive_uuid && verified->result.starts_with("PASSED"));
+}
+
 // Decision 0010: unreadable files are recorded and listed, not skipped.
 void unreadable_files_are_recorded()
 {
@@ -4034,6 +4068,7 @@ void register_engine_tests()
     a_new_revision_of_a_copy_stays_a_copy();
     a_new_revision_reads_the_latest_header_from_its_manifest();
     overlapping_roots_are_refused();
+    a_retired_root_refuses_no_overlapping_root();
     unreadable_files_are_recorded();
     retired_archive_takes_no_revision();
     interrupted_registration_resumes();

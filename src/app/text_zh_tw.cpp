@@ -1215,6 +1215,9 @@ constexpr CatalogEntry entries[] = {
     {"{} ({})", "{}（{}）", Match::FormatOnly},
     {"the filesystem of {}, behind another enclosure or on another device than recorded ({})",
         "{} 的檔案系統，但外接盒或裝置與記錄中的不同（{}）", Match::FormatOnly},
+    // ... a retired archive's root in a folder, which keeps the whole volume
+    // from nothing (decision 0051).
+    {"{} ({}, retired)", "{}（{}，已停用）", Match::FormatOnly},
     {"an unfinished registration of {} ({})", "{} 未完成的註冊（{}）", Match::FormatOnly},
     {"Holds {}", "已有 {}", Match::FormatOnly},
     {"{}; the whole volume cannot be registered: choose a folder in it that does not overlap them",

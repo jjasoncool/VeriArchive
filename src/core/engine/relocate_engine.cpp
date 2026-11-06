@@ -2,6 +2,7 @@
 
 #include "common/shell_argument.h"
 #include "common/time.h"
+#include "common/unicode.h"
 #include "common/utf8.h"
 #include "common/uuid.h"
 #include "core/engine/add_chunk_hashes.h"
@@ -212,7 +213,10 @@ std::expected<RelocateOutcome, RelocateFailure> relocate_archive(
         const bool same_volume = match.result == MatchResult::Match ||
                                  match.result == MatchResult::MatchWeak ||
                                  match.result == MatchResult::Migrated;
-        if (same_volume && roots_overlap(candidate.root_subpath, *root_subpath)) {
+        // A retired archive's root no longer refuses one that contains it or
+        // lies in it (decision 0051), as for a registration.
+        if (same_volume && roots_overlap(candidate.root_subpath, *root_subpath) &&
+            !(candidate.retired && unicode_fold(candidate.root_subpath) != unicode_fold(*root_subpath))) {
             return fail(Kind::Refused,
                 "the new root overlaps archive " + candidate.archive_uuid + " on the same volume");
         }

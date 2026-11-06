@@ -170,12 +170,20 @@ std::vector<VolumeRow> volume_rows(const app::Text& text, const std::vector<Atta
                 }
                 continue;
             }
+            // A retired archive's root in a folder keeps the whole volume
+            // from nothing (decision 0051); it is named, as retired.
+            const bool retired = std::ranges::find(root.details, "retired") != root.details.end();
             held.push_back(root.match == MatchResult::Migrated
                                ? text.format("the filesystem of {}, behind another enclosure or on another device "
                                              "than recorded ({})",
                                      label, where)
-                               : text.format("{} ({})", label, where));
-            (root.root_subpath.empty() ? whole : in_folder) = true;
+                           : retired ? text.format("{} ({}, retired)", label, where)
+                                     : text.format("{} ({})", label, where));
+            if (root.root_subpath.empty()) {
+                whole = true;
+            } else if (!retired) {
+                in_folder = true;
+            }
         }
         for (const auto& registration : pending) {
             const auto root = path_from_utf8(registration.root);
@@ -192,9 +200,10 @@ std::vector<VolumeRow> volume_rows(const app::Text& text, const std::vector<Atta
         };
         if (!relocation && !held.empty()) {
             const auto holds = text.format("Holds {}", listed(text, held));
-            // Its own root alone: chosen, Options offers what applies there.
-            row.selectable = whole && !in_folder;
-            if (whole) {
+            // Its own root alone, or retired archives' roots in folders alone:
+            // chosen, Options offers what applies there.
+            row.selectable = !in_folder;
+            if (!in_folder) {
                 row.note = holds;
             } else {
                 row.note = text.format("{}; the whole volume cannot be registered: choose a folder in it that does not "
@@ -270,7 +279,10 @@ SourceOptions source_options(const app::Text& text, const ChosenSource& source,
                 options.registered_here.push_back(root.archive_uuid);
                 retired_here = retired_here || std::ranges::find(root.details, "retired") != root.details.end();
             }
-        } else if (!options.refusal && roots_overlap(root.root_subpath, source.root_subpath)) {
+        } else if (!options.refusal && roots_overlap(root.root_subpath, source.root_subpath) &&
+                   std::ranges::find(root.details, "retired") == root.details.end()) {
+            // A retired archive's root refuses none that contains it or lies
+            // in it (decision 0051).
             options.refusal = overlapping(root.archive_uuid, root.root_subpath);
         }
     }
