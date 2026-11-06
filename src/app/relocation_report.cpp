@@ -80,7 +80,7 @@ std::string relocation_refusal_in_window(const Text& text, const RelocateFailure
         text.format("RELOCATION REFUSED: {}",
             text.format("the new carrier does not hold the recorded content; nothing was changed, but the "
                         "relocation's saved progress could not be removed: {}; abandon the relocation with "
-                        "Abandon... under Unfinished operations in Archives before relocating again",
+                        "Abandon... under Unfinished operations in Jobs before relocating again",
                 text(failure.cause))) +
         "\n";
     for (const auto& item : failure.items) {

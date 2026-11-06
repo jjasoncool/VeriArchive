@@ -55,7 +55,9 @@ const Page* page_named(std::string_view name)
 // attached as recorded (va-warning); the list's pane on the page's own
 // background, and the items of the details' menus; on a result page the
 // colours of its read speed chart and of the swatches of its legend, which
-// the chart takes its colours from, and its metrics; in Devices the model of
+// the chart takes its colours from, and its metrics; the count of unfinished
+// operations that stopped, in the colour of warnings (decision 0049); in
+// Devices the model of
 // each device, at the head of its card.
 constexpr const char* style = R"css(
 .va-ring {
@@ -195,6 +197,14 @@ row.va-device-head label.title {
     font-size: smaller;
     font-weight: bold;
 }
+.va-count.va-paused {
+    background-color: @warning_bg_color;
+    color: @warning_fg_color;
+}
+.va-stopped {
+    color: @warning_color;
+    font-weight: bold;
+}
 )css";
 
 void load_style()
@@ -256,6 +266,15 @@ GtkWidget* sidebar_row(GuiState& state, const Page& page)
         gtk_widget_set_valign(state.shell.jobs_badge, GTK_ALIGN_CENTER);
         gtk_widget_set_visible(state.shell.jobs_badge, FALSE);
         gtk_box_append(GTK_BOX(box), state.shell.jobs_badge);
+        // ... and the unfinished operations that stopped, which Jobs lists
+        // (decision 0049), in the colour of warnings.
+        state.shell.stopped_badge = gtk_label_new("0");
+        gtk_widget_add_css_class(state.shell.stopped_badge, "va-count");
+        gtk_widget_add_css_class(state.shell.stopped_badge, "va-paused");
+        gtk_widget_add_css_class(state.shell.stopped_badge, "numeric");
+        gtk_widget_set_valign(state.shell.stopped_badge, GTK_ALIGN_CENTER);
+        gtk_widget_set_visible(state.shell.stopped_badge, FALSE);
+        gtk_box_append(GTK_BOX(box), state.shell.stopped_badge);
     }
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
     return row;

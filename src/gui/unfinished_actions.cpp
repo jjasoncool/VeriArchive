@@ -1,4 +1,4 @@
-// Resume and Abandon... of the unfinished operations that Archives lists
+// Resume and Abandon... of the unfinished operations that Jobs lists
 // (decision 0022, point 7): a verification, registration or relocation
 // (decision 0046) there that has stopped can be resumed, wherever it was
 // started. A registration that has
@@ -73,11 +73,12 @@ Report cannot_open(const IoError& error)
 // the jobs; otherwise says why not.
 bool can_abandon(GuiState& state)
 {
-    if (state.session && !state.job.running() && state.archives_page.abandoning) {
+    if (state.session && !state.job.running() && state.jobs_page.abandoning) {
         return true;
     }
     // The window's step is also the upgrade of the database and retiring an
-    // archive (decision 0046); without Archives' bar, the page is not built.
+    // archive (decision 0046); without the bar of Jobs' unfinished
+    // operations (decision 0049), the page is not built.
     if (!state.session || state.job.running()) {
         show_message(state, fixed_message(state.session ? "Another step of the window is running; wait for it to end."
                                                         : "Open a repository first (Settings)."));
@@ -94,15 +95,15 @@ bool can_abandon(GuiState& state)
 void run_abandon_step(GuiState& state, const std::string& doing, Job::Work work,
     std::function<void(const Report&)> done)
 {
-    auto& view = state.archives_page;
+    auto& view = state.jobs_page;
     gtk_widget_set_visible(view.abandoning, TRUE);
     state.job.start(state.text, view.abandoning, std::move(work),
         [&state, done = std::move(done)](const Report& report) {
             guarded(
                 [&] {
                     lock_language(state);
-                    if (state.archives_page.abandoning) {
-                        gtk_widget_set_visible(state.archives_page.abandoning, FALSE);
+                    if (state.jobs_page.abandoning) {
+                        gtk_widget_set_visible(state.jobs_page.abandoning, FALSE);
                     }
                     done(report);
                 },

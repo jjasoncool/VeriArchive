@@ -109,7 +109,7 @@ void each_item_applies_where_it_can()
     CHECK(working && !working->resumable && !working->state.empty());
     const auto busy = va::gui::relocation_choice(english, usable, working);
     CHECK(!busy.offered && busy.note == "An unfinished relocation of this archive to Q:\\SAMPLE-NEW is listed under "
-                                        "Unfinished operations in Archives (" +
+                                        "Unfinished operations in Jobs (" +
                                             working->state + ").");
     // Retired, nothing is offered, whatever is unfinished.
     CHECK(!va::gui::relocation_choice(english, retired, stopped).offered);

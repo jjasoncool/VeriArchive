@@ -990,7 +990,7 @@ std::string waits_for(const va::Uuid& uuid, const std::string& run, std::uint32_
 // Archive List once it has stopped, which the windows name first (decision
 // 0033): Resume (decision 0022, point 7) and Abandon....
 const std::string on_its_row =
-    "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives";
+    "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Jobs";
 
 // The same refusal of a verification in Verify Archive, which names the
 // window's own ways on rather than command lines (decision 0033), once the
@@ -1019,7 +1019,7 @@ std::string waits_for_in_register_archive(const va::Uuid& uuid, const std::strin
 {
     const auto refusal = "an unfinished verification of archive " + uuid + " that adds chunk hashes (run " + run +
                          ") is creating revision 2";
-    const auto ways = on_its_row + "; or finish it with Resume in the archive's details there)";
+    const auto ways = on_its_row + "; or finish it with Resume in the archive's details in Archives)";
     return runs ? refusal + " and is still running; nothing was changed (wait for it to finish; if it stops, finish "
                             "it " +
                       ways
@@ -1329,7 +1329,7 @@ void a_relocation_and_a_verification_that_adds_chunk_hashes_wait_for_each_other(
         // command line names its commands (decisions 0033, 0046).
         const std::string resume_or_abandon =
             "resume it with Resume, or abandon it with Abandon..., on its row under Unfinished operations in "
-            "Archives; or resume it in the archive's details";
+            "Jobs; or resume it in the archive's details";
         CHECK(!refused && refused.error().refusing &&
               refused.error().refusing->kind == va::RefusingOperation::Kind::Relocation &&
               refused.error().refusing->run_id == "c0ffee00-0000-4000-8000-0000000000c1" &&
@@ -1378,11 +1378,11 @@ void a_relocation_and_a_verification_that_adds_chunk_hashes_wait_for_each_other(
                            " (to \"K:/SAMPLE\") found that the new carrier does not hold the recorded content";
         CHECK(!refused && refused.error().refusing && refused.error().refusing->differs &&
               va::app::stop_message_in_window(refused.error(), false) ==
-                  found + " and cannot be resumed; abandon it with Abandon... under Unfinished operations in Archives, "
+                  found + " and cannot be resumed; abandon it with Abandon... under Unfinished operations in Jobs, "
                           "then relocate again" &&
               va::app::stop_message_in_window(refused.error(), true) ==
                   found + " and is still running; wait for it to end; if it is then still listed under Unfinished "
-                          "operations in Archives, abandon it there with Abandon..., then relocate again");
+                          "operations in Jobs, abandon it there with Abandon..., then relocate again");
         fixture.repository.execute(("DELETE FROM settings WHERE key = 'relocation:" + uuid + "'").c_str());
         const auto added = fixture.add();
         CHECK(added && added->added_revision == 2);

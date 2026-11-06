@@ -23,17 +23,17 @@ std::string text_member(const nlohmann::json& record, const char* name)
     return found != record.end() && found->is_string() ? found->get<std::string>() : std::string{};
 }
 
-// The ways on that the operation's row under Unfinished operations in
-// Archives offers once it has stopped: Resume, which continues a stopped
+// The ways on that the operation's row under Unfinished operations in Jobs
+// (decision 0049) offers once it has stopped: Resume, which continues a stopped
 // registration, verification or relocation exactly as its command-line
 // resume does (decision 0022, point 7; decision 0046), and Abandon...
 // (decisions 0025, 0026, 0033). The windows name them first, then the refused
 // view's own way to finish it.
 constexpr std::string_view on_its_row =
-    "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives";
+    "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Jobs";
 
 // Where Abandon... is for an operation that can only be abandoned.
-constexpr std::string_view abandon_it = "abandon it with Abandon... under Unfinished operations in Archives";
+constexpr std::string_view abandon_it = "abandon it with Abandon... under Unfinished operations in Jobs";
 
 // Register Archive (decision 0046) offers only Resume the interrupted
 // registration for a root whose registration is unfinished, once that root is
@@ -89,7 +89,7 @@ std::string relocation_refusal(const RefusingOperation& refusing, bool runs)
         const auto found = "the unfinished relocation of archive " + uuid + to +
                            " found that the new carrier does not hold the recorded content";
         return runs ? found + " and is still running; wait for it to end; if it is then still listed under "
-                              "Unfinished operations in Archives, abandon it there with Abandon..., then relocate again"
+                              "Unfinished operations in Jobs, abandon it there with Abandon..., then relocate again"
                     : found + " and cannot be resumed; " + std::string(abandon_it) + ", then relocate again";
     }
     if (refusing.later_revision) {
@@ -116,7 +116,7 @@ std::string verification_refusal(const RefusingOperation& refusing, RefusedIn vi
                          " that adds chunk hashes (run " + refusing.run_id + ") is creating revision " +
                          std::to_string(refusing.revision + 1);
     const std::string resume = view == RefusedIn::Archives ? "with Resume in the archive's details"
-                                                           : "with Resume in the archive's details there";
+                                                           : "with Resume in the archive's details in Archives";
     const auto ways = std::string(on_its_row) + "; or finish it " + resume + ")";
     return runs ? refusal + " and is still running; nothing was changed (wait for it to finish; if it stops, "
                             "finish it " +
@@ -231,13 +231,13 @@ std::string relocation_message_in_window(const Text& text, const RelocateFailure
                                "letter or mount point now, choose Relocate to a new carrier... in the archive's "
                                "details and give its root there, which resumes the relocation; otherwise attach it "
                                "as it was and choose Resume again, or abandon the relocation with Abandon... under "
-                               "Unfinished operations in Archives",
+                               "Unfinished operations in Jobs",
                 failure.refusing->archive_uuid, failure.refusing->root);
         }
         return text.format("{}; where the new carrier is attached at another drive letter or mount point now, choose "
                            "Relocate to a new carrier... in the archive's details and give its root there, which "
                            "resumes the relocation; otherwise attach it as it was and choose Resume again, or abandon "
-                           "the relocation with Abandon... under Unfinished operations in Archives",
+                           "the relocation with Abandon... under Unfinished operations in Jobs",
             text(failure.cause));
     }
     if (failure.refusing) {
@@ -257,15 +257,15 @@ std::string relocation_message_in_window(const Text& text, const RelocateFailure
         if (failure.not_answering) {
             return text.format("relocation was interrupted: the device of the new carrier stopped answering ({} "
                                "entries in a row could not be read); unplug it and attach it again, then continue "
-                               "it with Resume under Unfinished operations in Archives; if it stops again at the "
+                               "it with Resume under Unfinished operations in Jobs; if it stops again at the "
                                "same place, the device may be damaged",
                 io_errors_that_stop);
         }
-        return text("relocation was interrupted; continue it with Resume under Unfinished operations in Archives, or "
+        return text("relocation was interrupted; continue it with Resume under Unfinished operations in Jobs, or "
                     "in the archive's details, without reading again what matched");
     }
     return text.format("{}; the relocation keeps its saved progress: continue it with Resume under Unfinished "
-                       "operations in Archives once that is dealt with",
+                       "operations in Jobs once that is dealt with",
         text(failure.cause));
 }
 

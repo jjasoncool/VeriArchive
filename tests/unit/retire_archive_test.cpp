@@ -669,7 +669,7 @@ void retiring_waits_for_every_operation_that_makes_a_revision()
     const auto in_window = va::app::retirement_message_in_window(english, refused.error(), false);
     CHECK(in_window == "an unfinished relocation of archive " + uuid +
                            " (to \"K:/SAMPLE-COPY\") exists; resume it with Resume, or abandon it with Abandon..., on "
-                           "its row under Unfinished operations in Archives; or resume it in the archive's details");
+                           "its row under Unfinished operations in Jobs; or resume it in the archive's details");
     CHECK(va::app::retirement_message_in_window(chinese, refused.error(), false).contains("「未完成的作業」"));
     const auto read_only = va::retirement_of(fixture.store, *fixture.repository.files, layout, uuid);
     CHECK(!read_only && read_only.error().kind == va::RetireFailure::Kind::Refused && read_only.error().refusing &&
@@ -688,7 +688,7 @@ void retiring_waits_for_every_operation_that_makes_a_revision()
           waits.error().refusing->kind == va::RefusingOperation::Kind::AddingVerification &&
           waits.error().refusing->run_id == "c0ffee00-0000-4000-8000-0000000000d2");
     CHECK(!waits && va::app::retirement_message_in_window(english, waits.error(), false)
-                        .contains("on its row under Unfinished operations in Archives"));
+                        .contains("on its row under Unfinished operations in Jobs"));
     CHECK(status_of(fixture, uuid) == "REGISTERED");
     fixture.repository.execute("DELETE FROM settings WHERE key = 'run:c0ffee00-0000-4000-8000-0000000000d2'");
 

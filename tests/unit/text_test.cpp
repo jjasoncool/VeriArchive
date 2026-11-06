@@ -474,9 +474,9 @@ void translation_tests()
     // the archive's details; the command line's names its commands.
     const std::string adding_run = "c0ffee00-0000-4000-8000-0000000000aa";
     const std::string on_its_row =
-        "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives";
+        "with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Jobs";
     const std::string on_its_row_chinese =
-        "在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以";
+        "在「工作」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以";
     CHECK(chinese.format("Not verified: {}",
               chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                       ") is creating revision 2; nothing was changed (finish it first " + on_its_row +
@@ -497,16 +497,16 @@ void translation_tests()
     // while it runs.
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2; nothing was changed (finish it first " + on_its_row +
-                  "; or finish it with Resume in the archive's details there)") ==
+                  "; or finish it with Resume in the archive's details in Archives)") ==
           "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run + "）正在建立版次 2；未做任何變更（請先" +
-              on_its_row_chinese + "在該頁此封存的詳細資料中按「繼續」完成它）");
+              on_its_row_chinese + "在「封存」頁此封存的詳細資料中按「繼續」完成它）");
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2 and is still running; nothing was changed (wait for it to finish; if it "
                   "stops, finish it " + on_its_row +
-                  "; or finish it with Resume in the archive's details there)") ==
+                  "; or finish it with Resume in the archive's details in Archives)") ==
           "封存 " + sample + " 有一個加入區塊雜湊的未完成驗證（執行 " + adding_run +
               "）正在建立版次 2，而且仍在執行；未做任何變更（請等它完成；若它停止了，請" + on_its_row_chinese +
-              "在該頁此封存的詳細資料中按「繼續」完成它）");
+              "在「封存」頁此封存的詳細資料中按「繼續」完成它）");
     // The window's words while a registration of the archive is unfinished
     // (decisions 0033, 0046): Resume and Abandon... on its row under
     // Unfinished operations first, then Register Archive, the root chosen
@@ -541,19 +541,19 @@ void translation_tests()
     const std::string older_chinese = "封存 " + sample +
                                       " 未完成的註冊（根目錄「Z:\\範例」）原本要建立版次 2，但封存現在已有較新的版次（3）；"
                                       "這個註冊再也無法完成";
-    CHECK(chinese(older + ": abandon it with Abandon... under Unfinished operations in Archives") ==
-          older_chinese + "：請在「封存」頁的「未完成的作業」中按「放棄…」放棄它");
+    CHECK(chinese(older + ": abandon it with Abandon... under Unfinished operations in Jobs") ==
+          older_chinese + "：請在「工作」頁的「未完成的作業」中按「放棄…」放棄它");
     CHECK(chinese(older + ", and is still running: wait for it to stop, then abandon it with Abandon... under "
-                          "Unfinished operations in Archives") ==
-          older_chinese + "，而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它");
+                          "Unfinished operations in Jobs") ==
+          older_chinese + "，而且仍在執行：請等它停止，再在「工作」頁的「未完成的作業」中按「放棄…」放棄它");
     // ... and while a relocation is unfinished: Resume on its row, or in the
     // archive's details, continues it (decision 0046).
     const std::string relocation = "an unfinished relocation of archive " + sample + " (to \"K:\\SAMPLE\") exists";
     const std::string relocation_chinese = "封存 " + sample + " 有一個未完成的搬移（至「K:\\SAMPLE」）";
     const std::string resume_in_window = "resume it with Resume, or abandon it with Abandon..., on its row under "
-                                         "Unfinished operations in Archives; or resume it in the archive's details";
+                                         "Unfinished operations in Jobs; or resume it in the archive's details";
     const std::string resume_chinese =
-        "請在「封存」頁「未完成的作業」中它那一列按「繼續」接續，或按「放棄…」放棄它；也可以在封存的詳細資料中按「繼續」";
+        "請在「工作」頁「未完成的作業」中它那一列按「繼續」接續，或按「放棄…」放棄它；也可以在封存的詳細資料中按「繼續」";
     CHECK(chinese.format("Not verified: {}", chinese(relocation + "; " + resume_in_window)) ==
           "未能驗證：" + relocation_chinese + "；" + resume_chinese);
     CHECK(chinese(relocation + " and is still running; wait for it to finish; if it stops, " + resume_in_window) ==
@@ -562,19 +562,19 @@ void translation_tests()
     const std::string relocation_older = "the unfinished relocation of archive " + sample +
                                          " (to \"K:\\SAMPLE\") verifies revision 1, but the archive now has a later "
                                          "revision (3); the relocation can no longer finish";
-    CHECK(chinese(relocation_older + ": abandon it with Abandon... under Unfinished operations in Archives, then "
+    CHECK(chinese(relocation_older + ": abandon it with Abandon... under Unfinished operations in Jobs, then "
                                      "relocate again") ==
           "封存 " + sample + " 未完成的搬移（至「K:\\SAMPLE」）驗證的是版次 1，但封存現在已有較新的版次（3）；這次搬移"
-                             "再也無法完成：請在「封存」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移");
+                             "再也無法完成：請在「工作」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移");
     const std::string differs = "the unfinished relocation of archive " + sample +
                                 " (to \"K:\\SAMPLE\") found that the new carrier does not hold the recorded content";
     const std::string differs_chinese = "封存 " + sample + " 未完成的搬移（至「K:\\SAMPLE」）發現新載體上的內容與記錄不符";
     CHECK(chinese(differs + " and cannot be resumed; abandon it with Abandon... under Unfinished operations in "
-                            "Archives, then relocate again") ==
-          differs_chinese + "，無法繼續；請在「封存」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移");
+                            "Jobs, then relocate again") ==
+          differs_chinese + "，無法繼續；請在「工作」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移");
     CHECK(chinese(differs + " and is still running; wait for it to end; if it is then still listed under Unfinished "
-                            "operations in Archives, abandon it there with Abandon..., then relocate again") ==
-          differs_chinese + "，而且仍在執行；請等它結束；結束後若它仍列在「封存」頁的「未完成的作業」中，請在那裡按「放棄…」"
+                            "operations in Jobs, abandon it there with Abandon..., then relocate again") ==
+          differs_chinese + "，而且仍在執行；請等它結束；結束後若它仍列在「工作」頁的「未完成的作業」中，請在那裡按「放棄…」"
                             "放棄它，再重新搬移");
     CHECK(chinese("an unfinished verification of archive " + sample + " that adds chunk hashes (run " + adding_run +
                   ") is creating revision 2; nothing was changed (finish it with `verify --full " + sample +

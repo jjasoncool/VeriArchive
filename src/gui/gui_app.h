@@ -42,7 +42,7 @@ namespace va::gui {
 
 // Unfinished registrations, verifications and relocations, wherever they run
 // (the command line, this window), read from the repository every few seconds
-// while Archives is shown (operations_poll.cpp). Each read runs on a thread of
+// while Archives or Jobs is shown (operations_poll.cpp). Each read runs on a thread of
 // its own, so a slow one never holds up the window. Kept across windows, so a
 // language change keeps the speed and time left.
 struct OperationsPoll {
@@ -53,7 +53,7 @@ struct OperationsPoll {
     guint timer = 0;                            // the GLib timeout; 0 while the list is hidden
     std::chrono::steady_clock::time_point ticked{};   // its last tick, or its start: a tick far later
                                                       // than this one tells that the window was held up
-    GtkWidget* served = nullptr;                // the Archives page the timer refreshes
+    GtkWidget* served = nullptr;                // the page (Archives or Jobs) the timer refreshes
     std::filesystem::path repository;           // the RepositoryRoot the watches belong to
     std::string archives_shown;                 // the mark of the archives the list shows (empty: none),
                                                 // to tell when a read finds them changed
@@ -177,7 +177,7 @@ struct GuiState {
     // unfinished operation (decisions 0025, 0026, 0033), and retiring an
     // archive (decisions 0003, 0046).
     Job job;
-    OperationsPoll operations;             // every unfinished operation, for Archives
+    OperationsPoll operations;             // every unfinished operation, for Jobs and Archives
     DevicesPoll devices;                   // the devices attached now, for Devices and Archives
     // The roots of the registration jobs that wait or work, by job, which
     // Devices names on their volumes in place of Register this volume.
@@ -276,6 +276,7 @@ struct GuiState {
         GtkWidget* content = nullptr;      // AdwNavigationPage of the page shown, titled as it
         GtkWidget* toasts = nullptr;       // AdwToastOverlay over the whole window
         GtkWidget* jobs_badge = nullptr;   // the Jobs row's count of jobs that run or wait
+        GtkWidget* stopped_badge = nullptr;  // ... and of the unfinished operations that stopped (decision 0049)
         AdwBreakpoint* narrow = nullptr;   // the window's breakpoint, below which it shows one pane at a time
         AdwToast* toast = nullptr;         // the last toast while it is shown or waits (a weak pointer: nothing once gone)
         AdwToast* started = nullptr;       // the last toast that a job started, which the next toast replaces (weak too)
@@ -300,7 +301,7 @@ struct GuiState {
         std::map<std::uint64_t, JobRow> rows;
     };
 
-    // A row of the unfinished operations in Archives as it is drawn: what
+    // A row of the unfinished operations in Jobs as it is drawn: what
     // makes it up (its operation, its buttons, whether it has a bar and
     // details), and the widgets whose words and bar a later read changes. A
     // read that finds the same rows changes only those, so the keyboard
@@ -331,11 +332,10 @@ struct GuiState {
         std::optional<AttachedLine> shown;
     };
 
-    // Archives (decision 0046): the page's head; the unfinished operations
-    // (decision 0022) above the archives, hidden when there are none; the
-    // list of archives beside the details of the one selected, or, without
-    // archives, a page that leads to the first registration. A narrow window
-    // shows the list or the details.
+    // Archives (decision 0046): the page's head; the list of archives beside
+    // the details of the one selected, or, without archives, a page that
+    // leads to the first registration. A narrow window shows the list or the
+    // details. The unfinished operations show in Jobs (decision 0049).
     struct {
         GtkWidget* navigation = nullptr;       // AdwNavigationView: the page, the result pages opened over it
         GtkWidget* root = nullptr;             // its first page (AdwNavigationPage), which holds `page`
@@ -348,10 +348,6 @@ struct GuiState {
                                                // (decision 0025), a relocation (decision 0026) or a
                                                // verification that adds chunk hashes (decision 0033) runs,
                                                // or of retiring an archive (decision 0046)
-        GtkWidget* operations = nullptr;       // "Unfinished operations", hidden when there are none
-        GtkWidget* operations_note = nullptr;  // what the group shows, or why it cannot
-        GtkWidget* operations_list = nullptr;  // GtkListBox, a row for each operation
-        std::vector<OperationShown> operation_rows;  // its rows, in its order
         GtkWidget* views = nullptr;            // GtkStack: "archives" (the split view), or "empty"
         GtkWidget* empty = nullptr;            // AdwStatusPage: no archives yet, or no repository
         GtkWidget* empty_button = nullptr;     // what it leads to: Register Archive, or Settings
@@ -543,6 +539,17 @@ struct GuiState {
     struct {
         JobList page;                      // the Jobs page
         GtkWidget* clear = nullptr;        // "Clear ended jobs"
+        // The unfinished operations (decision 0022), wherever they were
+        // started, below the jobs (decision 0049): those a job of this
+        // window works on are its rows' already. Hidden when there are none.
+        GtkWidget* operations = nullptr;       // the group, AdwPreferencesGroup
+        GtkWidget* operations_note = nullptr;  // what it shows, or why it cannot
+        GtkWidget* operations_list = nullptr;  // GtkListBox, a row for each operation
+        std::vector<OperationShown> operation_rows;  // its rows, in its order
+        GtkWidget* abandoning = nullptr;       // progress while a step of abandoning one of them runs
+                                               // (decisions 0025, 0026, 0033)
+        GtkWidget* stopped = nullptr;      // on the jobs button: how many of them stopped, hidden at 0
+        GtkWidget* stopped_count = nullptr;
         GtkWidget* button = nullptr;       // the header's jobs button (GtkMenuButton)
         GtkWidget* ring = nullptr;         // its ring: how far the jobs that run are (running_fraction)
         GtkWidget* count = nullptr;        // its count of jobs that run or wait, hidden at 0
@@ -722,9 +729,16 @@ void show_details(GuiState& state);
 // hashes" is offered while such a verification is unfinished.
 void show_details_operations(GuiState& state);
 
-// Draws the unfinished operations of the latest read above the archives, in
-// the interface language; hidden when nothing is unfinished.
+// Draws the unfinished operations of the latest read in Jobs, in the
+// interface language, hidden when nothing is unfinished; counts those that
+// stopped on the jobs button and the Jobs row (decision 0049); and shows
+// the details' and result pages' parts that they change.
 void show_operations(GuiState& state);
+
+
+// The unfinished operations that have stopped, of the latest read, which
+// Resume or Abandon... in Jobs can finish.
+std::size_t stopped_operations(const GuiState& state);
 
 // Says `report` in the head of Archives, where an unexpected error of its
 // handlers shows.

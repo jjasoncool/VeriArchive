@@ -54,7 +54,7 @@ Choice relocation_choice(
     }
     if (unfinished) {
         return {false, text.format("An unfinished relocation of this archive to {} is listed under Unfinished "
-                                   "operations in Archives ({}).",
+                                   "operations in Jobs ({}).",
                            unfinished->operation.root, unfinished->state)};
     }
     return {true, text("After you copied the archive to another device, or put its device in another enclosure: "

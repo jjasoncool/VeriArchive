@@ -706,8 +706,8 @@ constexpr CatalogEntry entries[] = {
      "letter or mount point now.",
         "繼續已停止、搬移至 {} 的作業；如果新的載體現在接在另一個磁碟機代號或掛載點，也可以改在那裡的根目錄繼續。",
         Match::FormatOnly},
-    {"An unfinished relocation of this archive to {} is listed under Unfinished operations in Archives ({}).",
-        "此封存有一個搬移至 {} 的未完成作業，列在「封存」頁的「未完成的作業」中（{}）。", Match::FormatOnly},
+    {"An unfinished relocation of this archive to {} is listed under Unfinished operations in Jobs ({}).",
+        "此封存有一個搬移至 {} 的未完成作業，列在「工作」頁的「未完成的作業」中（{}）。", Match::FormatOnly},
     {"This archive is retired already.", "這個封存已經停用。"},
     {"It is no longer expected to be verified and keeps its history. A retired archive cannot be made active again.",
         "它不必再驗證，並保留其歷程。已停用的封存無法再恢復使用。"},
@@ -844,11 +844,15 @@ constexpr CatalogEntry entries[] = {
     // src/gui/archives_page.cpp, src/gui/unfinished_actions.cpp,
     // src/app/unfinished_operations.cpp: unfinished operations (decision 0022)
     {"Unfinished operations", "未完成的作業"},
-    {"Registrations, verifications and relocations that have not finished, also those started from the "
-        "command line. The numbers move each time an operation saves its progress: after every 1000 files, "
-        "or once a minute when a file finishes; not while it scans.",
-        "尚未完成的註冊、驗證與搬移，包括從命令列啟動的。每當作業儲存進度，數字就會更新：每 1000 個檔案一次，"
-        "或在檔案完成時每分鐘一次；掃描期間不會更新。"},
+    {"Kept in the repository, also once the window is closed: Resume goes on where one stopped, without reading "
+     "again what it read; Abandon... deletes what it saved. Those started from the command line are listed too.",
+        "保存在儲存庫中，關閉視窗也不會消失：「繼續」會從停下的地方接著做，已讀過的不必重讀；「放棄…」會刪除已儲存的"
+        "進度。從命令列啟動的也列在這裡。"},
+    {"The numbers move each time an operation saves its progress: after every 1000 files, or once a minute when "
+     "a file finishes; not while it scans.",
+        "每當作業儲存進度，數字就會更新：每 1000 個檔案一次，或在檔案完成時每分鐘一次；掃描期間不會更新。"},
+    {"1 unfinished operation has stopped", "1 個未完成的作業已停止"},
+    {"{} unfinished operations have stopped", "{} 個未完成的作業已停止"},
     {"Root", "根目錄"},
     {"Registration", "註冊"},
     {"Verification", "驗證"},
@@ -1093,11 +1097,13 @@ constexpr CatalogEntry entries[] = {
     {"Jobs: {} running, {} waiting", "工作：{} 個執行中、{} 個等候中", Match::FormatOnly},
     {"Jobs: {} running", "工作：{} 個執行中", Match::FormatOnly},
     {"Jobs: none running", "工作：沒有執行中的工作"},
-    {"Each registration, verification, comparison, relocation and export started in this window runs as a job. "
+    {"Each registration, verification, cross-check, relocation and export started in this window runs as a job. "
      "Jobs that read the same device wait for one another; the others run at once. A stopped registration, "
-     "verification or relocation keeps what it did: it can be resumed without reading again what it read.",
-        "在這個視窗開始的每個註冊、驗證、比較、搬移和匯出，都會成為一個工作。讀取同一個裝置的工作會依序等候，其他的同時"
-        "執行。停止的註冊、驗證或搬移會保留已完成的部分：之後可以繼續，已讀過的不必重讀。"},
+     "verification or relocation keeps what it did and is listed under Unfinished operations, where Resume goes on "
+     "without reading again what it read.",
+        "在這個視窗開始的每個註冊、驗證、核對完整性、搬移和匯出，都會成為一個工作。讀取同一個裝置的工作會依序等候，其他的"
+        "同時執行。停止的註冊、驗證或搬移會保留已完成的部分，並列在「未完成的作業」中，按「繼續」就能接著做，已讀過的不必"
+        "重讀。"},
     {"Clear ended jobs", "清除已結束的工作"},
     {"No jobs yet.", "還沒有工作。"},
     {"Stop", "停止"},
@@ -1923,32 +1929,32 @@ constexpr CatalogEntry entries[] = {
     // Resume in the archive's details, where its stopped verification shows.
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
         "was changed (finish it first with Resume, or abandon it with Abandon..., on its row under Unfinished "
-        "operations in Archives; or finish it with Resume in the archive's details)",
-        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存」頁的"
+        "operations in Jobs; or finish it with Resume in the archive's details)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「工作」頁的"
         "「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在此封存的詳細資料中按"
         "「繼續」完成它）"},
     // ... while that verification still runs, when none of them is offered yet.
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {} and is still "
         "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with "
-        "Abandon..., on its row under Unfinished operations in Archives; or finish it with Resume in the archive's "
+        "Abandon..., on its row under Unfinished operations in Jobs; or finish it with Resume in the archive's "
         "details)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "若它停止了，請在「工作」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
         "也可以在此封存的詳細資料中按「繼續」完成它）"},
     // The same refusal of a registration in Register Archive (decision 0033).
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {}; nothing "
         "was changed (finish it first with Resume, or abandon it with Abandon..., on its row under Unfinished "
-        "operations in Archives; or finish it with Resume in the archive's details there)",
-        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「封存」頁的"
-        "「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在該頁此封存的詳細資料中按"
+        "operations in Jobs; or finish it with Resume in the archive's details in Archives)",
+        "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}；未做任何變更（請先在「工作」頁的"
+        "「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「封存」頁此封存的詳細資料中按"
         "「繼續」完成它）"},
     {"an unfinished verification of archive {} that adds chunk hashes (run {}) is creating revision {} and is still "
         "running; nothing was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with "
-        "Abandon..., on its row under Unfinished operations in Archives; or finish it with Resume in the archive's "
-        "details there)",
+        "Abandon..., on its row under Unfinished operations in Jobs; or finish it with Resume in the archive's "
+        "details in Archives)",
         "封存 {0} 有一個加入區塊雜湊的未完成驗證（執行 {1}）正在建立版次 {2}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
-        "也可以在該頁此封存的詳細資料中按「繼續」完成它）"},
+        "若它停止了，請在「工作」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "也可以在「封存」頁此封存的詳細資料中按「繼續」完成它）"},
     // The refusal of Register Archive and of a verification in Archives while
     // a registration of the archive is unfinished, in the windows' own words
     // (decisions 0025, 0030, 0033, 0046): Resume and Abandon... on its row
@@ -1957,113 +1963,113 @@ constexpr CatalogEntry entries[] = {
     // another root of the archive, or one made for an older revision, which
     // can only be abandoned; once it has stopped, and while it runs.
     {"an interrupted registration of this root exists (archive {}); finish it with Resume, or abandon it with "
-        "Abandon..., on its row under Unfinished operations in Archives; or choose this folder or volume again in "
+        "Abandon..., on its row under Unfinished operations in Jobs; or choose this folder or volume again in "
         "Register Archive, whose options then resume it",
-        "此根目錄有一個中斷的註冊（封存 {}）；請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，"
+        "此根目錄有一個中斷的註冊（封存 {}）；請在「工作」頁的「未完成的作業」中按它那一列的「繼續」完成它，"
         "或按該列的「放棄…」放棄它；也可以在「註冊封存」再選一次這個資料夾或磁碟區，在選項中繼續它"},
     {"a registration of this root (archive {}) is still running; wait for it to finish; if it stops, finish it with "
-        "Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or choose this "
+        "Resume, or abandon it with Abandon..., on its row under Unfinished operations in Jobs; or choose this "
         "folder or volume again in Register Archive, whose options then resume it",
-        "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的"
+        "此根目錄的註冊（封存 {}）仍在執行；請等它完成；若它停止了，請在「工作」頁的「未完成的作業」中按它那一列的"
         "「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」再選一次這個資料夾或磁碟區，在選項中繼續它"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {}; nothing was changed (finish "
-        "it first with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Archives; or "
+        "it first with Resume, or abandon it with Abandon..., on its row under Unfinished operations in Jobs; or "
         "finish it by choosing its root in Register Archive, whose options then resume it)",
-        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「封存」頁的「未完成的作業」"
+        "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}；未做任何變更（請先在「工作」頁的「未完成的作業」"
         "中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；也可以在「註冊封存」選擇它的根目錄，在選項中"
         "繼續它）"},
     {"an unfinished registration of archive {} (root \"{}\") is creating revision {} and is still running; nothing "
         "was changed (wait for it to finish; if it stops, finish it with Resume, or abandon it with Abandon..., on "
-        "its row under Unfinished operations in Archives; or finish it by choosing its root in Register Archive, "
+        "its row under Unfinished operations in Jobs; or finish it by choosing its root in Register Archive, "
         "whose options then resume it)",
         "封存 {} 有一個未完成的註冊（根目錄「{}」）正在建立版次 {}，而且仍在執行；未做任何變更（請等它完成；"
-        "若它停止了，請在「封存」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
+        "若它停止了，請在「工作」頁的「未完成的作業」中按它那一列的「繼續」完成它，或按該列的「放棄…」放棄它；"
         "也可以在「註冊封存」選擇它的根目錄，在選項中繼續它）"},
     {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
         "later revision ({}); the registration can no longer finish: abandon it with Abandon... under Unfinished "
-        "operations in Archives",
+        "operations in Jobs",
         "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成："
-        "請在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
+        "請在「工作」頁的「未完成的作業」中按「放棄…」放棄它"},
     {"the unfinished registration of archive {} (root \"{}\") would create revision {}, but the archive now has a "
         "later revision ({}); the registration can no longer finish, and is still running: wait for it to stop, then "
-        "abandon it with Abandon... under Unfinished operations in Archives",
+        "abandon it with Abandon... under Unfinished operations in Jobs",
         "封存 {} 未完成的註冊（根目錄「{}」）原本要建立版次 {}，但封存現在已有較新的版次（{}）；這個註冊再也無法完成，"
-        "而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它"},
+        "而且仍在執行：請等它停止，再在「工作」頁的「未完成的作業」中按「放棄…」放棄它"},
     // ... and while a relocation of the archive is unfinished: Resume on its
     // row, or in the archive's details, continues it (decision 0046).
     {"an unfinished relocation of archive {} (to \"{}\") exists; resume it with Resume, or abandon it with "
-        "Abandon..., on its row under Unfinished operations in Archives; or resume it in the archive's details",
-        "封存 {} 有一個未完成的搬移（至「{}」）；請在「封存」頁「未完成的作業」中它那一列按「繼續」接續，或按「放棄…」"
+        "Abandon..., on its row under Unfinished operations in Jobs; or resume it in the archive's details",
+        "封存 {} 有一個未完成的搬移（至「{}」）；請在「工作」頁「未完成的作業」中它那一列按「繼續」接續，或按「放棄…」"
         "放棄它；也可以在封存的詳細資料中按「繼續」"},
     {"an unfinished relocation of archive {} (to \"{}\") exists and is still running; wait for it to finish; if it "
         "stops, resume it with Resume, or abandon it with Abandon..., on its row under Unfinished operations in "
-        "Archives; or resume it in the archive's details",
-        "封存 {} 有一個未完成的搬移（至「{}」），而且仍在執行；請等它完成；若它停止了，請在「封存」頁「未完成的作業」中"
+        "Jobs; or resume it in the archive's details",
+        "封存 {} 有一個未完成的搬移（至「{}」），而且仍在執行；請等它完成；若它停止了，請在「工作」頁「未完成的作業」中"
         "它那一列按「繼續」接續，或按「放棄…」放棄它；也可以在封存的詳細資料中按「繼續」"},
     // A relocation made for an older revision (decision 0030): only abandoned.
     {"the unfinished relocation of archive {} (to \"{}\") verifies revision {}, but the archive now has a later "
         "revision ({}); the relocation can no longer finish: abandon it with Abandon... under Unfinished operations "
-        "in Archives, then relocate again",
+        "in Jobs, then relocate again",
         "封存 {} 未完成的搬移（至「{}」）驗證的是版次 {}，但封存現在已有較新的版次（{}）；這次搬移再也無法完成："
-        "請在「封存」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移"},
+        "請在「工作」頁的「未完成的作業」中按「放棄…」放棄它，再重新搬移"},
     {"the unfinished relocation of archive {} (to \"{}\") verifies revision {}, but the archive now has a later "
         "revision ({}); the relocation can no longer finish, and is still running: wait for it to stop, then "
-        "abandon it with Abandon... under Unfinished operations in Archives, then relocate again",
+        "abandon it with Abandon... under Unfinished operations in Jobs, then relocate again",
         "封存 {} 未完成的搬移（至「{}」）驗證的是版次 {}，但封存現在已有較新的版次（{}）；這次搬移再也無法完成，"
-        "而且仍在執行：請等它停止，再在「封存」頁的「未完成的作業」中按「放棄…」放棄它，然後重新搬移"},
+        "而且仍在執行：請等它停止，再在「工作」頁的「未完成的作業」中按「放棄…」放棄它，然後重新搬移"},
     // What the window says of a relocation that stopped and keeps its saved
     // progress (src/app/refusal_in_window.cpp, decision 0046): Resume in the
     // window continues it, in place of `archive relocate ... --resume`.
     {"relocation was interrupted: the device of the new carrier stopped answering ({} entries in a row could not be "
-        "read); unplug it and attach it again, then continue it with Resume under Unfinished operations in Archives; "
+        "read); unplug it and attach it again, then continue it with Resume under Unfinished operations in Jobs; "
         "if it stops again at the same place, the device may be damaged",
         "搬移已中斷：新載體的裝置停止回應（連續 {} 個項目無法讀取）；請拔除它再重新連接，然後在「封存」頁的「未完成的"
         "作業」中按「繼續」接續；如果它又在同一個地方停止，裝置可能已經損壞",
         Match::FormatOnly},
-    {"relocation was interrupted; continue it with Resume under Unfinished operations in Archives, or in the "
+    {"relocation was interrupted; continue it with Resume under Unfinished operations in Jobs, or in the "
         "archive's details, without reading again what matched",
-        "搬移已中斷；請在「封存」頁的「未完成的作業」中，或在封存的詳細資料中按「繼續」接續，已相符的不必重讀"},
-    {"{}; the relocation keeps its saved progress: continue it with Resume under Unfinished operations in Archives "
+        "搬移已中斷；請在「工作」頁的「未完成的作業」中，或在封存的詳細資料中按「繼續」接續，已相符的不必重讀"},
+    {"{}; the relocation keeps its saved progress: continue it with Resume under Unfinished operations in Jobs "
         "once that is dealt with",
-        "{}；搬移保留其已儲存的進度：處理好之後，請在「封存」頁的「未完成的作業」中按「繼續」接續", Match::FormatOnly},
+        "{}；搬移保留其已儲存的進度：處理好之後，請在「工作」頁的「未完成的作業」中按「繼續」接續", Match::FormatOnly},
     // A resume where the new carrier is not attached now, as when a drive
     // letter changed: the relocation dialog resumes it at the root given.
     {"the volume or folder of this root is not the one the unfinished relocation of archive {} started on (\"{}\"); "
         "where the new carrier is attached at another drive letter or mount point now, choose Relocate to a new "
         "carrier... in the archive's details and give its root there, which resumes the relocation; otherwise attach "
         "it as it was and choose Resume again, or abandon the relocation with Abandon... under Unfinished operations "
-        "in Archives",
+        "in Jobs",
         "此根目錄所在的磁碟區或資料夾，不是封存 {} 未完成的搬移開始時的那一個（「{}」）；如果新的載體現在接在另一個"
         "磁碟機代號或掛載點，請在封存的詳細資料中按「搬移到新的載體…」並在那裡輸入它的根目錄，即可繼續搬移；否則請照"
-        "原樣接上後再按「繼續」，或在「封存」頁的「未完成的作業」中按「放棄…」放棄這次搬移",
+        "原樣接上後再按「繼續」，或在「工作」頁的「未完成的作業」中按「放棄…」放棄這次搬移",
         Match::FormatOnly},
     {"{}; where the new carrier is attached at another drive letter or mount point now, choose Relocate to a new "
         "carrier... in the archive's details and give its root there, which resumes the relocation; otherwise attach "
         "it as it was and choose Resume again, or abandon the relocation with Abandon... under Unfinished operations "
-        "in Archives",
+        "in Jobs",
         "{}；如果新的載體現在接在另一個磁碟機代號或掛載點，請在封存的詳細資料中按「搬移到新的載體…」並在那裡輸入它的"
-        "根目錄，即可繼續搬移；否則請照原樣接上後再按「繼續」，或在「封存」頁的「未完成的作業」中按「放棄…」放棄這次"
+        "根目錄，即可繼續搬移；否則請照原樣接上後再按「繼續」，或在「工作」頁的「未完成的作業」中按「放棄…」放棄這次"
         "搬移",
         Match::FormatOnly},
     // Another operation recorded a later revision before it began.
     {"{}; nothing was changed: relocate again", "{}；未做任何變更：請重新搬移", Match::FormatOnly},
     // src/app/relocation_report.cpp: its saved progress could not be removed.
     {"the new carrier does not hold the recorded content; nothing was changed, but the relocation's saved progress "
-        "could not be removed: {}; abandon the relocation with Abandon... under Unfinished operations in Archives "
+        "could not be removed: {}; abandon the relocation with Abandon... under Unfinished operations in Jobs "
         "before relocating again",
-        "新載體上的內容與記錄不符；未做任何變更，但無法刪除搬移已儲存的進度：{}；重新搬移之前，請在「封存」頁的"
+        "新載體上的內容與記錄不符；未做任何變更，但無法刪除搬移已儲存的進度：{}；重新搬移之前，請在「工作」頁的"
         "「未完成的作業」中按「放棄…」放棄這次搬移",
         Match::FormatOnly},
     {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
-        "content and cannot be resumed; abandon it with Abandon... under Unfinished operations in Archives, then "
+        "content and cannot be resumed; abandon it with Abandon... under Unfinished operations in Jobs, then "
         "relocate again",
-        "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，無法繼續；請在「封存」頁的「未完成的作業」中"
+        "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，無法繼續；請在「工作」頁的「未完成的作業」中"
         "按「放棄…」放棄它，再重新搬移"},
     {"the unfinished relocation of archive {} (to \"{}\") found that the new carrier does not hold the recorded "
         "content and is still running; wait for it to end; if it is then still listed under Unfinished operations "
-        "in Archives, abandon it there with Abandon..., then relocate again",
+        "in Jobs, abandon it there with Abandon..., then relocate again",
         "封存 {} 未完成的搬移（至「{}」）發現新載體上的內容與記錄不符，而且仍在執行；請等它結束；結束後若它仍列在"
-        "「封存」頁的「未完成的作業」中，請在那裡按「放棄…」放棄它，再重新搬移"},
+        "「工作」頁的「未完成的作業」中，請在那裡按「放棄…」放棄它，再重新搬移"},
     {"this verification is still running in process {} ({}) on this computer; resume it once that process has "
         "ended",
         "此驗證仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再繼續"},

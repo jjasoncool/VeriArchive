@@ -1,18 +1,17 @@
-// Archives (§B17, decisions 0022 and 0046): every archive of the repository,
-// beside the details of the one selected (archive_detail.cpp), where its
-// verifications start. Never a bare "integrity status" (R-21): each row gives
-// the result of the last FULL verification and how long ago it was, with
-// OVERDUE, the device alerts of the last verification, a retired archive and
-// a manifest that cannot be used. Above the archives, the registrations,
-// verifications and relocations that have not finished, with their progress,
-// wherever they were started, read every few seconds while the page is shown
-// (operations_poll.cpp), with Resume and Abandon... where they have stopped
-// (unfinished_actions.cpp). Each row starts with where its archive is
-// attached now, or that it is not, as the reads of the attached devices find
-// it (devices_poll.cpp), which run while the page is shown too. Without
-// archives, a page that leads to the first registration. A narrow window
-// shows the list, and the details of an archive in its place. The result page
-// of a run opens over the page (result_page.cpp).
+// Archives (§B17, decisions 0022, 0046 and 0049): every archive of the
+// repository, beside the details of the one selected (archive_detail.cpp),
+// where its verifications start. Never a bare "integrity status" (R-21): each
+// row gives the result of the last FULL verification and how long ago it was,
+// with OVERDUE, the device alerts of the last verification, a retired archive
+// and a manifest that cannot be used. The registrations, verifications and
+// relocations that have not finished are listed in Jobs (decision 0049; they
+// were listed here); they are read every few seconds while the page is shown
+// (operations_poll.cpp), for the details' Resume. Each row starts with where
+// its archive is attached now, or that it is not, as the reads of the attached
+// devices find it (devices_poll.cpp), which run while the page is shown too.
+// Without archives, a page that leads to the first registration. A narrow
+// window shows the list, and the details of an archive in its place. The
+// result page of a run opens over the page (result_page.cpp).
 #include "gui/gui_app.h"
 
 #include "app/plain_words.h"
@@ -29,10 +28,6 @@
 namespace va::gui {
 namespace {
 
-// The most height the operations take before they scroll, so that a long list
-// of them never pushes the archives out of the window: about three rows.
-constexpr int operations_max_height = 240;
-
 // The width of the list beside the details, as the approved design of
 // decision 0046 draws it.
 constexpr int list_min_width = 280;
@@ -41,222 +36,6 @@ constexpr int list_max_width = 400;
 const char* archive_of(GtkListBoxRow* row)
 {
     return row ? static_cast<const char*>(g_object_get_data(G_OBJECT(row), "va-archive")) : nullptr;
-}
-
-// ---- Unfinished operations --------------------------------------------------
-
-// What a button of a row of the operations does when clicked: `act` on the
-// row's operation, named by its key.
-struct OperationAction {
-    std::string key;
-    void (*act)(GuiState&, const std::string&);
-};
-
-// A button of a row of the operations; what it does shows in a message of its
-// own, or where it brings a job into view.
-GtkWidget* operation_button(GuiState& state, const std::string& label, const std::string& key,
-    void (*act)(GuiState&, const std::string&))
-{
-    GtkWidget* button = gtk_button_new_with_label(label.c_str());
-    gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
-    g_object_set_data_full(G_OBJECT(button), "operation-action", new OperationAction{key, act},
-        +[](gpointer data) { delete static_cast<OperationAction*>(data); });
-    g_signal_connect(button, "clicked",
-        G_CALLBACK(+[](GtkButton* clicked, gpointer data) {
-            auto& state = *static_cast<GuiState*>(data);
-            const auto* action =
-                static_cast<const OperationAction*>(g_object_get_data(G_OBJECT(clicked), "operation-action"));
-            guarded(
-                [&] {
-                    if (action) {
-                        action->act(state, action->key);
-                    }
-                },
-                [&](const Report& report) { show_archives_status(state, report); });
-        }),
-        &state);
-    return button;
-}
-
-// A label of an operation's row. Not selectable: a read that finds other
-// operations draws the rows anew, which would drop a selection.
-GtkWidget* operation_label(const std::string& text, const char* style = nullptr)
-{
-    GtkWidget* label = gtk_label_new(text.c_str());
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
-    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
-    gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
-    if (style) {
-        gtk_widget_add_css_class(label, style);
-    }
-    return label;
-}
-
-// What makes up a row of the operations (OperationShown), besides the words
-// and the bar that a read changes in place.
-GuiState::OperationShown operation_shape(const app::OperationRow& shown)
-{
-    GuiState::OperationShown shape;
-    shape.key = shown.key;
-    shape.offers_resume = shown.offers_resume;
-    shape.resume_asks_first = shown.resume_asks_first;
-    shape.abandonable = shown.abandonable;
-    shape.has_bar = shown.fraction.has_value();
-    shape.has_details = !shown.details.empty();
-    return shape;
-}
-
-bool same_shape(const GuiState::OperationShown& drawn, const GuiState::OperationShown& read)
-{
-    return drawn.key == read.key && drawn.offers_resume == read.offers_resume &&
-           drawn.resume_asks_first == read.resume_asks_first && drawn.abandonable == read.abandonable &&
-           drawn.has_bar == read.has_bar && drawn.has_details == read.has_details;
-}
-
-// Gives the row `drawn` the words, bar and state of `shown`, the same
-// operation as a later read sees it.
-void update_operation_row(const app::Text& text, const GuiState::OperationShown& drawn, const app::OperationRow& shown)
-{
-    const bool stopped = app::has_stopped(shown.state_kind);
-    gtk_image_set_from_icon_name(GTK_IMAGE(drawn.icon), stopped ? "media-playback-pause-symbolic" : jobs_icon);
-    gtk_label_set_text(GTK_LABEL(drawn.title), text.format("{} · {}", shown.label, shown.kind).c_str());
-    gtk_widget_set_tooltip_text(drawn.title, shown.archive_uuid.c_str());
-    gtk_label_set_text(GTK_LABEL(drawn.root), shown.root.c_str());
-    if (drawn.bar && shown.fraction) {
-        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(drawn.bar), *shown.fraction);
-    }
-    gtk_label_set_text(GTK_LABEL(drawn.progress), shown.progress.c_str());
-    if (drawn.details) {
-        gtk_label_set_text(GTK_LABEL(drawn.details), shown.details.c_str());
-    }
-    const bool quiet =
-        shown.state_kind == app::OperationState::Quiet || shown.state_kind == app::OperationState::Silent;
-    gtk_label_set_text(GTK_LABEL(drawn.state), shown.state.c_str());
-    if (stopped) {
-        gtk_widget_add_css_class(drawn.state, "warning");
-    } else {
-        gtk_widget_remove_css_class(drawn.state, "warning");
-    }
-    if (quiet) {
-        gtk_widget_add_css_class(drawn.state, "heading");
-    } else {
-        gtk_widget_remove_css_class(drawn.state, "heading");
-    }
-    // A verification's run, and the process the record names; a
-    // verification that adds chunk hashes has both (decision 0033).
-    std::string tooltip = shown.run_id.empty() ? std::string{} : text.format("Run: {}", shown.run_id);
-    if (!shown.process.empty()) {
-        tooltip += (tooltip.empty() ? "" : "\n") + shown.process;
-    }
-    gtk_widget_set_tooltip_text(drawn.state, tooltip.empty() ? nullptr : tooltip.c_str());
-}
-
-// One unfinished operation: its archive and kind, its root, its bar where
-// the share done is known with what it did, its state, and Resume and
-// Abandon... where it offers them. `drawn` keeps the widgets that a later
-// read of the same operation changes.
-GtkWidget* operation_row(GuiState& state, const app::OperationRow& shown, GuiState::OperationShown& drawn)
-{
-    const auto& text = state.text;
-    GtkWidget* row = gtk_list_box_row_new();
-    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
-    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(row), FALSE);
-    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_margin_start(box, 14);
-    gtk_widget_set_margin_end(box, 14);
-    gtk_widget_set_margin_top(box, 10);
-    gtk_widget_set_margin_bottom(box, 10);
-
-    drawn.icon = gtk_image_new();
-    gtk_widget_set_valign(drawn.icon, GTK_ALIGN_START);
-    gtk_widget_add_css_class(drawn.icon, "dim-label");
-    gtk_box_append(GTK_BOX(box), drawn.icon);
-
-    GtkWidget* words = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_hexpand(words, TRUE);
-    drawn.title = operation_label("", "heading");
-    gtk_box_append(GTK_BOX(words), drawn.title);
-    // A long root (a folder deep in a volume) wraps, anywhere in a name,
-    // rather than pushing the state and the row's buttons off the window;
-    // without the hyphens Pango would add, which would read as part of the
-    // path.
-    drawn.root = operation_label("", "dim-label");
-    PangoAttrList* no_hyphens = pango_attr_list_new();
-    pango_attr_list_insert(no_hyphens, pango_attr_insert_hyphens_new(FALSE));
-    gtk_label_set_attributes(GTK_LABEL(drawn.root), no_hyphens);
-    pango_attr_list_unref(no_hyphens);
-    gtk_box_append(GTK_BOX(words), drawn.root);
-    if (drawn.has_bar) {
-        drawn.bar = gtk_progress_bar_new();
-        gtk_widget_set_margin_top(drawn.bar, 4);
-        gtk_box_append(GTK_BOX(words), drawn.bar);
-    }
-    drawn.progress = operation_label("", "numeric");
-    gtk_box_append(GTK_BOX(words), drawn.progress);
-    if (drawn.has_details) {
-        // The details may end with why a total is not known, a whole sentence.
-        drawn.details = operation_label("", "dim-label");
-        gtk_widget_add_css_class(drawn.details, "caption");
-        gtk_box_append(GTK_BOX(words), drawn.details);
-    }
-    drawn.state = operation_label("");
-    gtk_box_append(GTK_BOX(words), drawn.state);
-    gtk_box_append(GTK_BOX(box), words);
-    update_operation_row(text, drawn, shown);
-
-    // A stopped verification or registration can be resumed here, as on
-    // the command line (decision 0022, point 7); a stopped registration
-    // (decision 0025), relocation (decision 0026) or verification that
-    // adds chunk hashes (decision 0033) can be given up on purpose; and so
-    // can an older version's registration that may have stopped
-    // (describe_operation), whose Resume asks first.
-    if (shown.offers_resume || shown.abandonable) {
-        GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-        gtk_widget_set_valign(actions, GTK_ALIGN_CENTER);
-        if (shown.offers_resume) {
-            gtk_box_append(GTK_BOX(actions), operation_button(state, text("Resume"), shown.key,
-                                                 shown.resume_asks_first ? ask_to_resume : resume_from_list));
-        }
-        if (shown.abandonable) {
-            GtkWidget* abandon = operation_button(state, text("Abandon..."), shown.key, ask_to_abandon);
-            gtk_widget_add_css_class(abandon, "destructive-action");
-            gtk_box_append(GTK_BOX(actions), abandon);
-        }
-        gtk_box_append(GTK_BOX(box), actions);
-    }
-    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-    return row;
-}
-
-GtkWidget* build_operations(GuiState& state)
-{
-    auto& page = state.archives_page;
-    const auto& text = state.text;
-    page.operations = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_start(page.operations, 24);
-    gtk_widget_set_margin_end(page.operations, 24);
-    gtk_widget_set_margin_bottom(page.operations, 12);
-    GtkWidget* heading = gtk_label_new(text("Unfinished operations").c_str());
-    gtk_label_set_xalign(GTK_LABEL(heading), 0.0f);
-    gtk_widget_add_css_class(heading, "heading");
-    gtk_box_append(GTK_BOX(page.operations), heading);
-    page.operations_note = make_label("");
-    gtk_widget_add_css_class(page.operations_note, "dim-label");
-    gtk_box_append(GTK_BOX(page.operations), page.operations_note);
-    page.operations_list = gtk_list_box_new();
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(page.operations_list), GTK_SELECTION_NONE);
-    gtk_widget_add_css_class(page.operations_list, "boxed-list");
-    // As tall as its rows up to a limit, then it scrolls: many operations
-    // never make the window taller or push the archives out of it.
-    GtkWidget* scroller = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroller), TRUE);
-    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroller), operations_max_height);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), page.operations_list);
-    gtk_widget_set_margin_top(scroller, 4);
-    gtk_box_append(GTK_BOX(page.operations), scroller);
-    gtk_widget_set_visible(page.operations, FALSE);
-    return page.operations;
 }
 
 // ---- The list of archives ---------------------------------------------------
@@ -604,60 +383,6 @@ void show_archives_status(GuiState& state, const Report& report)
     }
 }
 
-void show_operations(GuiState& state)
-{
-    auto& page = state.archives_page;
-    if (!page.operations) {
-        return;
-    }
-    const auto& text = state.text;
-    use_session_repository(state);
-    const auto& poll = state.operations;
-    show_details_operations(state);
-    show_results_operations(state);
-    const auto clear = [&] {
-        keep_focus_from(state, page.operations_list);
-        gtk_list_box_remove_all(GTK_LIST_BOX(page.operations_list));
-        page.operation_rows.clear();
-    };
-    if (!state.session || (poll.watches.empty() && !poll.error)) {
-        clear();
-        gtk_widget_set_visible(page.operations, FALSE);
-        return;
-    }
-    gtk_widget_set_visible(page.operations, TRUE);
-    gtk_label_set_text(GTK_LABEL(page.operations_note),
-        poll.error ? poll.error(text).c_str()
-                   : text("Registrations, verifications and relocations that have not finished, also those "
-                          "started from the command line. The numbers move each time an operation saves its "
-                          "progress: after every 1000 files, or once a minute when a file finishes; not while it "
-                          "scans.")
-                         .c_str());
-    const auto now = std::chrono::steady_clock::now();
-    const auto wall_now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-    const auto rows = app::describe_operations(text, poll.watches, now, wall_now);
-    // The same operations with the same buttons as drawn: only their words
-    // and bars change, so the keyboard focus on a Resume or Abandon... stays
-    // (a read every few seconds would take it away otherwise).
-    const bool same = rows.size() == page.operation_rows.size() &&
-                      std::ranges::equal(page.operation_rows, rows, [](const auto& drawn, const auto& shown) {
-                          return same_shape(drawn, operation_shape(shown));
-                      });
-    if (same) {
-        for (std::size_t index = 0; index < rows.size(); ++index) {
-            update_operation_row(text, page.operation_rows[index], rows[index]);
-        }
-    } else {
-        clear();
-        for (const auto& shown : rows) {
-            auto drawn = operation_shape(shown);
-            gtk_list_box_append(GTK_LIST_BOX(page.operations_list), operation_row(state, shown, drawn));
-            page.operation_rows.push_back(std::move(drawn));
-        }
-    }
-    gtk_widget_set_visible(gtk_widget_get_parent(page.operations_list), !rows.empty());
-}
-
 void refresh_archives(GuiState& state)
 {
     auto& page = state.archives_page;
@@ -859,7 +584,6 @@ GtkWidget* build_archives_page(GuiState& state)
     gtk_box_append(GTK_BOX(head), refresh);
     gtk_box_append(GTK_BOX(box), head);
 
-    gtk_box_append(GTK_BOX(box), build_operations(state));
 
     page.views = gtk_stack_new();
     gtk_widget_set_vexpand(page.views, TRUE);
@@ -867,8 +591,9 @@ GtkWidget* build_archives_page(GuiState& state)
     gtk_stack_add_named(GTK_STACK(page.views), build_empty(state), "empty");
     gtk_box_append(GTK_BOX(box), page.views);
 
-    // The unfinished operations, and the attached devices, are read only
-    // while the page is on screen: "map" when it is shown (also when the
+    // The unfinished operations (for the details' Resume), and the attached
+    // devices, are read only while the page is on screen: "map" when it is
+    // shown (also when the
     // window first appears on it), "unmap" when another page is chosen or the
     // window closes, e.g. when a language change replaces it.
     g_signal_connect(box, "map", G_CALLBACK(+[](GtkWidget* shown, gpointer data) {

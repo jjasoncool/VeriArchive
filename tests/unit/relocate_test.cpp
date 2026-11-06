@@ -526,7 +526,7 @@ void a_differing_copy_whose_relocation_cannot_end_says_to_abandon_it()
         CHECK(refusal.starts_with("RELOCATION REFUSED: the new carrier does not hold the recorded content; nothing "
                                   "was changed, but the relocation's saved progress could not be removed: cannot run "
                                   "SQL: sample failure; abandon the relocation with Abandon... under Unfinished "
-                                  "operations in Archives before relocating again\n  "));
+                                  "operations in Jobs before relocating again\n  "));
         CHECK(refusal.contains("videos/v139.bin") && !refusal.contains("archive abandon-relocation"));
         // Without a record left, as the command line words it.
         auto plain = differs.error();
@@ -1208,7 +1208,7 @@ void a_resume_needs_the_volume_it_started_on()
         const auto ways = "; where the new carrier is attached at another drive letter or mount point now, choose "
                           "Relocate to a new carrier... in the archive's details and give its root there, which "
                           "resumes the relocation; otherwise attach it as it was and choose Resume again, or abandon "
-                          "the relocation with Abandon... under Unfinished operations in Archives";
+                          "the relocation with Abandon... under Unfinished operations in Jobs";
         CHECK(va::app::relocation_message_in_window(english, formatted.error(), false) ==
               "the volume or folder of this root is not the one the unfinished relocation of archive " +
                   fixture.archive_uuid + " started on (\"" + va::path_to_utf8(fixture.archive.root() / "new") +
@@ -1561,7 +1561,7 @@ void a_resume_needs_the_revision_it_verifies()
     CHECK(!refused && refused.error().refusing && refused.error().refusing->later_revision == 2u);
     if (!refused) {
         const auto words = va::app::relocation_message_in_window(va::app::Text{}, refused.error(), false);
-        CHECK(words.contains("abandon it with Abandon... under Unfinished operations in Archives") &&
+        CHECK(words.contains("abandon it with Abandon... under Unfinished operations in Jobs") &&
               !words.contains("archive abandon-relocation"));
     }
     CHECK(fixture.record() == ahead);
@@ -3261,10 +3261,10 @@ void the_window_words_a_relocation_that_did_not_record()
         return;
     }
     CHECK(va::app::relocation_message_in_window(english, interrupted.error(), false) ==
-          "relocation was interrupted; continue it with Resume under Unfinished operations in Archives, or in the "
+          "relocation was interrupted; continue it with Resume under Unfinished operations in Jobs, or in the "
           "archive's details, without reading again what matched");
     CHECK(va::app::relocation_message_in_window(chinese, interrupted.error(), false) ==
-          "搬移已中斷；請在「封存」頁的「未完成的作業」中，或在封存的詳細資料中按「繼續」接續，已相符的不必重讀");
+          "搬移已中斷；請在「工作」頁的「未完成的作業」中，或在封存的詳細資料中按「繼續」接續，已相符的不必重讀");
 
     // Its device no longer answering, and a failure that stopped it (their
     // failures as the engine gives them).
@@ -3273,16 +3273,16 @@ void the_window_words_a_relocation_that_did_not_record()
     CHECK(va::app::relocation_message_in_window(english, not_answering, false) ==
           "relocation was interrupted: the device of the new carrier stopped answering (10 entries in a row could "
           "not be read); unplug it and attach it again, then continue it with Resume under Unfinished operations in "
-          "Archives; if it stops again at the same place, the device may be damaged");
+          "Jobs; if it stops again at the same place, the device may be damaged");
     va::RelocateFailure stopped{va::RelocateFailure::Kind::Media, "cannot scan the new root: access denied (sample)"
                                                                   "; the relocation keeps its saved progress: ...", {}};
     stopped.keeps_progress = true;
     stopped.cause = "cannot scan the new root: access denied (sample)";
     CHECK(va::app::relocation_message_in_window(english, stopped, false) ==
           "cannot scan the new root: access denied (sample); the relocation keeps its saved progress: continue it "
-          "with Resume under Unfinished operations in Archives once that is dealt with");
+          "with Resume under Unfinished operations in Jobs once that is dealt with");
     CHECK(va::app::relocation_message_in_window(chinese, stopped, false).ends_with(
-        "；搬移保留其已儲存的進度：處理好之後，請在「封存」頁的「未完成的作業」中按「繼續」接續"));
+        "；搬移保留其已儲存的進度：處理好之後，請在「工作」頁的「未完成的作業」中按「繼續」接續"));
 
     // A new relocation while that one is unfinished: refused by it.
     const auto again = fixture.relocate(fixture.archive.root() / "new");
@@ -3296,7 +3296,7 @@ void the_window_words_a_relocation_that_did_not_record()
     const auto exists = "an unfinished relocation of archive " + fixture.archive_uuid + " (to \"" +
                         va::path_to_utf8(fixture.archive.root() / "new") + "\") exists";
     const std::string ways = "resume it with Resume, or abandon it with Abandon..., on its row under Unfinished "
-                             "operations in Archives; or resume it in the archive's details";
+                             "operations in Jobs; or resume it in the archive's details";
     CHECK(va::app::relocation_message_in_window(english, again.error(), false) == exists + "; " + ways);
     CHECK(va::app::relocation_message_in_window(english, again.error(), true) ==
           exists + " and is still running; wait for it to finish; if it stops, " + ways);

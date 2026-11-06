@@ -1,8 +1,9 @@
 // The unfinished registrations, verifications and relocations (decision
 // 0022), wherever they were started, read from the repository every few
-// seconds while Archives is shown, each read on a thread of its own: a
+// seconds while Jobs or Archives is shown, each read on a thread of its own: a
 // registration of a whole volume from the command line takes many hours, and
-// Archives is where the operator sees how far it is. A read that took long
+// Jobs is where the operator sees how far it is (decision 0049); Archives
+// offers Resume in an archive's details and counts those that stopped. A read that took long
 // spaces out the next ones, so the operation doing the work keeps the
 // database most of the time.
 #include "gui/gui_app.h"
@@ -18,7 +19,7 @@
 namespace va::gui {
 namespace {
 
-// How often the unfinished operations are read while Archives is shown. The
+// How often the unfinished operations are read while Jobs or Archives is shown. The
 // operations checkpoint every 1000 files or minute, so a shorter interval
 // would show nothing new.
 constexpr guint poll_seconds = 5;

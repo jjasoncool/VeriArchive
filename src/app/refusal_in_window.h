@@ -5,7 +5,7 @@
 // 0025, 0026, 0033, 0046): a registration, a relocation, or a FULL verify that
 // adds chunk hashes. The command line names its commands; the window names
 // its own ways on in their place (decisions 0033, 0046): first "Resume" and
-// "Abandon..." on the operation's row under Unfinished operations in Archives
+// "Abandon..." on the operation's row under Unfinished operations in Jobs
 // (decision 0022, point 7), then Register Archive, the registration's root
 // chosen there, whose options then resume it ("Resume the interrupted
 // registration"), or "Resume" in the archive's details, where its stopped
