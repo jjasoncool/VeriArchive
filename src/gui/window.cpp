@@ -59,7 +59,7 @@ const Page* page_named(std::string_view name)
 // operations that stopped, in the colour of warnings, the tiles of the
 // overview of Archives as cards, the one chosen outlined in the accent
 // colour, and the line under the head of an archive's details once they
-// scroll under it (decision 0049); in Devices the model of
+// scroll under it, as its label grows smaller, both animated (decision 0049); in Devices the model of
 // each device, at the head of its card.
 constexpr const char* style = R"css(
 .va-ring {
@@ -219,8 +219,17 @@ row.va-device-head label.title {
     color: @window_fg_color;
     box-shadow: inset 0 0 0 2px @accent_color;
 }
+.va-head-band {
+    transition: box-shadow 200ms ease-out;
+}
 .va-head-band.va-stuck {
     box-shadow: 0 1px alpha(@window_fg_color, 0.12);
+}
+.va-head-title {
+    transition: font-size 200ms ease-out;
+}
+.va-head-band.va-stuck .va-head-title {
+    font-size: 136%;
 }
 )css";
 

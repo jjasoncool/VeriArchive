@@ -538,7 +538,6 @@ void show_details(GuiState& state)
     while (GtkWidget* child = gtk_widget_get_first_child(page.detail_head)) {
         gtk_box_remove(GTK_BOX(page.detail_head), child);
     }
-    page.detail_title = nullptr;
     page.card.rows.clear();
     page.notice = nullptr;
     page.notice_key.reset();
@@ -592,8 +591,11 @@ void show_details(GuiState& state)
     // focus would show its words selected; the content's root and archive
     // UUID can be copied.
     GtkWidget* title_line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    page.detail_title = words_label(label, page.head_stuck ? "title-3" : "title-1");
-    gtk_box_append(GTK_BOX(title_line), page.detail_title);
+    // Smaller once the details scroll under the head, as the style animates
+    // it (.va-head-title in window.cpp).
+    GtkWidget* title = words_label(label, "title-1");
+    gtk_widget_add_css_class(title, "va-head-title");
+    gtk_box_append(GTK_BOX(title_line), title);
     GtkWidget* result = make_pill(row.result);
     gtk_widget_set_valign(result, GTK_ALIGN_CENTER);
     gtk_widget_set_hexpand(result, TRUE);

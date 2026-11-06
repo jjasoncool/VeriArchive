@@ -685,8 +685,8 @@ GtkWidget* build_split(GuiState& state)
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(details_scroller), clamp);
     gtk_widget_set_vexpand(details_scroller, TRUE);
     gtk_box_append(GTK_BOX(details_box), details_scroller);
-    // Scrolled, the head's label is smaller and a line sets it off from the
-    // details passing under it.
+    // Scrolled, the head's label grows smaller and a line sets it off from the
+    // details passing under it, both as the style animates them.
     g_object_set_data(G_OBJECT(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(details_scroller))), "va-band",
         head_band);
     g_signal_connect(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(details_scroller)), "value-changed",
@@ -700,10 +700,6 @@ GtkWidget* build_split(GuiState& state)
             page.head_stuck = stuck;
             auto* band = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(scrolled), "va-band"));
             (stuck ? gtk_widget_add_css_class : gtk_widget_remove_css_class)(band, "va-stuck");
-            if (page.detail_title) {
-                gtk_widget_remove_css_class(page.detail_title, stuck ? "title-1" : "title-3");
-                gtk_widget_add_css_class(page.detail_title, stuck ? "title-3" : "title-1");
-            }
         }),
         &state);
     page.detail_page = GTK_WIDGET(adw_navigation_page_new(details_box, ""));

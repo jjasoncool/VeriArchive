@@ -373,11 +373,10 @@ struct GuiState {
         GtkWidget* list = nullptr;             // GtkListBox, a row for each archive
         GtkWidget* detail_page = nullptr;      // AdwNavigationPage of the details, titled by the archive
         // The head of the details, above them, which stays in view while
-        // they scroll (decision 0049): the label (`detail_title`), smaller
-        // once they are scrolled (`head_stuck`), the result, the menu, the
-        // volume and root, FULL verify and Cross-check...
+        // they scroll (decision 0049): the label, the result, the menu, the
+        // volume and root, FULL verify and Cross-check...; and whether the
+        // details are scrolled under it, when its label is smaller.
         GtkWidget* detail_head = nullptr;
-        GtkWidget* detail_title = nullptr;
         bool head_stuck = false;
         GtkWidget* detail = nullptr;           // the details of the archive selected, made again for each
         GtkWidget* back = nullptr;             // back to the list, shown in a narrow window
