@@ -311,7 +311,7 @@ struct OperationRow {
                                      // (veriarchive-cli.exe)", for a tooltip
     std::string key;                 // the operation's key (UnfinishedOperation::key)
     bool abandonable = false;        // a registration (decision 0025), relocation (decision 0026) or
-                                     // verification that adds chunk hashes (decision 0033) shown stopped
+                                     // verification (decisions 0033, 0050) shown stopped
                                      // (has_stopped), or a registration whose plan never says when it worked
                                      // (an older version's) shown quiet (OperationState::Quiet): the operator
                                      // may abandon it

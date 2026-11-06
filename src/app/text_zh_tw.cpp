@@ -962,10 +962,13 @@ constexpr CatalogEntry entries[] = {
     // Abandoning a verification that adds chunk hashes (decision 0033); the
     // detail's last sentences are a relocation's.
     {"Abandon the unfinished verification of {} that adds chunk hashes?", "要放棄 {} 加入區塊雜湊的未完成驗證嗎？"},
+    // ... and of a stopped verification that adds none (decision 0050).
+    {"Abandon the stopped verification of {}?", "要放棄 {} 已停止的驗證嗎？"},
     {"Reading the verification of {} ...", "正在讀取 {} 的驗證……"},
     {"Abandoning the verification of {} ...", "正在放棄 {} 的驗證……"},
     {"Abandoned the unfinished verification of {} ({}) that adds chunk hashes.",
         "已放棄 {}（{}）加入區塊雜湊的未完成驗證。"},
+    {"Abandoned the stopped verification of {} ({}).", "已放棄 {}（{}）已停止的驗證。"},
     {"Cannot read the unfinished operations: {}", "無法讀取未完成的作業：{}", Match::FormatOnly},
     // src/gui/history_page.cpp, src/gui/history_rows.cpp: History, the runs
     // of every archive or of the one its filter names (decision 0046), and
@@ -2112,6 +2115,17 @@ constexpr CatalogEntry entries[] = {
     {"an attempt of the verification of archive {} that adds chunk hashes said it was working less than 3 minutes "
         "ago; abandon it once it has stopped",
         "封存 {} 加入區塊雜湊的驗證在不到 3 分鐘前仍回報正在執行；請等它停止後再放棄"},
+    // The same refusals of abandoning a stopped verification that adds none
+    // (decision 0050).
+    {"the stopped verification of archive {} is no longer the one shown (it was resumed, finished or abandoned "
+        "meanwhile); nothing was changed",
+        "封存 {} 已停止的驗證已不是畫面上的那一個（其間已被繼續、完成或放棄）；未做任何變更"},
+    {"the verification of archive {} is still running in process {} ({}) on this computer; abandon it once that "
+        "process has ended",
+        "封存 {} 的驗證仍在這台電腦的處理程序 {}（{}）中執行；請等該處理程序結束後再放棄"},
+    {"an attempt of the verification of archive {} said it was working less than 3 minutes ago; abandon it once it "
+        "has stopped",
+        "封存 {} 的驗證在不到 3 分鐘前仍回報正在執行；請等它停止後再放棄"},
     {"cannot read the unfinished verification: {}", "無法讀取未完成的驗證：{}", Match::Cause},
     {"cannot abandon the verification: {}", "無法放棄驗證：{}", Match::Cause},
     // A run that read everything keeps its saved progress when the revision

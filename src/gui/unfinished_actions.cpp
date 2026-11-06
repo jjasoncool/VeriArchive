@@ -3,8 +3,9 @@
 // (decision 0046) there that has stopped can be resumed, wherever it was
 // started. A registration that has
 // stopped can be abandoned (decision 0025), as when its media failed, and so
-// can a stopped relocation (decision 0026) and a stopped verification that
-// adds chunk hashes (decision 0033). An older version's registration, whose
+// can a stopped relocation (decision 0026) and a stopped verification, one
+// that adds chunk hashes (decision 0033) or one that adds none (decision
+// 0050). An older version's registration, whose
 // plan never says when it worked, can be resumed and abandoned once it reads
 // as one that may have stopped; its Resume asks first, as that version may
 // still run it. A step of abandoning reads what it removes first, then asks,
@@ -275,7 +276,7 @@ void ask_to_abandon_relocation(GuiState& state, const app::UnfinishedOperation& 
         });
 }
 
-// ---- Abandoning a verification that adds chunk hashes (decision 0033) -------
+// ---- Abandoning a verification (decisions 0033, 0050) ------------------------
 
 struct VerificationAbandonChoice {
     GuiState* state;
@@ -286,8 +287,11 @@ struct VerificationAbandonChoice {
 Report verification_abandon_report(const AbandonableVerification& abandoned)
 {
     return [abandoned](const app::Text& text) {
-        return text.format("Abandoned the unfinished verification of {} ({}) that adds chunk hashes.",
-            abandoned.label, abandoned.archive_uuid);
+        return abandoned.adds_chunk_hashes
+                   ? text.format("Abandoned the unfinished verification of {} ({}) that adds chunk hashes.",
+                         abandoned.label, abandoned.archive_uuid)
+                   : text.format("Abandoned the stopped verification of {} ({}).", abandoned.label,
+                         abandoned.archive_uuid);
     };
 }
 
@@ -333,8 +337,10 @@ void confirm_verification_abandon(GuiState& state, const AbandonableVerification
                                     "verification history are not changed.");
     // The request names the run shown: one resumed meanwhile, under a run of
     // its own, is not abandoned in its place.
-    ask(state.window, text.format("Abandon the unfinished verification of {} that adds chunk hashes?", label),
-        detail, {{"cancel", text("Cancel")}, {"abandon", text("Abandon"), true}},
+    const auto question = verification.adds_chunk_hashes
+                              ? text.format("Abandon the unfinished verification of {} that adds chunk hashes?", label)
+                              : text.format("Abandon the stopped verification of {}?", label);
+    ask(state.window, question, detail, {{"cancel", text("Cancel")}, {"abandon", text("Abandon"), true}},
         [choice = VerificationAbandonChoice{&state, {verification.archive_uuid, verification.run_id}, label}](
             const std::string& answer) {
             auto& state = *choice.state;
@@ -346,9 +352,9 @@ void confirm_verification_abandon(GuiState& state, const AbandonableVerification
         });
 }
 
-// The operator chose to abandon the verification that adds chunk hashes of a
-// row: what abandoning it removes is read first, by the check that abandons
-// it, as for a registration.
+// The operator chose to abandon the verification of a row, one that adds
+// chunk hashes or one that adds none: what abandoning it removes is read
+// first, by the check that abandons it, as for a registration.
 void ask_to_abandon_verification(GuiState& state, const app::UnfinishedOperation& operation)
 {
     const auto label = operation.label.empty() ? operation.archive_uuid.substr(0, 8) : operation.label;
@@ -408,8 +414,7 @@ void ask_to_abandon(GuiState& state, const std::string& key)
         ask_to_abandon_relocation(state, found->operation());
         return;
     }
-    if (!key.empty() && found != watches.end() && found->operation().kind == app::OperationKind::Verification &&
-        found->operation().adds_chunk_hashes) {
+    if (!key.empty() && found != watches.end() && found->operation().kind == app::OperationKind::Verification) {
         ask_to_abandon_verification(state, found->operation());
         return;
     }

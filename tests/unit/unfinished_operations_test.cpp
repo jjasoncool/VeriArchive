@@ -1867,7 +1867,8 @@ void a_verification_that_adds_chunk_hashes_is_listed_until_abandoned()
     OperationWatch other;
     other.update(plain, start, now);
     const auto plain_row = describe_operation(english, other, start, now);
-    CHECK(plain_row.kind == "Verification" && !plain_row.abandonable);
+    // Decision 0050: a stopped verification that adds none may be abandoned too.
+    CHECK(plain_row.kind == "Verification" && plain_row.state == "stopped; it can be resumed" && plain_row.abandonable);
 }
 
 // The process that the record of a verification that adds chunk hashes names
@@ -1961,8 +1962,8 @@ va::app::OperationRow row_of(const UnfinishedOperation& operation)
 // it worked or of a verification, not known, held up), not for one that can
 // no longer finish (an archive with a newer or later revision, or retired),
 // and never for a relocation, which the GUI does not run. Abandon... goes
-// with a registration's and a relocation's Resume, also where it alone is
-// offered (decision 0025). Resume asks first only on the quiet registration
+// with a registration's, a relocation's and a stopped verification's Resume
+// (decisions 0025, 0050), also where it alone is offered. Resume asks first only on the quiet registration
 // whose plan names no process, which the older version may still run
 // (operator, 2026-10-20).
 void offers_resume_only_where_it_continues()
@@ -1973,7 +1974,7 @@ void offers_resume_only_where_it_continues()
     verification.run_id = "c0ffee00-0000-4000-8000-0000000000aa";
     verification.recorded_stopped = true;  // recorded INCOMPLETE
     auto row = row_of(verification);
-    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && !row.abandonable &&
+    CHECK(row.state == "stopped; it can be resumed" && row.offers_resume && row.abandonable &&
           !row.resume_asks_first);
     // Killed, its record silent for minutes: stopped as well.
     verification.recorded_stopped = false;

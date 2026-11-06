@@ -652,14 +652,12 @@ OperationRow describe_operation(const Text& text, const OperationWatch& watch, O
     const bool quiet_registration =
         operation.kind == OperationKind::Registration && row.state_kind == OperationState::Quiet;
     // A stopped registration (decision 0025), relocation (decision 0026) or
-    // verification that adds chunk hashes (decision 0033) may be given up on
+    // verification (decision 0033 for one that adds chunk hashes, decision
+    // 0050 for one that adds none, which the next verification would
+    // supersede, but which no one may mean to resume) may be given up on
     // purpose, and so may a quiet registration as above; not one that runs,
-    // waits for its first progress, is held up or whose state is not known. A
-    // stopped verification that adds none is superseded by the next
-    // verification.
-    row.abandonable = ((operation.kind != OperationKind::Verification || operation.adds_chunk_hashes) &&
-                          has_stopped(row.state_kind)) ||
-                      quiet_registration;
+    // waits for its first progress, is held up or whose state is not known.
+    row.abandonable = has_stopped(row.state_kind) || quiet_registration;
     // Decision 0022, point 7: a verification or relocation that has stopped
     // and can be resumed (R-104, decision 0026), and a registration that has
     // stopped or is quiet as above, may be resumed from the list, as their

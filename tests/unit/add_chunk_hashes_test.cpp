@@ -1505,6 +1505,52 @@ void abandoning_a_verification_that_adds_chunk_hashes()
     CHECK(registered && registered->revision == 2);
 }
 
+// Decision 0050: a stopped FULL verify that adds no chunk hashes, named by its
+// run, is abandoned as one that adds them is: its record and saved progress
+// go, its INCOMPLETE run stays in the history, and it can no longer be
+// resumed. Without a run named (the command line's `archive
+// abandon-verification`), only one that adds chunk hashes is abandoned.
+void abandoning_a_stopped_verification_that_adds_none()
+{
+    Halves fixture;
+    fixture.archive.node("e.txt").open_error = va::IoError{va::IoErrorKind::DeviceRemoved, 0, "unplugged"};
+    va::VerifyRequest request;
+    request.archive_uuid = fixture.archive_uuid;
+    const auto interrupted = fixture.verify(request);
+    fixture.archive.node("e.txt").open_error.reset();
+    CHECK(interrupted && interrupted->result == "INCOMPLETE" && interrupted->adding_chunk_size == 0);
+    if (!interrupted) {
+        return;
+    }
+    va::AbandonServices services{fixture.store, fixture.processes, fixture.host.host};
+    const auto shown = va::abandonable_verification(services, {fixture.archive_uuid, interrupted->run_id});
+    CHECK(shown && !shown->adds_chunk_hashes && shown->run_id == interrupted->run_id && shown->revision == 1 &&
+          shown->files == 3 && shown->label == "ARCH-0001");
+    const auto unnamed = va::abandonable_verification(services, {fixture.archive_uuid, std::nullopt});
+    CHECK(!unnamed && unnamed.error().kind == va::AbandonFailure::Kind::Refused &&
+          unnamed.error().message ==
+              "archive " + fixture.archive_uuid + " has no unfinished verification that adds chunk hashes");
+
+    const auto abandoned = va::abandon_verification(services, {fixture.archive_uuid, interrupted->run_id});
+    CHECK(abandoned && abandoned->run_id == interrupted->run_id && !abandoned->adds_chunk_hashes);
+    CHECK(fixture.store.setting("run:" + interrupted->run_id) == "");
+    const auto progress = fixture.store.progress(interrupted->run_id);
+    CHECK(progress && progress->empty());
+    const auto runs = fixture.store.verify_runs(fixture.archive_uuid);
+    CHECK(runs && runs->size() == 1 && runs->front().result == "INCOMPLETE");
+    CHECK(fixture.current_revision() == 1);
+
+    const auto again = va::abandon_verification(services, {fixture.archive_uuid, interrupted->run_id});
+    CHECK(!again && again.error().kind == va::AbandonFailure::Kind::Refused &&
+          again.error().message == "the stopped verification of archive " + fixture.archive_uuid +
+                                       " is no longer the one shown (it was resumed, finished or abandoned "
+                                       "meanwhile); nothing was changed");
+    // Its resume is no more.
+    request.resume_run = interrupted->run_id;
+    const auto resumed = fixture.verify(request);
+    CHECK(!resumed && resumed.error().message == "run " + interrupted->run_id + " is not an interrupted run");
+}
+
 // Never while an attempt of it runs (decision 0024): refused while its process
 // runs on this computer, and, where the process cannot be checked (another
 // computer's), while its record said less than 3 minutes ago that it works.
@@ -2213,6 +2259,7 @@ void add_chunk_hashes_tests()
     a_relocation_and_a_verification_that_adds_chunk_hashes_wait_for_each_other();
     two_at_once();
     abandoning_a_verification_that_adds_chunk_hashes();
+    abandoning_a_stopped_verification_that_adds_none();
     a_verification_that_adds_chunk_hashes_is_not_abandoned_while_it_runs();
     a_verification_of_an_earlier_revision_is_not_unfinished();
     a_run_abandoned_while_it_reads_saves_no_checkpoint();
