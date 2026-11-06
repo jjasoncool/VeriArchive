@@ -56,7 +56,8 @@ const Page* page_named(std::string_view name)
 // background, and the items of the details' menus; on a result page the
 // colours of its read speed chart and of the swatches of its legend, which
 // the chart takes its colours from, and its metrics; the count of unfinished
-// operations that stopped, in the colour of warnings (decision 0049); in
+// operations that stopped, in the colour of warnings, and the line under the
+// head of an archive's details once they scroll under it (decision 0049); in
 // Devices the model of
 // each device, at the head of its card.
 constexpr const char* style = R"css(
@@ -204,6 +205,9 @@ row.va-device-head label.title {
 .va-stopped {
     color: @warning_color;
     font-weight: bold;
+}
+.va-head-band.va-stuck {
+    box-shadow: 0 1px alpha(@window_fg_color, 0.12);
 }
 )css";
 

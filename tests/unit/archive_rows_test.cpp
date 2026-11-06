@@ -275,11 +275,10 @@ void banners()
     auto banner = result_banner(english, status, policy, now);
     CHECK(banner.heading == "FULL VERIFY PASSED" && banner.tone == Tone::Success && !banner.overdue);
     CHECK((banner.lines == std::vector<std::string>{
-                               "Last FULL verify: " + va::app::local_time(status.last_full->finished, english) +
-                               ", 3 days ago"}));
+                               "Last FULL verify: 3 days ago, " + va::app::local_time(status.last_full->finished, english)}));
     banner = result_banner(chinese, status, policy, now);
     CHECK(banner.heading == "完整驗證 通過");
-    CHECK(banner.lines.front() == "上次完整驗證：" + va::app::local_time(status.last_full->finished, chinese) + "，3 天前");
+    CHECK(banner.lines.front() == "上次完整驗證：3 天前，" + va::app::local_time(status.last_full->finished, chinese));
 
     // A later verification of another mode is said with its mode; each
     // overdue limit that fired names its days.

@@ -185,8 +185,10 @@ ResultBanner result_banner(const app::Text& text, const ArchiveStatus& status, c
     }
     if (status.last_full) {
         const auto& full = *status.last_full;
-        banner.lines.push_back(text.format("Last FULL verify: {}, {}", app::local_time(full.finished, text),
-            age_words(text, full.finished, now)));
+        // How long ago first, which the operator looks for, then when
+        // (decision 0049).
+        banner.lines.push_back(text.format("Last FULL verify: {}, {}", age_words(text, full.finished, now),
+            app::local_time(full.finished, text)));
     } else {
         banner.lines.push_back(text("No FULL verification yet. A FULL verification tells whether the media still "
                                     "holds the content that the archive's current revision recorded."));

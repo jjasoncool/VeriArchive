@@ -1,12 +1,14 @@
-// The details of an archive in Archives (decision 0046), beside the list: its
-// label, volume label and root, with a menu (compare it with another archive,
-// create a new revision, copy its UUID, export its manifest, relocate it to a
-// new carrier, retire it); a banner with the result of its last
-// FULL verification with its mode, when it ended and how long ago, the last
-// verification of another mode, and OVERDUE with the limit that fired (R-21,
-// R-105); FULL verify, whose menu holds adding chunk hashes (decision 0033),
-// strict metadata and the verification of a folder or volume the operator
-// chooses, and View result, the result page of that last FULL verification;
+// The details of an archive in Archives (decision 0046), beside the list. Its
+// head stays above them while they scroll (decision 0049): its label and the
+// result of its last FULL verification, its volume label and root, FULL
+// verify, whose menu holds adding chunk hashes (decision 0033), strict
+// metadata and the verification of a folder or volume the operator chooses,
+// Cross-check..., and a menu (create a new revision, copy its UUID, export its
+// manifest, relocate it to a new carrier, retire it). Under it, a banner with
+// the result of its last FULL verification with its mode, how long ago and
+// when it ended, the last verification of another mode, and OVERDUE with the
+// limit that fired (R-21, R-105), and View result, the result page of that
+// last FULL verification;
 // the device alerts of its last verification (decision 0044); its job as a
 // card, with Stop and Details (decision 0045); a stopped verification or
 // relocation that Resume continues; and its device, its content, its copies
@@ -131,10 +133,10 @@ void add_separator(GtkWidget* popover)
     add_to_menu(popover, line);
 }
 
-// The archive's menu (⋯): compare it with another archive, create a new
-// revision, copy its UUID; then export its manifest, relocate it to a new
-// carrier and retire it (decision 0046), each offered where it applies and
-// saying why not where it does not.
+// The archive's menu (⋯): create a new revision, copy its UUID; then export
+// its manifest, relocate it to a new carrier and retire it (decision 0046),
+// each offered where it applies and saying why not where it does not. A
+// cross-check has a button of its own beside FULL verify (decision 0049).
 GtkWidget* more_menu(GuiState& state, const ArchiveStatus& status)
 {
     const auto& text = state.text;
@@ -147,9 +149,6 @@ GtkWidget* more_menu(GuiState& state, const ArchiveStatus& status)
     gtk_widget_set_tooltip_text(button, label.c_str());
     gtk_accessible_update_property(GTK_ACCESSIBLE(button), GTK_ACCESSIBLE_PROPERTY_LABEL, label.c_str(), -1);
     GtkWidget* popover = menu_popover();
-    add_to_menu(popover, menu_item(state, popover, text("Cross-check..."),
-                             compare_choice(text, state.archives_page.statuses.size()), uuid,
-                             [](GuiState& state, const Uuid& archive) { compare_with(state, archive, std::nullopt); }));
     // The root its latest revision recorded, read where the attached volumes
     // do not hold the archive elsewhere now.
     const std::string root = status.header ? status.header->root_hint : std::string{};
@@ -240,10 +239,10 @@ GtkWidget* verify_button(GuiState& state, const ArchiveStatus& status, bool busy
     return button;
 }
 
-// The result of the last FULL verification (result_banner), with FULL verify,
-// not offered while the archive's job waits or works (`busy`), and View
-// result, which opens the result page of that verification.
-GtkWidget* banner(GuiState& state, const ArchiveStatus& status, bool busy)
+// The result of the last FULL verification (result_banner), with View
+// result, which opens the result page of that verification. FULL verify is in
+// the head above, which stays in view (decision 0049).
+GtkWidget* banner(GuiState& state, const ArchiveStatus& status)
 {
     const auto& text = state.text;
     const auto shown = result_banner(text, status, state.session->context.config.policy,
@@ -280,11 +279,8 @@ GtkWidget* banner(GuiState& state, const ArchiveStatus& status, bool busy)
         gtk_box_append(GTK_BOX(words), label);
     }
     gtk_box_append(GTK_BOX(box), words);
-    // One above the other, as wide as each other: side by side they would
-    // leave the words beside them a narrow column in the details' pane.
     GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_valign(actions, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(actions), verify_button(state, status, busy));
     if (status.last_full) {
         GtkWidget* view = gtk_button_new_with_label(text("View result").c_str());
         state.archives_page.view_result = view;
@@ -535,10 +531,14 @@ void show_details(GuiState& state)
     const auto& text = state.text;
     // The focus on what goes (FULL verify, a card's Stop) goes to FULL verify
     // of the details made anew.
-    const bool focused = keep_focus_from(state, page.detail);
+    const bool focused = keep_focus_from(state, page.detail) || keep_focus_from(state, page.detail_head);
     while (GtkWidget* child = gtk_widget_get_first_child(page.detail)) {
         gtk_box_remove(GTK_BOX(page.detail), child);
     }
+    while (GtkWidget* child = gtk_widget_get_first_child(page.detail_head)) {
+        gtk_box_remove(GTK_BOX(page.detail_head), child);
+    }
+    page.detail_title = nullptr;
     page.card.rows.clear();
     page.notice = nullptr;
     page.notice_key.reset();
@@ -560,8 +560,10 @@ void show_details(GuiState& state)
     });
     if (!state.session || found == page.statuses.end()) {
         adw_navigation_page_set_title(ADW_NAVIGATION_PAGE(page.detail_page), text("Archives").c_str());
+        gtk_widget_set_visible(page.detail_head, FALSE);
         return;
     }
+    gtk_widget_set_visible(page.detail_head, TRUE);
     const auto& status = *found;
     const auto& uuid = status.archive.archive_uuid;
     const auto label = display_label(status);
@@ -580,24 +582,48 @@ void show_details(GuiState& state)
         page.adding_refused = std::unexpected(store.error());
     }
 
-    // The head: the label, the volume label and root, the menu. Not
-    // selectable: the first of the details to take the focus would show its
-    // words selected; the content's root and archive UUID can be copied.
-    GtkWidget* head = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    GtkWidget* title_line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    GtkWidget* title = words_label(label, "title-1");
-    gtk_widget_set_hexpand(title, TRUE);
-    gtk_box_append(GTK_BOX(title_line), title);
+    const auto* job = active_job_of(state, uuid);
+    page.verify_busy = job != nullptr;
+
+    // The head, above the details, which stays in view while they scroll
+    // (decision 0049): the label and the result of the last FULL
+    // verification, the menu; the volume label and root, FULL verify and
+    // Cross-check... Not selectable: the first of the details to take the
+    // focus would show its words selected; the content's root and archive
+    // UUID can be copied.
+    GtkWidget* title_line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    page.detail_title = words_label(label, page.head_stuck ? "title-3" : "title-1");
+    gtk_box_append(GTK_BOX(title_line), page.detail_title);
+    GtkWidget* result = make_pill(row.result);
+    gtk_widget_set_valign(result, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(result, TRUE);
+    gtk_widget_set_halign(result, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(title_line), result);
     gtk_box_append(GTK_BOX(title_line), more_menu(state, status));
-    gtk_box_append(GTK_BOX(head), title_line);
+    gtk_box_append(GTK_BOX(page.detail_head), title_line);
+    GtkWidget* action_line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     std::string where = row.volume_label;
     if (status.header && !status.header->root_hint.empty()) {
         where = where.empty() ? status.header->root_hint : text.format("{} · {}", where, status.header->root_hint);
     }
-    if (!where.empty()) {
-        gtk_box_append(GTK_BOX(head), words_label(where, "dim-label"));
-    }
-    gtk_box_append(GTK_BOX(page.detail), head);
+    // A long root is cut in its middle, whole in its tooltip, so that the
+    // buttons beside it stay in view.
+    GtkWidget* where_label = gtk_label_new(where.c_str());
+    gtk_label_set_xalign(GTK_LABEL(where_label), 0.0f);
+    gtk_label_set_ellipsize(GTK_LABEL(where_label), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_widget_set_tooltip_text(where_label, where.empty() ? nullptr : where.c_str());
+    gtk_widget_add_css_class(where_label, "dim-label");
+    gtk_widget_set_hexpand(where_label, TRUE);
+    gtk_widget_set_valign(where_label, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(action_line), where_label);
+    gtk_box_append(GTK_BOX(action_line), verify_button(state, status, job != nullptr));
+    const auto cross_check = compare_choice(text, page.statuses.size());
+    GtkWidget* cross = row_button(state, text("Cross-check..."), uuid,
+        [](GuiState& state, const Uuid& archive) { compare_with(state, archive, std::nullopt); });
+    gtk_widget_set_sensitive(cross, cross_check.offered);
+    gtk_widget_set_tooltip_text(cross, cross_check.note.c_str());
+    gtk_box_append(GTK_BOX(action_line), cross);
+    gtk_box_append(GTK_BOX(page.detail_head), action_line);
 
     // Decision 0028: what is wrong with its latest manifest, and how to fix
     // it; the manifest's path can be copied.
@@ -611,9 +637,7 @@ void show_details(GuiState& state)
     gtk_widget_set_visible(page.attached_notice, FALSE);
     gtk_box_append(GTK_BOX(page.detail), page.attached_notice);
 
-    const auto* job = active_job_of(state, uuid);
-    page.verify_busy = job != nullptr;
-    gtk_box_append(GTK_BOX(page.detail), banner(state, status, job != nullptr));
+    gtk_box_append(GTK_BOX(page.detail), banner(state, status));
 
     // Decision 0044: the device alerts of its last verification; a slower
     // read leads to the result page of its run, whose chart shows where.

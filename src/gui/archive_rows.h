@@ -165,8 +165,8 @@ Choice adding_choice(const app::Text& text, const std::expected<std::optional<st
 // root of the archive is known (root_hint), which Register Archive is given.
 Choice new_revision_choice(const app::Text& text, const ArchiveStatus& status);
 
-// "Cross-check...": offered where the repository has another archive to
-// cross-check with.
+// "Cross-check..." beside FULL verify (decision 0049): offered where the
+// repository has another archive to cross-check with.
 Choice compare_choice(const app::Text& text, std::size_t archives);
 
 // A line of the group Copies (decision 0005, display only): an archive whose
