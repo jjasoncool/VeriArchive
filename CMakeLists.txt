@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(VeriArchive VERSION 1.2.0 LANGUAGES C CXX)
+project(VeriArchive VERSION 1.2.1 LANGUAGES C CXX)
 
 include(CTest)
 option(VERIARCHIVE_ALLOW_NONBASELINE_TOOLCHAIN "Allow local, non-release toolchain checks" OFF)
