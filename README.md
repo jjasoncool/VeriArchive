@@ -2,9 +2,10 @@
 
 English | [繁體中文](README.zh-TW.md)
 
-VeriArchive records integrity evidence for archive disks and later proves whether the archived
-files were modified, corrupted, deleted, or added to. It detects; it never repairs, restores, or
-creates backups. Windows and Linux, one codebase.
+**VeriArchive is a verification tool for archive disks.** It records integrity evidence when a
+disk is registered, and later proves whether the archived files were modified, corrupted, deleted,
+or added to. It detects; it never repairs, restores, or creates backups. Windows and Linux, one
+codebase.
 
 - **Register** a folder or volume: every file is read once and its BLAKE3 and SHA-256 are stored
   in a manifest (`.vam`), the baseline.
@@ -23,6 +24,26 @@ creates backups. Windows and Linux, one codebase.
 
 VeriArchive detects accidental corruption and unintended change. Tamper evidence (signed
 manifests) is not part of this version.
+
+## Why VeriArchive
+
+VeriArchive is a verification tool, not a backup or sync tool: it answers one question, whether
+an archive disk still holds exactly what was registered, and keeps the proof.
+
+Archive disks often sit on a shelf for years between uses. Meanwhile their content can change
+without anyone noticing: sectors decay, a USB enclosure fails, a file is deleted or overwritten by
+mistake, a sync tool replaces it. Found only when the data is needed, such damage is often too old
+to repair from a copy.
+
+VeriArchive records each file's fingerprints when a disk is registered, reads the whole disk again
+at each FULL verification and compares, and keeps a dated, hash-chained record of every run: which
+disk, on which day, which files were still intact and which had changed. It finds and proves; it
+does not repair, and it makes no backups.
+
+A change made on purpose to the files on a disk is found like any other. But whoever can also
+change the repository can change the records too: this version cannot prove that the records
+themselves were not altered. So keep the repository away from the archive disks, where whoever
+can reach those disks cannot change it, and back it up (see "Backing up the repository").
 
 ## Screenshots
 
@@ -137,7 +158,29 @@ from the pinned config, and only on first initialisation falls back to `<program
 `~/VeriArchive`. A configured location that is unavailable is an error, never a fallback. A
 repository inside the config file's folder is pinned relative to it, so a portable program
 folder with its `data` can be moved as a whole (decision 0019). Back up the repository: losing it
-loses the verification history.
+loses the verification history (see "Backing up the repository").
+
+## Backing up the repository
+
+The repository holds the only copy of the verification history: losing it loses every record of
+what was verified and when, and the manifests can then be recovered only from media copies, where
+registration wrote them. Back it up after verifications, to another physical disk or a network
+folder (NAS):
+
+1. Close the VeriArchive window (stop its jobs or wait for them) and make sure that no
+   `veriarchive-cli` command runs: a copy made while the database is being written may not be
+   consistent.
+2. Copy the whole repository folder, the RepositoryRoot that Settings and `repo info` show (in a
+   portable install, `bin/data` beside the program), with everything in it: `veriarchive.db`
+   (and `veriarchive.db-wal`, where there is one), `manifests`, `repository.json` and the other
+   folders.
+3. Never put the copy on a disk that holds a registered archive: if that disk fails, the archive
+   and the evidence of it are lost together, and whoever can reach that disk could change the copy
+   as well.
+
+To restore, copy the folder back to the RepositoryRoot, or put it elsewhere and point the config
+file's `repository` at it. Runs recorded after the backup are not in it: verify those archives
+again. Never use two copies of one repository at once: their histories would part.
 
 ## Graphical interface
 
