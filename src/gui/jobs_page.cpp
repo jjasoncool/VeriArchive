@@ -1013,6 +1013,7 @@ void show_operations(GuiState& state)
     use_session_repository(state);
     show_details_operations(state);
     show_results_operations(state);
+    show_overview(state);
     show_stopped(state);
     auto& page = state.jobs_page;
     if (!page.operations) {

@@ -56,9 +56,10 @@ const Page* page_named(std::string_view name)
 // background, and the items of the details' menus; on a result page the
 // colours of its read speed chart and of the swatches of its legend, which
 // the chart takes its colours from, and its metrics; the count of unfinished
-// operations that stopped, in the colour of warnings, and the line under the
-// head of an archive's details once they scroll under it (decision 0049); in
-// Devices the model of
+// operations that stopped, in the colour of warnings, the tiles of the
+// overview of Archives as cards, the one chosen outlined in the accent
+// colour, and the line under the head of an archive's details once they
+// scroll under it (decision 0049); in Devices the model of
 // each device, at the head of its card.
 constexpr const char* style = R"css(
 .va-ring {
@@ -205,6 +206,18 @@ row.va-device-head label.title {
 .va-stopped {
     color: @warning_color;
     font-weight: bold;
+}
+.va-tile {
+    padding: 8px 12px;
+    border-radius: 10px;
+    background-color: @card_bg_color;
+    color: @card_fg_color;
+    box-shadow: 0 0 0 1px alpha(@window_fg_color, 0.07), 0 1px 2px alpha(black, 0.06);
+}
+.va-tile:checked {
+    background-color: alpha(@accent_bg_color, 0.12);
+    color: @window_fg_color;
+    box-shadow: inset 0 0 0 2px @accent_color;
 }
 .va-head-band.va-stuck {
     box-shadow: 0 1px alpha(@window_fg_color, 0.12);

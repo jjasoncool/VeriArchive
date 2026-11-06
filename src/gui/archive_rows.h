@@ -92,6 +92,53 @@ struct ArchiveRow {
 ArchiveRow archive_row(const app::Text& text, const ArchiveStatus& status, IdentityShown shown,
     std::chrono::sys_seconds now);
 
+// The overview above the list of Archives (decision 0049): how the archives
+// stand, each count a filter of the list. A retired archive is no longer
+// expected to be verified, so it counts under All only; so does one whose
+// first registration has not finished, which cannot be verified yet.
+enum class ArchiveFilter {
+    All,
+    PassedInTime,       // its last FULL verification passed (with or without warnings), not OVERDUE, no device alert
+    Overdue,            // OVERDUE (R-105)
+    NeverFullVerified,  // no FULL verification has reached a result
+    LastFailed,         // the result its row shows FAILED
+    DeviceAlert,        // its last verification gave a device alert (decision 0044)
+};
+
+bool in_filter(const ArchiveStatus& status, ArchiveFilter filter);
+
+// A tile of the overview: the filter, its words, how many archives it
+// holds, and the tone of the dot beside its words.
+struct OverviewTile {
+    ArchiveFilter filter = ArchiveFilter::All;
+    std::string words;
+    std::size_t count = 0;
+    Tone tone = Tone::Neutral;
+};
+
+std::vector<OverviewTile> overview_tiles(const app::Text& text, const std::vector<ArchiveStatus>& statuses);
+
+// The overview's heading: how many archives there are, and how many need
+// attention: OVERDUE, never FULL verified, last FAILED, with a device alert,
+// or with a manifest that cannot be used (decision 0028); none retired.
+// "6 archives, 3 need attention"; "6 archives, none needs attention".
+std::string overview_heading(const app::Text& text, const std::vector<ArchiveStatus>& statuses);
+
+// The overview's line under it: how many archives are attached now, once a
+// read of the attached devices says (`attached`), and the latest FULL
+// verification of any archive, with its archive and how long ago: "4
+// attached · Last FULL verify: ARCH-0001, 4 days ago".
+std::string overview_line(const app::Text& text, const std::vector<ArchiveStatus>& statuses,
+    std::optional<std::size_t> attached, std::chrono::sys_seconds now);
+
+// Whether a FULL verification of the archive is due by its state alone:
+// never FULL verified, OVERDUE, or its last result FAILED; never for a
+// retired archive, one whose first registration has not finished, or one
+// whose manifest cannot be used. "Verify the attached archives that need it"
+// starts one for each such archive that is attached as recorded, has no job
+// in the window and no unfinished verification (decision 0049).
+bool needs_full_verify(const ArchiveStatus& status);
+
 // The banner at the top of an archive's details.
 struct ResultBanner {
     Tone tone = Tone::Neutral;  // of the result in the heading

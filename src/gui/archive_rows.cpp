@@ -172,6 +172,120 @@ ArchiveRow archive_row(const app::Text& text, const ArchiveStatus& status, Ident
     return row;
 }
 
+namespace {
+
+// Whether the archive is expected to be verified: not retired, its first
+// registration finished.
+bool expected_to_verify(const ArchiveStatus& status)
+{
+    return status.archive.status != "RETIRED" && status.archive.status != "REGISTRATION_INCOMPLETE";
+}
+
+// Whether its latest manifest cannot be used, other than lost by a retired
+// archive (decision 0028).
+bool manifest_problem(const ArchiveStatus& status)
+{
+    return status.unusable_manifest && !status.manifest_lost;
+}
+
+} // namespace
+
+bool in_filter(const ArchiveStatus& status, ArchiveFilter filter)
+{
+    if (filter == ArchiveFilter::All) {
+        return true;
+    }
+    if (!expected_to_verify(status)) {
+        return false;
+    }
+    const auto& run = shown_run(status);
+    const bool overdue = status.full_overdue || status.any_overdue;
+    const bool failed = run && run->result == "FAILED";
+    const bool alert = app::archive_alerts(status).any();
+    switch (filter) {
+    case ArchiveFilter::All:
+        return true;
+    case ArchiveFilter::PassedInTime:
+        return status.last_full && result_tone(status.last_full->result) != Tone::Error && !failed && !overdue &&
+               !alert && !manifest_problem(status);
+    case ArchiveFilter::Overdue:
+        return overdue;
+    case ArchiveFilter::NeverFullVerified:
+        return !status.last_full;
+    case ArchiveFilter::LastFailed:
+        return failed;
+    case ArchiveFilter::DeviceAlert:
+        return alert;
+    }
+    return false;
+}
+
+std::vector<OverviewTile> overview_tiles(const app::Text& text, const std::vector<ArchiveStatus>& statuses)
+{
+    std::vector<OverviewTile> tiles{
+        {ArchiveFilter::All, text("All"), 0, Tone::Neutral},
+        {ArchiveFilter::PassedInTime, text("Passed, not overdue"), 0, Tone::Success},
+        {ArchiveFilter::Overdue, text("OVERDUE"), 0, Tone::Warning},
+        {ArchiveFilter::NeverFullVerified, text("Never FULL verified"), 0, Tone::Neutral},
+        {ArchiveFilter::LastFailed, text("Last result FAILED"), 0, Tone::Error},
+        {ArchiveFilter::DeviceAlert, text("Device alert"), 0, Tone::Error},
+    };
+    for (auto& tile : tiles) {
+        tile.count = static_cast<std::size_t>(
+            std::ranges::count_if(statuses, [&](const ArchiveStatus& status) { return in_filter(status, tile.filter); }));
+    }
+    return tiles;
+}
+
+std::string overview_heading(const app::Text& text, const std::vector<ArchiveStatus>& statuses)
+{
+    const auto attention = std::ranges::count_if(statuses, [](const ArchiveStatus& status) {
+        if (!expected_to_verify(status)) {
+            return false;
+        }
+        return manifest_problem(status) || in_filter(status, ArchiveFilter::Overdue) ||
+               in_filter(status, ArchiveFilter::NeverFullVerified) || in_filter(status, ArchiveFilter::LastFailed) ||
+               in_filter(status, ArchiveFilter::DeviceAlert);
+    });
+    const auto archives = app::count_of(text, statuses.size(), app::Counted::Archive);
+    if (attention == 0) {
+        return text.format("{}, none needs attention", archives);
+    }
+    return attention == 1 ? text.format("{}, 1 needs attention", archives)
+                          : text.format("{}, {} need attention", archives, attention);
+}
+
+std::string overview_line(const app::Text& text, const std::vector<ArchiveStatus>& statuses,
+    std::optional<std::size_t> attached, std::chrono::sys_seconds now)
+{
+    std::vector<std::string> parts;
+    if (attached) {
+        parts.push_back(text.format("{} attached", *attached));
+    }
+    const ArchiveStatus* latest = nullptr;
+    for (const auto& status : statuses) {
+        if (status.last_full && (!latest || status.last_full->finished > latest->last_full->finished)) {
+            latest = &status;
+        }
+    }
+    if (latest) {
+        parts.push_back(text.format("Last FULL verify: {}, {}", display_label(*latest),
+            age_words(text, latest->last_full->finished, now)));
+    } else if (!statuses.empty()) {
+        parts.push_back(text("No FULL verification yet"));
+    }
+    return joined(text, parts);
+}
+
+bool needs_full_verify(const ArchiveStatus& status)
+{
+    if (!expected_to_verify(status) || status.unusable_manifest) {
+        return false;
+    }
+    return in_filter(status, ArchiveFilter::NeverFullVerified) || in_filter(status, ArchiveFilter::Overdue) ||
+           in_filter(status, ArchiveFilter::LastFailed);
+}
+
 ResultBanner result_banner(const app::Text& text, const ArchiveStatus& status, const Policy& policy,
     std::chrono::sys_seconds now)
 {

@@ -3,15 +3,21 @@
 // where its verifications start. Never a bare "integrity status" (R-21): each
 // row gives the result of the last FULL verification and how long ago it was,
 // with OVERDUE, the device alerts of the last verification, a retired archive
-// and a manifest that cannot be used. The registrations, verifications and
-// relocations that have not finished are listed in Jobs (decision 0049; they
-// were listed here); they are read every few seconds while the page is shown
-// (operations_poll.cpp), for the details' Resume. Each row starts with where
-// its archive is attached now, or that it is not, as the reads of the attached
-// devices find it (devices_poll.cpp), which run while the page is shown too.
-// Without archives, a page that leads to the first registration. A narrow
-// window shows the list, and the details of an archive in its place. The
-// result page of a run opens over the page (result_page.cpp).
+// and a manifest that cannot be used. Above the archives, an overview
+// (decision 0049): how many archives there are and how many need attention,
+// how many are attached and the latest FULL verification; a tile for each
+// standing (passed, OVERDUE, never FULL verified, last FAILED, a device
+// alert), which shows only those archives in the list; Verify the attached
+// archives that need it, Register Archive and Cross-check...; and the way to
+// the unfinished operations that stopped, which Jobs lists (decision 0049;
+// they were listed here). The unfinished operations are read every few
+// seconds while the page is shown (operations_poll.cpp), for the details'
+// Resume and the overview. Each row starts with where its archive is attached
+// now, or that it is not, as the reads of the attached devices find it
+// (devices_poll.cpp), which run while the page is shown too. Without archives,
+// a page that leads to the first registration. A narrow window shows the
+// list, and the details of an archive in its place. The result page of a run
+// opens over the page (result_page.cpp).
 #include "gui/gui_app.h"
 
 #include "app/plain_words.h"
@@ -177,6 +183,336 @@ void show_attached_lines(GuiState& state)
     }
 }
 
+// ---- The overview (decision 0049) ------------------------------------------
+
+const ArchiveStatus* listed_status(const GuiState& state, std::string_view archive)
+{
+    for (const auto& status : state.archives_page.statuses) {
+        if (status.archive.archive_uuid == archive) {
+            return &status;
+        }
+    }
+    return nullptr;
+}
+
+// The list shows the archives of the filter its tiles chose.
+gboolean shows_row(GtkListBoxRow* row, gpointer data)
+{
+    const auto& state = *static_cast<const GuiState*>(data);
+    const char* uuid = archive_of(row);
+    const auto* status = uuid ? listed_status(state, uuid) : nullptr;
+    return !status || in_filter(*status, state.archive_filter);
+}
+
+// Whether a job of the window waits or works on the archive, or one of its
+// operations is unfinished (stopped or not): Resume or Abandon... comes
+// first.
+bool busy_with(const GuiState& state, const Uuid& archive)
+{
+    if (state.jobs.reads(std::nullopt, archive)) {
+        return true;
+    }
+    return std::ranges::any_of(state.operations.watches, [&](const app::OperationWatch& watch) {
+        return watch.operation().archive_uuid == archive;
+    });
+}
+
+// The archives that "Verify the attached archives that need it" verifies:
+// those that need a FULL verification by their state (needs_full_verify),
+// attached as recorded as the latest read of the attached devices found
+// them, behind no other enclosure (whose verification asks first, decision
+// 0047), and not busy (busy_with).
+std::vector<Uuid> archives_needing(const GuiState& state)
+{
+    std::vector<Uuid> needing;
+    const auto* read = attached_now(state);
+    if (!read) {
+        return needing;
+    }
+    for (const auto& status : state.archives_page.statuses) {
+        if (!needs_full_verify(status) || busy_with(state, status.archive.archive_uuid)) {
+            continue;
+        }
+        const auto attached = archive_attached(state.text, read, status, state.identity_shown);
+        if (!attached.line || attached.line->state != Attached::Here ||
+            enclosure_case(read, status, state.identity_shown)) {
+            continue;
+        }
+        needing.push_back(status.archive.archive_uuid);
+    }
+    return needing;
+}
+
+// The list again with the filter chosen. The archive shown in the details
+// stays where the list shows it; otherwise the first one it shows is chosen.
+void filter_list(GuiState& state)
+{
+    auto& page = state.archives_page;
+    if (!page.list) {
+        return;
+    }
+    gtk_list_box_invalidate_filter(GTK_LIST_BOX(page.list));
+    if (state.archive_selected) {
+        if (const auto* status = listed_status(state, *state.archive_selected);
+            status && in_filter(*status, state.archive_filter)) {
+            return;
+        }
+    }
+    for (const auto& status : page.statuses) {
+        if (in_filter(status, state.archive_filter)) {
+            select_archive(state, status.archive.archive_uuid, false);
+            return;
+        }
+    }
+}
+
+// The tiles shown, or folded away; folded, the list shows every archive.
+void show_fold(GuiState& state)
+{
+    auto& page = state.archives_page;
+    if (!page.fold || !page.tiles) {
+        return;
+    }
+    const bool folded = state.overview_folded;
+    gtk_widget_set_visible(page.tiles, !folded);
+    gtk_button_set_icon_name(GTK_BUTTON(page.fold), folded ? "pan-down-symbolic" : "pan-up-symbolic");
+    const auto words = folded ? state.text("Show the tiles") : state.text("Hide the tiles");
+    gtk_widget_set_tooltip_text(page.fold, words.c_str());
+    gtk_accessible_update_property(GTK_ACCESSIBLE(page.fold), GTK_ACCESSIBLE_PROPERTY_LABEL, words.c_str(), -1);
+    if (folded && state.archive_filter != ArchiveFilter::All) {
+        state.archive_filter = ArchiveFilter::All;
+        filter_list(state);
+        show_overview(state);
+    }
+}
+
+// Verify the attached archives that need it: a FULL verification of each,
+// as FULL verify of its details starts it; those of one device wait for one
+// another (decision 0045).
+void verify_needing(GuiState& state)
+{
+    // Read again: a job may have started on one since the overview was shown.
+    const auto needing = archives_needing(state);
+    std::string names;
+    for (const auto& archive : needing) {
+        verify_archive(state, archive, VerifyChoice::Full);
+        const auto* status = listed_status(state, archive);
+        const auto label = status ? display_label(*status) : archive.substr(0, 8);
+        names = names.empty() ? label : state.text.format("{}, {}", names, label);
+    }
+    if (!needing.empty()) {
+        show_toast(state,
+            needing.size() == 1 ? state.text.format("Started 1 FULL verification: {}", names)
+                                : state.text.format("Started {} FULL verifications: {}", needing.size(), names),
+            std::nullopt, ToastKind::Started);
+    }
+    show_overview(state);
+}
+
+// A button of the overview with an icon and words.
+GtkWidget* overview_button(const char* icon, const std::string& words)
+{
+    GtkWidget* button = gtk_button_new();
+    GtkWidget* face = adw_button_content_new();
+    adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(face), icon);
+    adw_button_content_set_label(ADW_BUTTON_CONTENT(face), words.c_str());
+    // In a narrow window its words are cut short rather than widen it.
+    adw_button_content_set_can_shrink(ADW_BUTTON_CONTENT(face), TRUE);
+    gtk_button_set_child(GTK_BUTTON(button), face);
+    gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
+    return button;
+}
+
+// Puts `child` into the flow box `box`, whose own child around it takes no
+// focus: the button in it does.
+void add_to_flow(GtkWidget* box, GtkWidget* child)
+{
+    gtk_flow_box_append(GTK_FLOW_BOX(box), child);
+    if (GtkWidget* around = gtk_widget_get_parent(child)) {
+        gtk_widget_set_focusable(around, FALSE);
+    }
+}
+
+GtkWidget* flow_box()
+{
+    GtkWidget* box = gtk_flow_box_new();
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(box), GTK_SELECTION_NONE);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(box), 8);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(box), 8);
+    return box;
+}
+
+// A tile: how many archives, the dot of its tone and its words; chosen, the
+// list shows only those. One tile is chosen at a time, All at first.
+GtkWidget* overview_tile(GuiState& state, const OverviewTile& tile, GtkWidget* group_with)
+{
+    GtkWidget* button = gtk_toggle_button_new();
+    gtk_widget_add_css_class(button, "va-tile");
+    if (group_with) {
+        gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(button), GTK_TOGGLE_BUTTON(group_with));
+    }
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkWidget* count = gtk_label_new("0");
+    gtk_label_set_xalign(GTK_LABEL(count), 0.0f);
+    gtk_widget_add_css_class(count, "title-2");
+    gtk_widget_add_css_class(count, "numeric");
+    gtk_box_append(GTK_BOX(box), count);
+    GtkWidget* line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget* dot = make_dot(tile.tone);
+    gtk_widget_set_valign(dot, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(line), dot);
+    GtkWidget* words = gtk_label_new(tile.words.c_str());
+    gtk_label_set_xalign(GTK_LABEL(words), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(words), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(words), PANGO_WRAP_WORD_CHAR);
+    // Words longer than this wrap, so that the six tiles share one line
+    // where the window is wide enough (English words are the longest).
+    gtk_label_set_max_width_chars(GTK_LABEL(words), 12);
+    gtk_widget_add_css_class(words, "caption");
+    gtk_widget_add_css_class(words, "dim-label");
+    gtk_box_append(GTK_BOX(line), words);
+    gtk_box_append(GTK_BOX(box), line);
+    gtk_button_set_child(GTK_BUTTON(button), box);
+    g_object_set_data(G_OBJECT(button), "va-count", count);
+    g_object_set_data(G_OBJECT(button), "va-filter", GINT_TO_POINTER(static_cast<int>(tile.filter)));
+    g_signal_connect(button, "toggled", G_CALLBACK(+[](GtkToggleButton* toggled, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        if (state.archives_page.overview_filling || !gtk_toggle_button_get_active(toggled)) {
+            return;
+        }
+        guarded(
+            [&] {
+                state.archive_filter = static_cast<ArchiveFilter>(
+                    GPOINTER_TO_INT(g_object_get_data(G_OBJECT(toggled), "va-filter")));
+                filter_list(state);
+            },
+            [&](const Report& report) { show_archives_status(state, report); });
+    }), &state);
+    return button;
+}
+
+// The overview's words, tiles and buttons, which show_overview fills.
+GtkWidget* build_overview(GuiState& state)
+{
+    auto& page = state.archives_page;
+    const auto& text = state.text;
+    GtkWidget* overview = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_start(overview, 24);
+    gtk_widget_set_margin_end(overview, 24);
+    gtk_widget_set_margin_top(overview, 12);
+    gtk_widget_set_margin_bottom(overview, 12);
+
+    GtkWidget* words = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    page.status = make_label("");
+    gtk_widget_add_css_class(page.status, "title-4");
+    gtk_box_append(GTK_BOX(words), page.status);
+    page.overview_line = make_label("");
+    gtk_widget_add_css_class(page.overview_line, "dim-label");
+    gtk_widget_add_css_class(page.overview_line, "numeric");
+    gtk_box_append(GTK_BOX(words), page.overview_line);
+    // Shown only while the attached devices cannot be read, when the rows say
+    // nothing of where their archives are attached (show_attached_lines).
+    page.devices_problem = make_label("");
+    gtk_widget_add_css_class(page.devices_problem, "dim-label");
+    gtk_widget_set_visible(page.devices_problem, FALSE);
+    gtk_box_append(GTK_BOX(words), page.devices_problem);
+    // Shown only while a step of retiring an archive runs (decision 0046).
+    page.abandoning = gtk_progress_bar_new();
+    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(page.abandoning), TRUE);
+    gtk_widget_set_visible(page.abandoning, FALSE);
+    gtk_box_append(GTK_BOX(words), page.abandoning);
+    gtk_box_append(GTK_BOX(overview), words);
+
+    // The buttons, each as wide as its words; Refresh and the fold at the end.
+    GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    page.verify_needed = overview_button("media-playback-start-symbolic", "");
+    gtk_widget_add_css_class(page.verify_needed, "suggested-action");
+    g_signal_connect(page.verify_needed, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded([&] { verify_needing(state); }, [&](const Report& report) { show_archives_status(state, report); });
+    }), &state);
+    gtk_box_append(GTK_BOX(actions), page.verify_needed);
+    GtkWidget* add = overview_button("list-add-symbolic", text("Register Archive"));
+    g_signal_connect(add, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded([&] { open_register_wizard(state); }, [&](const Report& report) { show_archives_status(state, report); });
+    }), &state);
+    gtk_box_append(GTK_BOX(actions), add);
+    GtkWidget* cross = overview_button("edit-copy-symbolic", text("Cross-check..."));
+    g_signal_connect(cross, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded(
+            [&] {
+                const auto& statuses = state.archives_page.statuses;
+                if (state.archive_selected) {
+                    compare_with(state, *state.archive_selected, std::nullopt);
+                } else if (!statuses.empty()) {
+                    compare_with(state, statuses.front().archive.archive_uuid, std::nullopt);
+                }
+            },
+            [&](const Report& report) { show_archives_status(state, report); });
+    }), &state);
+    gtk_box_append(GTK_BOX(actions), cross);
+    GtkWidget* gap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(gap, TRUE);
+    gtk_box_append(GTK_BOX(actions), gap);
+    GtkWidget* refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
+    page.refresh = refresh;
+    gtk_widget_add_css_class(refresh, "flat");
+    gtk_widget_set_tooltip_text(refresh, text("Refresh").c_str());
+    gtk_accessible_update_property(GTK_ACCESSIBLE(refresh), GTK_ACCESSIBLE_PROPERTY_LABEL, text("Refresh").c_str(), -1);
+    g_signal_connect(refresh, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded(
+            [&] {
+                refresh_archives(state);
+                start_poll(state);
+                read_devices(state, DevicesReadWhy::Refresh);
+            },
+            [&](const Report& report) { show_archives_status(state, report); });
+    }), &state);
+    gtk_widget_set_valign(refresh, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(actions), refresh);
+    page.fold = gtk_button_new();
+    gtk_widget_add_css_class(page.fold, "flat");
+    g_signal_connect(page.fold, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        state.overview_folded = !state.overview_folded;
+        show_fold(state);
+    }), &state);
+    gtk_widget_set_valign(page.fold, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(actions), page.fold);
+    gtk_box_append(GTK_BOX(overview), actions);
+
+    // A tile for each filter, as many on a line as the window's width allows.
+    page.tiles = flow_box();
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(page.tiles), TRUE);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(page.tiles), 2);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(page.tiles), 6);
+    page.tile_buttons.clear();
+    GtkWidget* first = nullptr;
+    for (const auto& tile : overview_tiles(text, {})) {
+        GtkWidget* button = overview_tile(state, tile, first);
+        first = first ? first : button;
+        page.tile_buttons.emplace_back(tile.filter, button);
+        add_to_flow(page.tiles, button);
+    }
+    gtk_box_append(GTK_BOX(overview), page.tiles);
+
+    // The way to the unfinished operations that stopped, in Jobs.
+    page.stopped = overview_button("media-playback-pause-symbolic", "");
+    gtk_widget_add_css_class(page.stopped, "flat");
+    gtk_widget_set_halign(page.stopped, GTK_ALIGN_START);
+    gtk_widget_set_visible(page.stopped, FALSE);
+    g_signal_connect(page.stopped, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded([&] { show_page(state, "jobs"); }, [&](const Report& report) { show_archives_status(state, report); });
+    }), &state);
+    gtk_box_append(GTK_BOX(overview), page.stopped);
+    show_fold(state);
+    return overview;
+}
+
 // A narrow window shows the details in place of the list, and the focus goes
 // with them; a wide one shows both, and the focus stays in the list.
 void show_details_pane(GuiState& state)
@@ -266,6 +602,12 @@ GtkWidget* build_split(GuiState& state)
     gtk_widget_set_valign(page.list, GTK_ALIGN_START);
     gtk_accessible_update_property(
         GTK_ACCESSIBLE(page.list), GTK_ACCESSIBLE_PROPERTY_LABEL, text("Archives").c_str(), -1);
+    // The tiles of the overview choose which archives it shows (decision 0049).
+    gtk_list_box_set_filter_func(GTK_LIST_BOX(page.list), shows_row, &state, nullptr);
+    GtkWidget* none = make_label(text("No archive is in this group. Choose All to see every archive."));
+    gtk_widget_add_css_class(none, "dim-label");
+    set_margins(none, 18);
+    gtk_list_box_set_placeholder(GTK_LIST_BOX(page.list), none);
     // Choosing a row, with a click or the arrow keys, shows its details
     // beside the list; a click or Enter also shows them in place of the list
     // in a narrow window.
@@ -486,8 +828,6 @@ void refresh_archives(GuiState& state)
     // meanwhile from the command line or another window. (History reads
     // them as it is shown.)
     refresh_compare_dialog(state);
-    gtk_label_set_text(
-        GTK_LABEL(page.status), app::count_of(text, page.statuses.size(), app::Counted::Archive).c_str());
     if (page.statuses.empty()) {
         state.archive_selected.reset();
         show_empty(state, true);
@@ -517,10 +857,87 @@ void refresh_archives(GuiState& state)
         }
     }
     page.filling = false;
+    filter_list(state);
     // Where each is attached, as the latest read of the attached devices
     // found it; the details say it too.
     show_attached_lines(state);
     show_details(state);
+    show_overview(state);
+}
+
+void show_overview(GuiState& state)
+{
+    auto& page = state.archives_page;
+    if (!page.status) {
+        return;
+    }
+    const auto& text = state.text;
+    const auto& statuses = page.statuses;
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    // The heading says how the archives stand, unless the list could not be
+    // read, which it says instead (refresh_archives).
+    if (!gtk_widget_has_css_class(page.status, "error")) {
+        gtk_label_set_text(GTK_LABEL(page.status), state.session ? overview_heading(text, statuses).c_str() : "");
+    }
+    std::optional<std::size_t> attached;
+    if (const auto* read = attached_now(state)) {
+        attached = static_cast<std::size_t>(std::ranges::count_if(statuses, [&](const ArchiveStatus& status) {
+            const auto shown = archive_attached(text, read, status, state.identity_shown);
+            return shown.line && shown.line->state == Attached::Here;
+        }));
+    }
+    const auto line = state.session ? overview_line(text, statuses, attached, now) : std::string{};
+    gtk_label_set_text(GTK_LABEL(page.overview_line), line.c_str());
+    gtk_widget_set_visible(page.overview_line, !line.empty());
+
+    // The tiles' counts; the one chosen, as the filter says.
+    const auto tiles = overview_tiles(text, statuses);
+    page.overview_filling = true;
+    for (const auto& [filter, button] : page.tile_buttons) {
+        const auto tile = std::ranges::find(tiles, filter, &OverviewTile::filter);
+        if (tile != tiles.end()) {
+            gtk_label_set_text(GTK_LABEL(g_object_get_data(G_OBJECT(button), "va-count")),
+                std::to_string(tile->count).c_str());
+            const auto said = text.format("{}: {}", tile->words, tile->count);
+            gtk_accessible_update_property(GTK_ACCESSIBLE(button), GTK_ACCESSIBLE_PROPERTY_LABEL, said.c_str(), -1);
+        }
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), filter == state.archive_filter);
+    }
+    page.overview_filling = false;
+
+    // Verify the attached archives that need it, with how many it verifies
+    // and their labels in its tooltip.
+    page.needing = archives_needing(state);
+    if (auto* face = gtk_button_get_child(GTK_BUTTON(page.verify_needed))) {
+        adw_button_content_set_label(ADW_BUTTON_CONTENT(face),
+            text.format("Verify the attached archives that need it ({})", page.needing.size()).c_str());
+    }
+    gtk_widget_set_sensitive(page.verify_needed, !page.needing.empty());
+    std::vector<std::string> labels;
+    for (const auto& archive : page.needing) {
+        if (const auto* status = listed_status(state, archive)) {
+            labels.push_back(display_label(*status));
+        }
+    }
+    std::string names;
+    for (const auto& label : labels) {
+        names = names.empty() ? label : text.format("{}, {}", names, label);
+    }
+    gtk_widget_set_tooltip_text(page.verify_needed,
+        labels.empty() ? text("No attached archive is OVERDUE, never FULL verified or last FAILED.").c_str()
+                       : text.format("FULL verify {}: OVERDUE, never FULL verified or last FAILED, and attached; those "
+                                     "on one device one after another", names)
+                             .c_str());
+
+    // The way to the unfinished operations that stopped, in Jobs.
+    const auto stopped = stopped_operations(state);
+    if (auto* face = gtk_button_get_child(GTK_BUTTON(page.stopped))) {
+        adw_button_content_set_label(ADW_BUTTON_CONTENT(face),
+            (stopped == 1 ? text("1 unfinished operation has stopped: see Jobs")
+                          : text.format("{} unfinished operations have stopped: see Jobs", stopped))
+                .c_str());
+    }
+    gtk_widget_set_visible(page.stopped, stopped > 0);
 }
 
 void show_attached(GuiState& state)
@@ -530,6 +947,7 @@ void show_attached(GuiState& state)
     }
     show_attached_lines(state);
     show_details_attached(state);
+    show_overview(state);
 }
 
 void select_archive(GuiState& state, const Uuid& archive, bool show_content)
@@ -562,65 +980,7 @@ GtkWidget* build_archives_page(GuiState& state)
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     page.page = box;
 
-    // The head: how many archives, the progress of a step of abandoning,
-    // Register Archive (its dialog) and Refresh. The page's name is the
-    // header bar's title above it, as on the other pages.
-    GtkWidget* head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_set_margin_start(head, 24);
-    gtk_widget_set_margin_end(head, 24);
-    gtk_widget_set_margin_top(head, 12);
-    gtk_widget_set_margin_bottom(head, 12);
-    page.status = make_label("");
-    gtk_widget_add_css_class(page.status, "dim-label");
-    gtk_widget_add_css_class(page.status, "numeric");
-    gtk_widget_set_hexpand(page.status, TRUE);
-    gtk_widget_set_valign(page.status, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(head), page.status);
-    // Shown only while the attached devices cannot be read, when the rows say
-    // nothing of where their archives are attached (show_attached_lines).
-    page.devices_problem = make_label("");
-    gtk_label_set_ellipsize(GTK_LABEL(page.devices_problem), PANGO_ELLIPSIZE_END);
-    gtk_widget_add_css_class(page.devices_problem, "dim-label");
-    gtk_widget_set_valign(page.devices_problem, GTK_ALIGN_CENTER);
-    gtk_widget_set_visible(page.devices_problem, FALSE);
-    gtk_box_append(GTK_BOX(head), page.devices_problem);
-    // Shown only while a step of abandoning runs (decisions 0025, 0026, 0033).
-    page.abandoning = gtk_progress_bar_new();
-    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(page.abandoning), TRUE);
-    gtk_widget_set_valign(page.abandoning, GTK_ALIGN_CENTER);
-    gtk_widget_set_size_request(page.abandoning, 220, -1);
-    gtk_widget_set_visible(page.abandoning, FALSE);
-    gtk_box_append(GTK_BOX(head), page.abandoning);
-    GtkWidget* add = gtk_button_new();
-    GtkWidget* add_face = adw_button_content_new();
-    adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(add_face), "list-add-symbolic");
-    adw_button_content_set_label(ADW_BUTTON_CONTENT(add_face), text("Register Archive").c_str());
-    gtk_button_set_child(GTK_BUTTON(add), add_face);
-    gtk_widget_set_valign(add, GTK_ALIGN_CENTER);
-    g_signal_connect(add, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
-        auto& state = *static_cast<GuiState*>(data);
-        guarded([&] { open_register_wizard(state); }, [&](const Report& report) { show_archives_status(state, report); });
-    }), &state);
-    gtk_box_append(GTK_BOX(head), add);
-    GtkWidget* refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
-    page.refresh = refresh;
-    gtk_widget_set_valign(refresh, GTK_ALIGN_CENTER);
-    gtk_widget_add_css_class(refresh, "flat");
-    gtk_widget_set_tooltip_text(refresh, text("Refresh").c_str());
-    gtk_accessible_update_property(GTK_ACCESSIBLE(refresh), GTK_ACCESSIBLE_PROPERTY_LABEL, text("Refresh").c_str(), -1);
-    g_signal_connect(refresh, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
-        auto& state = *static_cast<GuiState*>(data);
-        guarded(
-            [&] {
-                refresh_archives(state);
-                start_poll(state);
-                read_devices(state, DevicesReadWhy::Refresh);
-            },
-            [&](const Report& report) { show_archives_status(state, report); });
-    }), &state);
-    gtk_box_append(GTK_BOX(head), refresh);
-    gtk_box_append(GTK_BOX(box), head);
-
+    gtk_box_append(GTK_BOX(box), build_overview(state));
 
     page.views = gtk_stack_new();
     gtk_widget_set_vexpand(page.views, TRUE);
@@ -628,9 +988,9 @@ GtkWidget* build_archives_page(GuiState& state)
     gtk_stack_add_named(GTK_STACK(page.views), build_empty(state), "empty");
     gtk_box_append(GTK_BOX(box), page.views);
 
-    // The unfinished operations (for the details' Resume), and the attached
-    // devices, are read only while the page is on screen: "map" when it is
-    // shown (also when the
+    // The unfinished operations (for the details' Resume and the overview),
+    // and the attached devices, are read only while the page is on screen:
+    // "map" when it is shown (also when the
     // window first appears on it), "unmap" when another page is chosen or the
     // window closes, e.g. when a language change replaces it.
     g_signal_connect(box, "map", G_CALLBACK(+[](GtkWidget* shown, gpointer data) {

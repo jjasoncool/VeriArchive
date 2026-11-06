@@ -559,6 +559,82 @@ void operations_in_details()
 
 } // namespace
 
+// Decision 0049: the overview above the list, whose tiles filter it, and the
+// archives that "Verify the attached archives that need it" covers by their
+// state. Six sample archives, each standing one way.
+void overview()
+{
+    using va::gui::ArchiveFilter;
+    const Text english;
+    const Text chinese(Language::TraditionalChinese);
+
+    const auto passed = sample_status();
+    auto overdue = sample_status();
+    overdue.archive.label = "ARCH-SAMPLE-2";
+    overdue.full_overdue = true;
+    auto never = sample_status();
+    never.archive.label = "ARCH-SAMPLE-3";
+    never.last_full.reset();
+    never.last_any.reset();
+    never.last_run.reset();
+    auto failed = sample_status();
+    failed.archive.label = "ARCH-SAMPLE-4";
+    failed.last_full = sample_run("c0ffee00-0000-4000-9000-000000000004", "FAILED", 2h);
+    failed.last_any = failed.last_full;
+    failed.last_run = failed.last_full;
+    auto alerted = sample_status();
+    alerted.archive.label = "ARCH-SAMPLE-5";
+    alerted.last_run = sample_run("c0ffee00-0000-4000-9000-000000000005", "PASSED", 1h, counts_with_health("warning"));
+    auto retired = sample_status();
+    retired.archive.label = "ARCH-SAMPLE-6";
+    retired.archive.status = "RETIRED";
+    retired.last_full.reset();
+    retired.last_any.reset();
+    retired.last_run.reset();
+
+    CHECK(in_filter(passed, ArchiveFilter::PassedInTime) && !in_filter(passed, ArchiveFilter::Overdue));
+    CHECK(in_filter(overdue, ArchiveFilter::Overdue) && !in_filter(overdue, ArchiveFilter::PassedInTime));
+    CHECK(in_filter(never, ArchiveFilter::NeverFullVerified));
+    CHECK(in_filter(failed, ArchiveFilter::LastFailed) && !in_filter(failed, ArchiveFilter::PassedInTime));
+    CHECK(in_filter(alerted, ArchiveFilter::DeviceAlert) && !in_filter(alerted, ArchiveFilter::PassedInTime));
+    // A retired archive is no longer expected to be verified: All only.
+    CHECK(in_filter(retired, ArchiveFilter::All) && !in_filter(retired, ArchiveFilter::NeverFullVerified));
+
+    const std::vector<va::ArchiveStatus> all{passed, overdue, never, failed, alerted, retired};
+    const auto tiles = va::gui::overview_tiles(english, all);
+    std::vector<std::size_t> counts;
+    std::vector<std::string> words;
+    for (const auto& tile : tiles) {
+        counts.push_back(tile.count);
+        words.push_back(tile.words);
+    }
+    CHECK((counts == std::vector<std::size_t>{6, 1, 1, 1, 1, 1}));
+    CHECK((words == std::vector<std::string>{"All", "Passed, not overdue", "OVERDUE", "Never FULL verified",
+                        "Last result FAILED", "Device alert"}));
+    CHECK(va::gui::overview_tiles(chinese, all)[1].words == "通過且未逾期");
+
+    CHECK(va::gui::overview_heading(english, all) == "6 archives, 4 need attention");
+    CHECK(va::gui::overview_heading(chinese, all) == "6 個封存，其中 4 個需要處理");
+    CHECK(va::gui::overview_heading(english, {passed}) == "1 archive, none needs attention");
+    CHECK(va::gui::overview_heading(english, {passed, failed}) == "2 archives, 1 needs attention");
+
+    // The latest FULL verification of any archive: ARCH-SAMPLE-4's, 2 hours
+    // ago, which FAILED; the count attached once a read says it.
+    CHECK(va::gui::overview_line(english, all, 4, now) == "4 attached · Last FULL verify: ARCH-SAMPLE-4, 2 hours ago");
+    CHECK(va::gui::overview_line(chinese, all, std::nullopt, now) == "上次完整驗證：ARCH-SAMPLE-4，2 小時前");
+    CHECK(va::gui::overview_line(english, {never}, 0, now) == "0 attached · No FULL verification yet");
+
+    // FULL verify is due for an archive OVERDUE, never FULL verified or last
+    // FAILED; not for one that passed in time, one with a device alert alone,
+    // nor a retired one.
+    CHECK(!va::gui::needs_full_verify(passed) && !va::gui::needs_full_verify(alerted));
+    CHECK(va::gui::needs_full_verify(overdue) && va::gui::needs_full_verify(never) && va::gui::needs_full_verify(failed));
+    CHECK(!va::gui::needs_full_verify(retired));
+    auto incomplete = never;
+    incomplete.archive.status = "REGISTRATION_INCOMPLETE";
+    CHECK(!va::gui::needs_full_verify(incomplete));
+}
+
 void archive_rows_tests()
 {
     ages();
@@ -569,4 +645,5 @@ void archive_rows_tests()
     copies();
     runs();
     operations_in_details();
+    overview();
 }

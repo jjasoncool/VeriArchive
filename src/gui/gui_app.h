@@ -232,6 +232,10 @@ struct GuiState {
     std::optional<Uuid> archive_selected;
     std::map<Uuid, std::uint64_t> verification_jobs;
     std::optional<InterruptedRun> interrupted_run;
+    // Its overview (decision 0049): the filter its tiles chose for the list,
+    // and whether the tiles are folded away.
+    ArchiveFilter archive_filter = ArchiveFilter::All;
+    bool overview_folded = false;
 
     // The run that each ended verification job of the window recorded, by
     // the job: View result on its rows in Jobs and in its details opens the
@@ -332,15 +336,29 @@ struct GuiState {
         std::optional<AttachedLine> shown;
     };
 
-    // Archives (decision 0046): the page's head; the list of archives beside
-    // the details of the one selected, or, without archives, a page that
-    // leads to the first registration. A narrow window shows the list or the
-    // details. The unfinished operations show in Jobs (decision 0049).
+    // Archives (decision 0046): the overview above the archives (decision
+    // 0049); the list of archives beside the details of the one selected, or,
+    // without archives, a page that leads to the first registration. A narrow
+    // window shows the list or the details.
     struct {
         GtkWidget* navigation = nullptr;       // AdwNavigationView: the page, the result pages opened over it
         GtkWidget* root = nullptr;             // its first page (AdwNavigationPage), which holds `page`
         GtkWidget* page = nullptr;             // the page: the operations are read while it is shown
-        GtkWidget* status = nullptr;           // how many archives, or why none can be listed
+        // The overview (decision 0049): its heading, how many archives and
+        // how many need attention, or why none can be listed; the line under
+        // it; the tiles, each a filter of the list, and their box, which can
+        // be folded away; Verify the attached archives that need it, and the
+        // archives it would verify; and the way to the unfinished operations
+        // that stopped, in Jobs.
+        GtkWidget* status = nullptr;
+        GtkWidget* overview_line = nullptr;
+        GtkWidget* tiles = nullptr;            // GtkFlowBox
+        std::vector<std::pair<ArchiveFilter, GtkWidget*>> tile_buttons;  // GtkToggleButton of each filter
+        GtkWidget* fold = nullptr;             // folds the tiles away, or shows them
+        GtkWidget* verify_needed = nullptr;
+        std::vector<Uuid> needing;             // what it verifies, as the overview was shown last
+        GtkWidget* stopped = nullptr;          // "N unfinished operations stopped...", hidden at 0
+        bool overview_filling = false;         // a tile toggled by the code, not the operator
         GtkWidget* devices_problem = nullptr;  // that the attached devices cannot be read (Devices says why);
                                                // hidden while they can
         GtkWidget* refresh = nullptr;          // Refresh, which holds the focus while what had it is made anew
@@ -738,10 +756,15 @@ void show_details_operations(GuiState& state);
 
 // Draws the unfinished operations of the latest read in Jobs, in the
 // interface language, hidden when nothing is unfinished; counts those that
-// stopped on the jobs button and the Jobs row (decision 0049); and shows
-// the details' and result pages' parts that they change.
+// stopped on the jobs button, the Jobs row and the overview of Archives
+// (decision 0049); and shows the details' and result pages' parts that they
+// change.
 void show_operations(GuiState& state);
 
+// The overview above the list of Archives (decision 0049), made again from
+// what the list read, the latest read of the attached devices, the jobs of
+// the window and the latest read of the unfinished operations.
+void show_overview(GuiState& state);
 
 // The unfinished operations that have stopped, of the latest read, which
 // Resume or Abandon... in Jobs can finish.
