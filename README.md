@@ -36,8 +36,8 @@ The pages of the graphical interface, showing sample data made by
 | ![A verification's result](docs/images/en/09-result.png) | ![Register Archive](docs/images/en/03-register.png) |
 | **Devices** | **Jobs** |
 | ![Devices](docs/images/en/10-devices.png) | ![Jobs](docs/images/en/08-jobs.png) |
-| **History** | **Compare Archives** |
-| ![History](docs/images/en/05-history.png) | ![Compare Archives](docs/images/en/06-compare.png) |
+| **History** | **Cross-check** |
+| ![History](docs/images/en/05-history.png) | ![Cross-check](docs/images/en/06-compare.png) |
 | **Relocate to a new carrier** | **Settings** |
 | ![Relocate to a new carrier](docs/images/en/11-relocate.png) | ![Settings](docs/images/en/01-settings.png) |
 
@@ -141,15 +141,19 @@ loses the verification history.
 
 ## Graphical interface
 
-`veriarchive-gui` is built with GTK4 and libadwaita (decision 0046). Its pages are Archives (the
-unfinished operations, the archives with where each is attached now and the details of the one
-chosen, from which it is verified, compared, given a new revision, exported, relocated or
-retired), Devices (the attached devices, their health, volumes and archives), Jobs, History (the
-runs of every archive, each with its result page, from which the verification report of a run
-that reached a result is saved) and Settings; Register Archive and Compare Archives are dialogs.
-Every registration, verification, comparison, relocation and export runs as a job with its
+`veriarchive-gui` is built with GTK4 and libadwaita (decision 0046). Its pages are Archives (an
+overview of how the archives stand, whose tiles filter the list, with Verify the attached archives
+that need it; the archives with where each is attached now; and the details of the one chosen,
+whose head stays in view as they scroll, from which it is verified, cross-checked, given a new
+revision, exported, relocated or retired), Devices (the attached devices, their health, volumes and
+archives), Jobs (the jobs of the window, and the unfinished operations wherever they were started),
+History (the runs of every archive, each with its result page, from which the verification report
+of a run that reached a result is saved) and Settings; Register Archive and Cross-check are dialogs
+(decision 0049). A cross-check is the window's comparison: it takes neither archive for the
+original, and its report gives each archive's last FULL verification.
+Every registration, verification, cross-check, relocation and export runs as a job with its
 progress, which Stop ends; interrupted registrations, verifications and relocations can be
-resumed, and unfinished ones abandoned. A device moved to another USB enclosure is verified
+resumed in Jobs, and unfinished ones abandoned there. A device moved to another USB enclosure is verified
 in full once you confirm that it is the same device, by its own serial or on your word; the
 confirmation is recorded in the hash-chained history, and only a pass records the new enclosure
 (decision 0047). The GUI runs unprivileged: only to read a device's own serial behind its

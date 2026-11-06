@@ -142,7 +142,7 @@ An unfinished verification that adds chunk hashes, given up on purpose: its reco
 _Avoid_: cancelled verification (a cancelled one can be resumed)
 
 **Comparison**:
-Confirming from their manifests alone that two archives' current revisions hold the same entries with the same content, such as a copy against its original; no media is read, so it says nothing about what the media hold now.
+Confirming from their manifests alone that two archives' current revisions hold the same entries with the same content, such as a copy against its original; no media is read, so it says nothing about what the media hold now. In the window: Cross-check, 核對完整性 (decision 0049), whose report lists each archive's last FULL verification beside it; the command line's is `archive compare`.
 _Avoid_: diff, verification
 
 **Export**:
