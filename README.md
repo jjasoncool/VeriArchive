@@ -1,5 +1,7 @@
 # VeriArchive
 
+English | [繁體中文](README.zh-TW.md)
+
 VeriArchive records integrity evidence for archive disks and later proves whether the archived
 files were modified, corrupted, deleted, or added to. It detects; it never repairs, restores, or
 creates backups. Windows and Linux, one codebase.
