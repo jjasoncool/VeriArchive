@@ -11,7 +11,7 @@ One registered file tree, rooted at a volume root or at a directory on exactly o
 _Avoid_: backup, disk, media (when the file tree is meant)
 
 **Archive root**:
-The directory where an archive's file tree starts; recorded relative to its volume as the root subpath. Archive roots on one volume never overlap.
+The directory where an archive's file tree starts; recorded relative to its volume as the root subpath. Archive roots on one volume never overlap, except that a retired archive's root may lie in another root or contain it (decision 0051).
 _Avoid_: mount point (a mount point is runtime-only)
 
 **Retired archive**:
