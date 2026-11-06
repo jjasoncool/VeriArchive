@@ -50,6 +50,7 @@ std::uint64_t Jobs::start(const app::Text& text, JobSpec spec)
     JobShown shown;
     shown.id = id;
     shown.title = spec.title;
+    shown.keeps_progress = spec.keeps_progress;
     shown.bar.text = text("Starting...");
     shown_.push_back(std::move(shown));
     {

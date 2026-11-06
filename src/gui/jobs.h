@@ -48,6 +48,9 @@ struct JobSpec {
     // it reads none and waits for nothing.
     std::function<std::vector<std::string>()> devices;
     Counting counting = Counting::Files;
+    // A registration, verification or relocation: stopped, it keeps what it
+    // did, and Resume goes on from there (Stop's tooltip says so).
+    bool keeps_progress = false;
     std::function<Report(JobContext&)> work;            // on the job's thread; its report, unworded
     std::function<void(std::uint64_t job, const Report& report)> done;  // on the main thread, once it ended
 };

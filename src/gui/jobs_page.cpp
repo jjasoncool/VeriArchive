@@ -115,6 +115,18 @@ bool recorded_a_run(const GuiState& state, const JobShown& job)
     return job.state == JobState::Ended && state.job_runs.contains(job.id);
 }
 
+// What Stop of a registration, verification or relocation keeps (decision
+// 0049): it works as a pause would, but for the file it was reading.
+void show_stop_tooltip(GuiState& state, GtkWidget* stop, const JobShown& job)
+{
+    gtk_widget_set_tooltip_text(stop, job.keeps_progress
+                                          ? state.text("Stops it and keeps what it did: Resume under Unfinished "
+                                                       "operations goes on from there, reading again only the file it "
+                                                       "was reading.")
+                                                .c_str()
+                                          : nullptr);
+}
+
 void update_row(GuiState& state, const GuiState::JobRow& row, const JobShown& job)
 {
     const auto& text = state.text;
@@ -128,6 +140,7 @@ void update_row(GuiState& state, const GuiState::JobRow& row, const JobShown& jo
     // Stop does not ask first (decision 0045): a job stopped can be resumed.
     gtk_widget_set_visible(row.stop, job.state != JobState::Ended);
     gtk_widget_set_sensitive(row.stop, !job.stopping);
+    show_stop_tooltip(state, row.stop, job);
     gtk_widget_set_visible(row.result, recorded_a_run(state, job));
 }
 
@@ -145,6 +158,7 @@ void update_details(GuiState& state, const JobShown& job)
     // Until it ended, as on its row; then View result, where it recorded a run.
     gtk_widget_set_visible(details.stop, job.state != JobState::Ended);
     gtk_widget_set_sensitive(details.stop, !job.stopping);
+    show_stop_tooltip(state, details.stop, job);
     gtk_widget_set_visible(details.result, recorded_a_run(state, job));
     set_text(details.report, job.state == JobState::Ended && job.report
                                  ? job.report(text)

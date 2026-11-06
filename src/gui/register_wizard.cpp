@@ -80,6 +80,7 @@ void run_registration(GuiState& state, RegisterRequest request, std::optional<st
     // The worker returns its report unworded; it is worded when shown, in the
     // language in use then.
     JobSpec job;
+    job.keeps_progress = true;
     job.title = [root](const app::Text& text) { return text.format("Register {}", root); };
     job.target.root = request.root;
     job.devices = [root = request.root] { return devices_of_root(root); };

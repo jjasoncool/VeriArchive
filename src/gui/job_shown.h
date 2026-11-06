@@ -39,6 +39,7 @@ struct JobShown {
     std::string alert;              // its device alerts, worded, one per line
     Report report;                  // once it ended
     JobTone tone = JobTone::None;   // once it ended
+    bool keeps_progress = false;    // JobSpec::keeps_progress
 };
 
 } // namespace va::gui

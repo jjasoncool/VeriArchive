@@ -249,6 +249,7 @@ void run_verification(GuiState& state, VerifyRequest request, const Uuid& shown_
     // The worker returns its report unworded; it is worded when shown, in the
     // language in use then.
     JobSpec job;
+    job.keeps_progress = true;
     const auto name = request.root ? path_to_utf8(*request.root) : archive_name(state, *request.archive_uuid);
     if (request.resume_run) {
         job.title = [name](const app::Text& text) { return text.format("Resume the FULL verification of {}", name); };

@@ -82,6 +82,7 @@ void run_relocation(GuiState& state, RelocateRequest request, std::string typed)
     };
     auto ended = std::make_shared<Ended>();
     JobSpec job;
+    job.keeps_progress = true;
     job.title = [label, root, resume = request.resume](const app::Text& text) {
         return relocation_title(text, label, root, resume);
     };

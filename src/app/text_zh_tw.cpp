@@ -853,6 +853,9 @@ constexpr CatalogEntry entries[] = {
         "每當作業儲存進度，數字就會更新：每 1000 個檔案一次，或在檔案完成時每分鐘一次；掃描期間不會更新。"},
     {"1 unfinished operation has stopped", "1 個未完成的作業已停止"},
     {"{} unfinished operations have stopped", "{} 個未完成的作業已停止"},
+    {"Stops it and keeps what it did: Resume under Unfinished operations goes on from there, reading again only "
+     "the file it was reading.",
+        "停止它並保留已完成的部分：在「未完成的作業」按「繼續」就會從這裡接著做，只會重讀停止時正在讀的那個檔案。"},
     {"Root", "根目錄"},
     {"Registration", "註冊"},
     {"Verification", "驗證"},
