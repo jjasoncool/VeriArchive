@@ -435,7 +435,7 @@ public:
                     open_popover(page.verify_menu);
                     gtk_popover_popup(GTK_POPOVER(popover_));
                 }},
-            // The comparison dialog with A and its copy B chosen, as Compare...
+            // The cross-check dialog with A and its copy B chosen, as Cross-check...
             // on B's row under Copies in A's details opens it; not started.
             {"06-compare.png",
                 [this] {
@@ -452,7 +452,7 @@ public:
                     }
                 },
                 {}},
-            // Then Compare (no picture): the report in the job's details.
+            // Then Cross-check (no picture): the report in the job's details.
             {"",
                 [this] {
                     click(state_.compare_dialog.start);
@@ -464,11 +464,11 @@ public:
                 [this] {
                     const auto* job = state_.jobs.find(comparison_);
                     const auto report = job ? job->report : Report{};
-                    expect(report, "ARCHIVES ", "comparison");
+                    expect(report, "Cross-check: ", "comparison");
                     // Each archive's line says when its compared revision was
                     // recorded (decision 0041).
                     const auto english = report(app::Text());
-                    for (const std::string archive : {"\nA (reference): ", "\nB (copy): "}) {
+                    for (const std::string archive : {"\nA: ", "\nB: "}) {
                         const auto start = english.find(archive);
                         const auto line = start == std::string::npos
                                               ? std::string()

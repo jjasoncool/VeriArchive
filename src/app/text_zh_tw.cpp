@@ -599,9 +599,8 @@ constexpr CatalogEntry entries[] = {
     // verification (R-21, R-105), FULL verify and its menu (decision 0033),
     // and its groups.
     {"Menu of {}", "{} 的選單", Match::FormatOnly},
-    {"Compare with another archive...", "與另一個封存比較…"},
-    {"Compares the manifests in the repository; no media is read.", "比較儲存庫中的清單檔；不讀取媒體。"},
-    {"The repository has no other archive to compare with.", "儲存庫中沒有可以比較的其他封存。"},
+    {"Uses the manifests in the repository; no media is read.", "使用儲存庫中的清單檔；不讀取媒體。"},
+    {"The repository has no other archive to cross-check with.", "儲存庫中沒有可以比較的其他封存。"},
     {"Create a new revision...", "建立新版次…"},
     {"After an intended change of its content: reads the whole archive again and takes what it holds now as the "
      "new baseline.",
@@ -679,7 +678,6 @@ constexpr CatalogEntry entries[] = {
     {"This archive is recorded as a copy of it", "此封存記錄為它的副本"},
     {"Recorded as a copy of this archive", "記錄為此封存的副本"},
     {"not in this repository", "不在這個儲存庫中"},
-    {"Compare...", "比較…"},
     {"Recent verifications", "最近的驗證"},
     {"See where it slowed", "查看變慢的位置"},
     {"Cannot read the verifications of this archive: {}", "無法讀取此封存的驗證：{}", Match::FormatOnly},
@@ -1518,37 +1516,53 @@ constexpr CatalogEntry entries[] = {
     // read before (src/gui/register_wizard.cpp).
     {"the serial read before is no longer kept, as the device was detached or changed since",
         "之前讀到的序號已不再保留，因為裝置在那之後拔除或改變了"},
-    // src/gui/compare_dialog.cpp, src/gui/compare_choices.cpp: the comparison
-    // dialog (decisions 0020, 0046) and the report of its job.
-    {"ARCHIVES {}", "比較結果：{}"},
-    {"Every entry of A is in B with the same type and content, and B has no other entries.",
-        "A 的每個項目都以相同的類型與內容存在於 B，且 B 沒有其他項目。"},
+    // src/gui/compare_dialog.cpp, src/gui/compare_choices.cpp: the cross-check
+    // dialog (decisions 0020, 0046, 0049) and the report of its job. The
+    // window calls a comparison a cross-check, 核對完整性 (GLOSSARY:
+    // Comparison); A and B stand side by side, neither taken for the original.
+    {"Cross-check", "核對完整性"},
+    {"Cross-check...", "核對完整性…"},
+    {"Cross-check {} and {}", "核對 {} 與 {} 的完整性", Match::FormatOnly},
+    {"Cross-check: {}", "核對完整性：{}"},
+    {"A and B hold the same entries, each with the same type and content.",
+        "A 與 B 有相同的項目，類型與內容也都相同。"},
     {"No entry differs, but the entries listed below are not proven the same.",
         "沒有項目不同，但下列項目無法證明相同。"},
-    {"A (reference): {} ({}) revision {}, recorded {}", "A（參考）：{}（{}）版次 {}，記錄於 {}"},
-    {"B (copy): {} ({}) revision {}, recorded {}", "B（副本）：{}（{}）版次 {}，記錄於 {}"},
+    {"A: {} ({}) revision {}, recorded {}", "A：{}（{}）版次 {}，記錄於 {}"},
+    {"B: {} ({}) revision {}, recorded {}", "B：{}（{}）版次 {}，記錄於 {}"},
     {"Entries: {} in A, {} in B, {} the same", "項目：A 有 {} 個，B 有 {} 個，其中 {} 個相同"},
     {"Differences: {}", "差異：{}"},
+    {"Only in A", "只在 A"},
+    {"Only in B", "只在 B"},
+    {"Differs", "兩邊不同"},
     {"... and {} more differences, not listed here", "……另有 {} 個差異未列於此"},
     {"... and {} more difference, not listed here", "……另有 {} 個差異未列於此"},
-    {"This compares what each registration read. FULL verification of each archive proves that "
-        "its media still holds it.",
-        "此比較依據各封存註冊時讀取的內容。對各封存進行完整驗證，才能證明其媒體仍保有這些內容。"},
-    {"Not compared: {}", "未能比較：{}"},
-    {"Choose the two archives to compare.", "請選擇要比較的兩個封存。"},
-    {"A and B are the same archive; choose the copy to check as B.",
-        "A 與 B 是同一個封存；請將要檢查的副本選為 B。"},
-    {"Comparison checks that two registered archives hold the same entries with the same "
-        "content, using their manifests in the repository; no media is read. Choose the reference "
-        "archive as A and the copy to check as B.",
-        "比較會使用儲存庫中的清單檔，檢查兩個已註冊的封存是否有相同的項目與內容；不會讀取媒體。"
-        "請將參考封存選為 A，要檢查的副本選為 B。"},
-    {"Reference archive (A)", "參考封存（A）"},
-    {"Copy to check (B)", "要檢查的副本（B）"},
-    {"The copies of A come first.", "A 的副本排在最前面。"},
-    {"Compare", "比較"},
+    {"The last FULL verification of each, which tells whether its media held this content then:",
+        "兩邊最近一次的完整驗證，說明各自的媒體當時是否保有這些內容："},
+    {"{}: never FULL verified", "{}：從未完整驗證", Match::FormatOnly},
+    {"{}: {}, {}, {}", "{}：{}，{}，{}", Match::FormatOnly},
+    {"{}: no FULL verification of revision {} yet; the last, of revision {}: {}, {}, {}",
+        "{}：版次 {} 還沒有完整驗證；最近一次是版次 {} 的：{}，{}，{}"},
+    {"Both media held this content at their last FULL verifications, neither of which is overdue.",
+        "兩邊的媒體在最近一次完整驗證時都保有這些內容，而且都沒有逾期。"},
+    {"{} and {}", "{} 與 {}", Match::FormatOnly},
+    {"To show that the media hold this content, FULL verify {}.", "要證明媒體保有這些內容，請完整驗證 {}。"},
+    {"A cross-check compares what each registration read; it reads no media.",
+        "核對完整性依據的是兩個封存註冊時讀到的內容，不讀取任何媒體。"},
+    {"Not compared: {}", "未能核對：{}"},
+    {"Choose the two archives to cross-check.", "請選擇要核對的兩個封存。"},
+    {"A and B are the same archive; choose another archive as B.",
+        "A 與 B 是同一個封存；請選擇另一個封存作為 B。"},
+    {"A cross-check confirms that two registered archives hold the same entries with the same content, using "
+     "their manifests in the repository; no media is read. Its report also gives each archive's last FULL "
+     "verification, which tells whether its media held that content.",
+        "核對完整性會用儲存庫中兩個已註冊封存的清單檔，確認兩者有相同的項目與內容；不讀取任何媒體。報告也會列出兩邊"
+        "最近一次的完整驗證，說明各自的媒體是否保有這些內容。"},
+    {"Archive A", "封存 A"},
+    {"Archive B", "封存 B"},
+    {"The archives recorded as copies of A come first.", "記錄為 A 的副本的封存排在最前面。"},
     {"stopped", "已停止"},
-    {"not compared", "未能比較"},
+    {"not compared", "未能核對"},
     // src/gui/relocate_dialog.cpp, src/gui/archive_actions.cpp: the
     // relocation dialog (decisions 0004, 0046), the job's title and its toast;
     // the rest of its words are Register Archive's and the relocation's own.

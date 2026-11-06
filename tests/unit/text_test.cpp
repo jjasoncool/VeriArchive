@@ -873,7 +873,7 @@ void translation_tests()
           "錯誤：無法確定：此媒體符合多個封存（複製的媒體）；請以 `verify --full <archive_uuid>` 選擇其中一個；若這些封存的"
           "磁碟區同時連接著，請讓要驗證的那個封存以外的磁碟區都中斷連線，再驗證它");
 
-    // Comparing archives (CLI `archive compare`, GUI Compare Archives). The
+    // Comparing archives (CLI `archive compare`, the window's Cross-check). The
     // result line keeps its mode word in every language, as verification's does.
     const std::string uuid_b = "94bbff52-39fa-458a-8831-9b30fb0cadf1";
     CHECK(chinese.format("COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", chinese("DIFFERENT"), "ARCH-0001", uuid, 1,
@@ -882,8 +882,8 @@ void translation_tests()
     CHECK(english.format("COMPARE {}  {} ({}) r{}  vs  {} ({}) r{}", english("IDENTICAL"), "ARCH-0001", uuid, 1,
               "ARCH-0002", uuid_b, 1) ==
           "COMPARE IDENTICAL  ARCH-0001 (" + uuid + ") r1  vs  ARCH-0002 (" + uuid_b + ") r1");
-    CHECK(chinese.format("ARCHIVES {}", chinese("IDENTICAL")) == "比較結果：相同");
-    CHECK(chinese.format("ARCHIVES {}", chinese("IDENTICAL_WITH_WARNINGS")) == "比較結果：相同（有警告）");
+    CHECK(chinese.format("Cross-check: {}", chinese("IDENTICAL")) == "核對完整性：相同");
+    CHECK(chinese.format("Cross-check: {}", chinese("IDENTICAL_WITH_WARNINGS")) == "核對完整性：相同（有警告）");
     CHECK(chinese.format("same: {}", 4) + "  " + chinese("Missing") + " 1" == "相同：4  遺失 1");
     // Each archive's line names the compared revision and when it was
     // recorded: by a registration, a relocation or a verification that added
@@ -894,12 +894,12 @@ void translation_tests()
     CHECK(chinese.format("B: {}, revision {} recorded {}, {}", "ARCH-0002", 1, "2025-01-15 09:00:00（UTC+8）",
               va::app::count_of(chinese, 1, va::app::Counted::Entry)) ==
           "B：ARCH-0002，版次 1 記錄於 2025-01-15 09:00:00（UTC+8），共 1 個項目");
-    CHECK(chinese.format("A (reference): {} ({}) revision {}, recorded {}", "ARCH-0001", uuid, 2,
+    CHECK(chinese.format("A: {} ({}) revision {}, recorded {}", "ARCH-0001", uuid, 2,
               "2025-01-16 09:00:00（UTC+8）") ==
-          "A（參考）：ARCH-0001（" + uuid + "）版次 2，記錄於 2025-01-16 09:00:00（UTC+8）");
-    CHECK(chinese.format("B (copy): {} ({}) revision {}, recorded {}", "ARCH-0002", uuid_b, 1,
+          "A：ARCH-0001（" + uuid + "）版次 2，記錄於 2025-01-16 09:00:00（UTC+8）");
+    CHECK(chinese.format("B: {} ({}) revision {}, recorded {}", "ARCH-0002", uuid_b, 1,
               "2025-01-15 09:00:00（UTC+8）") ==
-          "B（副本）：ARCH-0002（" + uuid_b + "）版次 1，記錄於 2025-01-15 09:00:00（UTC+8）");
+          "B：ARCH-0002（" + uuid_b + "）版次 1，記錄於 2025-01-15 09:00:00（UTC+8）");
     // Item details: sizes are values; the reason an entry was unreadable is
     // translated, for every reason the scanner records.
     CHECK(chinese("size 7 -> 14") == "大小 7 → 14");
@@ -922,7 +922,7 @@ void translation_tests()
     CHECK(chinese("error: the comparison was cancelled") == "錯誤：比較已取消");
     CHECK(chinese.format("Not compared: {}",
               chinese("cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded")) ==
-          "未能比較：無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 沒有紀錄");
+          "未能核對：無法讀取 ARCH-0002 版次 2 的清單檔：版次 2 沒有紀錄");
     CHECK(english("cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded") ==
           "cannot read the manifest of ARCH-0002 revision 2: revision 2 is not recorded");
     // A manifest that cannot be used (decision 0028): the manifest by its
@@ -1251,7 +1251,7 @@ void translation_tests()
     CHECK(chinese("Register the first archive") == "註冊第一個封存");
     CHECK(chinese("FULL verify, and add chunk hashes") == "完整驗證，並加入區塊雜湊");
     CHECK(chinese("FULL verify with strict metadata") == "以嚴格中繼資料完整驗證");
-    CHECK(chinese("Compare with another archive...") == "與另一個封存比較…");
+    CHECK(chinese("Cross-check...") == "核對完整性…");
     CHECK(chinese("Create a new revision...") == "建立新版次…");
     CHECK(chinese("Copy archive UUID") == "複製封存 UUID");
     CHECK(chinese("The run was interrupted; continue it with Resume in the archive's details in Archives, without "

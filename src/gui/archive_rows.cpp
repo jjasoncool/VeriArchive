@@ -348,9 +348,9 @@ Choice new_revision_choice(const app::Text& text, const ArchiveStatus& status)
 Choice compare_choice(const app::Text& text, std::size_t archives)
 {
     if (archives < 2) {
-        return {false, text("The repository has no other archive to compare with.")};
+        return {false, text("The repository has no other archive to cross-check with.")};
     }
-    return {true, text("Compares the manifests in the repository; no media is read.")};
+    return {true, text("Uses the manifests in the repository; no media is read.")};
 }
 
 std::vector<CopyLink> copy_links(const app::Text& text, const ArchiveStatus& status,

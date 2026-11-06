@@ -1,15 +1,19 @@
 #pragma once
-// What the comparison dialog offers and its job reports (decision 0020,
-// decision 0046): the archives that "Copy to check (B)" lists for the
-// reference archive A, the copies of A first; which B it starts with; why A
-// and B cannot be compared as chosen; and the report of a comparison, which
-// the job's details show.
+// What the cross-check dialog offers and its job reports (decisions 0020,
+// 0046 and 0049): the archives that "Archive B" lists for archive A, the
+// recorded copies of A first; which B it starts with; why A and B cannot be
+// cross-checked as chosen; and the report of a cross-check, which the job's
+// details show. A cross-check is the window's word for a comparison
+// (GLOSSARY: Comparison; 核對完整性 in Chinese). A and B stand side by side:
+// neither is taken for the original, so a difference is an entry only in A,
+// an entry only in B, or an entry that differs.
 //
 // Plain C++ without GTK, so the unit tests can check it.
 #include "app/text.h"
 #include "core/engine/archive_status.h"
 #include "core/engine/compare_archives.h"
 
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -30,10 +34,10 @@ std::vector<Uuid> copy_candidates(const std::vector<ArchiveStatus>& statuses, co
 std::optional<Uuid> default_copy(const std::vector<ArchiveStatus>& statuses, const Uuid& reference,
     const std::optional<Uuid>& wanted = std::nullopt);
 
-// Why A and B cannot be compared as chosen: A and B are the same archive,
-// which the engine allows, but which here is almost surely a slip
-// ("identical" would then say nothing about the copy meant); or one is not
-// chosen. Nothing where they can.
+// Why A and B cannot be cross-checked as chosen: A and B are the same
+// archive, which the engine allows, but which here is almost surely a slip
+// ("identical" would then say nothing); or one is not chosen. Nothing where
+// they can.
 std::optional<std::string> comparison_refusal(
     const app::Text& text, const std::optional<Uuid>& reference, const std::optional<Uuid>& copy);
 
@@ -52,15 +56,37 @@ struct ComparisonShown {
 
 ComparisonShown shown_comparison(ArchiveComparison comparison);
 
+// What the report says beside the cross-check of one archive's media
+// (decision 0049): its last FULL verification that reached a result and
+// whether the archive is OVERDUE, as Archives listed it when the job
+// started. A cross-check reads no media; only a FULL verification of the
+// revision cross-checked tells that its media held that content.
+struct VerifiedSide {
+    std::optional<VerifyRunRecord> last_full;
+    bool overdue = false;
+};
+
+VerifiedSide verified_side(const ArchiveStatus& status);
+
+// How the report names a difference of a cross-check, which takes neither
+// archive for the original: an entry that only A has ("Missing" in the
+// comparison), only B has ("New"), or that both have and differs
+// ("Modified"); any other status as the engine names it.
+std::string difference_words(const app::Text& text, const std::string& status);
+
 // The report: the result, what it means, A and B each with its revision and
 // when that revision was recorded (decision 0041), the counts, the
-// differences listed and how many more there are, and what a comparison does
-// not prove.
-std::string comparison_report(const app::Text& text, const ComparisonShown& shown);
+// differences listed and how many more there are; then each archive's last
+// FULL verification as of `now`, and what they show together: where the two
+// are the same and both media passed a FULL verification of the revision
+// cross-checked that is not OVERDUE, that both held it then; otherwise which
+// archives a FULL verification would have to show it of (decision 0049).
+std::string comparison_report(const app::Text& text, const ComparisonShown& shown, const VerifiedSide& a,
+    const VerifiedSide& b, std::chrono::sys_seconds now);
 std::string comparison_failure_report(const app::Text& text, const CompareFailure& failure);
 
-// The toast once a comparison ended: its title and result, "Compare ARCH-0001
-// with ARCH-0002: DIFFERENT"; stopped, or without a result.
+// The toast once a cross-check ended: its title and result, "Cross-check
+// ARCH-0001 and ARCH-0002: DIFFERENT"; stopped, or without a result.
 std::string compared_toast(const app::Text& text, const std::string& title, const std::string& result);
 std::string not_compared_toast(const app::Text& text, const std::string& title, bool stopped);
 

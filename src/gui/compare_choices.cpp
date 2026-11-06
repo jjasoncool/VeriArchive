@@ -2,15 +2,45 @@
 
 #include "app/local_time.h"
 #include "app/plain_words.h"
+#include "gui/archive_rows.h"
 
 #include <algorithm>
 
 namespace va::gui {
 namespace {
 
-constexpr const char* note =
-    "This compares what each registration read. FULL verification of each archive proves that its "
-    "media still holds it.";
+constexpr const char* note = "A cross-check compares what each registration read; it reads no media.";
+
+// What the report says of one archive's last FULL verification, against the
+// revision cross-checked: its result with its mode, how long ago and when;
+// that it is OVERDUE; or that there is none of that revision yet.
+std::string verified_line(const app::Text& text, const std::string& name, std::uint32_t revision,
+    const VerifiedSide& side, std::chrono::sys_seconds now)
+{
+    if (!side.last_full) {
+        return text.format("{}: never FULL verified", name);
+    }
+    const auto& run = *side.last_full;
+    const auto age = age_words(text, run.finished, now);
+    const auto when = app::local_time(run.finished, text);
+    std::string line =
+        run.revision == revision
+            ? text.format("{}: {}, {}, {}", name, result_with_mode(text, run), age, when)
+            : text.format("{}: no FULL verification of revision {} yet; the last, of revision {}: {}, {}, {}", name,
+                  revision, run.revision, result_with_mode(text, run), age, when);
+    if (side.overdue) {
+        line = text.format("{} · {}", line, text("OVERDUE"));
+    }
+    return line;
+}
+
+// Whether a FULL verification shows that the media of an archive held the
+// revision cross-checked: one of that revision passed, and is not OVERDUE.
+bool media_shown(const VerifiedSide& side, std::uint32_t revision)
+{
+    return side.last_full && side.last_full->revision == revision && !side.overdue &&
+           result_tone(side.last_full->result) != Tone::Error && side.last_full->result != "INCOMPLETE";
+}
 
 // Whether `status` is recorded as a copy of `reference`, or `reference` as a
 // copy of it.
@@ -63,12 +93,31 @@ std::optional<std::string> comparison_refusal(
     const app::Text& text, const std::optional<Uuid>& reference, const std::optional<Uuid>& copy)
 {
     if (!reference || !copy) {
-        return text("Choose the two archives to compare.");
+        return text("Choose the two archives to cross-check.");
     }
     if (*reference == *copy) {
-        return text("A and B are the same archive; choose the copy to check as B.");
+        return text("A and B are the same archive; choose another archive as B.");
     }
     return std::nullopt;
+}
+
+VerifiedSide verified_side(const ArchiveStatus& status)
+{
+    return {status.last_full, status.full_overdue || status.any_overdue};
+}
+
+std::string difference_words(const app::Text& text, const std::string& status)
+{
+    if (status == "Missing") {
+        return text("Only in A");
+    }
+    if (status == "New") {
+        return text("Only in B");
+    }
+    if (status == "Modified") {
+        return text("Differs");
+    }
+    return text(status);
 }
 
 ComparisonShown shown_comparison(ArchiveComparison comparison)
@@ -82,34 +131,36 @@ ComparisonShown shown_comparison(ArchiveComparison comparison)
     return shown;
 }
 
-std::string comparison_report(const app::Text& text, const ComparisonShown& shown)
+std::string comparison_report(const app::Text& text, const ComparisonShown& shown, const VerifiedSide& a,
+    const VerifiedSide& b, std::chrono::sys_seconds now)
 {
     const auto& comparison = shown.comparison;
-    std::string body = text.format("ARCHIVES {}", text(comparison.result)) + "\n";
+    std::string body = text.format("Cross-check: {}", text(comparison.result)) + "\n";
+    const bool same = comparison.result == "IDENTICAL" || comparison.result == "IDENTICAL_WITH_WARNINGS";
     if (comparison.result == "IDENTICAL") {
-        body += text("Every entry of A is in B with the same type and content, and B has no other entries.") + "\n";
+        body += text("A and B hold the same entries, each with the same type and content.") + "\n";
     } else if (comparison.result == "IDENTICAL_WITH_WARNINGS") {
         body += text("No entry differs, but the entries listed below are not proven the same.") + "\n";
     }
     body += "\n" +
-            text.format("A (reference): {} ({}) revision {}, recorded {}", comparison.label_a, comparison.archive_a,
+            text.format("A: {} ({}) revision {}, recorded {}", comparison.label_a, comparison.archive_a,
                 comparison.revision_a, app::local_time(comparison.created_a, text)) +
             "\n" +
-            text.format("B (copy): {} ({}) revision {}, recorded {}", comparison.label_b, comparison.archive_b,
+            text.format("B: {} ({}) revision {}, recorded {}", comparison.label_b, comparison.archive_b,
                 comparison.revision_b, app::local_time(comparison.created_b, text)) +
             "\n" +
             text.format("Entries: {} in A, {} in B, {} the same", comparison.entries_a, comparison.entries_b,
                 comparison.same) +
             "\n" + text.format("Differences: {}", shown.differences);
     for (const auto& [status, count] : comparison.counts) {
-        body += "  " + text(status) + " " + std::to_string(count);
+        body += "  " + difference_words(text, status) + " " + std::to_string(count);
     }
     body += "\n";
     if (!comparison.differences.empty()) {
         body += "\n";
         for (const auto& difference : comparison.differences) {
             // "path:stream" names an alternate data stream, as Windows writes it.
-            body += text(difference.status) + "  " + difference.path +
+            body += difference_words(text, difference.status) + "  " + difference.path +
                     (difference.stream.empty() ? "" : ":" + difference.stream) +
                     (difference.detail.empty()
                             ? ""
@@ -122,6 +173,28 @@ std::string comparison_report(const app::Text& text, const ComparisonShown& show
             body += (more == 1 ? text.format("... and {} more difference, not listed here", more)
                                : text.format("... and {} more differences, not listed here", more)) +
                     "\n";
+        }
+    }
+    // Decision 0049: whether each archive's media held the content
+    // cross-checked, as its last FULL verification tells.
+    body += "\n" + text("The last FULL verification of each, which tells whether its media held this content then:") +
+            "\n" + verified_line(text, "A", comparison.revision_a, a, now) + "\n" +
+            verified_line(text, "B", comparison.revision_b, b, now) + "\n";
+    if (same) {
+        std::vector<std::string> unshown;
+        if (!media_shown(a, comparison.revision_a)) {
+            unshown.push_back(comparison.label_a);
+        }
+        if (!media_shown(b, comparison.revision_b)) {
+            unshown.push_back(comparison.label_b);
+        }
+        if (unshown.empty()) {
+            body += text("Both media held this content at their last FULL verifications, neither of which is "
+                         "overdue.") +
+                    "\n";
+        } else {
+            const auto names = unshown.size() == 1 ? unshown.front() : text.format("{} and {}", unshown[0], unshown[1]);
+            body += text.format("To show that the media hold this content, FULL verify {}.", names) + "\n";
         }
     }
     body += "\n" + text(note) + "\n";

@@ -147,7 +147,7 @@ GtkWidget* more_menu(GuiState& state, const ArchiveStatus& status)
     gtk_widget_set_tooltip_text(button, label.c_str());
     gtk_accessible_update_property(GTK_ACCESSIBLE(button), GTK_ACCESSIBLE_PROPERTY_LABEL, label.c_str(), -1);
     GtkWidget* popover = menu_popover();
-    add_to_menu(popover, menu_item(state, popover, text("Compare with another archive..."),
+    add_to_menu(popover, menu_item(state, popover, text("Cross-check..."),
                              compare_choice(text, state.archives_page.statuses.size()), uuid,
                              [](GuiState& state, const Uuid& archive) { compare_with(state, archive, std::nullopt); }));
     // The root its latest revision recorded, read where the attached volumes
@@ -346,7 +346,7 @@ GtkWidget* copies_group(GuiState& state, const std::vector<CopyLink>& links)
         adw_action_row_add_prefix(ADW_ACTION_ROW(row), gtk_image_new_from_icon_name("edit-copy-symbolic"));
         if (link.listed) {
             adw_action_row_add_suffix(ADW_ACTION_ROW(row),
-                row_button(state, text("Compare..."), link.copy, [reference = link.reference](GuiState& state, const Uuid& copy) {
+                row_button(state, text("Cross-check..."), link.copy, [reference = link.reference](GuiState& state, const Uuid& copy) {
                     compare_with(state, reference, copy);
                 }));
         }

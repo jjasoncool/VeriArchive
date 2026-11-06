@@ -1,18 +1,23 @@
-// The comparison dialog (decisions 0020, 0046): checks that a copy (B) holds
-// the same entries as its reference (A), using the manifests of both
-// archives' current revisions in the repository. No media is read, so a
-// comparison is quick; what it compares is what each registration read.
-// Whether the media still hold it is what a FULL verification of each archive
-// proves. Opened from an archive's details, its menu and its Copies, with A
-// and B chosen; B lists the copies of A first. A and B the same archive is
-// refused in the dialog. Compare runs it as a job (decision 0045), whose
-// details show the report, and a toast says its result.
+// The cross-check dialog (decisions 0020, 0046, 0049): checks that two
+// archives, A and B, hold the same entries with the same content, using the
+// manifests of both archives' current revisions in the repository. No media
+// is read, so a cross-check is quick; what it compares is what each
+// registration read. Its report lists each archive's last FULL verification
+// beside it, which tells whether the media held that content (decision
+// 0049). A and B stand side by side: neither is taken for the original.
+// Opened from an archive's details (Cross-check... beside FULL verify, and
+// beside each of its Copies) and from the overview of Archives, with A and B
+// chosen; B lists the recorded copies of A first. A and B the same archive is
+// refused in the dialog. Cross-check runs it as a job (decision 0045), whose
+// details show the report, and a toast says its result. (GLOSSARY:
+// Comparison, which the window calls a cross-check, 核對完整性.)
 #include "gui/gui_app.h"
 
 #include "gui/compare_choices.h"
 #include "platform/file_system.h"
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -45,8 +50,20 @@ void start_comparison(GuiState& state, const Uuid& reference, const Uuid& copy)
     // device (decision 0045).
     JobSpec job;
     job.title = [a = label_of(state, reference), b = label_of(state, copy)](const app::Text& text) {
-        return text.format("Compare {} with {}", a, b);
+        return text.format("Cross-check {} and {}", a, b);
     };
+    // Each archive's last FULL verification as Archives lists it now, which
+    // the report gives beside the cross-check (decision 0049).
+    VerifiedSide side_a;
+    VerifiedSide side_b;
+    for (const auto& status : state.archives_page.statuses) {
+        if (status.archive.archive_uuid == reference) {
+            side_a = verified_side(status);
+        }
+        if (status.archive.archive_uuid == copy) {
+            side_b = verified_side(status);
+        }
+    }
     job.counting = Counting::Entries;
     // What the toast says once it ended: its result, or that it stopped.
     struct Ended {
@@ -54,7 +71,7 @@ void start_comparison(GuiState& state, const Uuid& reference, const Uuid& copy)
         bool stopped = false;
     };
     auto ended = std::make_shared<Ended>();
-    job.work = [&state, a = reference, b = copy, ended](JobContext& context) -> Report {
+    job.work = [&state, a = reference, b = copy, side_a, side_b, ended](JobContext& context) -> Report {
         // Not compared, until a result says otherwise.
         context.tone = JobTone::Error;
         auto& session = *state.session;
@@ -78,8 +95,10 @@ void start_comparison(GuiState& state, const Uuid& reference, const Uuid& copy)
         }
         context.tone = comparison_tone(comparison->result);
         ended->result = comparison->result;
-        return [shown = shown_comparison(std::move(*comparison))](const app::Text& text) {
-            return comparison_report(text, shown);
+        // Worded when shown: how long ago each FULL verification was, as of then.
+        return [shown = shown_comparison(std::move(*comparison)), side_a, side_b](const app::Text& text) {
+            return comparison_report(
+                text, shown, side_a, side_b, std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
         };
     };
     job.done = [&state, ended](std::uint64_t id, const Report&) {
@@ -205,7 +224,7 @@ void compare_with(GuiState& state, const Uuid& reference, const std::optional<Uu
     const auto& text = state.text;
     AdwDialog* shown = adw_dialog_new();
     dialog.dialog = GTK_WIDGET(shown);
-    adw_dialog_set_title(shown, text("Compare Archives").c_str());
+    adw_dialog_set_title(shown, text("Cross-check").c_str());
     adw_dialog_set_content_width(shown, 620);
 
     GtkWidget* view = adw_toolbar_view_new();
@@ -216,15 +235,15 @@ void compare_with(GuiState& state, const Uuid& reference, const std::optional<Uu
     gtk_widget_set_margin_top(box, 6);
     gtk_widget_set_margin_bottom(box, 12);
     gtk_box_append(GTK_BOX(box),
-        make_words(text("Comparison checks that two registered archives hold the same entries with the same content, "
-                        "using their manifests in the repository; no media is read. Choose the reference archive as A "
-                        "and the copy to check as B."),
+        make_words(text("A cross-check confirms that two registered archives hold the same entries with the same "
+                        "content, using their manifests in the repository; no media is read. Its report also gives "
+                        "each archive's last FULL verification, which tells whether its media held that content."),
             "dim-label"));
     GtkWidget* group = adw_preferences_group_new();
-    dialog.reference = combo_row(text("Reference archive (A)"));
-    dialog.copy = combo_row(text("Copy to check (B)"));
+    dialog.reference = combo_row(text("Archive A"));
+    dialog.copy = combo_row(text("Archive B"));
     adw_action_row_set_subtitle(
-        ADW_ACTION_ROW(dialog.copy), text("The copies of A come first.").c_str());
+        ADW_ACTION_ROW(dialog.copy), text("The archives recorded as copies of A come first.").c_str());
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), dialog.reference);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), dialog.copy);
     gtk_box_append(GTK_BOX(box), group);
@@ -247,7 +266,7 @@ void compare_with(GuiState& state, const Uuid& reference, const std::optional<Uu
     GtkWidget* gap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(gap, TRUE);
     gtk_box_append(GTK_BOX(buttons), gap);
-    dialog.start = gtk_button_new_with_label(text("Compare").c_str());
+    dialog.start = gtk_button_new_with_label(text("Cross-check").c_str());
     gtk_widget_add_css_class(dialog.start, "suggested-action");
     g_signal_connect(dialog.start, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
         auto& state = *static_cast<GuiState*>(data);
