@@ -49,7 +49,10 @@ std::vector<PhysicalDeviceInfo> recorded_device_health(std::string_view counts_j
 struct RunAlerts {
     bool health = false;
     bool slower = false;
-    bool any() const { return health || slower; }
+    // The latest SMART read of a device of its carrier alerts (decision
+    // 0052): only of an archive (app::archive_alerts), never of a run.
+    bool smart = false;
+    bool any() const { return health || slower || smart; }
 };
 RunAlerts run_alerts(std::string_view counts_json);
 

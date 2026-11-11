@@ -5,6 +5,7 @@
 #include "app/history.h"
 #include "app/local_time.h"
 #include "app/plain_words.h"
+#include "app/smart_words.h"
 #include "core/engine/add_chunk_hashes.h"
 #include "core/engine/carrier_confirmation.h"
 #include "core/engine/comparison.h"
@@ -149,6 +150,11 @@ std::vector<Field> identity_fields(const Text& text, const RecordedRun& recorded
         if (index < health.size() && health[index].health) {
             fields.push_back({text("Health"), health_words(text, *health[index].health)});
         }
+    }
+    // Decision 0052: the SMART that the window read as the run was started,
+    // where it recorded it, one line for each device read.
+    for (const auto& read : recorded_smart_reads(run.counts_json)) {
+        fields.push_back({text("SMART"), smart_read_words(text, read)});
     }
     return fields;
 }
@@ -458,6 +464,12 @@ ResultPage result_page(const Text& text, const RecordedRun& recorded, const Show
     const auto compared = recorded_speed_comparison(run.counts_json);
     if (compared) {
         if (const auto line = slower_alert_line(text, *compared)) {
+            page.alerts.push_back(*line);
+        }
+    }
+    // Decision 0052: a SMART read recorded with the run that alerts.
+    for (const auto& read : recorded_smart_reads(run.counts_json)) {
+        if (const auto line = smart_read_alert_line(text, read)) {
             page.alerts.push_back(*line);
         }
     }

@@ -80,7 +80,7 @@ std::optional<va::app::SessionOptions> repository_of_version_1(
     if (!created) {
         return std::nullopt;
     }
-    run_sql(repository, "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1");
+    run_sql(repository, "DROP TABLE smart_reads; DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1");
     return va::app::SessionOptions{false, repository, config, not_elevated, false, now};
 }
 
@@ -116,8 +116,8 @@ void the_copy_before_an_upgrade_is_named_for_the_local_date()
     const auto copy = options->repository->lexically_normal() /
                       std::format("veriarchive-schema-1-before-upgrade-{:%F}.db", date);
     const auto opened = va::app::open_session(*options);
-    CHECK(opened && opened->notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 3, copy})});
-    if (opened && opened->notes.size() == 1 && opened->notes.front() != va::app::schema_upgrade_note({1, 3, copy})) {
+    CHECK(opened && opened->notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 4, copy})});
+    if (opened && opened->notes.size() == 1 && opened->notes.front() != va::app::schema_upgrade_note({1, 4, copy})) {
         std::cerr << "  noted: " << opened->notes.front() << '\n';
     }
     CHECK(std::filesystem::exists(copy));
@@ -167,10 +167,10 @@ void a_failed_open_still_says_where_the_copy_is()
         return;
     }
     CHECK(failed.error().message.starts_with("cannot record repository_uuid in config: ") &&
-          failed.error().notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 3, copy})});
+          failed.error().notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 4, copy})});
     CHECK(std::filesystem::exists(copy));
     CHECK(va::app::session_failure_in_window(va::app::Text{}, failed.error()) ==
-          failed.error().message + "\n\nNote: " + va::app::schema_upgrade_note({1, 3, copy}) +
+          failed.error().message + "\n\nNote: " + va::app::schema_upgrade_note({1, 4, copy}) +
               "\n\nCopy of the database from before an upgrade: " + va::path_to_utf8(copy) +
               " (an earlier version of VeriArchive can open only this copy; you can delete it once you no longer "
               "need that version)");
@@ -252,7 +252,7 @@ void a_failed_open_names_the_copies_where_the_repository_is()
     const va::app::Text chinese(va::app::Language::TraditionalChinese);
 
     const auto upgraded = va::app::open_session(*options);
-    CHECK(upgraded && upgraded->notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 3, copy})});
+    CHECK(upgraded && upgraded->notes == std::vector<std::string>{va::app::schema_upgrade_note({1, 4, copy})});
     run_sql(*options->repository, "DROP TABLE trusted_keys");
     const auto damaged = "the repository's database " + va::path_to_utf8(root / "veriarchive.db") +
                          " is damaged; make it again from the manifests with `repo rebuild-index`";
@@ -279,8 +279,8 @@ void a_failed_open_names_the_copies_where_the_repository_is()
     const auto config = later_folder.path() / "config.json";
     std::ofstream(config) << "{}\n";
     CHECK(va::app::open_session({true, later, config, not_elevated, false, moment}).has_value());
-    run_sql(later, "UPDATE schema_version SET version = 4");
-    const auto later_copy = later.lexically_normal() / "veriarchive-schema-3-before-upgrade-2026-10-17.db";
+    run_sql(later, "UPDATE schema_version SET version = 5");
+    const auto later_copy = later.lexically_normal() / "veriarchive-schema-4-before-upgrade-2026-10-17.db";
     std::ofstream(later_copy, std::ios::binary) << "SAMPLE: the copy a later version kept (sample data)\n";
     const auto refused = va::app::open_session({false, later, config, not_elevated, false, moment});
     CHECK(!refused && refused.error().message == "unsupported repository schema" &&

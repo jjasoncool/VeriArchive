@@ -766,7 +766,7 @@ void database_state_tells_what_cannot_be_used()
     const auto other = state();
     CHECK(!other && other.error().message == "unsupported repository schema");
     std::filesystem::remove(database);
-    run_sql(database, "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (4);");
+    run_sql(database, "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (5);");
     const auto later = state();
     CHECK(!later && later.error().message == "unsupported repository schema");
 
@@ -998,7 +998,8 @@ std::set<std::string> copies_in(const std::filesystem::path& folder)
 void lower_schema(const va::RepositoryLayout& layout, int version)
 {
     run_sql(layout,
-        ("DROP TABLE IF EXISTS verify_progress_chunks; UPDATE schema_version SET version = " +
+        (std::string("DROP TABLE IF EXISTS smart_reads; ") +
+            (version < 3 ? "DROP TABLE IF EXISTS verify_progress_chunks; " : "") + "UPDATE schema_version SET version = " +
             std::to_string(version) +
             "; DELETE FROM archives; INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000032',"
             "'ARCH-0001','2026-10-16T00:00:00Z',1,'REGISTERED','',NULL)")
@@ -1031,7 +1032,7 @@ void the_upgrade_creates_each_archive_when_its_first_revision_is()
             "INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000033','ARCH-0002',"
             "'2026-10-18T00:00:00Z',0,'REGISTRATION_INCOMPLETE','',NULL)");
         CHECK(va::open_repository(*context, test::today).has_value());
-        CHECK(stored_schema_version(layout) == 3);
+        CHECK(stored_schema_version(layout) == 4);
         CHECK(first_value(layout.database(), "SELECT created FROM archives WHERE label = 'ARCH-0001'") ==
               "2026-10-16T09:00:00Z");
         CHECK(first_value(layout.database(), "SELECT created FROM archives WHERE label = 'ARCH-0002'") ==
@@ -1042,17 +1043,18 @@ void the_upgrade_creates_each_archive_when_its_first_revision_is()
     }
 }
 
-// Decisions 0032 and 0033: a new repository has schema version 3. One that V1
+// Decisions 0032, 0033 and 0052: a new repository has schema version 4. One that V1
 // created (version 1, whose tables are those of version 2), and one of
-// version 2, are raised to version 3 when this version opens them, keeping
-// their rows: version 3 adds verify_progress_chunks (decision 0033), and a V1
+// version 2 or 3, are raised to version 4 when this version opens them, keeping
+// their rows: version 3 adds verify_progress_chunks (decision 0033), version 4
+// smart_reads (decision 0052), and an earlier
 // program refuses the repository from then on. Before it raises the version,
 // the open keeps a copy of the database as it is beside it, named for that
 // version and the day it is opened on: the copy holds the version and the
 // rows as they were, whole, and the open says where it is (decision 0032).
 // Opened again, the repository needs no upgrade, and no copy is made. A
 // version this program does not know is refused, and left as it is.
-void an_older_repository_is_raised_to_schema_version_3()
+void an_older_repository_is_raised_to_schema_version_4()
 {
     TemporaryDirectory temporary("schema-v1");
     auto options = make_options(temporary.path());
@@ -1062,47 +1064,53 @@ void an_older_repository_is_raised_to_schema_version_3()
         return;
     }
     const auto& layout = context->repo;
-    CHECK(stored_schema_version(layout) == 3 && has_table(layout, "verify_progress_chunks"));
+    CHECK(stored_schema_version(layout) == 4 && has_table(layout, "verify_progress_chunks"));
     CHECK(!context->schema_upgrade && copies_in(layout.root).empty());
 
-    // As V1 left it, and as a version 2 program left it (sample data).
-    for (const int older : {1, 2}) {
+    // As V1 left it, and as a version 2 and a version 3 program left it
+    // (sample data).
+    for (const int older : {1, 2, 3}) {
         lower_schema(layout, older);
         const auto unmigrated = va::validate_schema(layout);
         CHECK(!unmigrated && unmigrated.error().message == "unsupported repository schema");
         CHECK(va::open_repository(*context, test::today).has_value());
-        CHECK(stored_schema_version(layout) == 3 && has_table(layout, "verify_progress_chunks"));
+        CHECK(stored_schema_version(layout) == 4 && has_table(layout, "verify_progress_chunks") &&
+              has_table(layout, "smart_reads"));
         CHECK(va::validate_schema(layout).has_value());
         CHECK(first_value(layout.database(), "SELECT label FROM archives") == "ARCH-0001");
 
         const auto copy =
             layout.root / ("veriarchive-schema-" + std::to_string(older) + "-before-upgrade-2026-10-17.db");
         const auto& upgrade = context->schema_upgrade;
-        CHECK(upgrade && upgrade->from == older && upgrade->to == 3 && upgrade->copy == copy);
+        CHECK(upgrade && upgrade->from == older && upgrade->to == 4 && upgrade->copy == copy);
         CHECK(first_value(copy, "SELECT version FROM schema_version") == std::to_string(older));
         CHECK(first_value(copy, "SELECT label FROM archives") == "ARCH-0001");
-        CHECK(first_value(copy, "SELECT count(*) FROM sqlite_master WHERE name = 'verify_progress_chunks'") == "0");
+        CHECK(first_value(copy, "SELECT count(*) FROM sqlite_master WHERE name = 'verify_progress_chunks'") ==
+              (older < 3 ? "0" : "1"));
+        CHECK(first_value(copy, "SELECT count(*) FROM sqlite_master WHERE name = 'smart_reads'") == "0");
         CHECK(first_value(copy, "PRAGMA integrity_check") == "ok");
     }
     const std::set<std::string> both{
-        "veriarchive-schema-1-before-upgrade-2026-10-17.db", "veriarchive-schema-2-before-upgrade-2026-10-17.db"};
+        "veriarchive-schema-1-before-upgrade-2026-10-17.db", "veriarchive-schema-2-before-upgrade-2026-10-17.db",
+        "veriarchive-schema-3-before-upgrade-2026-10-17.db"};
     CHECK(copies_in(layout.root) == both);
 
     // Opened again: nothing more to do, and nothing more to copy.
     CHECK(va::open_repository(*context, test::today).has_value());
-    CHECK(stored_schema_version(layout) == 3);
+    CHECK(stored_schema_version(layout) == 4);
     CHECK(!context->schema_upgrade && copies_in(layout.root) == both);
 
-    // A version 3 database without the table is incomplete, not raised.
+    // A version 4 database without a table of its version is incomplete, not
+    // raised.
     run_sql(layout, "DROP TABLE verify_progress_chunks");
     const auto incomplete = va::validate_schema(layout);
     CHECK(!incomplete && incomplete.error().message == "unsupported or incomplete repository schema");
 
     // A later program's repository, neither upgraded nor copied.
-    run_sql(layout, "UPDATE schema_version SET version = 4");
+    run_sql(layout, "UPDATE schema_version SET version = 5");
     const auto later = va::open_repository(*context, test::today);
     CHECK(!later && later.error().message == "unsupported repository schema");
-    CHECK(stored_schema_version(layout) == 4);
+    CHECK(stored_schema_version(layout) == 5);
     CHECK(!context->schema_upgrade && copies_in(layout.root) == both);
 }
 
@@ -1136,7 +1144,7 @@ void a_copy_before_an_upgrade_never_replaces_a_file()
 
     CHECK(va::open_repository(*context, test::today).has_value());
     CHECK(context->schema_upgrade && context->schema_upgrade->copy == second);
-    CHECK(stored_schema_version(layout) == 3);
+    CHECK(stored_schema_version(layout) == 4);
     std::ifstream taken_file(taken, std::ios::binary);
     const std::string taken_now{std::istreambuf_iterator<char>(taken_file), std::istreambuf_iterator<char>()};
     CHECK(taken_now == kept);
@@ -1173,7 +1181,7 @@ void an_upgrade_without_its_copy_is_refused()
 
     const auto refused = va::open_repository(*context, test::today);
     const auto expected = "cannot keep a copy of the repository database at " + va::path_to_utf8(copy) +
-                          " before upgrading it from schema version 1 to 3, so the repository was not upgraded: "
+                          " before upgrading it from schema version 1 to 4, so the repository was not upgraded: "
                           "unable to open database file";
     CHECK(!refused && refused.error().message == expected);
     if (!refused && refused.error().message != expected) {
@@ -1186,7 +1194,7 @@ void an_upgrade_without_its_copy_is_refused()
     std::filesystem::remove_all(partial);
     CHECK(va::open_repository(*context, test::today).has_value());
     CHECK(context->schema_upgrade && context->schema_upgrade->copy == copy);
-    CHECK(stored_schema_version(layout) == 3 && first_value(copy, "SELECT version FROM schema_version") == "1");
+    CHECK(stored_schema_version(layout) == 4 && first_value(copy, "SELECT version FROM schema_version") == "1");
 }
 
 // An upgrade that fails after its copy was made, as a database of version 2
@@ -1205,7 +1213,7 @@ void an_upgrade_that_fails_keeps_no_copy()
     const auto& layout = context->repo;
     run_sql(layout, "UPDATE schema_version SET version = 2");
     const auto failed = va::open_repository(*context, test::today);
-    CHECK(!failed && failed.error().message == "cannot upgrade the repository database to schema version 3: cannot "
+    CHECK(!failed && failed.error().message == "cannot upgrade the repository database to schema version 4: cannot "
                                                "execute SQL: table verify_progress_chunks already exists");
     CHECK(stored_schema_version(layout) == 2 && copies_in(layout.root).empty() && !context->schema_upgrade);
 }
@@ -1284,7 +1292,7 @@ void an_upgrade_waits_for_the_write_lock()
     if (!opened) {
         std::cerr << "  failed: " << opened.error().message << '\n';
     }
-    CHECK(context->schema_upgrade && stored_schema_version(layout) == 3);
+    CHECK(context->schema_upgrade && stored_schema_version(layout) == 4);
     CHECK(copies_in(layout.root) == std::set<std::string>{"veriarchive-schema-1-before-upgrade-2026-10-17.db"});
 }
 
@@ -1307,11 +1315,15 @@ void an_open_waits_for_another_upgrade()
     {
         const LockHolder holder(layout, [&](sqlite3* connection) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
-            // The upgrade of version 1 to 3, as the other process makes it.
+            // The upgrade of version 1 to 4, as the other process makes it.
             CHECK(sqlite3_exec(connection,
                       "CREATE TABLE verify_progress_chunks (run_id TEXT NOT NULL,path TEXT NOT NULL,raw_hex TEXT NOT "
                       "NULL DEFAULT '',stream TEXT NOT NULL DEFAULT '',idx INTEGER NOT NULL,b3 TEXT NOT NULL,PRIMARY "
-                      "KEY(run_id,path,raw_hex,stream,idx)) WITHOUT ROWID; UPDATE schema_version SET version = 3; "
+                      "KEY(run_id,path,raw_hex,stream,idx)) WITHOUT ROWID; "
+                      "CREATE TABLE smart_reads (id INTEGER PRIMARY KEY,read_at TEXT NOT NULL,seen_json TEXT NOT NULL,model "
+                      "TEXT NOT NULL DEFAULT '',serial TEXT NOT NULL DEFAULT '',wwn TEXT NOT NULL DEFAULT '',firmware TEXT NOT "
+                      "NULL DEFAULT '',how TEXT NOT NULL DEFAULT '',identify BLOB,data BLOB,thresholds BLOB,problem TEXT NOT NULL "
+                      "DEFAULT '',detail TEXT NOT NULL DEFAULT ''); UPDATE schema_version SET version = 4; "
                       "COMMIT; BEGIN IMMEDIATE",
                       nullptr, nullptr, nullptr) == SQLITE_OK);
             // The lock taken again, until the open is done, or 10 seconds.
@@ -1327,7 +1339,7 @@ void an_open_waits_for_another_upgrade()
     if (!opened) {
         std::cerr << "  failed: " << opened.error().message << '\n';
     }
-    CHECK(!context->schema_upgrade && copies_in(layout.root).empty() && stored_schema_version(layout) == 3);
+    CHECK(!context->schema_upgrade && copies_in(layout.root).empty() && stored_schema_version(layout) == 4);
 }
 
 // When the lock stays taken longer than the open's patience, the open fails
@@ -1354,7 +1366,7 @@ void an_upgrade_gives_up_after_its_patience()
         const auto locked = va::open_repository(
             *context, test::today, {std::chrono::milliseconds(100), std::chrono::milliseconds(500)});
         const auto waited = std::chrono::steady_clock::now() - started;
-        CHECK(!locked && locked.error().message == "cannot upgrade the repository database to schema version 3: "
+        CHECK(!locked && locked.error().message == "cannot upgrade the repository database to schema version 4: "
                                                    "cannot execute SQL: database is locked");
         if (locked || locked.error().message.find("database is locked") == std::string::npos) {
             std::cerr << "  opened while the lock was held: " << (locked ? "upgraded" : locked.error().message) << '\n';
@@ -1389,9 +1401,9 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     const auto database = layout.database();
     const auto database_text = va::path_to_utf8(database);
     const auto current = file_bytes(database);
-    // As V1 left it: without the table that version 3 adds.
+    // As V1 left it: without the tables that versions 3 and 4 add.
     run_sql(layout,
-        "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1; "
+        "DROP TABLE smart_reads; DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1; "
         "INSERT INTO archives VALUES('c0ffee00-0000-4000-8000-000000000036','ARCH-0001','2026-10-27T00:00:00Z',1,"
         "'REGISTERED','',NULL)");
     const auto version_1 = file_bytes(database);
@@ -1418,7 +1430,7 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
     // database of version 1, which is then removed.
     const auto upgraded_with_copy = [&](const va::AppContext& opened) {
         const auto& upgrade = opened.schema_upgrade;
-        CHECK(upgrade && upgrade->from == 1 && upgrade->to == 3 &&
+        CHECK(upgrade && upgrade->from == 1 && upgrade->to == 4 &&
               copies() == std::set<std::string>{"veriarchive-schema-1-before-upgrade-2026-10-17.db"});
         if (upgrade) {
             CHECK(upgrade->copy == layout.root / "veriarchive-schema-1-before-upgrade-2026-10-17.db");
@@ -1458,7 +1470,7 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         auto rebuilding = *context;
         const auto marked = va::open_repository_to_rebuild(rebuilding, test::today);
         CHECK(marked && *marked && (*marked)->moved_to == layout.root / "veriarchive.db.damaged-SAMPLE");
-        CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Unfilled);
+        CHECK(stored_schema_version(layout) == 4 && va::database_state(layout) == va::DatabaseState::Unfilled);
         upgraded_with_copy(rebuilding);
     }
 
@@ -1468,7 +1480,7 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         auto rebuilding = *context;
         const auto opened = va::open_repository_to_rebuild(rebuilding, test::today);
         CHECK(opened && !*opened);
-        CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Usable);
+        CHECK(stored_schema_version(layout) == 4 && va::database_state(layout) == va::DatabaseState::Usable);
         CHECK(label_kept());
         upgraded_with_copy(rebuilding);
     }
@@ -1485,13 +1497,13 @@ void an_older_schema_is_upgraded_only_where_it_can_be_used()
         if (replaced && *replaced && (*replaced)->moved_to) {
             CHECK(file_bytes(*(*replaced)->moved_to) == damaged);
         }
-        CHECK(stored_schema_version(layout) == 3 && va::database_state(layout) == va::DatabaseState::Unfilled);
+        CHECK(stored_schema_version(layout) == 4 && va::database_state(layout) == va::DatabaseState::Unfilled);
         CHECK(!rebuilding.schema_upgrade && copies().empty());
     }
 
     // A later version's database: refused by the rebuild too, unchanged.
     std::ofstream(database, std::ios::binary | std::ios::trunc) << current;
-    run_sql(layout, "UPDATE schema_version SET version = 4;");
+    run_sql(layout, "UPDATE schema_version SET version = 5;");
     const auto later = file_bytes(database);
     {
         auto rebuilding = *context;
@@ -1697,7 +1709,7 @@ void repository_tests()
     database_state_tells_what_cannot_be_used();
     rebuild_makes_a_database_that_cannot_be_used_again();
     a_new_database_left_beside_its_place_is_taken_up();
-    an_older_repository_is_raised_to_schema_version_3();
+    an_older_repository_is_raised_to_schema_version_4();
     the_upgrade_creates_each_archive_when_its_first_revision_is();
     an_older_schema_is_upgraded_only_where_it_can_be_used();
     a_copy_before_an_upgrade_never_replaces_a_file();

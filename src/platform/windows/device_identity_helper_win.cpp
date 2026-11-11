@@ -1,19 +1,21 @@
-// The device identity reader on Windows (decision 0047). The program never
-// elevates itself (R-12): it asks Windows to start its own small reader,
-// veriarchive-device-identity.exe from the program's folder, with
-// administrator permission (ShellExecuteExW, verb "runas"), which Windows
-// asks the operator for. The reader gets two arguments only: the number of
-// the device (the N of \\.\PhysicalDriveN; never a path, which an elevated
-// program would open whatever it named) and the file to write its result to,
-// in a folder made new for this read under this user's temporary folder. The
-// program waits for the reader, reads its small JSON result, and removes the
-// file and the folder. The device must be described alike before Windows asks
-// and once the reader has ended, so that a device that took the number while
-// the operator answered is not read in its place.
+// The device identity reader on Windows (decisions 0047 and 0052). The
+// program never elevates itself (R-12): it asks Windows to start its own
+// small reader, veriarchive-device-identity.exe from the program's folder,
+// with administrator permission (ShellExecuteExW, verb "runas"), which
+// Windows asks the operator for. The reader gets the file to write its result
+// to, in a folder made new for this read under this user's temporary folder,
+// then the number of each device to read (the N of \\.\PhysicalDriveN; never
+// a path, which an elevated program would open whatever it named), nothing
+// else. The program waits for the reader, reads its JSON result (the pages
+// each device returned, decoded here: reader_reads.h), and removes the file
+// and the folder. Each device must be described alike before Windows asks and
+// once the reader has ended, so that a device that took the number while the
+// operator answered is not read in its place.
 #include "platform/device_identity_helper.h"
 #include "platform/platform_services.h"
 #include "platform/windows/device_identity_reader.h"
 #include "platform/windows/device_identity_start.h"
+#include "platform/windows/reader_reads.h"
 
 #include "common/time.h"
 #include "common/utf8.h"
@@ -22,6 +24,7 @@
 #include <objbase.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <chrono>
 #include <optional>
 #include <string>
@@ -33,9 +36,10 @@ namespace va::platform {
 namespace windows {
 namespace {
 
-// How long the reader may take once it runs: it sends one command to the
-// device, twice at most, each with a time limit of 15 s (helper/main.cpp).
-constexpr auto reader_time_limit = std::chrono::seconds(60);
+// How long the reader may take once it runs: it reads its devices side by
+// side, each with at most four commands of 15 s each (helper/main.cpp), as
+// sleeping hard disks may first spin up (decision 0052).
+constexpr auto reader_time_limit = std::chrono::seconds(120);
 // How often the wait looks whether it is cancelled.
 constexpr DWORD wait_step_ms = 100;
 // The folder of one read under the temporary folder, and its result file.
@@ -247,16 +251,14 @@ public:
         return reader && reader_present(*reader);
     }
 
-    std::expected<DeviceIdentityRead, IoError> read_device_identity(
-        const std::string& device_ref, CancelToken& cancel) override
+    std::expected<std::vector<DeviceRead>, IoError> read_devices(
+        const std::vector<std::string>& device_refs, CancelToken& cancel) override
     {
         if (cancel.cancelled()) {
             return std::unexpected(IoError{IoErrorKind::Cancelled, 0, "cancelled"});
         }
-        const auto number = physical_drive_number(device_ref);
-        if (!number) {
-            return std::unexpected(
-                IoError{IoErrorKind::Other, 0, "no device of this computer by its number: " + device_ref});
+        if (device_refs.empty() || device_refs.size() > physical_drive_count) {
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "no devices, or more than the reader reads"});
         }
         const auto reader = reader_path();
         if (!reader) {
@@ -266,18 +268,41 @@ public:
             return std::unexpected(IoError{IoErrorKind::NotFound, 0,
                 "the device identity reader is missing: " + path_to_utf8(*reader)});
         }
-        // The device as this program tells it before Windows asks the
-        // operator, which may take minutes.
-        const auto before = describe_(*number);
-        if (!before) {
-            return std::unexpected(
-                IoError{IoErrorKind::NotFound, 0, "the device is no longer attached: " + device_ref});
+        // Each device as this program tells it before Windows asks the
+        // operator, which may take minutes; one that is not there is not
+        // given to the reader.
+        std::vector<DeviceRead> reads(device_refs.size());
+        std::vector<std::size_t> places;
+        std::vector<unsigned> numbers;
+        std::vector<PhysicalDeviceInfo> before;
+        for (std::size_t index = 0; index < device_refs.size(); ++index) {
+            const auto& device_ref = device_refs[index];
+            reads[index].device_ref = device_ref;
+            const auto number = physical_drive_number(device_ref);
+            if (!number || std::ranges::find(numbers, *number) != numbers.end()) {
+                reads[index].identity = std::unexpected(
+                    IoError{IoErrorKind::Other, 0, "no device of this computer by its number: " + device_ref});
+                continue;
+            }
+            auto described = describe_(*number);
+            if (!described) {
+                reads[index].identity = std::unexpected(
+                    IoError{IoErrorKind::NotFound, 0, "the device is no longer attached: " + device_ref});
+                continue;
+            }
+            described->device_ref = device_ref;
+            places.push_back(index);
+            numbers.push_back(*number);
+            before.push_back(std::move(*described));
+        }
+        if (numbers.empty()) {
+            return reads;
         }
         auto folder = ResultFolder::make();
         if (!folder) {
             return std::unexpected(folder.error());
         }
-        auto process = start_(*reader, reader_parameters(*number, folder->result().native()));
+        auto process = start_(*reader, reader_parameters(numbers, folder->result().native()));
         if (!process) {
             return std::unexpected(process.error());
         }
@@ -306,17 +331,6 @@ public:
                     IoError{IoErrorKind::Timeout, 0, "the device identity reader did not finish in time"});
             }
         }
-        // The same device still has the number: else the reader read another
-        // one, which took the number while the operator answered.
-        const auto after = describe_(*number);
-        if (!after) {
-            return std::unexpected(
-                IoError{IoErrorKind::NotFound, 0, "the device is no longer attached: " + device_ref});
-        }
-        if (!same_description(*before, *after)) {
-            return std::unexpected(IoError{IoErrorKind::NotFound, 0,
-                "the device changed while it was read: another device has its number now (" + device_ref + ")"});
-        }
         DWORD exit_code = 0;
         GetExitCodeProcess(process->get(), &exit_code);
         const auto text = read_result(folder->result());
@@ -324,7 +338,28 @@ public:
             return std::unexpected(IoError{IoErrorKind::Other, static_cast<int>(exit_code),
                 "the device identity reader wrote no result (exit " + std::to_string(exit_code) + ")"});
         }
-        return reader_result(*text, device_ref, current_timestamp());
+        const auto devices = reader_devices(*text, numbers);
+        if (!devices) {
+            return std::unexpected(devices.error());
+        }
+        auto read = device_reads(*devices, before, current_timestamp());
+        for (std::size_t asked = 0; asked < places.size(); ++asked) {
+            auto& place = reads[places[asked]];
+            // The same device still has the number: else the reader read
+            // another one, which took the number while the operator answered.
+            const auto after = describe_(numbers[asked]);
+            if (!after) {
+                place.identity = std::unexpected(
+                    IoError{IoErrorKind::NotFound, 0, "the device is no longer attached: " + place.device_ref});
+            } else if (!same_description(before[asked], *after)) {
+                place.identity = std::unexpected(IoError{IoErrorKind::NotFound, 0,
+                    "the device changed while it was read: another device has its number now (" + place.device_ref +
+                        ")"});
+            } else if (asked < read.size()) {
+                place = std::move(read[asked]);
+            }
+        }
+        return reads;
     }
 
 private:

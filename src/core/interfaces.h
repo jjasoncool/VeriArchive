@@ -145,6 +145,24 @@ class CancelToken;  // below
 // opened or read (NotFound where it is no longer attached, or another device
 // took its place while the operator answered; Timeout where it did not
 // answer in time), or the reader failed.
+//
+// Decision 0052: one run of the reader reads every device it is given, under
+// one question of the operating system: each device's own identity and its
+// SMART (ATA SMART READ DATA and SMART READ THRESHOLDS, or the NVMe SMART /
+// Health Information log), which changes nothing either. The window gives it
+// every attached device whenever it asks for administrator permission.
+
+// One device's part of a read (decision 0052): its own identity, or why it
+// was not read (the kinds above); and what was read of its SMART, a failed
+// read included (SmartRead::problem), the device as the system described it
+// before the operator was asked; nothing where the device was not read at
+// all (it went, or another device took its name meanwhile).
+struct DeviceRead {
+    std::string device_ref;
+    std::expected<DeviceIdentityRead, IoError> identity;
+    std::optional<SmartRead> smart;
+};
+
 class IDeviceIdentityHelper {
 public:
     virtual ~IDeviceIdentityHelper() = default;
@@ -156,8 +174,25 @@ public:
     // where it is false.
     virtual bool available() const = 0;
 
-    virtual std::expected<DeviceIdentityRead, IoError> read_device_identity(
-        const std::string& device_ref, CancelToken& cancel) = 0;
+    // Reads each of `device_refs` (each once, at most 64), in one run of the
+    // reader: one DeviceRead for each, in that order; or, where the reader
+    // did not run or wrote nothing (the operator declined, the wait was
+    // cancelled or ran out, no reader), why not.
+    virtual std::expected<std::vector<DeviceRead>, IoError> read_devices(
+        const std::vector<std::string>& device_refs, CancelToken& cancel) = 0;
+
+    // The own identity of `device_ref` alone, read so.
+    std::expected<DeviceIdentityRead, IoError> read_device_identity(const std::string& device_ref, CancelToken& cancel)
+    {
+        auto reads = read_devices({device_ref}, cancel);
+        if (!reads) {
+            return std::unexpected(reads.error());
+        }
+        if (reads->size() != 1) {
+            return std::unexpected(IoError{IoErrorKind::Other, 0, "the device identity reader read no such device"});
+        }
+        return std::move(reads->front().identity);
+    }
 };
 
 enum class DeviceIdentityFailure { NotAvailable, Declined, NotPassed, Unreadable, Cancelled };
@@ -303,8 +338,8 @@ class NullDeviceIdentityHelper final : public IDeviceIdentityHelper {
 public:
     bool available() const override { return false; }
 
-    std::expected<DeviceIdentityRead, IoError> read_device_identity(
-        const std::string&, CancelToken&) override
+    std::expected<std::vector<DeviceRead>, IoError> read_devices(
+        const std::vector<std::string>&, CancelToken&) override
     {
         return std::unexpected(IoError{
             IoErrorKind::NotSupported,

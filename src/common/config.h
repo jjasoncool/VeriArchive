@@ -31,6 +31,11 @@ struct Config {
     Policy policy;
     bool allow_network_repository = false;
     std::string language; // "" = follow the system, "en" or "zh-TW" (decision 0017)
+    // Decision 0052: the window reads the SMART of the attached devices, with
+    // administrator permission that Windows asks for, as a FULL verification
+    // starts, and records it with the run. Off by default; the command line
+    // never reads SMART.
+    bool read_smart_with_full_verify = false;
     // R-111, §B7.3 `io.rotational_override`: by device serial, whether the
     // device is rotational (an HDD: true) or not (an SSD: false), for a USB
     // bridge that reports it wrongly or not at all. Written in the file as

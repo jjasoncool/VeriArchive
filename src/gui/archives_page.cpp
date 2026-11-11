@@ -294,8 +294,9 @@ void verify_needing(GuiState& state)
     // Read again: a job may have started on one since the overview was shown.
     const auto needing = archives_needing(state);
     std::string names;
+    // One read of SMART first for all of them, where it is on (decision 0052).
+    verify_archives(state, needing, VerifyChoice::Full);
     for (const auto& archive : needing) {
-        verify_archive(state, archive, VerifyChoice::Full);
         const auto* status = listed_status(state, archive);
         const auto label = status ? display_label(*status) : archive.substr(0, 8);
         names = names.empty() ? label : state.text.format("{}, {}", names, label);
@@ -777,6 +778,7 @@ void refresh_archives(GuiState& state)
     page.filling = false;
     gtk_widget_remove_css_class(page.status, "error");
     if (!state.session) {
+        state.smart_reads.clear();
         gtk_label_set_text(GTK_LABEL(page.status), "");
         show_empty(state, false);
         show_details(state);
@@ -816,6 +818,12 @@ void refresh_archives(GuiState& state)
         state.operations.archives_shown = *mark;
     }
     page.statuses = std::move(*statuses);
+    // Decision 0052: the SMART reads the repository keeps, and the SMART
+    // alert of each archive's devices.
+    if (auto reads = store->smart_reads()) {
+        state.smart_reads = std::move(*reads);
+    }
+    note_smart_alerts(state);
     if (changed && state.devices.timer != 0) {
         read_devices(state, DevicesReadWhy::Refresh);
     }

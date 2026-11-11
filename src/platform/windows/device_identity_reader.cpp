@@ -90,17 +90,54 @@ std::string text_member(const nlohmann::json& object, const char* name, bool& va
     return found->get<std::string>();
 }
 
-bool printable_ascii(std::string_view text, std::size_t longest)
+// Bytes as lowercase hex, two digits each.
+std::string hex_text(std::span<const std::uint8_t> bytes)
 {
-    return text.size() <= longest &&
-           std::ranges::all_of(text, [](char character) { return character >= 0x20 && character <= 0x7e; });
+    constexpr char digits[] = "0123456789abcdef";
+    std::string text;
+    text.reserve(bytes.size() * 2);
+    for (const auto byte : bytes) {
+        text += digits[byte >> 4];
+        text += digits[byte & 0x0f];
+    }
+    return text;
 }
 
-bool wwn_text(std::string_view text)
+// The page `name` of a device's result: its bytes, from lowercase hex of
+// exactly `size` bytes; none where the member is not there; nothing where it
+// is there otherwise.
+std::optional<std::vector<std::uint8_t>> page_member(const nlohmann::json& object, const char* name, std::size_t size)
 {
-    return text.empty() || (text.size() == 16 && std::ranges::all_of(text, [](char character) {
-        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
-    }));
+    const auto found = object.find(name);
+    if (found == object.end()) {
+        return std::vector<std::uint8_t>{};
+    }
+    if (!found->is_string()) {
+        return std::nullopt;
+    }
+    const auto& text = found->get_ref<const std::string&>();
+    if (text.size() != 2 * size) {
+        return std::nullopt;
+    }
+    const auto digit = [](char character) -> int {
+        if (character >= '0' && character <= '9') {
+            return character - '0';
+        }
+        if (character >= 'a' && character <= 'f') {
+            return character - 'a' + 10;
+        }
+        return -1;
+    };
+    std::vector<std::uint8_t> bytes(size);
+    for (std::size_t index = 0; index < size; ++index) {
+        const int high = digit(text[2 * index]);
+        const int low = digit(text[2 * index + 1]);
+        if (high < 0 || low < 0) {
+            return std::nullopt;
+        }
+        bytes[index] = static_cast<std::uint8_t>((high << 4) | low);
+    }
+    return bytes;
 }
 
 IoError other(std::string message)
@@ -194,79 +231,164 @@ bool output_path_argument(std::wstring_view argument)
     return ends_with_json(name);
 }
 
-std::wstring reader_parameters(unsigned device_number, std::wstring_view output_path)
+
+std::optional<std::vector<unsigned>> device_numbers_argument(std::span<const std::wstring_view> arguments)
 {
-    return std::to_wstring(device_number) + L" \"" + std::wstring(output_path) + L"\"";
+    if (arguments.empty() || arguments.size() > physical_drive_count) {
+        return std::nullopt;
+    }
+    std::vector<unsigned> numbers;
+    for (const auto argument : arguments) {
+        const auto number = device_number(argument);
+        if (!number || std::ranges::find(numbers, *number) != numbers.end()) {
+            return std::nullopt;
+        }
+        numbers.push_back(*number);
+    }
+    return numbers;
 }
 
-std::string identity_result_json(const AtaIdentity& identity, ReaderHow how)
+std::wstring reader_parameters(std::span<const unsigned> device_numbers, std::wstring_view output_path)
 {
-    return nlohmann::json{{"model", identity.model}, {"serial", identity.serial}, {"wwn", identity.wwn},
-        {"firmware", identity.firmware}, {"how", how == ReaderHow::Ata ? "ata" : "sat"}}
-        .dump();
+    std::wstring parameters = L"\"" + std::wstring(output_path) + L"\"";
+    for (const auto number : device_numbers) {
+        parameters += L" " + std::to_wstring(number);
+    }
+    return parameters;
 }
 
-std::string error_result_json(std::string_view error, std::uint32_t code)
+std::array<std::uint8_t, 16> smart_cdb(std::uint8_t feature)
 {
-    return nlohmann::json{{"error", error}, {"code", code}}.dump();
+    auto cdb = identify_device_cdb();
+    cdb[4] = feature;                 // FEATURES (7:0)
+    cdb[10] = smart_lba_mid;          // LBA (15:8)
+    cdb[12] = smart_lba_high;         // LBA (23:16)
+    cdb[14] = smart_command;
+    return cdb;
 }
 
-std::expected<DeviceIdentityRead, IoError> reader_result(
-    std::string_view text, const std::string& device_ref, const Timestamp& read_at)
+std::string reader_result_json(const std::vector<ReaderDevice>& devices)
+{
+    auto list = nlohmann::json::array();
+    for (const auto& device : devices) {
+        nlohmann::json entry{{"number", device.number}};
+        if (!device.error.empty()) {
+            entry["error"] = device.error;
+            entry["code"] = device.code;
+            list.push_back(std::move(entry));
+            continue;
+        }
+        entry["how"] = device.how;
+        entry["identify"] = hex_text(device.identify);
+        if (!device.smart.empty()) {
+            entry["smart"] = hex_text(device.smart);
+            if (!device.thresholds.empty()) {
+                entry["thresholds"] = hex_text(device.thresholds);
+            }
+        } else {
+            entry["smart_error"] = device.smart_error.empty() ? std::string("not-passed") : device.smart_error;
+            entry["smart_code"] = device.smart_code;
+        }
+        list.push_back(std::move(entry));
+    }
+    return nlohmann::json{{"devices", std::move(list)}}.dump();
+}
+
+std::expected<std::vector<ReaderDevice>, IoError> reader_devices(
+    std::string_view text, std::span<const unsigned> asked)
 {
     if (text.size() > largest_reader_result) {
         return std::unexpected(other("the device identity reader wrote a result larger than it writes"));
     }
     const auto json = nlohmann::json::parse(text, nullptr, false);
-    if (!json.is_object()) {
+    const auto list = json.is_object() ? json.find("devices") : json.end();
+    if (!json.is_object() || list == json.end() || !list->is_array() || list->size() != asked.size()) {
         return std::unexpected(other("the device identity reader wrote no result that it writes"));
     }
-    if (const auto error = json.find("error"); error != json.end()) {
-        const auto code = json.find("code");
-        const std::uint32_t native = code != json.end() && code->is_number_unsigned()
-                                         ? code->get<std::uint32_t>()
-                                         : 0;
-        // ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_DEV_NOT_EXIST,
-        // ERROR_NO_SUCH_DEVICE, ERROR_DEVICE_NOT_CONNECTED, ERROR_DEVICE_REMOVED:
-        // the device is no longer attached.
-        const bool gone = native == 2 || native == 3 || native == 55 || native == 433 || native == 1167 ||
-                          native == 1617;
-        if (*error == "not-passed") {
-            if (gone) {
-                return std::unexpected(IoError{IoErrorKind::NotFound, static_cast<int>(native),
-                    std::format("the device is no longer attached (error {})", native)});
-            }
-            // ERROR_SEM_TIMEOUT, WAIT_TIMEOUT, ERROR_OPERATION_ABORTED (the
-            // request ended by a reset), ERROR_TIMEOUT.
-            if (native == 121 || native == 258 || native == 995 || native == 1460) {
-                return std::unexpected(IoError{IoErrorKind::Timeout, static_cast<int>(native),
-                    std::format("the device did not answer IDENTIFY DEVICE in time (error {})", native)});
-            }
-            return std::unexpected(IoError{IoErrorKind::CommandNotPassed, static_cast<int>(native),
-                "the device's enclosure passes no ATA command on to the device"});
+    const auto refused = [] {
+        return std::unexpected(other("the device identity reader wrote a result that it does not write"));
+    };
+    std::vector<ReaderDevice> devices;
+    for (std::size_t index = 0; index < asked.size(); ++index) {
+        const auto& entry = (*list)[index];
+        if (!entry.is_object()) {
+            return refused();
         }
-        if (*error == "open-failed") {
-            return std::unexpected(IoError{gone ? IoErrorKind::NotFound : IoErrorKind::Other,
-                static_cast<int>(native),
-                std::format("the device identity reader could not open the device (error {})", native)});
+        ReaderDevice device;
+        const auto number = entry.find("number");
+        if (number == entry.end() || !number->is_number_unsigned() || number->get<unsigned>() != asked[index]) {
+            return refused();
         }
-        return std::unexpected(other("the device identity reader wrote an error that it does not write"));
+        device.number = asked[index];
+        if (const auto error = entry.find("error"); error != entry.end()) {
+            const auto code = entry.find("code");
+            if (!error->is_string() || (*error != "open-failed" && *error != "not-passed") || code == entry.end() ||
+                !code->is_number_unsigned()) {
+                return refused();
+            }
+            device.error = error->get<std::string>();
+            device.code = code->get<std::uint32_t>();
+            devices.push_back(std::move(device));
+            continue;
+        }
+        bool valid = true;
+        device.how = text_member(entry, "how", valid);
+        if (!valid || (device.how != "ata" && device.how != "sat" && device.how != "nvme")) {
+            return refused();
+        }
+        const bool nvme = device.how == "nvme";
+        auto identify = page_member(entry, "identify", nvme ? nvme_identify_data_size : identify_data_size);
+        if (!identify || identify->empty()) {
+            return refused();
+        }
+        device.identify = std::move(*identify);
+        auto smart = page_member(entry, "smart", nvme ? nvme_health_log_size : identify_data_size);
+        auto thresholds = page_member(entry, "thresholds", identify_data_size);
+        if (!smart || !thresholds || (nvme && !thresholds->empty()) || (smart->empty() && !thresholds->empty())) {
+            return refused();
+        }
+        device.smart = std::move(*smart);
+        device.thresholds = std::move(*thresholds);
+        if (device.smart.empty()) {
+            const auto smart_error = entry.find("smart_error");
+            const auto smart_code = entry.find("smart_code");
+            if (smart_error == entry.end() || *smart_error != "not-passed" || smart_code == entry.end() ||
+                !smart_code->is_number_unsigned()) {
+                return refused();
+            }
+            device.smart_error = "not-passed";
+            device.smart_code = smart_code->get<std::uint32_t>();
+        }
+        devices.push_back(std::move(device));
     }
-    bool valid = true;
-    DeviceIdentityRead read;
-    read.device.model = text_member(json, "model", valid);
-    read.device.serial = text_member(json, "serial", valid);
-    read.device.wwn = text_member(json, "wwn", valid);
-    const auto firmware = text_member(json, "firmware", valid);
-    read.how = text_member(json, "how", valid);
-    if (!valid || !printable_ascii(read.device.model, 40) || !printable_ascii(read.device.serial, 20) ||
-        !printable_ascii(firmware, 8) || !wwn_text(read.device.wwn) ||
-        (read.device.serial.empty() && read.device.wwn.empty()) || (read.how != "ata" && read.how != "sat")) {
-        return std::unexpected(other("the device identity reader wrote an identity that it does not write"));
+    return devices;
+}
+
+IoError reader_error(std::string_view error, std::uint32_t code)
+{
+    // ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_DEV_NOT_EXIST,
+    // ERROR_NO_SUCH_DEVICE, ERROR_DEVICE_NOT_CONNECTED, ERROR_DEVICE_REMOVED:
+    // the device is no longer attached.
+    const bool gone = code == 2 || code == 3 || code == 55 || code == 433 || code == 1167 || code == 1617;
+    if (error == "not-passed") {
+        if (gone) {
+            return IoError{IoErrorKind::NotFound, static_cast<int>(code),
+                std::format("the device is no longer attached (error {})", code)};
+        }
+        // ERROR_SEM_TIMEOUT, WAIT_TIMEOUT, ERROR_OPERATION_ABORTED (the
+        // request ended by a reset), ERROR_TIMEOUT.
+        if (code == 121 || code == 258 || code == 995 || code == 1460) {
+            return IoError{IoErrorKind::Timeout, static_cast<int>(code),
+                std::format("the device did not answer in time (error {})", code)};
+        }
+        return IoError{IoErrorKind::CommandNotPassed, static_cast<int>(code),
+            "the device's enclosure passes no ATA command on to the device"};
     }
-    read.read_at = read_at;
-    read.device_ref = device_ref;
-    return read;
+    if (error == "open-failed") {
+        return IoError{gone ? IoErrorKind::NotFound : IoErrorKind::Other, static_cast<int>(code),
+            std::format("the device identity reader could not open the device (error {})", code)};
+    }
+    return other("the device identity reader wrote an error that it does not write");
 }
 
 } // namespace va::platform::windows

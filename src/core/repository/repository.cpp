@@ -31,7 +31,9 @@ namespace {
 // archive_revisions.merkle_root and left them empty; version 2 fills them
 // (decision 0032). Version 3 adds verify_progress_chunks, the chunk hashes
 // that a FULL verify adding them keeps with its checkpoints (decision 0033).
-constexpr int schema_version = 3;
+// Version 4 adds smart_reads, the devices' SMART as the device identity
+// reader read it (decision 0052).
+constexpr int schema_version = 4;
 
 // R-92: forward-only migrations, each keyed by the version it upgrades and run
 // in the transaction that raises the version by one.
@@ -46,7 +48,8 @@ struct Migration {
 // may (§B8), to which no other table refers, and makes each archive with a
 // revision created when its first revision is, as its manifest says and a
 // rebuild of the index reads it again (decision 0040): V1, and V1.1 before
-// that decision, recorded when its first registration was planned.
+// that decision, recorded when its first registration was planned. 3 -> 4
+// adds a table, to which no other table refers (decision 0052).
 constexpr Migration migrations[] = {
     {1, ""},
     {2, "CREATE TABLE verify_progress_chunks (run_id TEXT NOT NULL,path TEXT NOT NULL,raw_hex TEXT NOT NULL DEFAULT "
@@ -55,6 +58,10 @@ constexpr Migration migrations[] = {
         "UPDATE archives SET created = (SELECT created FROM archive_revisions WHERE archive_revisions.archive_uuid = "
         "archives.archive_uuid ORDER BY revision LIMIT 1) WHERE EXISTS (SELECT 1 FROM archive_revisions WHERE "
         "archive_revisions.archive_uuid = archives.archive_uuid);"},
+    {3, "CREATE TABLE smart_reads (id INTEGER PRIMARY KEY,read_at TEXT NOT NULL,seen_json TEXT NOT NULL,model TEXT "
+        "NOT NULL DEFAULT '',serial TEXT NOT NULL DEFAULT '',wwn TEXT NOT NULL DEFAULT '',firmware TEXT NOT NULL "
+        "DEFAULT '',how TEXT NOT NULL DEFAULT '',identify BLOB,data BLOB,thresholds BLOB,problem TEXT NOT NULL DEFAULT "
+        "'',detail TEXT NOT NULL DEFAULT '');"},
 };
 
 // The tables of §B8, each with the schema version that first has it. A
@@ -68,7 +75,7 @@ struct RequiredTable {
 constexpr RequiredTable required_tables[] = {
     {"archives", 1}, {"archive_revisions", 1}, {"media_evidence", 1}, {"files", 1}, {"chunks", 1},
     {"verify_runs", 1}, {"verify_items", 1}, {"verify_progress", 1}, {"verify_progress_chunks", 3},
-    {"history_checkpoints", 1}, {"trusted_keys", 1}, {"settings", 1},
+    {"history_checkpoints", 1}, {"trusted_keys", 1}, {"settings", 1}, {"smart_reads", 4},
 };
 
 // No SQLite result code: database_state tells SQLite's own codes apart

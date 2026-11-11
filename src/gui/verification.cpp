@@ -33,6 +33,7 @@
 #include "core/engine/carrier_confirmation.h"
 #include "core/engine/verify_engine.h"
 #include "gui/archive_rows.h"
+#include "gui/smart_rows.h"
 #include "platform/file_system.h"
 #include "platform/media_enumerator.h"
 #include "platform/process_table.h"
@@ -522,14 +523,113 @@ bool refused_while_the_archive_has_a_job(GuiState& state, const Uuid& archive, c
     return busy;
 }
 
-void verify_archive(GuiState& state, const Uuid& archive, VerifyChoice choice)
+namespace {
+
+// Decision 0052: how long the SMART reads of a run of the device identity
+// reader serve a FULL verification started after it without asking Windows
+// again (as one started from the enclosure question, which read them).
+constexpr auto recent_smart_serves = std::chrono::minutes(5);
+
+// A verification to start, and the archive whose details show it.
+struct ToStart {
+    VerifyRequest request;
+    Uuid shown_in;
+};
+
+// Whether a FULL verification started now reads SMART first: the operator
+// turned it on in Settings, and this computer has a device identity reader.
+bool reads_smart_first(const GuiState& state)
 {
-    if (!state.session) {
-        show_message(state, fixed_message("Open a repository first (Settings)."));
+    return state.session && state.session->context.config.read_smart_with_full_verify && state.device_identity &&
+           state.device_identity->available();
+}
+
+// Starts each of `runs` (run_verification), after reading the SMART of the
+// attached devices where reads_smart_first (decision 0052): each run records
+// the reads of the devices of the volume it reads. The reads of a run of the
+// reader that ended a few minutes ago serve; otherwise the reader reads every
+// attached device, once for all of `runs`, after Windows asked the operator.
+// Where nothing is read (declined, no reader, another read waiting, nothing
+// attached), they start without SMART, and a toast says why.
+void start_verifications(GuiState& state, std::vector<ToStart> runs)
+{
+    const auto start = [](GuiState& state, std::vector<ToStart>& runs, const std::vector<SmartRead>& reads) {
+        for (auto& run : runs) {
+            run.request.smart_reads = reads;
+            run_verification(state, std::move(run.request), run.shown_in);
+        }
+    };
+    if (runs.empty()) {
         return;
     }
-    if (refused_while_the_archive_has_a_job(state, archive, recorded_root(state, archive))) {
+    if (!reads_smart_first(state)) {
+        start(state, runs, {});
         return;
+    }
+    if (!state.recent_smart.empty() && std::chrono::steady_clock::now() - state.recent_smart_at < recent_smart_serves) {
+        start(state, runs, state.recent_smart);
+        return;
+    }
+    std::vector<PhysicalDeviceInfo> devices;
+    if (const auto* read = attached_now(state)) {
+        for (const auto& attached : read->devices) {
+            if (!attached.device.device_ref.empty()) {
+                devices.push_back(attached.device);
+            }
+        }
+    }
+    const auto without = [](GuiState& state, std::vector<ToStart>& runs, const std::string& why) {
+        show_toast(state, state.text.format("Started without SMART: {}", why));
+        for (auto& run : runs) {
+            run_verification(state, std::move(run.request), run.shown_in);
+        }
+    };
+    if (devices.empty()) {
+        without(state, runs, state.text("No attached device whose SMART can be read."));
+        return;
+    }
+    if (state.device_reading) {
+        without(state, runs,
+            state.text("another read with administrator permission is waiting for the User Account Control prompt "
+                       "or for its devices"));
+        return;
+    }
+    auto pending = std::make_shared<std::vector<ToStart>>(std::move(runs));
+    const bool started = run_reader(state, std::move(devices), "*",
+        [pending, start, without](GuiState& state, ReaderRun& run) {
+            if (run.failure) {
+                show_message(state, run.failure);
+                without(state, *pending, state.text("the device identity reader failed"));
+                return;
+            }
+            if (!run.reads) {
+                // Cancelled: the window is closing, and starts nothing.
+                if (const auto words = smart_run_words(state.text, run.reads, state.smart_reads)) {
+                    without(state, *pending, *words);
+                }
+                return;
+            }
+            std::vector<SmartRead> reads;
+            for (const auto& read : *run.reads) {
+                if (read.smart) {
+                    reads.push_back(*read.smart);
+                }
+            }
+            start(state, *pending, reads);
+        });
+    if (!started) {
+        without(state, *pending, state.text("the device identity reader could not be started"));
+    }
+}
+
+// The request of FULL verify of `archive` by its uuid as `choice` asks for
+// it, or nothing where it is not started now: a job of the window works on
+// the archive (a message says so), or its device is seen behind another
+// enclosure, where the enclosure question opens first (decision 0047).
+std::optional<VerifyRequest> archive_verification(GuiState& state, const Uuid& archive, VerifyChoice choice)
+{
+    if (refused_while_the_archive_has_a_job(state, archive, recorded_root(state, archive))) {
+        return std::nullopt;
     }
     // Decision 0047: its device seen behind another enclosure, as the latest
     // read of the attached devices found it: the question first. The
@@ -545,13 +645,35 @@ void verify_archive(GuiState& state, const Uuid& archive, VerifyChoice choice)
                         text("chunk hashes are not added by the verification that accepts another enclosure; verify "
                              "the archive first, then add chunk hashes"));
                 });
-                return;
+                return std::nullopt;
             }
             ask_about_enclosure(state, archive, choice == VerifyChoice::StrictMetadata, *found);
-            return;
+            return std::nullopt;
         }
     }
-    run_verification(state, archive_request(state, archive, choice), archive);
+    return archive_request(state, archive, choice);
+}
+
+} // namespace
+
+void verify_archive(GuiState& state, const Uuid& archive, VerifyChoice choice)
+{
+    verify_archives(state, {archive}, choice);
+}
+
+void verify_archives(GuiState& state, const std::vector<Uuid>& archives, VerifyChoice choice)
+{
+    if (!state.session) {
+        show_message(state, fixed_message("Open a repository first (Settings)."));
+        return;
+    }
+    std::vector<ToStart> runs;
+    for (const auto& archive : archives) {
+        if (auto request = archive_verification(state, archive, choice)) {
+            runs.push_back({std::move(*request), archive});
+        }
+    }
+    start_verifications(state, std::move(runs));
 }
 
 bool verify_confirmed(GuiState& state, const Uuid& archive, bool strict, CarrierConfirmation confirmation)
@@ -566,7 +688,7 @@ bool verify_confirmed(GuiState& state, const Uuid& archive, bool strict, Carrier
     }
     auto request = archive_request(state, archive, strict ? VerifyChoice::StrictMetadata : VerifyChoice::Full);
     request.carrier_confirmation = std::move(confirmation);
-    run_verification(state, std::move(request), archive);
+    start_verifications(state, {ToStart{std::move(request), archive}});
     return true;
 }
 
@@ -678,7 +800,7 @@ void verify_root(GuiState& state, const Uuid& shown_in, const std::filesystem::p
     request.root = root;
     request.strict_metadata = strict || state.session->context.config.policy.strict_metadata;
     request.rotational_override = state.session->context.config.rotational_override;
-    run_verification(state, std::move(request), shown_in);
+    start_verifications(state, {ToStart{std::move(request), shown_in}});
 }
 
 void resume_verification(GuiState& state, const app::UnfinishedOperation& verification)

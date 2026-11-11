@@ -70,6 +70,40 @@ struct DeviceIdentityRead {
     std::string device_ref;
 };
 
+// One read of a device's SMART by the device identity reader (decision
+// 0052): the pages as the device returned them, which the repository keeps
+// (smart_reads) and the program decodes unprivileged (core/smart), so that a
+// better decoding reads old reads anew. A read that gave no SMART data is
+// kept too, with why (`problem`).
+struct SmartRead {
+    std::int64_t id = 0;            // its row in smart_reads; 0 before it is recorded
+    Timestamp read_at;
+    // The device as the system described it without elevation when it was
+    // read (device_ref, model, serial, WWN, bus, capacity, whether its
+    // enclosure hides its identity): how Devices finds the reads of a device
+    // attached now.
+    PhysicalDeviceInfo seen;
+    // Its own identity, from its identification (ATA IDENTIFY DEVICE or NVMe
+    // Identify Controller): how the reads of one device are compared over
+    // time. Empty where its identification was not read.
+    DeviceIdentity device;
+    std::string firmware;
+    // How it was read: "ata" (ATA pass-through), "sat" (ATA commands inside
+    // SCSI commands, as USB bridges take them), "nvme" (the NVMe protocol
+    // through the storage driver); empty where nothing was read.
+    std::string how;
+    std::vector<std::uint8_t> identify;    // IDENTIFY DEVICE (512 bytes) or Identify Controller (4096)
+    std::vector<std::uint8_t> data;        // SMART READ DATA or the SMART / Health Information log (512)
+    std::vector<std::uint8_t> thresholds;  // SMART READ THRESHOLDS (512); empty for NVMe
+    // Empty where `data` was read; else why not: "not-passed" (the
+    // enclosure passes no command on to the device), "smart-not-passed"
+    // (the identification was read, SMART was not), "smart-unsupported",
+    // "smart-off" (the device has SMART turned off), "no-answer",
+    // "unreadable".
+    std::string problem;
+    std::string detail;  // the error's own message (English), where there is one
+};
+
 struct VolumeInfo {
     std::filesystem::path mount_point;
     std::string filesystem_type;

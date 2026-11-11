@@ -70,8 +70,8 @@ std::string device_identity_reader_note(const Text& text)
     // "device" is the computer, not a device as VeriArchive names one.
     return text("Needs administrator permission: Windows' User Account Control asks whether to allow "
                 "veriarchive-device-identity.exe (the VeriArchive device identity reader), from an unknown publisher. "
-                "It reads only the model, serial and WWN that the device reports, and reads or writes none of the "
-                "data on the device.");
+                "It reads only the model, serial, WWN and SMART that the attached devices report, and reads or writes "
+                "none of the data on them.");
 }
 
 std::string device_read_declined(const Text& text)

@@ -51,6 +51,7 @@ struct ResumePoint {
     std::string root;  // where the run read (decision 0022); empty in a record of an older version
     std::uint64_t adding = 0;  // the chunk size at which the run adds chunk hashes (decision 0033)
     std::optional<RecordedConfirmation> confirmation;  // the run went on past a changed enclosure (decision 0047)
+    std::vector<SmartRead> smart;  // the SMART reads its first attempt recorded (decision 0052)
 };
 
 std::optional<std::filesystem::path> native_subpath(const std::string& root_subpath)
@@ -346,7 +347,7 @@ std::expected<ResumePoint, VerifyStop> find_resume_point(ArchiveStore& store, co
     const auto root = json.find("root");
     return ResumePoint{json["archive_uuid"].get<std::string>(), json["revision"].get<std::uint32_t>(),
         root != json.end() && root->is_string() ? root->get<std::string>() : std::string{}, adding_chunk_size(json),
-        carrier_confirmed_in_record(json)};
+        carrier_confirmed_in_record(json), json.contains("smart") ? smart_reads_from_json(json["smart"]) : std::vector<SmartRead>{}};
 }
 
 // Why a run that adds chunk hashes records no revision with them, though it
@@ -873,6 +874,12 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
         run_record[carrier_confirmed_member] =
             carrier_confirmation_json(confirmed->confirmation, confirmed->from_revision);
     }
+    // Decision 0052: the SMART of the volume's devices as the window read it
+    // when the verification was started, which its resume records too.
+    outcome.smart = resume ? resume->smart : reads_of_volume(request.smart_reads, located->volume.devices);
+    if (!outcome.smart.empty()) {
+        run_record["smart"] = smart_reads_json(outcome.smart);
+    }
     // The chunk hashes read, by entry key, of every file larger than the
     // chunk size whose content matched; with those that the checkpoints of a
     // resumed run kept (decision 0033).
@@ -1325,6 +1332,11 @@ std::expected<VerifyOutcome, VerifyStop> verify_full(
     // wrong "same device" is audited too.
     if (confirmed) {
         counts[carrier_confirmed_member] = carrier_confirmation_json(confirmed->confirmation, confirmed->from_revision);
+    }
+    // Decision 0052: the SMART read as it was started, hash-chained with the
+    // run whatever its result.
+    if (!outcome.smart.empty()) {
+        counts["smart"] = smart_reads_json(outcome.smart);
     }
     // Decision 0044: how fast this run read each hundredth of the content it
     // read; and, once the verification reached a result, how its read (with

@@ -190,6 +190,42 @@ void refresh_settings(GuiState& state)
                                                  days(policy.full_verify_max_age_days),
                                                  days(policy.any_verify_max_age_days))));
         add(state, page.policy, value_row(text("Strict metadata"), text(policy.strict_metadata ? "On" : "Off")));
+        // Decision 0052: where this computer has a device identity reader.
+        if (state.device_identity && state.device_identity->available()) {
+            GtkWidget* smart = adw_switch_row_new();
+            set_plain_title(smart, text("Read SMART when a FULL verification starts"));
+            adw_action_row_set_subtitle(ADW_ACTION_ROW(smart),
+                text("Windows asks for administrator permission each time a FULL verification is started in this "
+                     "window; the SMART of the devices it reads is recorded with the run, in its history. Off: "
+                     "SMART is read only with Read the SMART of all devices... on Devices.")
+                    .c_str());
+            adw_switch_row_set_active(ADW_SWITCH_ROW(smart), context.config.read_smart_with_full_verify);
+            g_signal_connect(smart, "notify::active", G_CALLBACK(+[](GObject* source, GParamSpec*, gpointer data) {
+                auto& state = *static_cast<GuiState*>(data);
+                guarded(
+                    [&] {
+                        if (!state.session) {
+                            return;
+                        }
+                        const bool on = adw_switch_row_get_active(ADW_SWITCH_ROW(source));
+                        auto& config = state.session->context.config;
+                        if (config.read_smart_with_full_verify == on) {
+                            return;
+                        }
+                        if (auto saved = app::save_smart_with_full_verify(on, state.session->context.config_file);
+                            !saved) {
+                            adw_switch_row_set_active(ADW_SWITCH_ROW(source), config.read_smart_with_full_verify);
+                            show_message(state, [cause = saved.error()](const app::Text& text) {
+                                return text.format("The setting could not be saved: {}", text(cause));
+                            });
+                            return;
+                        }
+                        config.read_smart_with_full_verify = on;
+                    },
+                    [&](const Report& report) { show_message(state, report); });
+            }), &state);
+            add(state, page.policy, smart);
+        }
         add(state, page.policy,
             value_row(text("Trusted signing keys"), text("Signed manifests are not part of this version.")));
         gtk_widget_set_visible(page.policy, TRUE);

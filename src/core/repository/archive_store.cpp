@@ -3,6 +3,7 @@
 #include "common/canonical_json.h"
 #include "common/time.h"
 #include "core/hash/hashers.h"
+#include "core/identity/volume_json.h"
 #include "core/manifest/manifest.h"
 
 #include <nlohmann/json.hpp>
@@ -1956,6 +1957,85 @@ std::expected<std::string, IoError> ArchiveStore::archive_list_mark()
         for (int column = 0; column < 6; ++column) {
             add(archives->text(column));
         }
+    }
+}
+
+} // namespace va
+
+namespace va {
+
+std::expected<void, IoError> ArchiveStore::record_smart_reads(std::vector<SmartRead>& reads)
+{
+    return write_transaction([&]() -> std::expected<void, IoError> {
+        auto statement = database_.prepare(
+            "INSERT INTO smart_reads (read_at, seen_json, model, serial, wwn, firmware, how, identify, data, "
+            "thresholds, problem, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        if (!statement) {
+            return std::unexpected(statement.error());
+        }
+        for (auto& read : reads) {
+            VolumeInfo seen;
+            seen.devices = {read.seen};
+            seen.devices.front().health.reset();
+            const auto seen_json = volume_to_json(seen)["devices"][0].dump();
+            statement->reset();
+            statement->bind(1, read.read_at)
+                .bind(2, seen_json)
+                .bind(3, read.device.model)
+                .bind(4, read.device.serial)
+                .bind(5, read.device.wwn)
+                .bind(6, read.firmware)
+                .bind(7, read.how)
+                .bind_blob(8, read.identify)
+                .bind_blob(9, read.data)
+                .bind_blob(10, read.thresholds)
+                .bind(11, read.problem)
+                .bind(12, read.detail);
+            if (auto done = statement->run(); !done) {
+                return done;
+            }
+            read.id = database_.last_insert_rowid();
+        }
+        return {};
+    });
+}
+
+std::expected<std::vector<SmartRead>, IoError> ArchiveStore::smart_reads()
+{
+    auto statement = database_.prepare(
+        "SELECT id, read_at, seen_json, model, serial, wwn, firmware, how, identify, data, thresholds, problem, "
+        "detail FROM smart_reads ORDER BY read_at, id");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    std::vector<SmartRead> reads;
+    for (;;) {
+        const auto row = statement->step();
+        if (!row) {
+            return std::unexpected(row.error());
+        }
+        if (!*row) {
+            return reads;
+        }
+        SmartRead read;
+        read.id = statement->integer(0);
+        read.read_at = statement->text(1);
+        const auto seen = nlohmann::json::parse(statement->text(2), nullptr, false);
+        if (seen.is_object()) {
+            const auto volume = volume_from_json(nlohmann::json{{"devices", nlohmann::json::array({seen})}});
+            if (!volume.devices.empty()) {
+                read.seen = volume.devices.front();
+            }
+        }
+        read.device = DeviceIdentity{statement->text(3), statement->text(4), statement->text(5)};
+        read.firmware = statement->text(6);
+        read.how = statement->text(7);
+        read.identify = statement->blob(8);
+        read.data = statement->blob(9);
+        read.thresholds = statement->blob(10);
+        read.problem = statement->text(11);
+        read.detail = statement->text(12);
+        reads.push_back(std::move(read));
     }
 }
 

@@ -68,7 +68,8 @@ std::vector<std::string> alert_marks(const Text& text, const RunAlerts& alerts);
 // last verification, until a later one gives none: the health that the
 // devices reported in its latest run (an INCOMPLETE one included: it asked
 // them as it started), and the read of its latest FULL verification that
-// reached a result.
+// reached a result; and, where the window filled it, the SMART alert of a
+// device of its carrier (decision 0052).
 RunAlerts archive_alerts(const ArchiveStatus& status);
 
 } // namespace va::app

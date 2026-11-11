@@ -254,3 +254,29 @@ std::expected<void, std::string> save_language(Language language,
 }
 
 } // namespace va::app
+
+namespace va::app {
+
+std::expected<void, std::string> save_smart_with_full_verify(bool on, std::optional<std::filesystem::path> explicit_config)
+{
+    const auto path = config_path(std::move(explicit_config));
+    if (!path) {
+        return std::unexpected(std::string("cannot locate the config file"));
+    }
+    Config config;
+    if (const auto existing = read_config(*path); existing && *existing) {
+        config = **existing;
+    } else if (!existing) {
+        return std::unexpected(existing.error().message);
+    }
+    config.read_smart_with_full_verify = on;
+    std::error_code error;
+    std::filesystem::create_directories(path->parent_path(), error);
+    const auto writer = platform::make_file_writer();
+    if (auto written = write_file_atomically(*writer, *path, config_to_json(config)); !written) {
+        return std::unexpected(written.error().message);
+    }
+    return {};
+}
+
+} // namespace va::app

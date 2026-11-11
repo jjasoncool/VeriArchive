@@ -165,6 +165,11 @@ RunAlerts archive_alerts(const ArchiveStatus& status)
     if (status.last_full) {
         alerts.slower = run_alerts(status.last_full->counts_json).slower;
     }
+    // Decision 0052: the latest SMART read of a device of its carrier, as
+    // the window found it.
+    if (status.smart_alert) {
+        alerts.smart = true;
+    }
     return alerts;
 }
 

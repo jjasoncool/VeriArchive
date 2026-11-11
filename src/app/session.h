@@ -121,6 +121,10 @@ Language interface_language(std::optional<std::string> explicit_code,
     std::optional<std::filesystem::path> explicit_config);
 
 // Remembers the language in the config file that interface_language() reads.
+// Decision 0052: remembers "Read SMART when a FULL verification starts" in
+// the same file.
+std::expected<void, std::string> save_smart_with_full_verify(bool on, std::optional<std::filesystem::path> explicit_config);
+
 std::expected<void, std::string> save_language(Language language,
     std::optional<std::filesystem::path> explicit_config);
 

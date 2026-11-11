@@ -161,9 +161,104 @@ GtkWidget* own_serial_row(GuiState& state, const OwnSerialLine& own)
     return row;
 }
 
-// A device's card: its head (model, bus and capacity, health), its serial,
-// the device's own serial where its enclosure hides it, then each volume with
-// the archives on it.
+// A table of the SMART details, which scrolls sideways where the card is
+// narrow.
+GtkWidget* smart_table(const SmartTable& table)
+{
+    GtkWidget* grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
+    set_margins(grid, 12);
+    for (std::size_t column = 0; column < table.headings.size(); ++column) {
+        GtkWidget* heading = make_row_label(table.headings[column]);
+        gtk_widget_add_css_class(heading, "dim-label");
+        gtk_widget_add_css_class(heading, "caption-heading");
+        gtk_label_set_xalign(GTK_LABEL(heading), column == 0 || column == 1 ? 0.0f : 1.0f);
+        gtk_grid_attach(GTK_GRID(grid), heading, static_cast<int>(column), 0, 1, 1);
+    }
+    for (std::size_t row = 0; row < table.rows.size(); ++row) {
+        for (std::size_t column = 0; column < table.rows[row].size(); ++column) {
+            GtkWidget* cell = make_row_label(table.rows[row][column]);
+            gtk_label_set_selectable(GTK_LABEL(cell), TRUE);
+            gtk_widget_add_css_class(cell, "numeric");
+            gtk_label_set_xalign(GTK_LABEL(cell), column == 0 || column == 1 ? 0.0f : 1.0f);
+            gtk_grid_attach(GTK_GRID(grid), cell, static_cast<int>(column), static_cast<int>(row) + 1, 1, 1);
+        }
+    }
+    GtkWidget* scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroller), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), grid);
+    GtkWidget* row = gtk_list_box_row_new();
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), scroller);
+    return row;
+}
+
+// Lines of words in a row of the card: the alerts in red, the hints and why
+// a read gave nothing dimmed.
+GtkWidget* smart_lines_row(const SmartSection& smart)
+{
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    set_margins(box, 12);
+    gtk_widget_set_margin_start(box, 16);
+    gtk_widget_set_margin_end(box, 16);
+    for (const auto& line : smart.alerts) {
+        gtk_box_append(GTK_BOX(box), make_words(line, "error", true));
+    }
+    for (const auto& line : smart.hints) {
+        gtk_box_append(GTK_BOX(box), make_words(line, "dim-label", true));
+    }
+    if (!smart.problem.empty()) {
+        gtk_box_append(GTK_BOX(box), make_words(smart.problem, "dim-label", true));
+    }
+    GtkWidget* row = gtk_list_box_row_new();
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+    return row;
+}
+
+// A device's SMART (decision 0052): when and how it was read, its alerts and
+// hints, the values most looked at, and, folded, every value and the reads
+// before.
+void append_smart(GuiState& state, GtkWidget* list, const SmartSection& smart)
+{
+    const auto& text = state.text;
+    // Under SMART: when and how it was read, or, where it never gave data,
+    // why not.
+    const bool problem_alone = smart.values.empty() && smart.alerts.empty() && smart.hints.empty();
+    std::string under = smart.read;
+    if (problem_alone && !smart.problem.empty()) {
+        under = under.empty() ? smart.problem : under + "\n" + smart.problem;
+    }
+    GtkWidget* head = card_row(text("SMART"), under);
+    adw_action_row_set_subtitle_selectable(ADW_ACTION_ROW(head), TRUE);
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(head), FALSE);
+    gtk_list_box_append(GTK_LIST_BOX(list), head);
+    if (!problem_alone && (!smart.alerts.empty() || !smart.hints.empty() || !smart.problem.empty())) {
+        gtk_list_box_append(GTK_LIST_BOX(list), smart_lines_row(smart));
+    }
+    if (!smart.values.empty()) {
+        gtk_list_box_append(GTK_LIST_BOX(list), make_fields_row(smart.values));
+    }
+    for (const auto& [title, table] :
+        {std::pair{smart.attributes_title, &smart.attributes}, std::pair{smart.history_title, &smart.history}}) {
+        if (table->rows.empty()) {
+            continue;
+        }
+        GtkWidget* expander = adw_expander_row_new();
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(expander), FALSE);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(expander), title.c_str());
+        adw_expander_row_add_row(ADW_EXPANDER_ROW(expander), smart_table(*table));
+        gtk_list_box_append(GTK_LIST_BOX(list), expander);
+    }
+}
+
+// A device's card: its head (model, bus and capacity, health, SMART), its
+// serial, the device's own serial where its enclosure hides it, its SMART,
+// then each volume with the archives on it.
 GtkWidget* device_card(GuiState& state, const DeviceCard& card)
 {
     GtkWidget* list = gtk_list_box_new();
@@ -179,6 +274,11 @@ GtkWidget* device_card(GuiState& state, const DeviceCard& card)
         gtk_widget_set_valign(health, GTK_ALIGN_CENTER);
         adw_action_row_add_suffix(ADW_ACTION_ROW(head), health);
     }
+    if (card.smart) {
+        GtkWidget* smart = make_pill(card.smart->pill);
+        gtk_widget_set_valign(smart, GTK_ALIGN_CENTER);
+        adw_action_row_add_suffix(ADW_ACTION_ROW(head), smart);
+    }
     gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(head), FALSE);
     gtk_list_box_append(GTK_LIST_BOX(list), head);
     if (!card.fields.empty()) {
@@ -186,6 +286,9 @@ GtkWidget* device_card(GuiState& state, const DeviceCard& card)
     }
     if (card.own) {
         gtk_list_box_append(GTK_LIST_BOX(list), own_serial_row(state, *card.own));
+    }
+    if (card.smart) {
+        append_smart(state, list, *card.smart);
     }
     for (const auto& volume : card.volumes) {
         gtk_list_box_append(GTK_LIST_BOX(list), volume_row(state, volume));
@@ -201,6 +304,21 @@ GtkWidget* device_card(GuiState& state, const DeviceCard& card)
 bool reader_available(const GuiState& state)
 {
     return state.device_identity && state.device_identity->available();
+}
+
+// Decision 0052: the own identity of `device`, behind an enclosure that hides
+// it, where the window keeps a read of it (device_reads.h); nothing otherwise,
+// and nothing for a device that nothing hides, whose reads are found by what
+// the system tells of it.
+std::optional<DeviceIdentity> own_identity_kept(const GuiState& state, const PhysicalDeviceInfo& device)
+{
+    if (!device.enclosure_hides_identity) {
+        return std::nullopt;
+    }
+    if (const auto* kept = kept_read_of(state.device_reads, device)) {
+        return kept->read.device;
+    }
+    return std::nullopt;
 }
 
 // The roots that registrations work on: those of this window's registration
@@ -271,12 +389,33 @@ void refresh_devices(GuiState& state)
 
     // Decision 0047: the devices' own serials read, and the one being read.
     gtk_widget_set_visible(page.enclosures, reader_available(state));
+    // Decision 0052: SMART, where this computer reads it or the repository
+    // keeps reads of it.
+    const bool smart_shown = state.session && (reader_available(state) || !state.smart_reads.empty());
+    if (page.smart) {
+        gtk_widget_set_visible(page.smart, state.session && reader_available(state));
+        std::vector<PhysicalDeviceInfo> attached;
+        std::vector<std::optional<DeviceIdentity>> own;
+        if (read) {
+            for (const auto& device : read->devices) {
+                attached.push_back(device.device);
+                own.push_back(own_identity_kept(state, device.device));
+            }
+        }
+        gtk_label_set_text(
+            GTK_LABEL(page.smart_summary), smart_summary(text, state.smart_reads, attached, own).c_str());
+        const bool reading_all = state.device_reading && state.device_reading->device_ref == "*";
+        gtk_widget_set_visible(page.smart_reading, reading_all);
+        gtk_spinner_set_spinning(GTK_SPINNER(page.smart_reading), reading_all);
+        gtk_widget_set_sensitive(page.smart_read, !state.device_reading && read && !read->devices.empty());
+    }
     const auto cards = read ? device_cards(text, *read,
                                   archive_names(state.archives_page.statuses, state.identity_shown),
                                   state.identity_shown, registering_roots(state), state.device_reads,
                                   reader_available(state),
                                   state.device_reading ? state.device_reading->device_ref : std::string{},
-                                  enclosure_cases(*read, state.archives_page.statuses, state.identity_shown))
+                                  enclosure_cases(*read, state.archives_page.statuses, state.identity_shown),
+                                  smart_shown ? &state.smart_reads : nullptr)
                             : std::vector<DeviceCard>{};
     // The same as drawn: the keyboard focus stays where it is.
     if (page.shown.has_value() == (read != nullptr) && (!read || *page.shown == cards)) {
@@ -362,6 +501,57 @@ GtkWidget* build_devices_page(GuiState& state)
     gtk_widget_set_visible(page.enclosures, reader_available(state));
     gtk_box_append(GTK_BOX(box), page.enclosures);
 
+    // Decision 0052: SMART, read with administrator permission, of every
+    // attached device at once; where this computer can read it.
+    page.smart = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_add_css_class(page.smart, "card");
+    GtkWidget* smart_head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    set_margins(smart_head, 12);
+    gtk_widget_set_margin_bottom(smart_head, 0);
+    page.smart_summary = make_label("");
+    gtk_widget_add_css_class(page.smart_summary, "heading");
+    gtk_widget_set_hexpand(page.smart_summary, TRUE);
+    gtk_widget_set_valign(page.smart_summary, GTK_ALIGN_CENTER);
+    gtk_label_set_wrap(GTK_LABEL(page.smart_summary), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(page.smart_summary), 0.0f);
+    gtk_box_append(GTK_BOX(smart_head), page.smart_summary);
+    page.smart_reading = gtk_spinner_new();
+    gtk_widget_set_valign(page.smart_reading, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(page.smart_reading, FALSE);
+    const auto waiting = text("Waiting for the User Account Control prompt and the devices...");
+    gtk_widget_set_tooltip_text(page.smart_reading, waiting.c_str());
+    gtk_accessible_update_property(
+        GTK_ACCESSIBLE(page.smart_reading), GTK_ACCESSIBLE_PROPERTY_LABEL, waiting.c_str(), -1);
+    gtk_box_append(GTK_BOX(smart_head), page.smart_reading);
+    page.smart_read = gtk_button_new();
+    GtkWidget* smart_content = adw_button_content_new();
+    adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(smart_content), "security-high-symbolic");
+    adw_button_content_set_label(ADW_BUTTON_CONTENT(smart_content), text("Read the SMART of all devices...").c_str());
+    gtk_button_set_child(GTK_BUTTON(page.smart_read), smart_content);
+    gtk_widget_add_css_class(page.smart_read, "suggested-action");
+    gtk_widget_set_valign(page.smart_read, GTK_ALIGN_CENTER);
+    g_signal_connect(page.smart_read, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+        auto& state = *static_cast<GuiState*>(data);
+        guarded([&] { read_all_smart(state); }, [&](const Report& report) { show_message(state, report); });
+    }), &state);
+    gtk_box_append(GTK_BOX(smart_head), page.smart_read);
+    gtk_box_append(GTK_BOX(page.smart), smart_head);
+    GtkWidget* smart_note = make_label(text(
+        "SMART is what a device reports of its own condition, such as sectors it had to replace. Windows shows it "
+        "only with administrator permission: the button starts the device identity reader "
+        "(veriarchive-device-identity.exe), which User Account Control asks you to allow. It reads the model, "
+        "serial and SMART of every attached device, nothing of their content, and changes nothing; a sleeping disk "
+        "spins up. It also reads them whenever you read a device's own serial. The reads are recorded in the "
+        "repository, and compared with the last read of the same device."));
+    gtk_widget_add_css_class(smart_note, "dim-label");
+    gtk_label_set_wrap(GTK_LABEL(smart_note), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(smart_note), 0.0f);
+    set_margins(smart_note, 12);
+    gtk_widget_set_margin_top(smart_note, 0);
+    gtk_box_append(GTK_BOX(page.smart), smart_note);
+    gtk_widget_set_visible(page.smart, state.session && reader_available(state));
+    gtk_box_append(GTK_BOX(box), page.smart);
+
     page.problem = make_line_box("va-error", "dialog-warning-symbolic", "error");
     page.problem_words = make_words("", nullptr, true);
     gtk_widget_set_hexpand(page.problem_words, TRUE);
@@ -392,6 +582,60 @@ GtkWidget* build_devices_page(GuiState& state)
     gtk_widget_set_vexpand(scroller, TRUE);
     refresh_devices(state);
     return scroller;
+}
+
+void read_all_smart(GuiState& state)
+{
+    std::vector<PhysicalDeviceInfo> devices;
+    if (const auto* read = attached_now(state)) {
+        for (const auto& attached : read->devices) {
+            if (!attached.device.device_ref.empty()) {
+                devices.push_back(attached.device);
+            }
+        }
+    }
+    if (devices.empty()) {
+        show_toast(state, state.text("No attached device whose SMART can be read."));
+        return;
+    }
+    run_reader(state, std::move(devices), "*", [](GuiState& state, ReaderRun& run) {
+        if (run.failure) {
+            show_message(state, run.failure);
+            return;
+        }
+        if (const auto words = smart_run_words(state.text, run.reads, state.smart_reads)) {
+            show_toast(state, *words);
+        }
+    });
+}
+
+void note_smart_alerts(GuiState& state)
+{
+    const auto* read = attached_now(state);
+    for (auto& status : state.archives_page.statuses) {
+        // Its carrier's devices as recorded (whose reads behind an enclosure
+        // that hid the device's identity device_smart never takes), and those
+        // where it is attached now, each with its own identity where the
+        // window keeps a read of it.
+        std::vector<PhysicalDeviceInfo> devices;
+        if (status.header) {
+            devices = status.header->identity.devices;
+        }
+        std::vector<std::optional<DeviceIdentity>> own(devices.size());
+        if (read) {
+            if (const auto* attachment = attachment_of(*read, status.archive.archive_uuid)) {
+                for (const auto& place : attachment->places) {
+                    if (place.volume < read->archive_volumes.size()) {
+                        for (const auto& device : read->archive_volumes[place.volume].devices) {
+                            devices.push_back(device);
+                            own.push_back(own_identity_kept(state, device));
+                        }
+                    }
+                }
+            }
+        }
+        status.smart_alert = archive_smart_alert(state.smart_reads, devices, own);
+    }
 }
 
 } // namespace va::gui

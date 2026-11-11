@@ -18,6 +18,7 @@
 #include "common/utf8.h"
 #include "core/engine/carrier_confirmation.h"
 #include "core/identity/volume_json.h"
+#include "core/smart/smart_data.h"
 #include "gui/device_reads.h"
 #include "gui/device_rows.h"
 #include "gui/displayed_identity.h"
@@ -705,10 +706,22 @@ void the_screenshot_mode_reads_a_sample_identity()
     const auto reader = va::gui::sample_device_identity_helper();
     CHECK(reader->available());
     va::CancelToken cancel;
-    const auto read = reader->read_device_identity("SAMPLE-DEVICE-REF-01", cancel);
+    const auto read = reader->read_device_identity("SAMPLE-DEVICE-REF-03", cancel);
     CHECK(read && read->device.serial == va::gui::sample_own_serial && read->device.model.starts_with("SAMPLE-") &&
-          read->device.wwn.starts_with("SAMPLE-") && read->device_ref == "SAMPLE-DEVICE-REF-01" &&
+          read->device.wwn.starts_with("SAMPLE-") && read->device_ref == "SAMPLE-DEVICE-REF-03" &&
           read->how == "sample");
+    // Decision 0052: each sample device's own identity (that of a device
+    // that hides none is the serial it reports) and a sample SMART read, of
+    // which SAMPLE-DEVICE-02's alerts; any other device passes no command on.
+    const auto all = reader->read_devices({"SAMPLE-DEVICE-REF-01", "SAMPLE-DEVICE-REF-02", "SAMPLE-ELSEWHERE"}, cancel);
+    CHECK(all && all->size() == 3);
+    if (all && all->size() == 3) {
+        CHECK((*all)[0].identity && (*all)[0].identity->device.serial == "SAMPLE-SERIAL-01" && (*all)[0].smart &&
+              !va::any_smart_alert(va::smart_findings(*(*all)[0].smart, nullptr)));
+        CHECK((*all)[1].smart && va::any_smart_alert(va::smart_findings(*(*all)[1].smart, nullptr)));
+        CHECK(!(*all)[2].identity && (*all)[2].identity.error().kind == IoErrorKind::CommandNotPassed &&
+              !(*all)[2].smart);
+    }
     cancel.cancel();
     const auto stopped = reader->read_device_identity("SAMPLE-DEVICE-REF-01", cancel);
     CHECK(!stopped && stopped.error().kind == IoErrorKind::Cancelled);

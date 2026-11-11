@@ -1,5 +1,5 @@
 CREATE TABLE schema_version (version INTEGER NOT NULL);
-INSERT INTO schema_version VALUES (3);
+INSERT INTO schema_version VALUES (4);
 CREATE TABLE archives (archive_uuid TEXT PRIMARY KEY,label TEXT NOT NULL,created TEXT NOT NULL,current_revision INTEGER NOT NULL,status TEXT NOT NULL,root_subpath TEXT NOT NULL DEFAULT '',notes TEXT);
 CREATE INDEX archives_label ON archives(label);
 CREATE TABLE archive_revisions (archive_uuid TEXT NOT NULL,revision INTEGER NOT NULL,manifest_relpath TEXT NOT NULL,header_json TEXT NOT NULL,header_blake3 TEXT NOT NULL,body_blake3 TEXT NOT NULL,merkle_root TEXT,signed INTEGER NOT NULL DEFAULT 0,key_id TEXT,imported_from TEXT,created TEXT NOT NULL,PRIMARY KEY(archive_uuid,revision));
@@ -13,3 +13,4 @@ CREATE TABLE verify_progress_chunks (run_id TEXT NOT NULL,path TEXT NOT NULL,raw
 CREATE TABLE history_checkpoints (id INTEGER PRIMARY KEY,created TEXT NOT NULL,last_row_hash TEXT NOT NULL,run_count INTEGER NOT NULL,key_id TEXT,sig TEXT);
 CREATE TABLE trusted_keys (key_id TEXT PRIMARY KEY,pubkey_hex TEXT NOT NULL,added TEXT,note TEXT);
 CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT);
+CREATE TABLE smart_reads (id INTEGER PRIMARY KEY,read_at TEXT NOT NULL,seen_json TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',serial TEXT NOT NULL DEFAULT '',wwn TEXT NOT NULL DEFAULT '',firmware TEXT NOT NULL DEFAULT '',how TEXT NOT NULL DEFAULT '',identify BLOB,data BLOB,thresholds BLOB,problem TEXT NOT NULL DEFAULT '',detail TEXT NOT NULL DEFAULT '');

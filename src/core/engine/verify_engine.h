@@ -24,6 +24,7 @@
 #include "core/interfaces.h"
 #include "core/manifest/manifest.h"
 #include "core/repository/archive_store.h"
+#include "core/smart/smart_data.h"
 
 #include <map>
 #include <optional>
@@ -63,6 +64,12 @@ struct VerifyRequest {
     // with the confirmation its record carries, and with no other. Never
     // together with add_chunk_hashes.
     std::optional<CarrierConfirmation> carrier_confirmation = std::nullopt;
+    // Decision 0052: the SMART reads that the window made as the operator
+    // started this verification (Settings: read SMART when a FULL
+    // verification starts); those of the devices of the volume it reads are
+    // recorded with the run (VerifyOutcome::smart). A resumed run records
+    // those its record carries, and no other.
+    std::vector<SmartRead> smart_reads = {};
 };
 
 struct VerifyServices {
@@ -131,6 +138,10 @@ struct VerifyOutcome {
     std::optional<RecordedConfirmation> carrier_confirmed;
     std::uint32_t carrier_revision = 0;
     std::string carrier_not_recorded;
+    // Decision 0052: the SMART reads of the volume's devices that its counts
+    // record (`smart`, smart_reads_json), hash-chained with it whatever its
+    // result; none where none was read as it started.
+    std::vector<SmartRead> smart;
 };
 
 // Verification could not start: the media needs an operator decision

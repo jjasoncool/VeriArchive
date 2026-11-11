@@ -109,6 +109,7 @@ add_library(veriarchive_core
     src/core/repository/repository.cpp
     src/core/repository/sqlite_raii.cpp
     src/core/scan/scanner.cpp
+    src/core/smart/smart_data.cpp
     src/core/write_file.cpp)
 add_library(VeriArchive::core ALIAS veriarchive_core)
 target_include_directories(veriarchive_core PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -137,6 +138,7 @@ if(WIN32)
         src/platform/windows/media_enumerator_win.cpp
         src/platform/windows/platform_services_win.cpp
         src/platform/windows/process_table_win.cpp
+        src/platform/windows/reader_reads.cpp
         src/platform/windows/root_kind.cpp
         src/platform/windows/subst_drive.cpp
         src/platform/windows/win_util.cpp
@@ -201,6 +203,7 @@ add_library(veriarchive_app
     src/app/archive_roots.cpp
     src/app/attached_devices.cpp
     src/app/device_alerts.cpp
+    src/app/smart_words.cpp
     src/app/enclosure_words.cpp
     src/app/history.cpp
     src/app/local_time.cpp
@@ -260,6 +263,7 @@ if(VERIARCHIVE_BUILD_GUI)
         src/gui/compare_dialog.cpp
         src/gui/device_reads.cpp
         src/gui/device_rows.cpp
+        src/gui/smart_rows.cpp
         src/gui/devices_page.cpp
         src/gui/devices_poll.cpp
         src/gui/displayed_identity.cpp
@@ -430,6 +434,7 @@ if(BUILD_TESTING)
         tests/unit/scanner_test.cpp
         tests/unit/session_test.cpp
         tests/unit/sha256sums_test.cpp
+        tests/unit/smart_test.cpp
         tests/unit/subst_drive_test.cpp
         tests/unit/text_test.cpp
         tests/unit/transfer_test.cpp
@@ -467,6 +472,7 @@ if(BUILD_TESTING)
         # Pure C++ path handling and parsing; tested on every OS although only Windows uses it.
         target_sources(veriarchive_tests PRIVATE src/platform/windows/device_health_status.cpp
             src/platform/windows/device_id_descriptor.cpp src/platform/windows/device_identity_reader.cpp
+            src/platform/windows/reader_reads.cpp
             src/platform/windows/long_path.cpp src/platform/windows/root_kind.cpp
             src/platform/windows/subst_drive.cpp)
     endif()
@@ -482,7 +488,7 @@ if(BUILD_TESTING)
     # serial tells (decision 0047), are plain C++ without GTK, so they are
     # tested also where the GUI is not built.
     target_sources(veriarchive_tests PRIVATE src/gui/archive_actions.cpp src/gui/archive_rows.cpp src/gui/compare_choices.cpp
-        src/gui/device_reads.cpp src/gui/device_rows.cpp src/gui/displayed_identity.cpp src/gui/enclosure_flow.cpp
+        src/gui/device_reads.cpp src/gui/device_rows.cpp src/gui/smart_rows.cpp src/gui/displayed_identity.cpp src/gui/enclosure_flow.cpp
         src/gui/ended_notification.cpp src/gui/history_rows.cpp
         src/gui/job_queue.cpp src/gui/job_words.cpp src/gui/progress_wording.cpp src/gui/register_choices.cpp src/gui/report.cpp
         src/gui/run_result.cpp src/gui/window_words.cpp)

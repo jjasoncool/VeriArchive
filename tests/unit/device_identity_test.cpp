@@ -12,11 +12,13 @@
 #include "platform/device_identity_helper.h"
 #include "platform/windows/device_id_descriptor.h"
 #include "platform/windows/device_identity_reader.h"
+#include "platform/windows/reader_reads.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <optional>
 #include <span>
 #include <string>
@@ -181,77 +183,193 @@ void result_paths_are_strict()
              L"1:\\result.json"}) {
         CHECK(!output_path_argument(refused));
     }
-    CHECK(reader_parameters(3, L"C:\\SAMPLE\\result.json") == L"3 \"C:\\SAMPLE\\result.json\"");
+    const std::array<unsigned, 2> numbers{3, 12};
+    CHECK(reader_parameters(numbers, L"C:\\SAMPLE\\result.json") == L"\"C:\\SAMPLE\\result.json\" 3 12");
+    // Decision 0052: one to 64 device numbers, each once.
+    const std::array<std::wstring_view, 3> three{L"3", L"0", L"63"};
+    CHECK(device_numbers_argument(three) == std::vector<unsigned>({3, 0, 63}));
+    const std::array<std::wstring_view, 2> twice{L"3", L"3"};
+    CHECK(!device_numbers_argument(twice));
+    const std::array<std::wstring_view, 2> wrong{L"3", L"64"};
+    CHECK(!device_numbers_argument(wrong));
+    CHECK(!device_numbers_argument(std::span<const std::wstring_view>{}));
+    std::vector<std::wstring> all;
+    for (unsigned number = 0; number <= physical_drive_count; ++number) {
+        all.push_back(std::to_wstring(number % physical_drive_count));
+    }
+    std::vector<std::wstring_view> too_many(all.begin(), all.end());
+    CHECK(!device_numbers_argument(too_many));
+    CHECK(device_numbers_argument(std::span(too_many).first(physical_drive_count)).has_value());
 }
 
 const std::string sample_ref = "\\\\.\\PhysicalDrive3";
 const std::string sample_time = "2026-11-05T08:00:00Z";
 
+// SAMPLE DATA: an ATA identification of a made-up device, SMART supported and
+// on (words 82 and 85, bit 0), or turned off.
+std::vector<std::uint8_t> sample_identify_page(bool smart_on = true)
+{
+    IdentifyData data;
+    data.text(10, 10, "SAMPLE0001").text(27, 20, "SAMPLE MODEL 0001").text(23, 4, "SAMP01");
+    data.word(108, 0x5000).word(109, 0).word(110, 0).word(111, 0x0001);
+    data.word(82, 0x0001).word(85, smart_on ? 0x0001 : 0x4000);
+    std::vector<std::uint8_t> bytes;
+    for (const auto byte : data.bytes()) {
+        bytes.push_back(std::to_integer<std::uint8_t>(byte));
+    }
+    return bytes;
+}
+
+std::string hex_of(const std::vector<std::uint8_t>& bytes)
+{
+    std::string text;
+    for (const auto byte : bytes) {
+        text += std::format("{:02x}", byte);
+    }
+    return text;
+}
+
+void smart_command_is_built()
+{
+    const std::array<std::uint8_t, 16> data{0x85, 0x08, 0x0e, 0, 0xd0, 0, 1, 0, 0, 0, 0x4f, 0, 0xc2, 0, 0xb0, 0};
+    CHECK(smart_cdb(smart_read_data) == data);
+    auto thresholds = data;
+    thresholds[4] = 0xd1;
+    CHECK(smart_cdb(smart_read_thresholds) == thresholds);
+}
+
 void results_are_read_back()
 {
-    AtaIdentity identity{"SAMPLE MODEL 0001", "SAMPLE0001", "SAMP01", "5000000000000001"};
-    const auto read = reader_result(identity_result_json(identity, ReaderHow::Sat), sample_ref, sample_time);
-    CHECK(read && read->device.model == "SAMPLE MODEL 0001" && read->device.serial == "SAMPLE0001" &&
-          read->device.wwn == "5000000000000001" && read->how == "sat" && read->read_at == sample_time &&
-          read->device_ref == sample_ref);
-    const auto by_ata = reader_result(identity_result_json(identity, ReaderHow::Ata), sample_ref, sample_time);
-    CHECK(by_ata && by_ata->how == "ata");
+    // Decision 0052: the pages as the devices returned them, each device in
+    // the order given; written by the reader, taken back by the window.
+    ReaderDevice ata;
+    ata.number = 3;
+    ata.how = "sat";
+    ata.identify = sample_identify_page();
+    ata.smart = std::vector<std::uint8_t>(512, 0x11);
+    ata.thresholds = std::vector<std::uint8_t>(512, 0x22);
+    ReaderDevice nvme;
+    nvme.number = 7;
+    nvme.how = "nvme";
+    nvme.identify = std::vector<std::uint8_t>(4096, 0x41);
+    nvme.smart = std::vector<std::uint8_t>(512, 0x01);
+    ReaderDevice no_smart;
+    no_smart.number = 9;
+    no_smart.how = "ata";
+    no_smart.identify = sample_identify_page(false);
+    no_smart.smart_error = "not-passed";
+    ReaderDevice failed;
+    failed.number = 12;
+    failed.error = "not-passed";
+    failed.code = 121;
+    const std::vector<ReaderDevice> written{ata, nvme, no_smart, failed};
+    const std::array<unsigned, 4> asked{3, 7, 9, 12};
+    const auto text = reader_result_json(written);
+    const auto read = reader_devices(text, asked);
+    CHECK(read && read->size() == 4);
+    if (!read || read->size() != 4) {
+        return;
+    }
+    CHECK((*read)[0].how == "sat" && (*read)[0].identify == ata.identify && (*read)[0].smart == ata.smart &&
+          (*read)[0].thresholds == ata.thresholds);
+    CHECK((*read)[1].how == "nvme" && (*read)[1].identify.size() == 4096 && (*read)[1].thresholds.empty());
+    CHECK((*read)[2].smart.empty() && (*read)[2].smart_error == "not-passed");
+    CHECK((*read)[3].error == "not-passed" && (*read)[3].code == 121 && (*read)[3].identify.empty());
+    // Read back for other devices, or in another order: refused.
+    const std::array<unsigned, 4> other_order{7, 3, 9, 12};
+    CHECK(!reader_devices(text, other_order));
+    const std::array<unsigned, 3> fewer{3, 7, 9};
+    CHECK(!reader_devices(text, fewer));
 
-    // Not passed on: CommandNotPassed, which the window tells apart; also
-    // where the bridge answered with a SCSI status (code 0).
-    const auto not_passed = reader_result(error_result_json("not-passed", 1), sample_ref, sample_time);
-    CHECK(!not_passed && not_passed.error().kind == IoErrorKind::CommandNotPassed &&
-          va::device_identity_failure(not_passed.error()) == va::DeviceIdentityFailure::NotPassed);
-    const auto refused_status = reader_result(error_result_json("not-passed", 0), sample_ref, sample_time);
-    CHECK(!refused_status && refused_status.error().kind == IoErrorKind::CommandNotPassed);
-    // The command failed as the device went (ERROR_DEVICE_NOT_CONNECTED,
-    // ERROR_NO_SUCH_DEVICE, ERROR_DEVICE_REMOVED): NotFound, not the
-    // enclosure's fault.
+    // What the window makes of them: the identity decoded from the pages, a
+    // SMART read of each device that is still there, and why where nothing
+    // came back.
+    std::vector<va::PhysicalDeviceInfo> seen;
+    for (const auto number : asked) {
+        va::PhysicalDeviceInfo device;
+        device.device_ref = "\\\\.\\PhysicalDrive" + std::to_string(number);
+        device.model = "SAMPLE ENCLOSURE";
+        device.serial = "SAMPLE-ENCLOSURE-" + std::to_string(number);
+        seen.push_back(device);
+    }
+    const auto reads = va::platform::windows::device_reads(*read, seen, sample_time);
+    CHECK(reads.size() == 4);
+    if (reads.size() == 4) {
+        CHECK(reads[0].identity && reads[0].identity->device.serial == "SAMPLE0001" &&
+              reads[0].identity->device.model == "SAMPLE MODEL 0001" &&
+              reads[0].identity->device.wwn == "5000000000000001" && reads[0].identity->how == "sat" &&
+              reads[0].identity->read_at == sample_time && reads[0].device_ref == "\\\\.\\PhysicalDrive3");
+        CHECK(reads[0].smart && reads[0].smart->problem.empty() && reads[0].smart->data == ata.smart &&
+              reads[0].smart->seen.serial == "SAMPLE-ENCLOSURE-3" && reads[0].smart->device.serial == "SAMPLE0001" &&
+              reads[0].smart->firmware == "SAMP01");
+        // An NVMe identification all of the letter A names a device whose
+        // serial is twenty of them.
+        CHECK(reads[1].identity && reads[1].identity->device.serial == std::string(20, 'A') && reads[1].smart &&
+              reads[1].smart->how == "nvme");
+        // SMART turned off, as its identification says.
+        CHECK(reads[2].identity && reads[2].smart && reads[2].smart->problem == "smart-off");
+        // No identification in time: a read that failed, kept with why.
+        CHECK(!reads[3].identity && reads[3].identity.error().kind == IoErrorKind::Timeout && reads[3].smart &&
+              reads[3].smart->problem == "no-answer");
+    }
+    // A device that went: no SMART read of it.
+    ReaderDevice went;
+    went.number = 3;
+    went.error = "open-failed";
+    went.code = 2;
+    const auto gone = va::platform::windows::device_reads({went}, {seen[0]}, sample_time);
+    CHECK(gone.size() == 1 && !gone[0].identity && gone[0].identity.error().kind == IoErrorKind::NotFound &&
+          !gone[0].smart);
+    // An identification that does not decode is not taken for the device.
+    ReaderDevice garbled = ata;
+    garbled.identify = std::vector<std::uint8_t>(512, 0);
+    const auto bad = va::platform::windows::device_reads({garbled}, {seen[0]}, sample_time);
+    CHECK(bad.size() == 1 && !bad[0].identity && bad[0].smart && bad[0].smart->problem == "unreadable");
+
+    // Why a device was not read, by the error the reader wrote.
+    CHECK(reader_error("not-passed", 1).kind == IoErrorKind::CommandNotPassed);
+    CHECK(reader_error("not-passed", 0).kind == IoErrorKind::CommandNotPassed);
+    CHECK(va::device_identity_failure(reader_error("not-passed", 1)) == va::DeviceIdentityFailure::NotPassed);
     for (const std::uint32_t code : {1167u, 433u, 1617u, 55u}) {
-        const auto went = reader_result(error_result_json("not-passed", code), sample_ref, sample_time);
-        CHECK(!went && went.error().kind == IoErrorKind::NotFound &&
-              went.error().native_code == static_cast<int>(code));
+        const auto went_error = reader_error("not-passed", code);
+        CHECK(went_error.kind == IoErrorKind::NotFound && went_error.native_code == static_cast<int>(code));
     }
-    // No answer in time (ERROR_SEM_TIMEOUT, WAIT_TIMEOUT, ERROR_OPERATION_ABORTED,
-    // ERROR_TIMEOUT), as a sleeping device spinning up behind its bridge:
-    // Timeout, a read that failed.
     for (const std::uint32_t code : {121u, 258u, 995u, 1460u}) {
-        const auto late = reader_result(error_result_json("not-passed", code), sample_ref, sample_time);
-        CHECK(!late && late.error().kind == IoErrorKind::Timeout &&
-              va::device_identity_failure(late.error()) == va::DeviceIdentityFailure::Unreadable);
+        CHECK(reader_error("not-passed", code).kind == IoErrorKind::Timeout);
     }
-    // Not opened: NotFound where the device is gone, Other otherwise (never
-    // PermissionDenied, which is the operator's answer alone).
-    const auto gone = reader_result(error_result_json("open-failed", 2), sample_ref, sample_time);
-    CHECK(!gone && gone.error().kind == IoErrorKind::NotFound && gone.error().native_code == 2);
-    const auto denied = reader_result(error_result_json("open-failed", 5), sample_ref, sample_time);
-    CHECK(!denied && denied.error().kind == IoErrorKind::Other &&
-          va::device_identity_failure(denied.error()) == va::DeviceIdentityFailure::Unreadable);
-    const auto unknown = reader_result(error_result_json("SAMPLE-error", 0), sample_ref, sample_time);
-    CHECK(!unknown && unknown.error().kind == IoErrorKind::Other);
+    CHECK(reader_error("open-failed", 2).kind == IoErrorKind::NotFound);
+    CHECK(reader_error("open-failed", 5).kind == IoErrorKind::Other);
+    CHECK(reader_error("SAMPLE-error", 0).kind == IoErrorKind::Other);
 
     // Anything the reader does not write is refused.
-    const auto refused = [](std::string_view text) {
-        const auto result = reader_result(text, sample_ref, sample_time);
-        return !result && result.error().kind == IoErrorKind::Other;
+    const std::array<unsigned, 1> one{3};
+    const auto refused = [&one](std::string_view result) {
+        const auto devices = reader_devices(result, one);
+        return !devices && devices.error().kind == IoErrorKind::Other;
     };
+    const auto identify = hex_of(sample_identify_page());
+    const auto page = hex_of(std::vector<std::uint8_t>(512, 0x11));
+    const auto with = [](const std::string& members) { return R"({"devices":[{"number":3,)" + members + "}]}"; };
     CHECK(refused(""));
     CHECK(refused("not json"));
     CHECK(refused("[]"));
-    CHECK(refused(R"({"error":1})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"SAMPLE0001","wwn":"","firmware":"S1","how":"magic"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"SAMPLE0001","wwn":"","how":"sat"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"","wwn":"","firmware":"S1","how":"sat"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"SAMPLE0001","wwn":"5000000000000ABC","firmware":"S1","how":"sat"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"SAMPLE0001","wwn":"50000000","firmware":"S1","how":"sat"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"SAMPLE\u0001","wwn":"","firmware":"S1","how":"sat"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"SAMPLE-SERIAL-LONGER-THAN-20","wwn":"","firmware":"S1","how":"sat"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":"SAMPLE0001","wwn":"","firmware":"SAMPLE-FW-9","how":"sat"})"));
-    CHECK(refused(R"({"model":"SAMPLE","serial":7,"wwn":"","firmware":"S1","how":"sat"})"));
+    CHECK(refused(R"({"devices":{}})"));
+    CHECK(refused(R"({"devices":[]})"));
+    CHECK(refused(with(R"("error":1,"code":0)")));
+    CHECK(refused(with(R"("error":"SAMPLE","code":0)")));
+    CHECK(refused(with(R"("how":"magic","identify":")" + identify + R"(")")));
+    CHECK(refused(R"({"devices":[{"number":"3","how":"ata","identify":")" + identify + R"("}]})"));
+    // Pages of another size, or not lowercase hex.
+    CHECK(refused(with(R"("how":"ata","identify":")" + identify.substr(2) + R"(")")));
+    CHECK(refused(with(R"("how":"nvme","identify":")" + identify + R"(")")));
+    CHECK(refused(with(R"("how":"ata","identify":")" + identify + R"(","smart":")" + std::string(1024, 'A') + R"(")")));
+    // Thresholds without the data; SMART that is neither there nor said why.
+    CHECK(refused(with(R"("how":"ata","identify":")" + identify + R"(","thresholds":")" + page + R"(")")));
+    CHECK(refused(with(R"("how":"ata","identify":")" + identify + R"(")")));
+    CHECK(reader_devices(with(R"("how":"ata","identify":")" + identify + R"(","smart":")" + page + R"(")"), one));
     CHECK(refused(std::string(largest_reader_result + 1, ' ')));
     // A result within the limit is read, whatever space pads it.
-    CHECK(reader_result(identity_result_json(identity, ReaderHow::Sat) + std::string(100, ' '), sample_ref,
-        sample_time));
+    CHECK(reader_devices(reader_result_json({ata}) + std::string(100, ' '), one));
 }
 
 void failures_are_told_apart()
@@ -412,6 +530,7 @@ void device_identity_tests()
     identify_command_is_built();
     device_numbers_are_strict();
     result_paths_are_strict();
+    smart_command_is_built();
     results_are_read_back();
     failures_are_told_apart();
     identification_pages_are_read();

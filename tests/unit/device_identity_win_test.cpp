@@ -1,5 +1,5 @@
-// The window's side of the device identity reader on Windows (decision
-// 0047), everything but Windows' question for administrator permission: the
+// The window's side of the device identity reader on Windows (decisions
+// 0047 and 0052), everything but Windows' question for administrator permission: the
 // reader of this build is started as this test runs, without that
 // permission (__COMPAT_LAYER=RunAsInvoker, so that Windows starts it at all),
 // for device 63 (\\.\PhysicalDrive63), which no computer here has, so that no
@@ -24,6 +24,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 #ifndef VERIARCHIVE_TEST_DEVICE_IDENTITY_READER
 #error "VERIARCHIVE_TEST_DEVICE_IDENTITY_READER must name the reader of this build"
@@ -146,8 +147,24 @@ void reads_through_the_reader()
         described_alike);
     const auto gone = helper->read_device_identity(sample_device, cancel);
     CHECK(!gone && gone.error().kind == IoErrorKind::NotFound && gone.error().native_code == 2);
-    CHECK(given.starts_with(L"63 \"\\\\?\\") && given.ends_with(L"\\device-identity.json\""));
-    CHECK(given.size() > 5 && va::platform::windows::output_path_argument(given.substr(4, given.size() - 5)));
+    CHECK(given.starts_with(L"\"\\\\?\\") && given.ends_with(L"\\device-identity.json\" 63"));
+    CHECK(given.size() > 5 && va::platform::windows::output_path_argument(given.substr(1, given.size() - 5)));
+
+    // Decision 0052: one run for several devices, each given by its number
+    // after the result file, each read back in that order; a device the
+    // reader cannot open gives no SMART read either (it is gone).
+    const auto both = helper->read_devices({sample_device, "\\\\.\\PhysicalDrive62"}, cancel);
+    CHECK(given.ends_with(L"\\device-identity.json\" 63 62"));
+    CHECK(both && both->size() == 2 && (*both)[0].device_ref == sample_device &&
+          (*both)[1].device_ref == "\\\\.\\PhysicalDrive62");
+    for (const auto& read : both ? *both : std::vector<va::DeviceRead>{}) {
+        CHECK(!read.identity && read.identity.error().kind == IoErrorKind::NotFound && !read.smart);
+    }
+    // A name that is no device of this computer is refused alone: the others
+    // are read.
+    const auto mixed = helper->read_devices({"SAMPLE-not-a-device", sample_device}, cancel);
+    CHECK(mixed && mixed->size() == 2 && !(*mixed)[0].identity &&
+          (*mixed)[0].identity.error().kind == IoErrorKind::Other && given.ends_with(L"\" 63"));
 
     std::error_code error;
     CHECK(!std::filesystem::exists(left, error));
@@ -158,7 +175,7 @@ void reads_through_the_reader()
     // A reader that refused its arguments wrote nothing: the exit says so.
     const auto refused = va::platform::windows::make_device_identity_helper(reader_of_this_build(),
         [](const std::filesystem::path& reader, const std::wstring& parameters) {
-            return start_as_this_user(reader, L"64" + parameters.substr(2));
+            return start_as_this_user(reader, parameters.substr(0, parameters.size() - 2) + L"64");
         },
         described_alike);
     const auto nothing = refused->read_device_identity(sample_device, cancel);

@@ -385,7 +385,8 @@ Pill health_pill(const app::Text& text, const std::optional<DeviceHealth>& healt
 
 std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& read,
     const std::vector<ArchiveName>& names, IdentityShown shown, const std::vector<std::filesystem::path>& registering,
-    const KeptDeviceReads& reads, bool reader, const std::string& reading, const std::vector<Uuid>& enclosure_changed)
+    const KeptDeviceReads& reads, bool reader, const std::string& reading, const std::vector<Uuid>& enclosure_changed,
+    const std::vector<SmartRead>* smart_reads)
 {
     // The sample list is sample data itself, shown as it is.
     const auto identity = read.sample ? IdentityShown::Recorded : shown;
@@ -491,6 +492,15 @@ std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& 
                 }
             }
             card.own = std::move(own);
+        }
+        // Decision 0052: what the latest SMART read of the device as the
+        // system describes it says.
+        if (smart_reads) {
+            // Behind an enclosure that hides the device's identity, only a
+            // read of its own identity that the window keeps tells which
+            // device is inside (operator, 2026-11-10).
+            const auto* own = attached.device.enclosure_hides_identity ? kept_read_of(reads, attached.device) : nullptr;
+            card.smart = smart_section(text, *smart_reads, attached.device, reader, own ? &own->read.device : nullptr);
         }
         const auto volumes = by_mount_point(attached.volumes);
         for (const auto index : volumes) {

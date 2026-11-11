@@ -759,7 +759,8 @@ void a_pass_with_warnings_records_the_carrier()
     CHECK(next && next->result == "PASSED" && next->identity.result == va::MatchResult::Match);
 }
 
-// No schema change (1.1.0 still opens the repository): schema version 3,
+// No schema change of its own (1.1.0 still opened the repository): schema
+// version 4 since decision 0052, which added a table of its own (smart_reads),
 // verify_runs with its 17 columns, the confirmation inside counts_json alone,
 // which the chain hashes as stored, so `repo verify-history` holds; and a
 // changed counts_json breaks it, as any edited run does.
@@ -769,7 +770,7 @@ void the_records_are_those_of_the_schema()
     fixture.move_to(enclosure_b);
     const auto outcome = fixture.verify_by_uuid(by_operator(enclosure_a, enclosure_b));
     CHECK(outcome && outcome->carrier_revision == 2);
-    CHECK(fixture.repository.query("SELECT version FROM schema_version") == "3");
+    CHECK(fixture.repository.query("SELECT version FROM schema_version") == "4");
     CHECK(fixture.repository.query("SELECT count(*) FROM pragma_table_info('verify_runs')") == "17");
     CHECK(fixture.chain_holds());
     fixture.repository.execute(

@@ -2,9 +2,11 @@
 
 #include "common/time.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <utility>
+#include <vector>
 
 namespace va::gui {
 namespace {
@@ -107,23 +109,107 @@ std::vector<SampleVolume> sample_volumes()
 
 namespace {
 
-// SAMPLE DATA: a device identity reader that reads nothing.
+// SAMPLE DATA: an ATA SMART page (SMART READ DATA, or with `thresholds`
+// SMART READ THRESHOLDS) of the attributes given as {id, value, threshold,
+// raw}, its checksum made to hold (decision 0052).
+struct SampleAttribute {
+    std::uint8_t id;
+    std::uint8_t value;
+    std::uint8_t threshold;
+    std::uint64_t raw;
+};
+std::vector<std::uint8_t> sample_smart_page(const std::vector<SampleAttribute>& attributes, bool thresholds)
+{
+    std::vector<std::uint8_t> page(512, 0);
+    page[0] = 0x10;
+    for (std::size_t index = 0; index < attributes.size() && index < 30; ++index) {
+        const auto& attribute = attributes[index];
+        const std::size_t at = 2 + 12 * index;
+        page[at] = attribute.id;
+        if (thresholds) {
+            page[at + 1] = attribute.threshold;
+            continue;
+        }
+        page[at + 1] = attribute.threshold != 0 ? 0x33 : 0x32;  // pre-failure where it has a threshold
+        page[at + 3] = attribute.value;
+        page[at + 4] = attribute.value;
+        for (std::size_t byte = 0; byte < 6; ++byte) {
+            page[at + 5 + byte] = static_cast<std::uint8_t>(attribute.raw >> (8 * byte));
+        }
+    }
+    unsigned sum = 0;
+    for (std::size_t index = 0; index < 511; ++index) {
+        sum += page[index];
+    }
+    page[511] = static_cast<std::uint8_t>(-sum & 0xff);
+    return page;
+}
+
+// SAMPLE DATA: a device identity reader that reads nothing. Each sample
+// device of sample_volumes gets a made-up identity and a made-up SMART read
+// (decision 0052): SAMPLE-DEVICE-02, which reports a warning, has 8
+// reallocated and 8 pending sectors; the others report nothing amiss; any
+// other device passes no command on.
 class SampleDeviceIdentityHelper final : public IDeviceIdentityHelper {
 public:
     bool available() const override { return true; }
 
-    std::expected<DeviceIdentityRead, IoError> read_device_identity(
-        const std::string& device_ref, CancelToken& cancel) override
+    std::expected<std::vector<DeviceRead>, IoError> read_devices(
+        const std::vector<std::string>& device_refs, CancelToken& cancel) override
     {
         if (cancel.cancelled()) {
             return std::unexpected(IoError{IoErrorKind::Cancelled, 0, "cancelled"});
         }
-        DeviceIdentityRead read;
-        read.device = DeviceIdentity{"SAMPLE-OWN-MODEL", sample_own_serial, "SAMPLE-OWN-WWN-01"};
-        read.how = "sample";
-        read.read_at = current_timestamp();
-        read.device_ref = device_ref;
-        return read;
+        const auto now = current_timestamp();
+        std::vector<DeviceRead> reads;
+        for (const auto& device_ref : device_refs) {
+            DeviceRead read;
+            read.device_ref = device_ref;
+            const PhysicalDeviceInfo* seen = nullptr;
+            const auto volumes = sample_volumes();
+            for (const auto& sample : volumes) {
+                if (sample.volume.devices.front().device_ref == device_ref) {
+                    seen = &sample.volume.devices.front();
+                }
+            }
+            SmartRead smart;
+            smart.read_at = now;
+            if (!seen) {
+                read.identity = std::unexpected(IoError{IoErrorKind::CommandNotPassed, 0,
+                    "the device's enclosure passes no ATA command on to the device"});
+                reads.push_back(std::move(read));
+                continue;
+            }
+            smart.seen = *seen;
+            smart.seen.health.reset();
+            DeviceIdentityRead identity;
+            identity.device = seen->enclosure_hides_identity
+                                  ? DeviceIdentity{"SAMPLE-OWN-MODEL", sample_own_serial, "SAMPLE-OWN-WWN-01"}
+                                  : DeviceIdentity{seen->model, seen->serial, ""};
+            identity.how = "sample";
+            identity.read_at = now;
+            identity.device_ref = device_ref;
+            read.identity = identity;
+            const bool failing = device_ref == "SAMPLE-DEVICE-REF-02";
+            const std::vector<SampleAttribute> attributes{
+                {0x01, 100, 16, 0},
+                {0x05, failing ? std::uint8_t{98} : std::uint8_t{100}, 5, failing ? 8u : 0u},
+                {0x09, 92, 0, 8'760},
+                {0x0C, 100, 0, 412},
+                {0xC2, 64, 0, 36},
+                {0xC5, 100, 0, failing ? 8u : 0u},
+                {0xC6, 100, 0, 0},
+                {0xC7, 200, 0, 0},
+            };
+            smart.device = identity.device;
+            smart.firmware = "SAMPLE01";
+            smart.how = seen->bus == "sample-usb" ? "sat" : "ata";
+            smart.data = sample_smart_page(attributes, false);
+            smart.thresholds = sample_smart_page(attributes, true);
+            read.smart = std::move(smart);
+            reads.push_back(std::move(read));
+        }
+        return reads;
     }
 };
 

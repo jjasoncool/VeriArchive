@@ -2156,7 +2156,7 @@ if(SQLITE3)
     function(lower_schema version)
         execute_process(
             COMMAND "${SQLITE3}" "${OLDER}/veriarchive.db"
-                "DROP TABLE IF EXISTS verify_progress_chunks; UPDATE schema_version SET version = ${version};"
+                "DROP TABLE IF EXISTS smart_reads; DROP TABLE IF EXISTS verify_progress_chunks; UPDATE schema_version SET version = ${version};"
             RESULT_VARIABLE code
             ERROR_VARIABLE errors)
         if(NOT code EQUAL 0)
@@ -2170,7 +2170,7 @@ if(SQLITE3)
     string(TIMESTAMP before_open "%Y-%m-%d")
     run_cli("0" --repository "${OLDER}" --lang en repo info)
     string(TIMESTAMP after_open "%Y-%m-%d")
-    set(upgraded "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at ")
+    set(upgraded "note: the repository database was upgraded from schema version 1 to 4, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at ")
     string(FIND "${last_errors}" "${upgraded}" said)
     if(said EQUAL -1 OR NOT last_errors MATCHES "veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db\n")
         message(FATAL_ERROR "the first open of a repository of schema version 1:\n${last_errors}")
@@ -2212,7 +2212,7 @@ if(SQLITE3)
     run_cli("0" --repository "${OLDER}" archive list --json)
     string(TIMESTAMP after_open "%Y-%m-%d")
     string(JSON listed_archives LENGTH "${last_output}" archives)
-    string(FIND "${last_errors}" "附註：儲存庫資料庫已從結構描述版本 2 升級到 3，較早版本的 VeriArchive 無法再開啟它；升級前的資料庫副本保存在 " said)
+    string(FIND "${last_errors}" "附註：儲存庫資料庫已從結構描述版本 2 升級到 4，較早版本的 VeriArchive 無法再開啟它；升級前的資料庫副本保存在 " said)
     if(said EQUAL -1 OR NOT last_errors MATCHES "veriarchive-schema-2-before-upgrade-(${before_open}|${after_open})\\.db\n"
             OR NOT listed_archives EQUAL 0)
         message(FATAL_ERROR "the first open of a repository of schema version 2, with --json:\n${last_output}\n${last_errors}")
@@ -2243,7 +2243,7 @@ if(SQLITE3)
     run_cli("0" --repository "${INCOMPLETE}" repo init)
     execute_process(
         COMMAND "${SQLITE3}" "${INCOMPLETE}/veriarchive.db"
-            "DROP TABLE verify_progress_chunks; DROP TABLE trusted_keys; UPDATE schema_version SET version = 1;"
+            "DROP TABLE smart_reads; DROP TABLE verify_progress_chunks; DROP TABLE trusted_keys; UPDATE schema_version SET version = 1;"
         RESULT_VARIABLE code
         ERROR_VARIABLE errors)
     if(NOT code EQUAL 0)
@@ -2269,7 +2269,7 @@ if(SQLITE3)
     run_cli("0" --repository "${DAMAGED}" repo init)
     execute_process(
         COMMAND "${SQLITE3}" "${DAMAGED}/veriarchive.db"
-            "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1;"
+            "DROP TABLE smart_reads; DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1;"
         RESULT_VARIABLE code
         ERROR_VARIABLE errors)
     if(NOT code EQUAL 0)
@@ -2330,7 +2330,7 @@ if(SQLITE3)
         run_cli("0" --repository "${LOCKED}" repo init)
         execute_process(
             COMMAND "${SQLITE3}" "${LOCKED}/veriarchive.db"
-                "DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1;"
+                "DROP TABLE smart_reads; DROP TABLE verify_progress_chunks; UPDATE schema_version SET version = 1;"
             RESULT_VARIABLE code
             ERROR_VARIABLE errors)
         if(NOT code EQUAL 0)
@@ -2350,7 +2350,7 @@ if(SQLITE3)
         file(CHMOD "${LOCKED_CONFIG}" PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
         set(GLOBAL --config "${WORK}/config.json")
         set(locked_copy "veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db")
-        if(NOT code EQUAL 11 OR NOT errors MATCHES "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*${locked_copy}\nerror: cannot record repository_uuid in config: [^\n]*\nCopy of the database from before an upgrade: [^\n]*${locked_copy}${copy_purpose}\n$")
+        if(NOT code EQUAL 11 OR NOT errors MATCHES "note: the repository database was upgraded from schema version 1 to 4, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*${locked_copy}\nerror: cannot record repository_uuid in config: [^\n]*\nCopy of the database from before an upgrade: [^\n]*${locked_copy}${copy_purpose}\n$")
             message(FATAL_ERROR "an open that could not record the repository's uuid after the upgrade: exit ${code}\n${errors}")
         endif()
     endif()
@@ -2367,7 +2367,7 @@ if(SQLITE3)
     string(JSON rebuilt_uuid GET "${last_output}" archive_uuid)
     execute_process(
         COMMAND "${SQLITE3}" "${REBUILT}/veriarchive.db"
-            "DROP TABLE verify_progress_chunks; UPDATE archive_revisions SET merkle_root = NULL; DELETE FROM chunks; UPDATE schema_version SET version = 1;"
+            "DROP TABLE smart_reads; DROP TABLE verify_progress_chunks; UPDATE archive_revisions SET merkle_root = NULL; DELETE FROM chunks; UPDATE schema_version SET version = 1;"
         RESULT_VARIABLE code
         ERROR_VARIABLE errors)
     if(NOT code EQUAL 0)
@@ -2382,7 +2382,7 @@ if(SQLITE3)
         OUTPUT_VARIABLE rebuilt_index
         OUTPUT_STRIP_TRAILING_WHITESPACE)
     file(GLOB rebuilt_copies "${REBUILT}/veriarchive-schema-1-before-upgrade-*.db")
-    if(NOT last_errors MATCHES "note: the repository database was upgraded from schema version 1 to 3, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db\n"
+    if(NOT last_errors MATCHES "note: the repository database was upgraded from schema version 1 to 4, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db\n"
             OR NOT last_output MATCHES "Rebuilt the index from manifests"
             OR NOT rebuilt_index MATCHES "^3[\r\n]+[0-9a-f]+$" OR NOT rebuilt_copies)
         message(FATAL_ERROR "repo rebuild-index of a repository of schema version 1:\n${last_output}\n${last_errors}\n"

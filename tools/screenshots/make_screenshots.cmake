@@ -156,7 +156,7 @@ file(WRITE "${new_folder}/文件/範例說明.txt" "範例文件\n")
 file(WRITE "${new_folder}/文件/清單.csv" "item,count\n範例,1\n")
 
 set(pictures 01-settings.png 02-archive-list.png 03-register.png 04-verify.png 05-history.png
-    06-compare.png 07-language.png 08-jobs.png 09-result.png 10-devices.png 11-relocate.png)
+    06-compare.png 07-language.png 08-jobs.png 09-result.png 10-devices.png 11-relocate.png 12-smart.png)
 # The verification report that the tour saves (decision 0048), SAMPLE DATA,
 # which never stays in OUT (see below): one left there by a run that stopped
 # before it was moved goes now.

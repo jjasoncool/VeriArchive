@@ -9,6 +9,7 @@
 #include "core/engine/read_speed.h"
 #include "core/engine/recorded_manifest.h"
 #include "gui/report.h"
+#include "gui/smart_rows.h"
 
 #include <algorithm>
 
@@ -140,6 +141,11 @@ ArchiveRow archive_row(const app::Text& text, const ArchiveStatus& status, Ident
     const auto alerts = app::archive_alerts(status);
     for (const auto& mark : app::alert_marks(text, alerts)) {
         row.marks.push_back({mark, Tone::Error});
+    }
+    // Decision 0052: the SMART alert of a device of its carrier, while its
+    // latest read alerts.
+    if (status.smart_alert) {
+        row.marks.push_back({smart_alert_mark(text, *status.smart_alert), Tone::Error});
     }
     // The archive's status where it is not REGISTERED, as `archive list`
     // shows it: RETIRED (已停用), REGISTRATION_INCOMPLETE (註冊未完成), the
@@ -352,6 +358,11 @@ std::vector<AlertLine> device_alert_lines(const app::Text& text, const ArchiveSt
                 lines.push_back({std::move(*line), status.last_full->run_id});
             }
         }
+    }
+    // Decision 0052: the SMART alert of a device of its carrier; Devices
+    // shows the whole read.
+    if (status.smart_alert) {
+        lines.push_back({smart_alert_line(text, *status.smart_alert), {}});
     }
     return lines;
 }

@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct sqlite3;
 struct sqlite3_stmt;
@@ -29,6 +31,8 @@ public:
     SqliteStatement& bind(int index, std::string_view text);
     SqliteStatement& bind(int index, std::int64_t value);
     SqliteStatement& bind_null(int index);
+    // A BLOB (decision 0052: the pages of a SMART read); an empty one is NULL.
+    SqliteStatement& bind_blob(int index, std::span<const std::uint8_t> bytes);
     // true when a result row is available, false when the statement is done.
     std::expected<bool, IoError> step();
     std::expected<void, IoError> run(); // step() expecting no rows
@@ -37,6 +41,8 @@ public:
     std::string text(int column) const;
     std::int64_t integer(int column) const;
     bool is_null(int column) const;
+    // The bytes of a BLOB column; none for NULL.
+    std::vector<std::uint8_t> blob(int column) const;
 
 private:
     sqlite3_stmt* statement_;
@@ -60,6 +66,8 @@ public:
     // True while a transaction is open on this connection (BEGIN without its
     // COMMIT or ROLLBACK yet).
     bool in_transaction() const;
+    // The rowid of the row this connection inserted last.
+    std::int64_t last_insert_rowid() const;
     // Copies the database, as this connection reads it in one read
     // transaction, into a new database file at `destination` through
     // SQLite's backup API, which refuses a connection in a write transaction

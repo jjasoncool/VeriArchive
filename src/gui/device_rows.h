@@ -19,6 +19,7 @@
 #include "gui/displayed_identity.h"
 #include "gui/history_rows.h"
 #include "gui/register_choices.h"
+#include "gui/smart_rows.h"
 
 #include <chrono>
 #include <cstddef>
@@ -223,6 +224,9 @@ struct DeviceCard {
     std::optional<Pill> health;
     std::vector<Field> fields;
     std::optional<OwnSerialLine> own;
+    // Its SMART (decision 0052), where the window shows SMART: on Windows,
+    // with a repository open.
+    std::optional<SmartSection> smart;
     std::vector<VolumeLine> volumes;
     bool operator==(const DeviceCard&) const = default;
 };
@@ -244,7 +248,8 @@ struct DeviceCard {
 std::vector<DeviceCard> device_cards(const app::Text& text, const AttachedRead& read,
     const std::vector<ArchiveName>& names, IdentityShown shown,
     const std::vector<std::filesystem::path>& registering = {}, const KeptDeviceReads& reads = {},
-    bool reader = false, const std::string& reading = {}, const std::vector<Uuid>& enclosure_changed = {});
+    bool reader = false, const std::string& reading = {}, const std::vector<Uuid>& enclosure_changed = {},
+    const std::vector<SmartRead>* smart_reads = nullptr);
 
 // The head of Devices: "3 devices attached", or that none is.
 std::string devices_status(const app::Text& text, const AttachedRead& read);

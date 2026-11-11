@@ -198,6 +198,18 @@ struct GuiState {
     };
     std::optional<DeviceReading> device_reading;
     std::uint64_t device_reads_started = 0;
+    // Decision 0052: the SMART reads that the repository open now keeps,
+    // oldest first, read with Archives and after each run of the device
+    // identity reader, which reads the SMART of every attached device
+    // whenever it is asked for (device_ref "*" in device_reading: Read the
+    // SMART of all devices... of Devices).
+    std::vector<SmartRead> smart_reads;
+    // The SMART reads of the latest run of the device identity reader in this
+    // window, and when it ended: a FULL verification started within a few
+    // minutes of it records them, without asking Windows again (decision
+    // 0052), as after the enclosure question.
+    std::vector<SmartRead> recent_smart;
+    std::chrono::steady_clock::time_point recent_smart_at{};
     // The confirmation that each verification job of the window went on with
     // past a changed enclosure (given in the enclosure question, or carried
     // by the run that a resume goes on with), by the job, until it ended: its
@@ -618,6 +630,13 @@ struct GuiState {
         // What reading a device's own serial behind its enclosure is for
         // (decision 0047), shown where this computer can read one.
         GtkWidget* enclosures = nullptr;
+        // Decision 0052, where this computer has a device identity reader:
+        // when SMART was last read and how many attached devices alert, and
+        // Read the SMART of all devices... (a spinner beside it while it reads).
+        GtkWidget* smart = nullptr;
+        GtkWidget* smart_summary = nullptr;
+        GtkWidget* smart_read = nullptr;
+        GtkWidget* smart_reading = nullptr;
         std::optional<std::vector<DeviceCard>> shown;  // what the cards show, once a read was drawn
     } devices_page;
 
@@ -1008,6 +1027,10 @@ enum class VerifyChoice { Full, AddingChunkHashes, StrictMetadata };
 // job titled by its label (decision 0045), shown in its details; strict
 // metadata where `choice` asks for it or the policy sets it.
 void verify_archive(GuiState& state, const Uuid& archive, VerifyChoice choice);
+// The same for each of `archives` (Verify the attached archives that need
+// it), with one read of SMART first for all of them where it is on
+// (decision 0052).
+void verify_archives(GuiState& state, const std::vector<Uuid>& archives, VerifyChoice choice);
 
 // "Verify a folder or volume...": asks, in a dialog over the window, for the
 // folder or volume to verify, typed or pasted (a root that a refusal named,
@@ -1068,6 +1091,37 @@ struct OwnIdentityRead {
 // was answered (the dialog that asked for the read closed).
 bool read_own_identity(GuiState& state, const PhysicalDeviceInfo& device,
     std::function<void(GuiState&, OwnIdentityRead&)> done, std::shared_ptr<CancelToken> cancel = nullptr);
+
+// Decision 0052: one run of the device identity reader over `devices` (the
+// one asked for first, then every other attached device), off the window's
+// thread, after Windows asked the operator for administrator permission: what
+// it read of each, the archives whose confirmed device each identity read is
+// (by device_ref), and the SMART reads recorded in the repository (or why
+// they could not be). Each identity read of a device whose enclosure hides it
+// is kept (state.device_reads); the SMART reads join state.smart_reads, and
+// Devices and Archives show them. `reading`: the device_ref that Devices
+// shows a spinner for, "*" for Read the SMART of all devices.... One run at a
+// time, as read_own_identity.
+struct ReaderRun {
+    std::expected<std::vector<DeviceRead>, IoError> reads =
+        std::unexpected(IoError{IoErrorKind::Cancelled, 0, "not read"});
+    std::map<std::string, std::vector<Uuid>> confirmed_of;
+    std::vector<SmartRead> recorded;
+    std::optional<std::string> not_recorded;
+    Report failure;
+};
+bool run_reader(GuiState& state, std::vector<PhysicalDeviceInfo> devices, std::string reading,
+    std::function<void(GuiState&, ReaderRun&)> done, std::shared_ptr<CancelToken> cancel = nullptr);
+
+// Read the SMART of all devices... of Devices: a run of the reader over every
+// attached device, and a toast of what it read, or why it read nothing.
+void read_all_smart(GuiState& state);
+
+// The SMART alert of each archive listed in Archives (ArchiveStatus::
+// smart_alert), from state.smart_reads: of the devices of its carrier as
+// recorded, and of those of the volumes where the latest read of the attached
+// devices finds it.
+void note_smart_alerts(GuiState& state);
 
 // FULL verify of an archive whose device is seen behind another enclosure
 // (`found`, enclosure_case): the enclosure question, an AdwDialog over the

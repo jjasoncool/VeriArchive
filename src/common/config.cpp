@@ -38,6 +38,7 @@ std::expected<std::optional<Config>, IoError> read_config(const std::filesystem:
         config.last_repository_uuid = document.value("last_repository_uuid", std::string{});
         config.allow_network_repository = document.value("allow_network_repository", false);
         config.language = document.value("language", std::string{});
+        config.read_smart_with_full_verify = document.value("read_smart_with_full_verify", false);
         if (document.contains("policy")) {
             const auto& policy = document.at("policy");
             if (!policy.is_object()) {
@@ -101,6 +102,12 @@ std::string config_to_json(const Config& config)
         document.erase("language");
     } else {
         document["language"] = config.language;
+    }
+    // Decision 0052: written only where it is on.
+    if (config.read_smart_with_full_verify) {
+        document["read_smart_with_full_verify"] = true;
+    } else {
+        document.erase("read_smart_with_full_verify");
     }
     auto& policy = document["policy"];
     policy["full_verify_max_age_days"] = config.policy.full_verify_max_age_days;

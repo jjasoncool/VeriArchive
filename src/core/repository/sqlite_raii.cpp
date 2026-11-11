@@ -119,6 +119,11 @@ bool SqliteDatabase::in_transaction() const
     return sqlite3_get_autocommit(database_) == 0;
 }
 
+std::int64_t SqliteDatabase::last_insert_rowid() const
+{
+    return sqlite3_last_insert_rowid(database_);
+}
+
 std::expected<void, IoError> SqliteDatabase::copy_to(const std::filesystem::path& destination) const
 {
     sqlite3* copy = nullptr;
@@ -171,6 +176,15 @@ SqliteStatement& SqliteStatement::bind_null(int index)
     return *this;
 }
 
+SqliteStatement& SqliteStatement::bind_blob(int index, std::span<const std::uint8_t> bytes)
+{
+    if (bytes.empty()) {
+        return bind_null(index);
+    }
+    sqlite3_bind_blob(statement_, index, bytes.data(), static_cast<int>(bytes.size()), SQLITE_TRANSIENT);
+    return *this;
+}
+
 std::expected<bool, IoError> SqliteStatement::step()
 {
     const int result = sqlite3_step(statement_);
@@ -215,6 +229,13 @@ std::int64_t SqliteStatement::integer(int column) const
 bool SqliteStatement::is_null(int column) const
 {
     return sqlite3_column_type(statement_, column) == SQLITE_NULL;
+}
+
+std::vector<std::uint8_t> SqliteStatement::blob(int column) const
+{
+    const auto* bytes = static_cast<const std::uint8_t*>(sqlite3_column_blob(statement_, column));
+    const int length = sqlite3_column_bytes(statement_, column);
+    return bytes ? std::vector<std::uint8_t>(bytes, bytes + length) : std::vector<std::uint8_t>{};
 }
 
 } // namespace va::repository_detail

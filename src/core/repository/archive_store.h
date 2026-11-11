@@ -517,6 +517,15 @@ public:
     std::expected<std::vector<std::pair<std::string, std::string>>, IoError> settings_with_prefix(
         const std::string& prefix);
 
+    // The devices' SMART as the device identity reader read it (decision
+    // 0052; smart_reads, schema version 4): a record of each read, the pages
+    // as the device returned them, outside the hash chain (SMART tells of the
+    // device, not of an archive's content) and kept by `repo rebuild-index`,
+    // which rebuilds only the index. record_smart_reads writes `reads` in one
+    // transaction and gives each its id; smart_reads lists them oldest first.
+    std::expected<void, IoError> record_smart_reads(std::vector<SmartRead>& reads);
+    std::expected<std::vector<SmartRead>, IoError> smart_reads();
+
 private:
     explicit ArchiveStore(repository_detail::SqliteDatabase database);
     std::expected<void, IoError> write_file_rows(const char* verb, const Uuid& archive_uuid,

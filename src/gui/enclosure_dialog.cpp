@@ -18,6 +18,7 @@
 #include "core/engine/carrier_confirmation.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -472,48 +473,133 @@ std::string label_in_list(const GuiState& state, const Uuid& archive)
 
 } // namespace
 
-bool read_own_identity(GuiState& state, const PhysicalDeviceInfo& device,
-    std::function<void(GuiState&, OwnIdentityRead&)> done, std::shared_ptr<CancelToken> cancel)
+bool run_reader(GuiState& state, std::vector<PhysicalDeviceInfo> devices, std::string reading,
+    std::function<void(GuiState&, ReaderRun&)> done, std::shared_ptr<CancelToken> cancel)
 {
     if (state.device_reading) {
-        show_message(state, fixed_message("Another read of a device's own serial is waiting for the User Account "
-                                          "Control prompt or for its device; answer it or let it finish first."));
+        show_message(state, fixed_message("Another read with administrator permission is waiting for the User "
+                                          "Account Control prompt or for its devices; answer it or let it finish "
+                                          "first."));
         return false;
     }
-    if (!state.device_identity) {
+    if (!state.device_identity || devices.empty()) {
         return false;
     }
     if (!cancel) {
         cancel = std::make_shared<CancelToken>();
     }
     const auto id = ++state.device_reads_started;
-    state.device_reading = GuiState::DeviceReading{device.device_ref, cancel, id};
+    state.device_reading = GuiState::DeviceReading{reading, cancel, id};
     // The reader outlives every read in flight (GuiState::device_identity).
     auto* reader = state.device_identity.get();
     const auto layout = state.session ? std::optional(state.session->context.repo) : std::nullopt;
-    read_off_thread<OwnIdentityRead>(state,
-        [reader, device_ref = device.device_ref, cancel, layout] {
-            OwnIdentityRead result;
-            result.read = reader->read_device_identity(device_ref, *cancel);
-            if (result.read && layout) {
-                result.confirmed_of = confirmed_owners(*layout, result.read->device);
+    std::vector<std::string> refs;
+    for (const auto& device : devices) {
+        refs.push_back(device.device_ref);
+    }
+    read_off_thread<ReaderRun>(state,
+        [reader, refs, cancel, layout] {
+            ReaderRun run;
+            run.reads = reader->read_devices(refs, *cancel);
+            if (!run.reads || !layout) {
+                return run;
             }
-            return result;
+            for (const auto& read : *run.reads) {
+                if (read.identity) {
+                    run.confirmed_of[read.device_ref] = confirmed_owners(*layout, read.identity->device);
+                }
+                if (read.smart) {
+                    run.recorded.push_back(*read.smart);
+                }
+            }
+            // Decision 0052: every SMART read is recorded, a failed one too.
+            if (!run.recorded.empty()) {
+                auto store = ArchiveStore::open(*layout);
+                auto recorded = store ? store->record_smart_reads(run.recorded)
+                                      : std::expected<void, IoError>(std::unexpected(store.error()));
+                if (!recorded) {
+                    run.not_recorded = recorded.error().message;
+                    run.recorded.clear();
+                }
+            }
+            return run;
         },
-        [id, device, done = std::move(done)](GuiState& state, OwnIdentityRead& result) {
+        [id, devices = std::move(devices), done = std::move(done)](GuiState& state, ReaderRun& run) {
             if (state.device_reading && state.device_reading->id == id) {
                 state.device_reading.reset();
             }
-            if (result.read) {
-                state.device_reads[device.device_ref] = KeptDeviceRead{*result.read, device, result.confirmed_of};
+            if (run.reads) {
+                // Decision 0052: for a FULL verification started next.
+                state.recent_smart.clear();
+                for (const auto& read : *run.reads) {
+                    if (read.smart) {
+                        state.recent_smart.push_back(*read.smart);
+                    }
+                }
+                state.recent_smart_at = std::chrono::steady_clock::now();
+                for (const auto& read : *run.reads) {
+                    const auto device = std::ranges::find(devices, read.device_ref, &PhysicalDeviceInfo::device_ref);
+                    // The one asked for, and every other that its enclosure
+                    // hides the identity of, as Devices shows them.
+                    if (read.identity && device != devices.end() &&
+                        (device == devices.begin() || device->enclosure_hides_identity)) {
+                        state.device_reads[read.device_ref] =
+                            KeptDeviceRead{*read.identity, *device, run.confirmed_of[read.device_ref]};
+                    }
+                }
+            }
+            if (!run.recorded.empty()) {
+                state.smart_reads.insert(state.smart_reads.end(), run.recorded.begin(), run.recorded.end());
+                refresh_archives(state);
             }
             refresh_devices(state);
             if (done) {
-                done(state, result);
+                done(state, run);
+            }
+            if (run.not_recorded) {
+                show_message(state, [message = *run.not_recorded](const app::Text& text) {
+                    return text.format("The SMART reads could not be recorded: {}", text(message));
+                });
             }
         });
     refresh_devices(state);
     return true;
+}
+
+bool read_own_identity(GuiState& state, const PhysicalDeviceInfo& device,
+    std::function<void(GuiState&, OwnIdentityRead&)> done, std::shared_ptr<CancelToken> cancel)
+{
+    // Decision 0052: the one asked for, then every other attached device,
+    // whose SMART is read under the same question of Windows.
+    std::vector<PhysicalDeviceInfo> devices{device};
+    if (const auto* read = attached_now(state)) {
+        for (const auto& attached : read->devices) {
+            if (!attached.device.device_ref.empty() && attached.device.device_ref != device.device_ref) {
+                devices.push_back(attached.device);
+            }
+        }
+    }
+    return run_reader(state, std::move(devices), device.device_ref,
+        [device_ref = device.device_ref, done = std::move(done)](GuiState& state, ReaderRun& run) {
+            OwnIdentityRead result;
+            result.failure = run.failure;
+            if (!run.reads) {
+                result.read = std::unexpected(run.reads.error());
+            } else {
+                const auto read = std::ranges::find(*run.reads, device_ref, &DeviceRead::device_ref);
+                if (read == run.reads->end()) {
+                    result.read = std::unexpected(
+                        IoError{IoErrorKind::Other, 0, "the device identity reader read no such device"});
+                } else {
+                    result.read = read->identity;
+                    result.confirmed_of = run.confirmed_of[device_ref];
+                }
+            }
+            if (done) {
+                done(state, result);
+            }
+        },
+        std::move(cancel));
 }
 
 void ask_about_enclosure(GuiState& state, const Uuid& archive, bool strict, const EnclosureCase& found)

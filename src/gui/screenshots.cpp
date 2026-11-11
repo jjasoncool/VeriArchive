@@ -321,6 +321,32 @@ public:
                     }
                     return true;
                 }},
+            // Decision 0052: that read read the SMART of every sample device
+            // too (SAMPLE DATA of the sample reader), which Devices shows:
+            // the card of SAMPLE-DEVICE-02, whose sample read alerts, scrolled
+            // into view.
+            {"12-smart.png",
+                [this] {
+                    show("devices");
+                    const auto& shown = state_.devices_page.shown;
+                    const auto alerting = shown ? std::ranges::find_if(*shown,
+                                                      [](const DeviceCard& listed) {
+                                                          return listed.smart &&
+                                                                 listed.smart->pill.tone == app::Tone::Error;
+                                                      })
+                                                : std::vector<DeviceCard>::const_iterator{};
+                    if (!shown || alerting == shown->end()) {
+                        throw std::runtime_error("Devices shows no SMART alert of the sample devices");
+                    }
+                    GtkWidget* card = gtk_widget_get_first_child(state_.devices_page.cards);
+                    for (auto index = alerting - shown->begin(); card && index > 0; --index) {
+                        card = gtk_widget_get_next_sibling(card);
+                    }
+                    if (GtkWidget* viewport = card ? gtk_widget_get_ancestor(card, GTK_TYPE_VIEWPORT) : nullptr) {
+                        gtk_viewport_scroll_to(GTK_VIEWPORT(viewport), card, nullptr);
+                    }
+                },
+                {}},
             {"03-register.png",
                 [this] {
                     // Register Archive as the sidebar's + opens it, the

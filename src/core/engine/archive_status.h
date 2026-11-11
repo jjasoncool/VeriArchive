@@ -6,6 +6,7 @@
 #include "core/engine/recorded_manifest.h"
 #include "core/manifest/manifest.h"
 #include "core/repository/archive_store.h"
+#include "core/smart/smart_data.h"
 
 #include <chrono>
 #include <optional>
@@ -34,6 +35,10 @@ struct ArchiveStatus {
     bool full_overdue = false;
     bool any_overdue = false;
     bool label_shared = false;                // R-88: another archive has the same label
+    // The SMART alert of a device of its carrier (decision 0052): filled by
+    // the window from the SMART reads, never by archive_statuses, so the
+    // command line shows none.
+    std::optional<ArchiveSmartAlert> smart_alert;
 };
 
 // Which statuses archive_statuses reads: every archive's, or only that of the
