@@ -45,6 +45,15 @@ change the repository can change the records too: this version cannot prove that
 themselves were not altered. So keep the repository away from the archive disks, where whoever
 can reach those disks cannot change it, and back it up (see "Backing up the repository").
 
+## A real verification
+
+Not sample data: the FULL verification of a real archive, in the Chinese interface. Its 144,621
+entries, 9.2 TiB, were all read and matched in 11 h 56 min, at 214 MiB/s on average; the chart is
+the read speed along the archive's content. The device had been moved to another enclosure since
+the archive was registered, and was confirmed after reading the device's own serial.
+
+![The FULL verification of a real archive: passed](docs/real/full-verification.png)
+
 ## Screenshots
 
 The pages of the graphical interface, showing sample data made by
