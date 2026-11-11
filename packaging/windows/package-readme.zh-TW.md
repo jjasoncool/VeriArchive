@@ -10,7 +10,7 @@ VeriArchive 為封存用的資料碟留下「完整性證據」，日後可以�
 
 - `bin\veriarchive-gui.exe` 是圖形介面：按兩下就會啟動。
 - `bin\veriarchive-cli.exe` 是命令列，在 PowerShell 或命令提示字元中使用；不加任何指令執行時，會列出所有指令。
-- `bin\veriarchive-device-identity.exe` 是裝置身分讀取程式。只有在您要求讀取外接盒內裝置本身的序號時，視窗才會啟動它，Windows 也會先詢問是否允許它取得系統管理員權限。請不要自行開啟它。
+- `bin\veriarchive-device-identity.exe` 是裝置身分讀取程式。只有在您要求讀取外接盒內裝置本身的序號，或讀取已連接裝置的 SMART 時，視窗才會啟動它，Windows 也會先詢問是否允許它取得系統管理員權限。請不要自行開啟它。
 
 ## 使用說明
 

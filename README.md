@@ -197,7 +197,7 @@ again. Never use two copies of one repository at once: their histories would par
 overview of how the archives stand, whose tiles filter the list, with Verify the attached archives
 that need it; the archives with where each is attached now; and the details of the one chosen,
 whose head stays in view as they scroll, from which it is verified, cross-checked, given a new
-revision, exported, relocated or retired), Devices (the attached devices, their health, volumes and
+revision, exported, relocated or retired), Devices (the attached devices, their health and SMART, volumes and
 archives), Jobs (the jobs of the window, and the unfinished operations wherever they were started),
 History (the runs of every archive, each with its result page, from which the verification report
 of a run that reached a result is saved) and Settings; Register Archive and Cross-check are dialogs
@@ -209,9 +209,13 @@ resumed in Jobs, and unfinished ones abandoned there. A device moved to another 
 in full once you confirm that it is the same device, by its own serial or on your word; the
 confirmation is recorded in the hash-chained history, and only a pass records the new enclosure
 (decision 0047). The GUI runs unprivileged: only to read a device's own serial behind its
-enclosure, on your request, does it start the device identity reader
-(`veriarchive-device-identity.exe`, Windows only), which Windows asks you to allow with
-administrator permission each time. The command line never asks for it.
+enclosure, or the SMART of the attached devices, on your request, does it start the device identity
+reader (`veriarchive-device-identity.exe`, Windows only), which Windows asks you to allow with
+administrator permission each time. It reads the identity and SMART of every attached device and
+nothing of their content; the repository keeps each SMART read, and Devices and Archives show a
+device whose latest read alerts, such as one with reallocated or pending sectors; where Settings says so, it
+reads SMART as each FULL verification starts and records it with the run (decision 0052).
+The command line never asks for it.
 
 Only the command line shows every revision of an archive (`archive show`), imports manifests
 (`import`), writes a list for `sha256sum -c` (`export-sha256sums`), rebuilds the index

@@ -108,8 +108,12 @@ Of a device or volume: present on this computer now, as the system lists it. Of 
 _Avoid_: online, mounted (a volume may be attached without a mount point), present (matching's results say which archive is present), connected archive
 
 **Device alert**:
-A sign that a device may be failing, told beside a run result and never changing it: the device reports its own health as failing, or a FULL verification read the archive markedly slower than the last usual one on that device. It stays marked beside the archive's last verification until a later one gives none. In the interface: 裝置警訊.
+A sign that a device may be failing, told beside a run result and never changing it: the device reports its own health as failing, or a FULL verification read the archive markedly slower than the last usual one on that device. It stays marked beside the archive's last verification until a later one gives none. In the window on Windows, also the latest SMART read of a device of the archive's carrier that alerts (a SMART alert, SMART 警訊), until a later read of that device gives none. In the interface: 裝置警訊.
 _Avoid_: warning (a warning caps the run result at PASSED_WITH_WARNINGS), device error
+
+**SMART read**:
+One read of what a device reports of its own condition (SMART: counts such as the sectors it had to reallocate or cannot read, and values with the thresholds its maker set; for an NVMe device its health log), made by the device identity reader with administrator permission, of every attached device whenever the window asks for that permission, also as a FULL verification starts where Settings says so, which then records it with the run. The repository keeps each read, as the device returned it, outside the history's chain; the window compares a device's latest read with the one before it. In the interface: 讀取 SMART (the read: SMART 讀取; its alert: SMART 警訊).
+_Avoid_: health check, scan, test (no self-test runs; nothing of the content is read), diagnosis
 
 ### Bookkeeping
 

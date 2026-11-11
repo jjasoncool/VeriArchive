@@ -10,7 +10,7 @@ The folder the zip was unzipped into, for example `D:\VeriArchive`, holds the wh
 
 - `bin\veriarchive-gui.exe` is the graphical interface: double-click it.
 - `bin\veriarchive-cli.exe` is the command line, for PowerShell or the Command Prompt; run without a command, it lists its commands.
-- `bin\veriarchive-device-identity.exe` is the device identity reader. The window starts it only when you ask it to read a device's own serial behind its enclosure, and Windows first asks whether to allow it administrator permission. It is not meant to be opened by hand.
+- `bin\veriarchive-device-identity.exe` is the device identity reader. The window starts it only when you ask it to read a device's own serial behind its enclosure or the SMART of the attached devices, and Windows first asks whether to allow it administrator permission. It is not meant to be opened by hand.
 
 ## The guides
 
