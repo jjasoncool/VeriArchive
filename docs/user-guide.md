@@ -1,15 +1,35 @@
 # VeriArchive user guide
 
-VeriArchive records integrity evidence for archive disks and later proves whether the archived files were modified, corrupted, deleted, or added to. It only **detects**: it never repairs, restores, or makes backups.
+VeriArchive records file integrity information for archives so you can later check for modified, corrupted, deleted or added files. It only **detects** changes; it does not repair files, restore them or create backups.
 
 The whole workflow is two steps:
 
 1. **Register**: read every file of a folder or volume once and store its fingerprints (BLAKE3 and SHA-256) as the **baseline**.
 2. **Verify**: later, re-read every registered byte from the disk, compare it with the baseline, and report what changed.
 
-With pictures of the graphical interface (`veriarchive-gui.exe`) as it really looks, this guide takes you step by step through creating the repository, registering an archive, verifying it, reading its result and history, saving a verification report, relocating it, and **confirming that a copy and the original are exactly the same**. Most sections explain the window first, then the command line (`veriarchive-cli.exe`).
+This guide uses screenshots of the graphical interface (`veriarchive-gui.exe`) to explain how to create a repository, register and verify archives, view results and history, save verification reports, relocate archives and cross-check copies against their originals. Most sections cover the GUI first, followed by the corresponding command-line (`veriarchive-cli.exe`) instructions.
 
-All data in the screenshots is sample data. This guide is public, so its screenshots cannot show what a real device holds. The archives are folders of sample files on one volume, under `D:\va-sample`: `原始資料` (`ARCH-0001`, the original) and `備份資料` (`ARCH-0002`, its copy); `舊版封存` (`ARCH-0003`) stands for an archive that an earlier version registered, still without chunk hashes (see "Adding chunk hashes to an archive registered earlier"); and the picture of Register Archive registers a fourth sample folder, `新的資料`, as `ARCH-0009`. While the screenshots are made, VeriArchive replaces the identity of that volume and its device (volume label, device model, serial and capacity) with fixed sample values (`SAMPLE-VOLUME`, `SAMPLE-DEVICE`, `SAMPLE0001`, 1.0 TiB), lists a fixed set of sample devices and volumes (`SAMPLE-DEVICE-01`, `/media/SAMPLE-VOLUME-1`, ...) on the Devices page and in the dialogs in place of this computer's, answers a read of a device's own serial with a fixed sample identity (`SAMPLE-OWN-SERIAL-01`) and made-up SMART data without asking Windows for administrator permission, and names the computer `SAMPLE-HOST`, so no real device ever shows. The times, durations and read speeds are those of the run that made the pictures. In real use you usually register a whole volume of a device, such as `H:\`, chosen among the attached volumes (see "Registering an archive"), and Archives shows its real volume label, model and capacity; everything else works as in the screenshots.
+### Sample data in the screenshots
+
+The screenshots use sample files and substitute device information so that no real devices or private data appear. All sample archives are folders on one volume, under `D:\va-sample`:
+
+| Folder | Archive label | Purpose |
+|---|---|---|
+| `原始資料` | `ARCH-0001` | The original archive |
+| `備份資料` | `ARCH-0002` | A copy of the original archive |
+| `舊版封存` | `ARCH-0003` | An archive registered by an older version, without chunk hashes (see "Adding chunk hashes to an archive registered earlier") |
+| `新的資料` | `ARCH-0009` | The source used in the Register Archive screenshot |
+
+When generating screenshots, the program substitutes the following information:
+
+- Volume label, device model, serial and capacity: `SAMPLE-VOLUME`, `SAMPLE-DEVICE`, `SAMPLE0001` and 1.0 TiB.
+- Devices page and dialogs: a fixed set of sample devices and volumes, such as `SAMPLE-DEVICE-01` and `/media/SAMPLE-VOLUME-1`, instead of this computer's actual devices.
+- Device's own serial and SMART: `SAMPLE-OWN-SERIAL-01` and simulated SMART data, without requesting administrator permission from Windows.
+- Computer name: `SAMPLE-HOST`.
+
+Times, durations and read speeds are the actual measurements from the run used to generate the screenshots.
+
+In normal use, you would usually register a whole volume, such as `H:\`, from the attached volumes (see "Registering an archive"). Archives then shows the actual volume label, model and capacity; the other operations work as shown.
 
 [繁體中文版](user-guide.zh-TW.md)
 
@@ -27,7 +47,15 @@ The zip holds no folder of its own: its `bin`, `lib` and `share` go straight int
 - `bin/veriarchive-device-identity.exe`: the device identity reader, which the window starts only when you ask it to read a device's own serial behind its enclosure or the SMART of the attached devices, with the administrator permission that Windows asks you for (see "A device moved to another enclosure" and "SMART"); it is not meant to be opened by hand
 - `lib/` and `share/`: image loaders, icons, settings and translations GTK needs; `share/doc/VeriArchive/`: this guide and a short README; `share/licenses/`: licenses of the libraries the program uses
 
-To update the program, close VeriArchive, then unzip the new version's zip **into the same folder** (`D:\VeriArchive` in the example) and let it replace the files there. In Windows Explorer: right-click the zip, choose "Extract All...", type the program folder as the destination, and when asked, choose to replace the files in the destination. Explorer proposes a new folder named after the zip instead; a program unzipped there finds none of your records. The zip holds no `bin\data` and no `bin\config.json`, so the existing records are not overwritten. Do not delete the old folder first. To see which version runs, look at "Program version" under About at the end of the Settings page, or run `veriarchive-cli --version` or `veriarchive-cli repo info`.
+To update VeriArchive:
+
+1. Close the program.
+2. In Windows Explorer, right-click the new version's zip and choose "Extract All...".
+3. Set the destination to **the existing program folder** (`D:\VeriArchive` in this example), then replace the files when prompted.
+
+Explorer defaults to a new folder named after the zip. If you extract there, that copy of the program will not find your existing records. The zip contains neither `bin\data` nor `bin\config.json`, so replacing the program files does not overwrite your records. **Do not delete the old folder first.**
+
+To check the running version, look for "Program version" under About at the bottom of Settings, or run `veriarchive-cli --version` or `veriarchive-cli repo info`.
 
 ### Moving the program folder
 
@@ -41,7 +69,21 @@ On first use, the repository (`data`) and the config file that remembers it (`co
 
 ### After updating VeriArchive
 
-A new version may need to upgrade the repository's database, which earlier versions then cannot open. The first time it opens the repository, it keeps a copy of the database as it is beside it, in the repository folder, named for the database's old schema version and the day, for example `veriarchive-schema-1-before-upgrade-2026-10-17.db`, and says where the copy is: the command line in its error output (`note: the repository database was upgraded from schema version 1 to 3, ...`), the GUI on the Settings page, which it then shows first. Afterwards Settings and `repo info` go on showing where each such copy is, and what it is for (`Copy of the database from before an upgrade: ... (an earlier version of VeriArchive can open only this copy; you can delete it once you no longer need that version)`; `repo info --json`: `database_copies_before_upgrade`), for as long as it is in the repository folder, also after the error when the repository cannot be opened, for example when a later version of VeriArchive has upgraded its database: then the copy is your way back. Copying a large database takes a while: meanwhile the GUI's window shows "Upgrading the repository database..." with a moving progress bar in place of its pages, also in a second start that waits for the first one's upgrade, and if the upgrade fails, it says why there. The verification history lives only in the database, so keep the copy until you are sure you will stay with the new version: an earlier version can open only the copy. If the copy cannot be made, for example because the disk is full, nothing is upgraded and the program stops with an error (exit code 11): make room and open the repository again.
+A new version may need to upgrade the repository database. Earlier versions cannot open the upgraded database.
+
+Before upgrading, VeriArchive saves a copy beside the database in the repository folder. The filename includes the old schema version and the date, for example `veriarchive-schema-1-before-upgrade-2026-10-17.db`.
+
+The program reports the copy's location as follows:
+
+- **CLI**: a note on standard error, such as `note: the repository database was upgraded from schema version 1 to 3, ...`.
+- **GUI**: a notice on Settings, which opens first after the upgrade.
+- **Later use**: Settings and `repo info` list each copy's location and purpose for as long as it remains in the repository folder. The notice reads `Copy of the database from before an upgrade: ... (an earlier version of VeriArchive can open only this copy; you can delete it once you no longer need that version)`. In `repo info --json`, these copies appear under `database_copies_before_upgrade`.
+
+The copies are also listed after an error if the repository cannot be opened, including when a newer version has already upgraded it. Use the pre-upgrade copy if you need to return to the earlier version.
+
+Copying a large database can take time. The GUI shows "Upgrading the repository database..." and an animated progress bar until the pages are ready. A second window opened during the upgrade waits with the same message. If the upgrade fails, the window explains why.
+
+**Keep the copy until you are sure you will continue using the new version.** Verification history exists only in the database, and the earlier version can open only the pre-upgrade copy. If the copy cannot be created, for example because the disk is full, VeriArchive leaves the database unchanged and stops with exit code 11. Free up space, then open the repository again.
 
 ## The window
 

@@ -21,6 +21,8 @@ stages:
 ubuntu-24.04:
   <<: *linux_build
   image: ubuntu:24.04
+  # Keep the dependency lists for Ubuntu, Fedora and Windows in sync with
+  # the Build sections of both READMEs.
   before_script:
     - apt-get update
     - >

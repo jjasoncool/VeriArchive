@@ -47,10 +47,12 @@ can reach those disks cannot change it, and back it up (see "Backing up the repo
 
 ## A real verification
 
-Not sample data: the FULL verification of a real archive, in the Chinese interface. Its 144,621
-entries, 9.2 TiB, were all read and matched in 11 h 56 min, at 214 MiB/s on average; the chart is
-the read speed along the archive's content. The device had been moved to another enclosure since
-the archive was registered, and was confirmed after reading the device's own serial.
+The screenshot below shows a FULL verification of a real archive, using the Traditional Chinese
+interface. All 144,621 entries, totalling 9.2 TiB, were read and matched the baseline in
+11 h 56 min, at an average of 214 MiB/s. The chart shows read speed across the archive's content.
+
+The device had been moved to another enclosure after registration. Before verification, its own
+serial was read to confirm that it was the same device.
 
 ![The FULL verification of a real archive: passed](docs/real/full-verification.png)
 
@@ -87,6 +89,24 @@ The pages of the graphical interface, showing sample data made by
 Windows commands run in an **MSYS2 UCRT64** shell. Dependencies: GCC ≥ 14, CMake ≥ 3.28, Ninja,
 SQLite ≥ 3.40, OpenSSL 3, GLib ≥ 2.72, GTK4 ≥ 4.14 and libadwaita ≥ 1.5 (for the GUI). BLAKE3 and nlohmann/json are
 downloaded at configure time when not installed.
+
+Install the dependencies for your operating system below. These lists match the CI configuration
+in `.gitlab-ci.yml`; keep CI and both READMEs in sync when changing dependencies.
+
+```sh
+# Windows, in the MSYS2 UCRT64 shell
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja \
+    mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-sqlite3 mingw-w64-ucrt-x86_64-openssl \
+    mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita
+# Ubuntu 24.04
+sudo apt-get install build-essential cmake ninja-build pkg-config ca-certificates git \
+    libsqlite3-dev libssl-dev libglib2.0-dev libgtk-4-dev libadwaita-1-dev
+# Fedora
+sudo dnf install gcc-c++ cmake ninja-build pkgconf-pkg-config git \
+    sqlite-devel openssl-devel glib2-devel gtk4-devel libadwaita-devel
+```
+
+Then build and test:
 
 ```sh
 cmake --preset windows-ucrt64-debug        # or linux-debug
@@ -193,29 +213,39 @@ again. Never use two copies of one repository at once: their histories would par
 
 ## Graphical interface
 
-`veriarchive-gui` is built with GTK4 and libadwaita (decision 0046). Its pages are Archives (an
-overview of how the archives stand, whose tiles filter the list, with Verify the attached archives
-that need it; the archives with where each is attached now; and the details of the one chosen,
-whose head stays in view as they scroll, from which it is verified, cross-checked, given a new
-revision, exported, relocated or retired), Devices (the attached devices, their health and SMART, volumes and
-archives), Jobs (the jobs of the window, and the unfinished operations wherever they were started),
-History (the runs of every archive, each with its result page, from which the verification report
-of a run that reached a result is saved) and Settings; Register Archive and Cross-check are dialogs
-(decision 0049). A cross-check is the window's comparison: it takes neither archive for the
-original, and its report gives each archive's last FULL verification.
-Every registration, verification, cross-check, relocation and export runs as a job with its
-progress, which Stop ends; interrupted registrations, verifications and relocations can be
-resumed in Jobs, and unfinished ones abandoned there. A device moved to another USB enclosure is verified
-in full once you confirm that it is the same device, by its own serial or on your word; the
-confirmation is recorded in the hash-chained history, and only a pass records the new enclosure
-(decision 0047). The GUI runs unprivileged: only to read a device's own serial behind its
-enclosure, or the SMART of the attached devices, on your request, does it start the device identity
-reader (`veriarchive-device-identity.exe`, Windows only), which Windows asks you to allow with
-administrator permission each time. It reads the identity and SMART of every attached device and
-nothing of their content; the repository keeps each SMART read, and Devices and Archives show a
-device whose latest read alerts, such as one with reallocated or pending sectors; where Settings says so, it
-reads SMART as each FULL verification starts and records it with the run (decision 0052).
-The command line never asks for it.
+`veriarchive-gui` uses GTK4 and libadwaita (decision 0046) and has five pages:
+
+- **Archives**: view the status overview, filter the archive list and see where each archive is
+  attached. The selected archive's details offer verification, cross-checking, new revisions,
+  export, relocation and retirement, with a header that stays visible while scrolling.
+  You can also verify all attached archives that need verification at once.
+- **Devices**: view attached devices, their health, SMART data, volumes and archives.
+- **Jobs**: view this window's jobs and unfinished operations started from any window or the CLI.
+- **History**: view all archives' recorded runs and their result pages. For runs that reached a
+  result, save a verification report from the result page.
+- **Settings**: view the repository and the verification policy, and change the interface language.
+
+Register Archive and Cross-check use dialogs (decision 0049). A cross-check treats neither archive
+as the original, and its report lists each archive's last FULL verification.
+
+Registration, verification, cross-checking, relocation and export run as jobs with progress
+indicators. Stop ends a job. Interrupted registrations, verifications and relocations can be
+resumed or abandoned on the Jobs page.
+
+After a device moves to another USB enclosure, you must confirm that it is the same device before
+a FULL verification, either by reading its own serial or by confirming it yourself. The
+confirmation is recorded in the hash-chained history; the new enclosure is recorded only if
+verification passes (decision 0047).
+
+The GUI runs without administrator privileges. Only when you request the device's own serial
+behind its enclosure, or SMART data from attached devices, does it start the device identity
+reader (`veriarchive-device-identity.exe`, Windows only). Windows asks for administrator permission
+each time. The reader reads the identity and SMART data of all attached devices, not their files.
+
+The repository keeps each SMART reading. Devices and Archives flag devices whose latest reading
+reports an alert, such as reallocated or pending sectors. Settings also offers an option to read
+SMART at the start of each FULL verification and record it with the run (decision 0052).
+The CLI never requests administrator permission.
 
 Only the command line shows every revision of an archive (`archive show`), imports manifests
 (`import`), writes a list for `sha256sum -c` (`export-sha256sums`), rebuilds the index
