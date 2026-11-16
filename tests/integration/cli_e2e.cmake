@@ -2384,7 +2384,7 @@ if(SQLITE3)
     file(GLOB rebuilt_copies "${REBUILT}/veriarchive-schema-1-before-upgrade-*.db")
     if(NOT last_errors MATCHES "note: the repository database was upgraded from schema version 1 to 4, which earlier versions of VeriArchive cannot open; a copy of it from before the upgrade is kept at [^\n]*veriarchive-schema-1-before-upgrade-(${before_open}|${after_open})\\.db\n"
             OR NOT last_output MATCHES "Rebuilt the index from manifests"
-            OR NOT rebuilt_index MATCHES "^3[\r\n]+[0-9a-f]+$" OR NOT rebuilt_copies)
+            OR NOT rebuilt_index MATCHES "^4[\r\n]+[0-9a-f]+$" OR NOT rebuilt_copies)
         message(FATAL_ERROR "repo rebuild-index of a repository of schema version 1:\n${last_output}\n${last_errors}\n"
             "index: ${rebuilt_index}; copies: ${rebuilt_copies}")
     endif()
