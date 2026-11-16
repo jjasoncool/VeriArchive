@@ -170,6 +170,11 @@ if(WIN32)
         CONTENT "#define VERIARCHIVE_VERSION_TEXT \"@PROJECT_VERSION@\"
 #define VERIARCHIVE_VERSION_NUMBERS @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
 " @ONLY)
+    # The resource compiler tells the build nothing of what its file includes:
+    # name the version header, so that a new version number builds the
+    # version information again.
+    set_source_files_properties(src/platform/windows/helper/veriarchive-device-identity.rc PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/generated/device_identity_reader_version.h")
     target_include_directories(veriarchive_device_identity PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_compile_features(veriarchive_device_identity PRIVATE cxx_std_23)
     target_link_libraries(veriarchive_device_identity PRIVATE nlohmann_json::nlohmann_json)

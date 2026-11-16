@@ -141,9 +141,12 @@ foreach(file IN LISTS bundled loaders)
     list(APPEND owned_paths "/${inside}")
 endforeach()
 # One pacman call for all files: "<path> is owned by <package> <version>".
+# Asked in English whatever the shell's language: pacman answers in the
+# language of the locale (in a Traditional Chinese MSYS2 shell, "... 被 ...
+# 所擁有"), which the lines below would not read.
 set(owner_report "")
 if(pacman)
-    execute_process(COMMAND "${pacman}" -Qo ${owned_paths}
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env LC_ALL=C LANGUAGE=C "${pacman}" -Qo ${owned_paths}
         OUTPUT_VARIABLE owner_report ERROR_QUIET)
 endif()
 # File name -> package, kept as "name|package" pairs. File names are compared
