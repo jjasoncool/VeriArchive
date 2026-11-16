@@ -1,8 +1,10 @@
 // The devices and volumes attached now (decision 0046), read on a thread of
 // its own while Archives or Devices is shown: when either comes on screen,
 // when Refresh on either is pressed, and every 30 seconds while one of them
-// is shown. No platform tells the program of a device attached or removed
-// (and core and common hold no system code), so reading again is the only
+// is shown; and, since decision 0053, a moment after the system told of a
+// device or volume attached or removed (platform::DeviceWatch, which says
+// only that something changed). The core tells of none
+// (core and common hold no system code), so reading again is the only
 // way to see one. A read lists the volumes, asks each device for its health
 // once (app::attached_devices: on Linux a udisks call of up to 3 seconds a
 // device), reads the space in use on each volume, and matches the archives'
@@ -321,6 +323,70 @@ const AttachedRead* attached_now(const GuiState& state)
 {
     const auto& poll = state.devices;
     return poll.read && poll.repository == repository_open(state) ? &*poll.read : nullptr;
+}
+
+} // namespace va::gui
+
+namespace va::gui {
+namespace {
+
+// How often the changes that wait are looked at (DeviceChanges::due).
+constexpr guint changes_tick_ms = 100;
+
+gboolean changes_tick(gpointer data)
+{
+    auto& state = *static_cast<GuiState*>(data);
+    auto& poll = state.devices;
+    if (!state.window) {
+        poll.changes_timer = 0;  // shutting down
+        return G_SOURCE_REMOVE;
+    }
+    if (!poll.changes.due(std::chrono::steady_clock::now())) {
+        return G_SOURCE_CONTINUE;
+    }
+    poll.changes.taken();
+    poll.changes_timer = 0;
+    // Only while Archives or Devices is shown (its timer runs): either reads
+    // when it comes on screen.
+    if (poll.timer != 0) {
+        guarded([&] { read_devices(state, DevicesReadWhy::Refresh); },
+            [&](const Report& report) { show_read_error(state, report); });
+    }
+    return G_SOURCE_REMOVE;
+}
+
+} // namespace
+
+void device_change_told(GuiState& state)
+{
+    auto& poll = state.devices;
+    if (!state.window) {
+        return;
+    }
+    poll.changes.told(std::chrono::steady_clock::now());
+    if (poll.changes_timer == 0) {
+        poll.changes_timer = g_timeout_add(changes_tick_ms, changes_tick, &state);
+    }
+}
+
+void start_device_watch(GuiState& state)
+{
+    // Told on the watch's thread: handed to the main thread, the only one
+    // that touches the window's state.
+    state.device_watch = std::make_unique<platform::DeviceWatch>([&state] {
+        g_idle_add(
+            +[](gpointer data) -> gboolean {
+                auto& state = *static_cast<GuiState*>(data);
+                guarded([&] { device_change_told(state); }, [](const Report&) {});
+                return G_SOURCE_REMOVE;
+            },
+            &state);
+    });
+}
+
+void stop_device_watch(GuiState& state)
+{
+    state.device_watch.reset();
 }
 
 } // namespace va::gui

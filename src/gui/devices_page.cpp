@@ -483,9 +483,9 @@ GtkWidget* build_devices_page(GuiState& state)
 
     GtkWidget* explanation = make_label(
         text("This page lists the devices attached to this computer now, the health each reports, the volumes on "
-             "each, and the archives whose roots lie on those volumes. It reads them again every 30 seconds while "
-             "this page or Archives is shown, and at once with Refresh. Reading them needs no administrator "
-             "permission, and this page writes nothing to them."));
+             "each, and the archives whose roots lie on those volumes. While this page or Archives is shown, it reads "
+             "them again when a device or volume is attached or removed, every 30 seconds, and at once with "
+             "Refresh. Reading them needs no administrator permission, and this page writes nothing to them."));
     gtk_widget_add_css_class(explanation, "dim-label");
     gtk_box_append(GTK_BOX(box), explanation);
     // Decision 0047: where this computer can read a device's own serial

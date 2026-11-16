@@ -130,6 +130,7 @@ if(WIN32)
         src/platform/windows/device_id_descriptor.cpp
         src/platform/windows/device_identity_helper_win.cpp
         src/platform/windows/device_identity_reader.cpp
+        src/platform/windows/device_watch_win.cpp
         src/platform/windows/file_writer_win.cpp
         src/platform/windows/fs_access_win.cpp
         src/platform/windows/interrupt_win.cpp
@@ -177,6 +178,7 @@ elseif(UNIX AND NOT APPLE)
     target_sources(veriarchive_platform PRIVATE
         src/platform/linux/device_health_linux.cpp
         src/platform/linux/device_identity_helper_linux.cpp
+        src/platform/linux/device_watch_linux.cpp
         src/platform/linux/file_writer_linux.cpp
         src/platform/linux/fs_access_linux.cpp
         src/platform/linux/interrupt_linux.cpp
@@ -398,6 +400,7 @@ if(BUILD_TESTING)
         tests/unit/device_health_test.cpp
         tests/unit/device_identity_test.cpp
         tests/unit/device_rows_test.cpp
+        tests/unit/device_watch_test.cpp
         tests/unit/displayed_identity_test.cpp
         tests/unit/enclosure_flow_test.cpp
         tests/unit/ended_notification_test.cpp
@@ -444,7 +447,7 @@ if(BUILD_TESTING)
     # and a sparse sample file made as each system makes one (R-48).
     if(WIN32)
         target_sources(veriarchive_tests PRIVATE tests/unit/platform_errors_win.cpp tests/unit/sparse_file_win.cpp
-            tests/unit/device_identity_win_test.cpp)
+            tests/unit/device_identity_win_test.cpp tests/unit/device_watch_win_test.cpp)
         # The window's side of the device identity reader is tested with the
         # reader of this build, started without administrator permission.
         add_dependencies(veriarchive_tests veriarchive_device_identity)

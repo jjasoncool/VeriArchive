@@ -64,6 +64,12 @@ int main(int argc, char* argv[])
     }
     // Nobody watches the screenshot mode or the smoke test from another
     // window: their operations end without a notification (decision 0043).
+    // Decision 0053: the system tells of devices attached or removed, so that
+    // Archives and Devices read them at once. Not where the devices shown are
+    // sample data.
+    if (!smoke_test && !state.screenshot_folder) {
+        va::gui::start_device_watch(state);
+    }
     state.job.set_notifying(!smoke_test && !state.screenshot_folder);
     state.jobs.set_notifying(!smoke_test && !state.screenshot_folder);
     state.jobs.set_identity_shown(state.identity_shown);
@@ -100,6 +106,8 @@ int main(int argc, char* argv[])
             if (state.device_reading && state.device_reading->cancel) {
                 state.device_reading->cancel->cancel();
             }
+            // Decision 0053: no more changes of the devices are told.
+            va::gui::stop_device_watch(state);
             // The window is gone. GLib still runs the callbacks already queued
             // (a language change, say); they check this and do nothing.
             state.window = nullptr;

@@ -15,6 +15,7 @@
 #include "core/engine/archive_status.h"
 #include "core/interfaces.h"
 #include "gui/archive_rows.h"
+#include "gui/device_changes.h"
 #include "gui/device_reads.h"
 #include "gui/device_rows.h"
 #include "gui/displayed_identity.h"
@@ -24,6 +25,7 @@
 #include "gui/job_words.h"
 #include "gui/jobs.h"
 #include "gui/register_choices.h"
+#include "platform/device_watch.h"
 
 #include <atomic>
 #include <chrono>
@@ -101,6 +103,11 @@ struct DevicesPoll {
     // udisks, which reads the environment, and the change writes it
     // (use_gtk_language). The window is not held up meanwhile.
     std::optional<app::Language> language_after;
+    // Decision 0053: the changes of the attached devices that the system told
+    // of and that wait for their read, and the short timer that reads once
+    // they are due (0: none waits).
+    DeviceChanges changes;
+    guint changes_timer = 0;
 
     DevicesPoll() = default;
     DevicesPoll(const DevicesPoll&) = delete;
@@ -179,6 +186,10 @@ struct GuiState {
     Job job;
     OperationsPoll operations;             // every unfinished operation, for Jobs and Archives
     DevicesPoll devices;                   // the devices attached now, for Devices and Archives
+    // Decision 0053: tells of devices attached or removed, so that they are
+    // read at once (start_device_watch); none in the screenshot mode and the
+    // smoke test.
+    std::unique_ptr<platform::DeviceWatch> device_watch;
     // The roots of the registration jobs that wait or work, by job, which
     // Devices names on their volumes in place of Register this volume.
     std::map<std::uint64_t, std::filesystem::path> registering;
@@ -823,6 +834,19 @@ void read_devices(GuiState& state, DevicesReadWhy why);
 // reads for it.
 void watch_devices(GuiState& state, GtkWidget* page);
 void stop_watching_devices(GuiState& state, GtkWidget* page);
+
+// Decision 0053: the system told that the attached devices or volumes may
+// have changed (main thread). While Archives or Devices is shown, they are
+// read again once the changes have been quiet for a moment (DeviceChanges),
+// as Refresh reads them; while neither is shown, nothing is read: the page
+// reads when it comes on screen.
+void device_change_told(GuiState& state);
+// Starts listening to the system for such changes (platform::DeviceWatch),
+// for the life of the window; stop_device_watch ends it as the program
+// shuts down. Not in the screenshot mode or the smoke test, whose devices
+// are sample data.
+void start_device_watch(GuiState& state);
+void stop_device_watch(GuiState& state);
 
 // The latest read, where it matched the archives of the repository open now
 // (or none open); null before the first read, after one that failed, and once

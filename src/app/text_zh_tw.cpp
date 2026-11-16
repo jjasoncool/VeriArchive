@@ -950,11 +950,12 @@ constexpr CatalogEntry entries[] = {
     // src/gui/devices_poll.cpp: Devices (decision 0046), the devices attached
     // now with their volumes and the archives on them.
     {"This page lists the devices attached to this computer now, the health each reports, the volumes on each, and "
-     "the archives whose roots lie on those volumes. It reads them again every 30 seconds while this page or "
-     "Archives is shown, and at once with Refresh. Reading them needs no administrator permission, and this page "
-     "writes nothing to them.",
+     "the archives whose roots lie on those volumes. While this page or Archives is shown, it reads them again when "
+     "a device or volume is attached or removed, every 30 seconds, and at once with Refresh. Reading them needs no "
+     "administrator permission, and this page writes nothing to them.",
         "這裡列出目前連接到這部電腦的裝置、各裝置回報的健康狀態、裝置上的磁碟區，以及根目錄位於這些磁碟區上的封存。"
-        "顯示這一頁或「封存」時，每 30 秒會重新讀取一次；按「重新整理」會立即讀取。讀取時不需要系統管理員權限，這一頁"
+        "顯示這一頁或「封存」時，裝置或磁碟區接上或移除後會立即重新讀取，另外每 30 秒也會讀取一次；按「重新整理」"
+        "會立即讀取。讀取時不需要系統管理員權限，這一頁"
         "也不會寫入這些裝置。"},
     {"Reading the attached devices...", "正在讀取已連接的裝置……"},
     {"Still reading: a device may not be responding", "仍在讀取：可能有裝置沒有回應"},

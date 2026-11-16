@@ -4,8 +4,8 @@
 // device with the health it reports of itself (decision 0044) and its serial
 // as it reports it, the volumes on it, and on each volume the archives whose
 // roots lie there, told by identity matching alone (where_attached); in
-// Archives, where each archive is attached now, or that it is not. No
-// platform tells of a device attached or removed, so all of it is as the
+// Archives, where each archive is attached now, or that it is not. The
+// system tells only that devices changed (decision 0053), so all of it is as the
 // latest read found it, and the operations still decide for themselves: a
 // verification looks for its archive again, and refuses as it refuses.
 //

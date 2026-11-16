@@ -49,6 +49,8 @@ void progress_wording_tests();
 void attached_tests();
 void attached_devices_tests();
 void device_rows_tests();
+void device_watch_tests();
+void device_watch_windows_tests();
 void smart_tests();
 void enclosure_flow_tests();
 void hash_tests();
