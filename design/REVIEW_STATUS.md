@@ -1,6 +1,6 @@
 # Implementation status
 
-Status of `master`, version 1.3.0: version 1.0.0 (tag `v1.0.0`, V1) with V1.1 stage 1 on top
+Status of `master`, version 1.3.1: version 1.0.0 (tag `v1.0.0`, V1) with V1.1 stage 1 on top
 (last section), against HANDOFF Part C. "Done" means implemented and covered by automated tests,
 on Windows (MSYS2 UCRT64, GCC 16) and in GitLab CI. A milestone is accepted only when its
 acceptance tests pass on both operating systems in CI (HANDOFF Part C); the hardware tests that CI
@@ -85,7 +85,7 @@ program 1.1.0 (`--version`, `repo info` and Settings show it, and every manifest
 run records it); the window's jobs, its redesign, a device behind a changed enclosure and the
 verification report (decisions 0045 to 0048) numbered it 1.2.0; the overview of Archives with the unfinished
 operations in Jobs, abandoning a stopped verification and a retired archive's root (decisions 0049 to
-0051) numbered it 1.2.1; SMART (decision 0052), which raises the schema to version 4, numbers it 1.3.0:
+0051) numbered it 1.2.1; SMART (decision 0052), which raises the schema to version 4, numbered it 1.3.0; reading the devices when the system tells of a change (decision 0053) numbers it 1.3.1:
 
 | Part | Implemented |
 |---|---|
