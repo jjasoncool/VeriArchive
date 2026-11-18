@@ -2,6 +2,12 @@
 
 English | [繁體中文](README.zh-TW.md)
 
+## License
+
+VeriArchive is licensed under the GNU General Public License, version 3 only
+(`GPL-3.0-only`). See [LICENSE](LICENSE) for the full terms.
+Third-party components retain their respective licenses.
+
 **VeriArchive is a verification tool for archive disks.** It records integrity evidence when a
 disk is registered, and later proves whether the archived files were modified, corrupted, deleted,
 or added to. It detects; it never repairs, restores, or creates backups. Windows and Linux, one

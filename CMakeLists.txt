@@ -338,6 +338,7 @@ if(WIN32)
 endif()
 install(FILES docs/user-guide.md docs/user-guide.zh-TW.md
     DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
+install(FILES LICENSE DESTINATION share/licenses/VeriArchive COMPONENT VeriArchive)
 # The guides show their screenshots from images/ beside them.
 install(DIRECTORY docs/images DESTINATION share/doc/VeriArchive COMPONENT VeriArchive)
 # The licenses of the code compiled into the programs (decision 0038):
